@@ -11,6 +11,12 @@ use cadence_api::types::*;
 
 use crate::value::{Fields, FromI32, FromThrift, FromValue, Struct, ToThrift, ToValue, Value};
 
+// The execution store uses milliseconds for timer scheduling; Cadence's
+// Thrift IDL represents timestamp fields as Unix nanoseconds.
+fn millis_to_nanos(value: Option<i64>) -> Option<i64> {
+    value.map(|millis| millis.saturating_mul(1_000_000))
+}
+
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
@@ -1723,15 +1729,15 @@ impl ToThrift for PollForActivityTaskResponse {
         f.sstr(30, &self.activity_id);
         f.ostruct(40, self.activity_type.as_ref());
         f.sbytes(50, &self.input);
-        f.oi64(70, self.scheduled_timestamp);
+        f.oi64(70, millis_to_nanos(self.scheduled_timestamp));
         f.oi32(80, self.schedule_to_close_timeout_seconds);
-        f.oi64(90, self.started_timestamp);
+        f.oi64(90, millis_to_nanos(self.started_timestamp));
         f.oi32(100, self.start_to_close_timeout_seconds);
         f.oi32(110, self.heartbeat_timeout_seconds);
         if self.attempt != 0 {
             f.fields.push((120, Value::I32(self.attempt)));
         }
-        f.oi64(130, self.scheduled_timestamp_of_this_attempt);
+        f.oi64(130, millis_to_nanos(self.scheduled_timestamp_of_this_attempt));
         f.sbytes(140, &self.heartbeat_details);
         f.ostruct(150, self.workflow_type.as_ref());
         f.sstr(160, &self.workflow_domain);
@@ -1851,15 +1857,15 @@ impl FromThrift for ScheduleActivityTaskDecisionAttributes {
         Ok(Self {
             activity_id: s.req_string(10, "")?,
             activity_type: s.opt_struct(20)?,
-            domain: s.req_string(30, "")?,
-            task_list: s.opt_struct(40)?,
-            input: s.bytes_or_empty(50)?,
-            schedule_to_close_timeout_seconds: s.opt_i32(60)?,
-            schedule_to_start_timeout_seconds: s.opt_i32(70)?,
-            start_to_close_timeout_seconds: s.opt_i32(80)?,
-            heartbeat_timeout_seconds: s.opt_i32(90)?,
-            retry_policy: s.opt_struct(100)?,
-            header: s.opt_struct(110)?,
+            domain: s.req_string(25, "")?,
+            task_list: s.opt_struct(30)?,
+            input: s.bytes_or_empty(40)?,
+            schedule_to_close_timeout_seconds: s.opt_i32(45)?,
+            schedule_to_start_timeout_seconds: s.opt_i32(50)?,
+            start_to_close_timeout_seconds: s.opt_i32(55)?,
+            heartbeat_timeout_seconds: s.opt_i32(60)?,
+            retry_policy: s.opt_struct(70)?,
+            header: s.opt_struct(80)?,
         })
     }
 }
@@ -1869,15 +1875,15 @@ impl ToThrift for ScheduleActivityTaskDecisionAttributes {
         let mut f = Fields::new();
         f.sstr(10, &self.activity_id);
         f.ostruct(20, self.activity_type.as_ref());
-        f.sstr(30, &self.domain);
-        f.ostruct(40, self.task_list.as_ref());
-        f.sbytes(50, &self.input);
-        f.oi32(60, self.schedule_to_close_timeout_seconds);
-        f.oi32(70, self.schedule_to_start_timeout_seconds);
-        f.oi32(80, self.start_to_close_timeout_seconds);
-        f.oi32(90, self.heartbeat_timeout_seconds);
-        f.ostruct(100, self.retry_policy.as_ref());
-        f.ostruct(110, self.header.as_ref());
+        f.sstr(25, &self.domain);
+        f.ostruct(30, self.task_list.as_ref());
+        f.sbytes(40, &self.input);
+        f.oi32(45, self.schedule_to_close_timeout_seconds);
+        f.oi32(50, self.schedule_to_start_timeout_seconds);
+        f.oi32(55, self.start_to_close_timeout_seconds);
+        f.oi32(60, self.heartbeat_timeout_seconds);
+        f.ostruct(70, self.retry_policy.as_ref());
+        f.ostruct(80, self.header.as_ref());
         f.finish()
     }
 }
@@ -3299,7 +3305,7 @@ impl ToThrift for HistoryEvent {
         if self.event_id != 0 {
             f.fields.push((10, Value::I64(self.event_id)));
         }
-        f.oi64(20, self.timestamp);
+        f.oi64(20, millis_to_nanos(self.timestamp));
         f.oenum(30, self.event_type);
         if self.version != 0 {
             f.fields.push((35, Value::I64(self.version)));
@@ -3629,13 +3635,28 @@ mod tests {
             request_id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
             ..Default::default()
         });
+        let attrs = ScheduleActivityTaskDecisionAttributes {
+            activity_id: "activity-1".to_string(),
+            activity_type: Some(ActivityType { name: "hello".to_string() }),
+            domain: "domain-1".to_string(),
+            task_list: Some(TaskList { name: "task-list-1".to_string(), ..Default::default() }),
+            input: b"input".to_vec(),
+            schedule_to_close_timeout_seconds: Some(90),
+            schedule_to_start_timeout_seconds: Some(30),
+            start_to_close_timeout_seconds: Some(60),
+            heartbeat_timeout_seconds: Some(10),
+            ..Default::default()
+        };
+        let wire = attrs.to_thrift();
+        assert!(matches!(wire.get(30), Some(Value::Struct(_))));
+        assert!(matches!(wire.get(25), Some(Value::Bytes(_))));
+        assert_eq!(ScheduleActivityTaskDecisionAttributes::from_thrift(&wire).unwrap(), attrs);
     }
 
     #[test]
     fn history_event_round_trip() {
         let e = HistoryEvent {
             event_id: 1,
-            timestamp: Some(123),
             event_type: Some(EventType::WorkflowExecutionStarted),
             version: 5,
             workflow_execution_started_event_attributes: Some(
@@ -3649,6 +3670,13 @@ mod tests {
             ..Default::default()
         };
         round_trip(&e);
+
+        let timestamp = HistoryEvent {
+            timestamp: Some(1_700_000_000_123),
+            ..Default::default()
+        }
+        .to_thrift();
+        assert_eq!(timestamp.opt_i64(20).unwrap(), Some(1_700_000_000_123_000_000));
     }
 
     #[test]

@@ -1,5 +1,13 @@
 # Progress log
 
+- **2026-10-14 — Go SDK workflow running against Rust frontend.** Added
+  `rust-cadence-version-workflow` with a Go worker and starter targeting the
+  Rust YARPC/Thrift endpoint. Fixed the activity-schedule decision field IDs,
+  Thrift timestamp nanoseconds, history long-poll deadline handling, and
+  follow-up decision scheduling so empty replays do not spin and events arriving
+  during a decision are replayed. Verified Go SDK activity execution and left
+  `cadence-rust` tmux session running with an open, signal-waiting workflow.
+
 - **2026-10-14 — Retries, pollers, follow-up decisions (96 tests, clippy clean).**
   Activity retries per retry policy (fatal/non-retriable/max-attempts stop;
   fresh Scheduled event + backoff requeue via background loop),

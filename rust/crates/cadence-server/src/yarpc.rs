@@ -378,6 +378,7 @@ async fn handle_describe_workflow(
 async fn handle_get_history(
     state: &AppState,
     body: &Struct,
+    deadline: Instant,
 ) -> HandlerResult {
     use cadence_api::service_types::GetWorkflowExecutionHistoryRequest;
     use cadence_api::validation;
@@ -387,6 +388,39 @@ async fn handle_get_history(
     let execution = req.execution.clone().unwrap_or_default();
     validation::check_execution(Some(&execution))
         .map_err(|e| AppError::bad_request(e.message))?;
+    if req.wait_for_new_event {
+        loop {
+            match state.executions.history_page(
+                &req.domain,
+                &execution,
+                req.maximum_page_size,
+                &req.next_page_token,
+                req.history_event_filter_type,
+            ) {
+                Ok(resp) if (!resp.history.as_ref().map(|h| h.events.is_empty()).unwrap_or(true))
+                    || !req.next_page_token.is_empty() =>
+                {
+                    return Ok(wrap_success(&resp));
+                }
+                Ok(_) if Instant::now() >= deadline => {
+                    // Timed out long-poll: return empty history page (mirrors Go).
+                    return Ok(wrap_success(
+                        &cadence_api::service_types::GetWorkflowExecutionHistoryResponse::default(),
+                    ));
+                }
+                Ok(_) => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+                Err(cadence_persistence::HistoryPageError::NotFound(e)) => {
+                    return Err(AppError::entity_not_exists(e.message))
+                }
+                Err(cadence_persistence::HistoryPageError::InvalidToken(e)) => {
+                    return Err(AppError::bad_request(e.message))
+                }
+            }
+        }
+    }
     match state.executions.history_page(
         &req.domain,
         &execution,
@@ -681,7 +715,7 @@ pub async fn dispatch(
         "DeprecateDomain" => handle_deprecate_domain(state, body).await,
         "StartWorkflowExecution" => handle_start(state, body).await,
         "DescribeWorkflowExecution" => handle_describe_workflow(state, body).await,
-        "GetWorkflowExecutionHistory" => handle_get_history(state, body).await,
+        "GetWorkflowExecutionHistory" => handle_get_history(state, body, deadline).await,
         "SignalWorkflowExecution" => handle_signal(state, body).await,
         "SignalWithStartWorkflowExecution" => handle_signal_with_start(state, body).await,
         "TerminateWorkflowExecution" => handle_terminate(state, body).await,

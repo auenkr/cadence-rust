@@ -889,6 +889,14 @@ impl InMemoryExecutionStore {
             )));
         }
         Self::validate_decisions(&inner, &record_key, &req.decisions)?;
+        // External events can arrive after this decision was polled but before
+        // its completion is committed. In that case the worker's response
+        // cannot have observed those events, so another replay task is needed.
+        let has_new_events = inner
+            .by_run
+            .get(&record_key)
+            .and_then(|record| record.history.last())
+            .is_some_and(|event| event.event_id > pending.started_event_id.unwrap_or_default());
         // All valid: record completion.
         let record = inner.by_run.get_mut(&record_key).expect("record exists");
         let started_event_id = pending.started_event_id.expect("verified started");
@@ -919,6 +927,7 @@ impl InMemoryExecutionStore {
         let workflow_id = record.execution.workflow_id.clone();
         let run_id = record.execution.run_id.clone();
         let task_list = record.task_list.name.clone();
+        let has_decisions = !req.decisions.is_empty();
         Self::apply_decisions_locked(
             &mut inner,
             &domain,
@@ -928,11 +937,16 @@ impl InMemoryExecutionStore {
             completed_event_id,
             &req.identity,
         )?;
-        let still_open = inner
-            .by_run
-            .get(&record_key)
-            .is_some_and(ExecutionRecord::is_open);
-        if still_open {
+        // A non-empty command batch gets one follow-up task so the worker can
+        // observe the recorded decision events on replay. An empty replay
+        // means the workflow is blocked on a timer/activity/signal; enqueueing
+        // another task there would spin indefinitely.
+        if (has_decisions || has_new_events)
+            && inner
+                .by_run
+                .get(&record_key)
+                .is_some_and(ExecutionRecord::is_open)
+        {
             Self::schedule_decision_locked(
                 &mut inner,
                 &domain,
