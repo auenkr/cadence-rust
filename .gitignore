@@ -1,52 +1,22 @@
-*.out
-*.test
-*.xml
-*.swp
-.idea/
-*.iml
-*.cov
-*.html
-.gobincache/
-.tmp/
-.vscode/
+# Rust build outputs
+rust/target/
+**/target/
+
+# Go build outputs (mirrors go/.gitignore at root for tooling that runs at top level)
 .build/
 .bin/
-.cursor/
-/vendor
-/_vendor-*
-/cadence
-.DS_Store
-*.log
-test
-test_xdc
-test_e2e
-test_eventsV2
-test_eventsV2_xdc
-matching-simulator-output/
-history-simulator-output/
-replication-simulator-output/
-**/Dockerfile.local*
-**/Dockerfile.light*
-dockerize
-*.crt
+.gobincache/
+*.out
+*.test
+*.cov
 
-# Executables produced by cadence repo
-/cadence
-/cadence-server
-/cadence-canary
-/cadence-bench
-/cadence-cassandra-tool
-/cadence-sql-tool
-/cadence-releaser
-/sharddistributor-canary
-
-# SQLite databases
+# SQLite dev databases
 cadence.db*
 cadence_visibility.db*
 
-# Local settings
-settings.local.json
-.mcp.json
-*.bak
-CLAUDE.local.md
-.claude/settings.json
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.iml
+.DS_Store
