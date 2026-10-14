@@ -10,3 +10,23 @@ path = "src/main.rs"
 
 [dependencies]
 cadence-api = { path = "../cadence-api" }
+cadence-common = { path = "../cadence-common" }
+cadence-persistence = { path = "../cadence-persistence" }
+cadence-thrift = { path = "../cadence-thrift" }
+anyhow = "1"
+axum = { version = "0.8", features = ["json"] }
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+axum = { version = "0.8", features = ["json"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }

@@ -1,0 +1,10 @@
+[package]
+name = "cadence-common"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rand = "0.8"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }

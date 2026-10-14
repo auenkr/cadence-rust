@@ -2,7 +2,10 @@
 resolver = "2"
 members = [
     "crates/cadence-api",
+    "crates/cadence-common",
+    "crates/cadence-persistence",
     "crates/cadence-server",
+    "crates/cadence-thrift",
 ]
 
 [workspace.package]

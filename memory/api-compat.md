@@ -14,6 +14,15 @@ The Rust server must be a drop-in replacement for SDK clients.
 
 ## Current status
 
-- Only a stub workspace exists (`API_COMPAT_VERSION = "v1-thrift"`).
-- Next step: generate/port Thrift types into `cadence-api` and add
-  round-trip tests against `go/.gen` fixtures.
+- `cadence-api` ports all 32 Thrift enums (Go-identical discriminants and
+  `String()` output, int wire encoding) plus core/domain/service structs
+  with Go-identical JSON names (`[]byte` as base64). Covered by
+  `crates/cadence-api/tests/go_compat.rs` (Go-JSON fixtures) and unit
+  tests mirroring Go table tests.
+- Transport: HTTP JSON API serving `cadence-api` shapes
+  (`rust/crates/cadence-server/src/handlers.rs`), tested by
+  `crates/cadence-server/tests/e2e.rs`. Thrift-binary framing and gRPC
+  (what the Go/Java SDKs speak) are NOT yet implemented — required
+  before SDKs work unmodified.
+- Next step: Thrift transport for the served shapes, then SDK-driven
+  scenarios from `go/host/`.
