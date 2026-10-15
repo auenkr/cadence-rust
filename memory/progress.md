@@ -1514,3 +1514,24 @@ registry and RPC integration, then route Go Frontend/History to Rust Matching.
 Queries, forwarding, ownership, domain lifecycle, throttling, semaphores, internal
 transport and production membership remain. Matching is NOT complete.
 
+
+## Queue registry checkpoint (2026-10-15)
+
+Added `matching_registry::QueueRegistry` and QueueHandle. Lease acquisition and
+registration share one blocking worker; concurrent requests get one owner.
+Append and notification share a worker so RPC cancellation does not skip wakeup.
+Ack flush visits all owners despite individual errors. Shutdown stops handles;
+unload checks pointer identity so old teardown cannot remove a replacement.
+Four registry tests plus seven delivery/History tests passed:
+`/tmp/cadence-registry-unload-tests.log` (11 passed). Strict workspace all-target lint passed;
+`/tmp/cadence-registry-unload.exit` = 0.
+This is an independent lifecycle component, not a running Matching replacement.
+RPC integration, configured ack timer, domain cache, ownership checks and idle
+unload still remain. Go reference: task_list_registry.go and task_reader.go.
+
+Before AddActivity RPC wiring, port/test a source-domain SQL edge: original
+`sql_task_store.go:CreateTasks` writes each row with v.Data.DomainID while fencing
+TaskListInfo.DomainID. AddActivity engine supplies SourceDomainUUID as TaskInfo
+DomainID. Current Rust create_tasks assumes the queue domain for every row.
+Preserve pinned Go behavior; do not silently normalize source to target domain.
+

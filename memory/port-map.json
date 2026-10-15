@@ -270,5 +270,14 @@
     "evidence": [
       "Outbound task-start calls preserve YARPC metadata, stable request UUIDs, Go retry/error classification and SDK tokens/response data. Real Go History + Go Frontend completed an 11-event workflow through Rust durable queue/client. This does not replace the Matching RPC listener; routing, queries, passive handling, sync match and distributed behavior remain incomplete."
     ]
+  },
+  "go/service/matching/tasklist/task_list_registry.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-server/src/matching_registry.rs"
+    ],
+    "evidence": [
+      "Concurrent single lease, decision/activity isolation, shutdown ack persistence, fenced flush and identity-checked unload tests; metrics, indexed enumeration, manager integration and service lifecycle parity remain."
+    ]
   }
 }

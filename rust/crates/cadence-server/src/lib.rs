@@ -27,3 +27,6 @@ pub mod matching_history;
 
 #[allow(clippy::result_large_err)]
 pub mod matching_dispatch;
+
+#[allow(clippy::result_large_err)]
+pub mod matching_registry;
