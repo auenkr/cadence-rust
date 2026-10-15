@@ -52,6 +52,7 @@ def main():
         run("workspace-clippy", ["cargo", "clippy", "--manifest-path", manifest,
                                  "--workspace", "--all-targets", "--", "-D", "warnings"])
     run("scheduler-differential", [sys.executable, str(root / "tests/run-scheduler-compat.py")])
+    run("version-history-differential", [sys.executable, str(root / "tests/run-version-history-compat.py")])
     run("server-build", ["cargo", "build", "--manifest-path", manifest, "-p", "cadence-server"])
     # Reserve all five ports together to avoid selecting the same port twice.
     reservations = [socket.socket() for _ in range(5)]

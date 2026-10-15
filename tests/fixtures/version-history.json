@@ -1,0 +1,1826 @@
+[
+  {
+    "name": "append first",
+    "op": "add",
+    "histories": [
+      []
+    ],
+    "item": [
+      1,
+      -24
+    ],
+    "expected": [
+      [
+        1,
+        -24
+      ]
+    ]
+  },
+  {
+    "name": "coalesce same version",
+    "op": "add",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      12,
+      20
+    ],
+    "expected": [
+      [
+        3,
+        0
+      ],
+      [
+        6,
+        10
+      ],
+      [
+        12,
+        20
+      ]
+    ]
+  },
+  {
+    "name": "append new version",
+    "op": "add",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      12,
+      30
+    ],
+    "expected": [
+      [
+        3,
+        0
+      ],
+      [
+        6,
+        10
+      ],
+      [
+        9,
+        20
+      ],
+      [
+        12,
+        30
+      ]
+    ]
+  },
+  {
+    "name": "reject lower version",
+    "op": "add",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      12,
+      10
+    ],
+    "expected": {
+      "error": "cannot update version history with a lower version 10. Last version: 20"
+    }
+  },
+  {
+    "name": "reject equal event id",
+    "op": "add",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      9,
+      30
+    ],
+    "expected": {
+      "error": "cannot add version history with a lower event id 9. Last event id: 9"
+    }
+  },
+  {
+    "name": "reject lower event id",
+    "op": "add",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      2,
+      30
+    ],
+    "expected": {
+      "error": "cannot add version history with a lower event id 2. Last event id: 9"
+    }
+  },
+  {
+    "name": "contains 1/0",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      1,
+      0
+    ],
+    "expected": true
+  },
+  {
+    "name": "contains 3/0",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      3,
+      0
+    ],
+    "expected": true
+  },
+  {
+    "name": "contains 4/0",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      4,
+      0
+    ],
+    "expected": false
+  },
+  {
+    "name": "contains 4/10",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      4,
+      10
+    ],
+    "expected": true
+  },
+  {
+    "name": "contains 6/10",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      6,
+      10
+    ],
+    "expected": true
+  },
+  {
+    "name": "contains 7/10",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      7,
+      10
+    ],
+    "expected": false
+  },
+  {
+    "name": "contains 9/20",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      9,
+      20
+    ],
+    "expected": true
+  },
+  {
+    "name": "contains 10/20",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      10,
+      20
+    ],
+    "expected": false
+  },
+  {
+    "name": "contains 0/0",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      0,
+      0
+    ],
+    "expected": false
+  },
+  {
+    "name": "contains 1/-24",
+    "op": "contains",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      1,
+      -24
+    ],
+    "expected": false
+  },
+  {
+    "name": "lca within final version",
+    "op": "lca",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        3,
+        0
+      ],
+      [
+        6,
+        10
+      ],
+      [
+        8,
+        20
+      ]
+    ],
+    "expected": [
+      8,
+      20
+    ]
+  },
+  {
+    "name": "lca skips divergent versions",
+    "op": "lca",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        3,
+        0
+      ],
+      [
+        5,
+        10
+      ],
+      [
+        12,
+        30
+      ]
+    ],
+    "expected": [
+      5,
+      10
+    ]
+  },
+  {
+    "name": "lca first segment",
+    "op": "lca",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        2,
+        0
+      ],
+      [
+        12,
+        30
+      ]
+    ],
+    "expected": [
+      2,
+      0
+    ]
+  },
+  {
+    "name": "no joint version",
+    "op": "lca",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        3,
+        1
+      ],
+      [
+        12,
+        30
+      ]
+    ],
+    "expected": {
+      "error": "version history is malformed. No joint point found."
+    }
+  },
+  {
+    "name": "empty lca",
+    "op": "lca",
+    "histories": [
+      []
+    ],
+    "remote": [
+      [
+        3,
+        0
+      ]
+    ],
+    "expected": {
+      "error": "version history is malformed. No joint point found."
+    }
+  },
+  {
+    "name": "duplicate through middle segment",
+    "op": "duplicate",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      5,
+      10
+    ],
+    "expected": {
+      "items": [
+        [
+          3,
+          0
+        ],
+        [
+          5,
+          10
+        ]
+      ],
+      "tokenLength": 0
+    }
+  },
+  {
+    "name": "duplicate excludes branch token",
+    "op": "duplicate",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      9,
+      20
+    ],
+    "expected": {
+      "items": [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ],
+      "tokenLength": 0
+    }
+  },
+  {
+    "name": "duplicate rejects past segment",
+    "op": "duplicate",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      7,
+      10
+    ],
+    "expected": {
+      "error": "version history does not contains the LCA item."
+    }
+  },
+  {
+    "name": "duplicate rejects unknown version",
+    "op": "duplicate",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      4,
+      5
+    ],
+    "expected": {
+      "error": "version history does not contains the LCA item."
+    }
+  },
+  {
+    "name": "duplicate lower boundary follows Go",
+    "op": "duplicate",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      1,
+      10
+    ],
+    "expected": {
+      "error": "cannot add version history with a lower event id 1. Last event id: 3"
+    }
+  },
+  {
+    "name": "tip appendable",
+    "op": "appendable",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      9,
+      20
+    ],
+    "expected": true
+  },
+  {
+    "name": "ancestor not appendable",
+    "op": "appendable",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      8,
+      20
+    ],
+    "expected": false
+  },
+  {
+    "name": "empty appendable panics",
+    "op": "appendable",
+    "histories": [
+      []
+    ],
+    "item": [
+      1,
+      0
+    ],
+    "expected": {
+      "panic": "version history not initialized"
+    }
+  },
+  {
+    "name": "first",
+    "op": "first",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "expected": [
+      3,
+      0
+    ]
+  },
+  {
+    "name": "empty first",
+    "op": "first",
+    "histories": [
+      []
+    ],
+    "expected": {
+      "error": "version history is empty."
+    }
+  },
+  {
+    "name": "last",
+    "op": "last",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "expected": [
+      9,
+      20
+    ]
+  },
+  {
+    "name": "empty last",
+    "op": "last",
+    "histories": [
+      []
+    ],
+    "expected": {
+      "error": "version history is empty"
+    }
+  },
+  {
+    "name": "event version 0",
+    "op": "event_version",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "eventID": 0,
+    "expected": {
+      "error": "input event ID is not in range."
+    }
+  },
+  {
+    "name": "event version 1",
+    "op": "event_version",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "eventID": 1,
+    "expected": 0
+  },
+  {
+    "name": "event version 3",
+    "op": "event_version",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "eventID": 3,
+    "expected": 0
+  },
+  {
+    "name": "event version 4",
+    "op": "event_version",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "eventID": 4,
+    "expected": 10
+  },
+  {
+    "name": "event version 6",
+    "op": "event_version",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "eventID": 6,
+    "expected": 10
+  },
+  {
+    "name": "event version 7",
+    "op": "event_version",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "eventID": 7,
+    "expected": 20
+  },
+  {
+    "name": "event version 9",
+    "op": "event_version",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "eventID": 9,
+    "expected": 20
+  },
+  {
+    "name": "event version 10",
+    "op": "event_version",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "eventID": 10,
+    "expected": {
+      "error": "input event ID is not in range."
+    }
+  },
+  {
+    "name": "empty event version",
+    "op": "event_version",
+    "histories": [
+      []
+    ],
+    "eventID": 1,
+    "expected": {
+      "error": "version history is empty"
+    }
+  },
+  {
+    "name": "new higher branch becomes current",
+    "op": "add_history",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        3,
+        0
+      ],
+      [
+        12,
+        30
+      ]
+    ],
+    "expected": {
+      "changed": true,
+      "current": 1,
+      "histories": [
+        [
+          [
+            3,
+            0
+          ],
+          [
+            6,
+            10
+          ],
+          [
+            9,
+            20
+          ]
+        ],
+        [
+          [
+            3,
+            0
+          ],
+          [
+            12,
+            30
+          ]
+        ]
+      ],
+      "index": 1
+    }
+  },
+  {
+    "name": "same version longer branch stays noncurrent",
+    "op": "add_history",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        3,
+        0
+      ],
+      [
+        12,
+        20
+      ]
+    ],
+    "expected": {
+      "changed": false,
+      "current": 0,
+      "histories": [
+        [
+          [
+            3,
+            0
+          ],
+          [
+            6,
+            10
+          ],
+          [
+            9,
+            20
+          ]
+        ],
+        [
+          [
+            3,
+            0
+          ],
+          [
+            12,
+            20
+          ]
+        ]
+      ],
+      "index": 1
+    }
+  },
+  {
+    "name": "older branch stays noncurrent",
+    "op": "add_history",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        3,
+        0
+      ],
+      [
+        8,
+        10
+      ]
+    ],
+    "expected": {
+      "changed": false,
+      "current": 0,
+      "histories": [
+        [
+          [
+            3,
+            0
+          ],
+          [
+            6,
+            10
+          ],
+          [
+            9,
+            20
+          ]
+        ],
+        [
+          [
+            3,
+            0
+          ],
+          [
+            8,
+            10
+          ]
+        ]
+      ],
+      "index": 1
+    }
+  },
+  {
+    "name": "branch first version mismatch",
+    "op": "add_history",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        3,
+        1
+      ],
+      [
+        12,
+        30
+      ]
+    ],
+    "expected": {
+      "error": "version history first item does not match."
+    }
+  },
+  {
+    "name": "empty incoming branch",
+    "op": "add_history",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [],
+    "expected": {
+      "error": "version history is empty."
+    }
+  },
+  {
+    "name": "null incoming branch",
+    "op": "add_null",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "expected": {
+      "error": "version histories is null."
+    }
+  },
+  {
+    "name": "empty current branch",
+    "op": "add_history",
+    "histories": [
+      []
+    ],
+    "remote": [
+      [
+        3,
+        0
+      ]
+    ],
+    "expected": {
+      "error": "version history is empty."
+    }
+  },
+  {
+    "name": "nearest common branch",
+    "op": "lca_history",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ],
+      [
+        [
+          3,
+          0
+        ],
+        [
+          7,
+          10
+        ],
+        [
+          12,
+          30
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        3,
+        0
+      ],
+      [
+        8,
+        10
+      ],
+      [
+        13,
+        40
+      ]
+    ],
+    "expected": {
+      "index": 1,
+      "item": [
+        7,
+        10
+      ]
+    }
+  },
+  {
+    "name": "LCA tie prefers fewer segments",
+    "op": "lca_history",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ],
+      [
+        [
+          6,
+          0
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "remote": [
+      [
+        6,
+        0
+      ],
+      [
+        9,
+        20
+      ],
+      [
+        12,
+        30
+      ]
+    ],
+    "expected": {
+      "index": 1,
+      "item": [
+        9,
+        20
+      ]
+    }
+  },
+  {
+    "name": "empty branch collection LCA",
+    "op": "lca_history",
+    "histories": [],
+    "remote": [
+      [
+        1,
+        0
+      ]
+    ],
+    "expected": {
+      "index": 0,
+      "item": null
+    }
+  },
+  {
+    "name": "first containing branch",
+    "op": "find_first",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ]
+      ],
+      [
+        [
+          3,
+          0
+        ],
+        [
+          7,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      5,
+      10
+    ],
+    "expected": 0
+  },
+  {
+    "name": "later containing branch",
+    "op": "find_first",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ]
+      ],
+      [
+        [
+          3,
+          0
+        ],
+        [
+          7,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      8,
+      20
+    ],
+    "expected": 1
+  },
+  {
+    "name": "item missing from branches",
+    "op": "find_first",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "item": [
+      15,
+      20
+    ],
+    "expected": {
+      "error": "version histories does not contains given item."
+    }
+  },
+  {
+    "name": "rebuilt current 0",
+    "op": "rebuilt",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ]
+      ],
+      [
+        [
+          3,
+          0
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "current": 0,
+    "expected": true
+  },
+  {
+    "name": "rebuilt current 1",
+    "op": "rebuilt",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ]
+      ],
+      [
+        [
+          3,
+          0
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "current": 1,
+    "expected": false
+  },
+  {
+    "name": "get branch -1",
+    "op": "get",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "index": -1,
+    "expected": {
+      "error": "getting branch index: -1, available branch count: 1"
+    }
+  },
+  {
+    "name": "set current -1",
+    "op": "set_current",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "index": -1,
+    "expected": {
+      "error": "invalid current branch index."
+    }
+  },
+  {
+    "name": "get branch 0",
+    "op": "get",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "index": 0,
+    "expected": 0
+  },
+  {
+    "name": "set current 0",
+    "op": "set_current",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "index": 0,
+    "expected": 0
+  },
+  {
+    "name": "get branch 1",
+    "op": "get",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "index": 1,
+    "expected": {
+      "error": "getting branch index: 1, available branch count: 1"
+    }
+  },
+  {
+    "name": "set current 1",
+    "op": "set_current",
+    "histories": [
+      [
+        [
+          3,
+          0
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          9,
+          20
+        ]
+      ]
+    ],
+    "index": 1,
+    "expected": {
+      "error": "invalid current branch index."
+    }
+  },
+  {
+    "name": "construct 0/-24",
+    "op": "new_item",
+    "histories": [],
+    "item": [
+      0,
+      -24
+    ],
+    "expected": [
+      0,
+      -24
+    ]
+  },
+  {
+    "name": "construct 1/0",
+    "op": "new_item",
+    "histories": [],
+    "item": [
+      1,
+      0
+    ],
+    "expected": [
+      1,
+      0
+    ]
+  },
+  {
+    "name": "construct -1/0",
+    "op": "new_item",
+    "histories": [],
+    "item": [
+      -1,
+      0
+    ],
+    "expected": {
+      "panic": "invalid version history item event ID: -1, version: 0"
+    }
+  },
+  {
+    "name": "construct 1/-1",
+    "op": "new_item",
+    "histories": [],
+    "item": [
+      1,
+      -1
+    ],
+    "expected": {
+      "panic": "invalid version history item event ID: 1, version: -1"
+    }
+  },
+  {
+    "name": "construct 1/-25",
+    "op": "new_item",
+    "histories": [],
+    "item": [
+      1,
+      -25
+    ],
+    "expected": {
+      "panic": "invalid version history item event ID: 1, version: -25"
+    }
+  }
+]

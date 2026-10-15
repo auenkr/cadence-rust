@@ -149,3 +149,15 @@ The full runner also copies the built server to its artifacts directory and
 boots it there, using embedded development defaults with no Go checkout in the
 working directory. It separately verifies that an explicit Go YAML config still
 parses. The copied binary and server working directory are retained with logs.
+
+History version-branch primitives are compared with the pinned Go persistence
+implementation using 68 shared fixtures:
+
+```sh
+python3 tests/run-version-history-compat.py
+```
+
+The fixtures cover inclusive version ranges, append validation, lowest common
+ancestors, branch selection/ties, rebuilt branches, and exact error/panic text.
+The full runner also executes this differential check. Branch utilities alone
+do not establish replication application or persistence-backend compatibility.

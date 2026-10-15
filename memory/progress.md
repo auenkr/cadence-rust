@@ -1177,3 +1177,24 @@
   all configuration gaps. Major production persistence, schema migration,
   distributed ownership/replication/worker roles, archival and inventory gaps
   remain. The active full-migration goal must remain incomplete.
+
+- Version-history primitives (2026-10-15): ported Go persistence range
+  coalescing/validation, item containment, LCA selection and prefix copies,
+  event-version lookup, branch addition/current selection, first-containing
+  branch, rebuilt detection and index validation into version_history.rs.
+  Uses existing Cadence API structs. Exact Go errors/panics are preserved,
+  including its shorter-history LCA tie-break and same-version non-switch.
+- Added 68 shared fixtures with expected outcomes produced by the actual Go
+  implementation. tests/version-history-go/main.go remains a direct Go oracle;
+  tests/run-version-history-compat.py reruns Go and Rust against the fixtures.
+  Full compatibility runner now includes this check. All 68 match; persistence
+  suite 136 tests passes; strict persistence/all-targets clippy passes.
+- These algorithms are foundational for real replication but are not yet
+  attached to execution records. ReplicateEventsV2 remains the old validated
+  no-op. Next work: attach history versions/branches, preserve them through
+  buffered-event flush/reset/snapshot, then apply remote branch events with
+  state rebuild and cluster/version gating. Raw history currently omits version
+  metadata; Go's branch-token storage codec uses 0x59 + binary Thrift, not JSON.
+  Local Go history events use constants.EmptyVersion=-24; current Rust emits
+  zero. Legacy Rust snapshot version-zero histories must be handled explicitly
+  when integrating new version tracking. No full replication claim is justified.

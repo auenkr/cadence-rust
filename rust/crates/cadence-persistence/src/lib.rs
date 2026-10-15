@@ -9,6 +9,7 @@ pub mod executions;
 pub mod schedules;
 pub mod semaphores;
 pub mod visibility;
+pub mod version_history;
 
 pub use domains::{DomainRecord, FailoverError, InMemoryDomainStore};
 pub use executions::{
