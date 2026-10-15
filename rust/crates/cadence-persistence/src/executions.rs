@@ -713,6 +713,47 @@ impl InMemoryExecutionStore {
         self.start_locked(&mut inner, req)
     }
 
+    /// Apply internal-only start metadata after public start has created
+    /// execution state. Used by native internal `StartWorkflowExecution`.
+    pub fn set_start_execution_metadata(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        parent: Option<(String, String, String, i64)>,
+        attempt: i32,
+        expiration_time_nanos: Option<i64>,
+        first_decision_task_backoff_seconds: i32,
+    ) -> Result<(), EntityNotExistsError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let key = (domain.to_string(), execution.workflow_id.clone(), execution.run_id.clone());
+        let record = inner
+            .by_run
+            .get_mut(&key)
+            .ok_or_else(|| EntityNotExistsError::new("Workflow execution does not exist.".to_string()))?;
+        record.attempt = attempt;
+        if let Some(expiration) = expiration_time_nanos {
+            record.expiration_time_nanos = Some(expiration);
+        }
+        if first_decision_task_backoff_seconds > 0 {
+            record.first_decision_task_backoff_seconds = first_decision_task_backoff_seconds;
+            let backoff_millis = i64::from(record.first_decision_task_backoff_seconds.max(0))
+                .saturating_mul(1000);
+            if backoff_millis > 0 {
+                record.first_decision_due_millis = Some(record.start_time_millis + backoff_millis);
+            }
+        }
+        if let Some((parent_domain, workflow_id, run_id, initiated)) = parent {
+            record.parent = Some(crate::executions::ParentRef {
+                domain: parent_domain,
+                workflow_id,
+                run_id,
+                initiated_event_id: initiated,
+                started_event_id: 0,
+            });
+        }
+        Ok(())
+    }
+
     /// Enqueue an async start request, mirroring Go frontend
     /// `StartWorkflowExecutionAsync` publishing to the async queue. The
     /// request is validated by the caller before enqueueing and processed by

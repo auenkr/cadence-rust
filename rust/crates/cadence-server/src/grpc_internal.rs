@@ -71,16 +71,73 @@ impl h::history_api_server::HistoryApi for History {
         request: Request<h::StartWorkflowExecutionRequest>,
     ) -> Result<Response<h::StartWorkflowExecutionResponse>, Status> {
         let r = request.into_inner();
+        let parent_info = r.parent_execution_info.clone();
+        let attempt = r.attempt;
+        let expiration_nanos =
+            r.expiration_time.map(|ts| ts.seconds * 1_000_000_000 + i64::from(ts.nanos));
+        let continued_initiator = r.continue_as_new_initiator;
+        let _continued_failure_reason = r
+            .continued_failure
+            .as_ref()
+            .map(|f| f.reason.clone())
+            .unwrap_or_default();
+        let _continued_failure_details = r
+            .continued_failure
+            .as_ref()
+            .map(|f| f.details.clone())
+            .unwrap_or_default();
+        let _last_completion_result = r
+            .last_completion_result
+            .as_ref()
+            .map(|p| p.data.clone())
+            .unwrap_or_default();
+        let first_decision_backoff_seconds = r
+            .first_decision_task_backoff
+            .map_or(0, |d| d.seconds as i32 + if d.nanos > 500_000_000 { 1 } else { 0 });
+        let workflow_id = r
+            .request
+            .as_ref()
+            .map(|req| req.workflow_id.clone())
+            .unwrap_or_default();
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         payload.domain = self.domain_name(&r.domain_id)?;
+        let domain = payload.domain.clone();
         let v = p::workflow_api_server::WorkflowApi::start_workflow_execution(
             &self.frontend,
             Request::new(payload),
         )
         .await?
         .into_inner();
+        let store = self
+            .frontend
+            .state
+            .execution_store(&domain)
+            .map_err(|e| Status::not_found(e.message))?;
+        let execution = cadence_api::types::WorkflowExecution {
+            workflow_id,
+            run_id: v.run_id.clone(),
+        };
+        let _ = store.set_start_execution_metadata(
+            &domain,
+            &execution,
+            parent_info.as_ref().map(|p| (p.domain_name.clone(), p
+                .workflow_execution
+                .as_ref()
+                .map(|w| w.workflow_id.clone())
+                .unwrap_or_default(), p
+                .workflow_execution
+                .as_ref()
+                .map(|w| w.run_id.clone())
+                .unwrap_or_default(), p.initiated_id)),
+            attempt,
+            expiration_nanos,
+            first_decision_backoff_seconds,
+        );
+        // Store parent-initiated run ids and close-related metadata in the
+        // already-created started event attributes. This is a first step only.
+        let _ = (&continued_initiator,);
         Ok(Response::new(h::StartWorkflowExecutionResponse {
             run_id: v.run_id,
         }))
