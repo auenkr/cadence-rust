@@ -7,6 +7,10 @@
 //! `history_length` and `GetWorkflowExecutionHistory` behave like the Go
 //! implementation for these operations.
 
+use crate::version_history::{VersionHistoryExt, VersionHistoriesExt, EMPTY_VERSION};
+
+fn empty_version() -> i64 { EMPTY_VERSION }
+
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -107,6 +111,10 @@ pub struct ExecutionRecord {
     pub start_time_millis: i64,
     pub close_time_millis: Option<i64>,
     pub history: Vec<HistoryEvent>,
+    #[serde(default = "empty_version")]
+    pub current_version: i64,
+    #[serde(default)]
+    pub version_histories: Option<cadence_api::types::VersionHistories>,
     #[serde(default)]
     pub(crate) buffered_events: Vec<HistoryEvent>,
     #[serde(default)]
@@ -409,6 +417,7 @@ impl ExecutionRecord {
         vec![
             HistoryEvent {
                 event_id: task.scheduled_event_id,
+                version: self.current_version,
                 timestamp: task.scheduled_time_millis,
                 event_type: Some(EventType::DecisionTaskScheduled),
                 decision_task_scheduled_event_attributes: Some(
@@ -422,6 +431,7 @@ impl ExecutionRecord {
             },
             HistoryEvent {
                 event_id: task.started_event_id.unwrap(),
+                version: self.current_version,
                 timestamp: task.started_time_millis,
                 event_type: Some(EventType::DecisionTaskStarted),
                 decision_task_started_event_attributes: Some(DecisionTaskStartedEventAttributes {
@@ -432,6 +442,27 @@ impl ExecutionRecord {
                 ..Default::default()
             },
         ]
+    }
+
+    fn rebuild_version_history(&mut self, branch_token: Vec<u8>) {
+        let items: Vec<_> = self.history.iter().map(|event| {
+            crate::version_history::new_item(event.event_id, event.version)
+        }).collect();
+        self.version_histories = Some(cadence_api::types::VersionHistories {
+            current_version_history_index: 0,
+            histories: vec![crate::version_history::new_history(branch_token, &items)],
+        });
+    }
+
+    fn record_version(&mut self, event_id: i64, version: i64) {
+        if self.version_histories.is_none() {
+            let token = crate::history_branch::new_token(&self.execution.run_id, &self.execution.run_id);
+            self.rebuild_version_history(token);
+        }
+        let histories = self.version_histories.as_mut().unwrap();
+        histories.histories[histories.current_version_history_index as usize]
+            .add_or_update(&crate::version_history::new_item(event_id, version))
+            .expect("committed events must extend the current version history");
     }
 
     fn materialize_transient_decision(&mut self, identity: &str) {
@@ -445,6 +476,7 @@ impl ExecutionRecord {
         }
         for event in events {
             debug_assert_eq!(event.event_id, self.next_event_id());
+            self.record_version(event.event_id, event.version);
             self.history.push(event);
         }
     }
@@ -510,10 +542,12 @@ impl ExecutionRecord {
         let now = now_millis();
         event.timestamp = Some(now);
         event.event_type = Some(event_type);
+        event.version = self.current_version;
         let id = event.event_id;
         if buffer {
             self.buffered_events.push(event);
         } else {
+            self.record_version(event.event_id, event.version);
             self.history.push(event);
         }
         id
@@ -576,6 +610,7 @@ pub(crate) struct Inner {
     pub(crate) known_domains: std::collections::HashSet<String>,
     pub(crate) domain_ids: HashMap<String, String>,
     pub(crate) domain_names: HashMap<String, String>,
+    pub(crate) domain_versions: HashMap<String, i64>,
     /// Durable async-request queue (FIFO), drained by the server's worker role.
     pub(crate) async_requests: std::collections::VecDeque<AsyncRequest>,
     /// (domain namespace, schedule ID) -> schedule record.
@@ -622,6 +657,10 @@ impl InMemoryExecutionStore {
             domain_scope: Some(id.to_owned()),
         }
     }
+    pub fn set_domain_version(&self, id: &str, version: i64) {
+        self.inner.write().expect("execution store lock").domain_versions.insert(id.to_string(), version);
+    }
+
     pub fn namespace_id(&self) -> Option<&str> {
         self.domain_scope.as_deref()
     }
@@ -922,6 +961,14 @@ impl InMemoryExecutionStore {
             start_time_millis: start_millis,
             close_time_millis: None,
             history: Vec::new(),
+            current_version: inner.domain_versions.get(&req.domain).copied().unwrap_or(EMPTY_VERSION),
+            version_histories: Some(cadence_api::types::VersionHistories {
+                current_version_history_index: 0,
+                histories: vec![cadence_api::types::VersionHistory {
+                    branch_token: crate::history_branch::new_token(&run_id, &uuid::Uuid::new_v4().to_string()),
+                    items: Vec::new(),
+                }],
+            }),
             buffered_events: Vec::new(),
             buffer_event_sequence: 0,
             sticky_task_list: None,
@@ -1132,6 +1179,9 @@ impl InMemoryExecutionStore {
             if let Some(id) = activity.started_event_id.and_then(|id| ids.get(&id)) {
                 activity.started_event_id = Some(*id);
             }
+        }
+        for event in &events {
+            record.record_version(event.event_id, event.version);
         }
         record.history.extend(events);
         for child in inner.by_run.values_mut() {
@@ -1464,6 +1514,8 @@ impl InMemoryExecutionStore {
             start_time_millis: now_millis(),
             close_time_millis: None,
             history: prefix,
+            current_version: inner.domain_versions.get(domain).copied().unwrap_or(base_record.current_version).max(base_record.current_version),
+            version_histories: None,
             buffered_events: Vec::new(),
             buffer_event_sequence: 0,
             sticky_task_list: None,
@@ -1483,6 +1535,15 @@ impl InMemoryExecutionStore {
             jitter_start_seconds: 0,
             attempt: 0,
         };
+        let source_branch = base_record.version_histories.as_ref()
+            .and_then(|histories| histories.current_history().ok())
+            .and_then(|history| crate::history_branch::decode(&history.branch_token).ok())
+            .unwrap_or(cadence_api::types::HistoryBranch {
+                tree_id: base_run_id.clone(), branch_id: base_run_id.clone(), ancestors: Vec::new(),
+            });
+        let fork = crate::history_branch::fork(&source_branch, record.next_event_id(), &uuid::Uuid::new_v4().to_string())
+            .map_err(|e| ResetError::Invalid(e.message))?;
+        record.rebuild_version_history(crate::history_branch::encode(&fork));
         // Rebuild signal dedup state from the forked prefix.
         for event in record.history.iter() {
             if let Some(id) = event
@@ -1993,7 +2054,7 @@ impl InMemoryExecutionStore {
     }
 
     /// A snapshot of user-visible mutable state, mirroring Go history
-    /// `GetMutableState` fields that exist without branches/versions.
+    /// `GetMutableState` fields including the durable current branch/version history.
     pub fn mutable_state_view(
         &self,
         domain: &str,
@@ -2038,6 +2099,7 @@ impl InMemoryExecutionStore {
             sticky_schedule_to_start_timeout_seconds: record
                 .sticky_schedule_to_start_timeout_seconds,
             close_status: record.close_status,
+            version_histories: record.version_histories.clone(),
             history_size_bytes: serde_json::to_string(&record.history)
                 .map(|s| s.len() as i64)
                 .unwrap_or(0),
@@ -4054,6 +4116,14 @@ impl InMemoryExecutionStore {
             start_time_millis: now_millis(),
             close_time_millis: None,
             history: Vec::new(),
+            current_version: inner.domain_versions.get(domain).copied().unwrap_or_else(|| inner.by_run[&old_key].current_version),
+            version_histories: Some(cadence_api::types::VersionHistories {
+                current_version_history_index: 0,
+                histories: vec![cadence_api::types::VersionHistory {
+                    branch_token: crate::history_branch::new_token(&new_run_id, &uuid::Uuid::new_v4().to_string()),
+                    items: Vec::new(),
+                }],
+            }),
             buffered_events: Vec::new(),
             buffer_event_sequence: 0,
             sticky_task_list: None,
@@ -4243,6 +4313,14 @@ impl InMemoryExecutionStore {
             start_time_millis: now_millis(),
             close_time_millis: None,
             history: Vec::new(),
+            current_version: inner.domain_versions.get(&child_domain).copied().unwrap_or(EMPTY_VERSION),
+            version_histories: Some(cadence_api::types::VersionHistories {
+                current_version_history_index: 0,
+                histories: vec![cadence_api::types::VersionHistory {
+                    branch_token: crate::history_branch::new_token(&child_run_id, &uuid::Uuid::new_v4().to_string()),
+                    items: Vec::new(),
+                }],
+            }),
             buffered_events: Vec::new(),
             buffer_event_sequence: 0,
             sticky_task_list: None,
@@ -7134,6 +7212,7 @@ pub struct MutableStateView {
     pub sticky_schedule_to_start_timeout_seconds: i32,
     pub close_status: Option<WorkflowExecutionCloseStatus>,
     pub history_size_bytes: i64,
+    pub version_histories: Option<cadence_api::types::VersionHistories>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -7205,6 +7284,8 @@ struct ExecutionSnapshot {
     #[serde(default)]
     domain_names: HashMap<String, String>,
     #[serde(default)]
+    domain_versions: HashMap<String, i64>,
+    #[serde(default)]
     async_requests: Vec<AsyncRequest>,
     #[serde(default)]
     schedules: Vec<((String, String), crate::schedules::ScheduleRecord)>,
@@ -7253,6 +7334,7 @@ impl InMemoryExecutionStore {
             known_domains: inner.known_domains.iter().cloned().collect(),
             domain_ids: inner.domain_ids.clone(),
             domain_names: inner.domain_names.clone(),
+            domain_versions: inner.domain_versions.clone(),
             async_requests: inner.async_requests.iter().cloned().collect(),
             schedules: inner
                 .schedules
@@ -7280,6 +7362,13 @@ impl InMemoryExecutionStore {
     fn restore(snapshot: ExecutionSnapshot) -> Self {
         let mut runs = snapshot.runs;
         for (_, record) in &mut runs {
+            if record.version_histories.is_none() {
+                // Older Rust snapshots emitted version zero. Preserve their
+                // recorded stream instead of retroactively rewriting versions.
+                record.current_version = record.history.last().map(|e| e.version).unwrap_or(EMPTY_VERSION);
+                let token = crate::history_branch::new_token(&record.execution.run_id, &record.execution.run_id);
+                record.rebuild_version_history(token);
+            }
             if let Some(task) = record.pending_decision.as_mut() {
                 if task.task_list_name.is_none() {
                     task.task_list_name = record
@@ -7339,6 +7428,7 @@ impl InMemoryExecutionStore {
             known_domains: snapshot.known_domains.into_iter().collect(),
             domain_ids: snapshot.domain_ids,
             domain_names: snapshot.domain_names,
+            domain_versions: snapshot.domain_versions,
             async_requests: snapshot.async_requests.into_iter().collect(),
             schedules: snapshot.schedules.into_iter().collect(),
             semaphores: snapshot.semaphores.into_iter().collect(),
@@ -11481,6 +11571,193 @@ mod transient_decision_tests {
                 .unwrap()
                 .event_id,
             1
+        );
+    }
+}
+
+#[cfg(test)]
+mod version_state_tests {
+    use super::*;
+    use cadence_api::tasks::RespondDecisionTaskCompletedRequest;
+
+    fn start(store: &InMemoryExecutionStore) -> WorkflowExecution {
+        let response = store
+            .start(&StartWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_id: "versioned".to_string(),
+                workflow_type: Some(WorkflowType {
+                    name: "test".to_string(),
+                }),
+                task_list: Some(TaskList {
+                    name: "tl".to_string(),
+                    ..Default::default()
+                }),
+                execution_start_to_close_timeout_seconds: Some(600),
+                task_start_to_close_timeout_seconds: Some(10),
+                request_id: "start".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        WorkflowExecution::new("versioned", response.run_id)
+    }
+
+    fn consistent(
+        store: &InMemoryExecutionStore,
+        execution: &WorkflowExecution,
+    ) -> cadence_api::types::VersionHistory {
+        let inner = store.inner.read().unwrap();
+        let r = &inner.by_run[&(
+            "d".to_string(),
+            execution.workflow_id.clone(),
+            execution.run_id.clone(),
+        )];
+        let history = r
+            .version_histories
+            .as_ref()
+            .unwrap()
+            .current_history()
+            .unwrap();
+        assert_eq!(
+            history.last_item().unwrap().event_id,
+            r.history.last().unwrap().event_id
+        );
+        for event in &r.history {
+            assert_eq!(
+                history.event_version(event.event_id).unwrap(),
+                event.version
+            );
+        }
+        history.clone()
+    }
+
+    #[test]
+    fn version_state_local_and_global_starts_have_committed_branch_tips() {
+        for version in [EMPTY_VERSION, 42] {
+            let store = InMemoryExecutionStore::new();
+            store.set_domain_version("d", version);
+            let execution = start(&store);
+            let history = consistent(&store, &execution);
+            assert_eq!(
+                history.items,
+                vec![crate::version_history::new_item(2, version)]
+            );
+            let branch = crate::history_branch::decode(&history.branch_token).unwrap();
+            assert_eq!(branch.tree_id, execution.run_id);
+            assert!(uuid::Uuid::parse_str(&branch.branch_id).is_ok());
+            assert!(branch.ancestors.is_empty());
+        }
+    }
+
+    #[test]
+    fn version_state_buffer_flush_and_transient_decisions_advance_only_committed_tips() {
+        let store = InMemoryExecutionStore::new();
+        let execution = start(&store);
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        let tip = consistent(&store, &execution).last_item().unwrap().event_id;
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(execution.clone()),
+                signal_name: "buffered".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            consistent(&store, &execution).last_item().unwrap().event_id,
+            tip
+        );
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        let committed = consistent(&store, &execution).last_item().unwrap().event_id;
+        assert!(committed > tip);
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        store
+            .fail_decision(&task.task_token, None, Vec::new(), "worker", "")
+            .unwrap();
+        consistent(&store, &execution);
+        let transient = store.poll_decision("d", "tl", "retry").unwrap();
+        consistent(&store, &execution);
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: transient.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        consistent(&store, &execution);
+    }
+
+    #[test]
+    fn version_state_reset_forks_ancestry_and_snapshot_preserves_tokens() {
+        let store = InMemoryExecutionStore::new();
+        let execution = start(&store);
+        store.poll_decision("d", "tl", "worker").unwrap();
+        let original = consistent(&store, &execution);
+        let reset = store
+            .reset(&cadence_api::types::ResetWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(execution.clone()),
+                decision_finish_event_id: 3,
+                request_id: "reset".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        let reset_execution = WorkflowExecution::new("versioned", reset.run_id);
+        let forked = consistent(&store, &reset_execution);
+        let source = crate::history_branch::decode(&original.branch_token).unwrap();
+        let branch = crate::history_branch::decode(&forked.branch_token).unwrap();
+        assert_eq!(branch.tree_id, source.tree_id);
+        assert_ne!(branch.branch_id, source.branch_id);
+        assert_eq!(
+            branch.ancestors,
+            vec![cadence_api::types::HistoryBranchRange {
+                branch_id: source.branch_id,
+                begin_node_id: 1,
+                end_node_id: 4,
+            }]
+        );
+        let path =
+            std::env::temp_dir().join(format!("cadence-versions-{}.json", uuid::Uuid::new_v4()));
+        store.save_to_file(&path).unwrap();
+        let restored = InMemoryExecutionStore::load_from_file(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(consistent(&restored, &reset_execution), forked);
+    }
+
+    #[test]
+    fn version_state_legacy_zero_version_snapshots_keep_their_recorded_stream() {
+        let store = InMemoryExecutionStore::new();
+        let execution = start(&store);
+        let mut snapshot = serde_json::to_value(store.snapshot()).unwrap();
+        let record = snapshot["runs"][0][1].as_object_mut().unwrap();
+        record.remove("current_version");
+        record.remove("version_histories");
+        for event in record.get_mut("history").unwrap().as_array_mut().unwrap() {
+            event["version"] = serde_json::json!(0);
+        }
+        let snapshot = serde_json::from_value(snapshot).unwrap();
+        let restored = InMemoryExecutionStore::restore(snapshot);
+        assert_eq!(
+            consistent(&restored, &execution)
+                .last_item()
+                .unwrap()
+                .version,
+            0
+        );
+        restored
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(execution.clone()),
+                signal_name: "after-upgrade".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            consistent(&restored, &execution).items,
+            vec![crate::version_history::new_item(3, 0)]
         );
     }
 }

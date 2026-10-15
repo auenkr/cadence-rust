@@ -1198,3 +1198,36 @@
   Local Go history events use constants.EmptyVersion=-24; current Rust emits
   zero. Legacy Rust snapshot version-zero histories must be handled explicitly
   when integrating new version tracking. No full replication claim is justified.
+
+- Execution history version/branch metadata integrated (2026-10-15): every
+  committed event updates a compressed version range; buffered events wait
+  until assigned durable IDs; transient decision events update the range on
+  materialization. Starts, children, continue-as-new and reset now carry
+  current versions and branch tokens. Reset forks ancestor ranges. Snapshots
+  preserve metadata; old Rust zero-version histories are reconstructed without
+  rewriting their stream. Local new events/domain failover values use Go's
+  EmptyVersion=-24. Request domain metadata seeds new execution versions.
+- Added Go-format branch token codec (0x59 + binary Thrift), including typed
+  empty ancestor lists, and ancestor-fork logic. Differential oracle now calls
+  Go's real codec and SQL ForkHistoryBranch through its mock DB boundary.
+  Version-history fixture set expanded from 68 to 82 cases. Branch token JSON
+  is now base64, matching Go bytes. GetMutableState/PollMutableState return
+  the stored branch token and version histories instead of placeholders.
+- Added execution tests for local/provided-domain versions, buffered flushes,
+  transient tasks, reset ancestry, snapshot token stability and legacy zero
+  histories. External IDL-based client now checks local -24 versions and
+  mutable-state branch consistency. Latest full combined runner PASSED all
+  nine stages: 284 workspace tests, strict workspace/all-targets clippy, both
+  differential suites, standalone build/config, public/internal gRPC and Go
+  SDK TChannel. Artifacts: /tmp/cadence-version-state-compat/results.json.
+  Copied test server cleaned up; original development server not restarted.
+- ReplicateEventsV2 still does not apply events; no replication completion
+  claim. Global failover version calculation/gating, passive execution roles,
+  remote state rebuilding and distributed persistence remain unported.
+- Next concrete replication path: Admin raw-history V2 currently ignores
+  proto start/end version items, uses inclusive-inclusive event slicing
+  (Go is exclusive-exclusive), returns no version history, emits raw JSON
+  timestamps in internal milliseconds, and uses weak offset cursors. Port
+  Go admin handler's setRequestDefaultValueAndGetTargetVersionHistory and
+  token validation with differential fixtures, then return real compatible
+  history batches and selected version history before remote application.

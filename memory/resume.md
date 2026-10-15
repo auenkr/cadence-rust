@@ -24,14 +24,19 @@ pushed this session:
 - 9a490be26: exact Go UUID namespaces, buffered origins, system limits.
 - 693964d8e: cooperative cancellation and durable latest-target tracking.
 - 7c08f363b: monotonic fire accounting and full isolated compatibility runner.
-- Latest standalone bootstrap: Rust-owned embedded development defaults,
-  explicit Go config support, copied-binary verification outside the checkout.
+- 3a2431677: embedded development defaults and copied-binary verification.
+- 0cdb0bc60: Go history-version algorithms with 68 differential cases.
+- Latest execution version checkpoint: durable version ranges/branch tokens,
+  -24 local versions, reset ancestry, snapshot upgrades, mutable-state metadata;
+  Go differential suite expanded to 82 cases including codec/SQL fork behavior.
 
-The latest checkpoint adds monotonic fire-attempt accounting and the automated
-full compatibility runner. Missing actions/start failures count MissedRuns and
-consume attempts; LastRunTime includes skips/buffering and cannot regress when
-old buffered fires drain. A previous incorrect Rust assertion assumed LastRunTime
-meant last successful start; it was corrected using real Go behavior.
+The latest checkpoint integrates version histories into stored executions,
+including buffered flushes and transient tasks, child/continue-as-new/reset,
+and snapshot recovery. New local history versions are -24; legacy zero-version
+Rust snapshots retain their original stream. GetMutableState and PollMutableState
+now expose durable branch tokens/version histories. Branch tokens use Go's
+0x59 + binary Thrift codec, with byte-exact and SQL-fork differential checks.
+ReplicateEventsV2 still accepts without applying events; do not claim replication.
 
 Commands:
 
@@ -41,23 +46,27 @@ Commands:
   differential fixtures, server build, isolated server on free ports,
   public/internal gRPC checks and existing Go SDK over TChannel. It prints
   artifact paths, writes results.json, and stops its own server afterward.
-- Latest complete runner passed in tmux cadence-rust:standalone-final;
-  artifacts /tmp/cadence-standalone-compat/results.json, outer log
-  /tmp/cadence-standalone-compat-run.log, exit file
-  /tmp/cadence-standalone-compat.exit (0). Its isolated server was cleaned up.
+- Latest complete runner passed in tmux cadence-rust:version-verified-run;
+  artifacts /tmp/cadence-version-state-compat/results.json, outer log
+  /tmp/cadence-version-state-compat-run.log, exit file
+  /tmp/cadence-version-state-compat.exit (0). Its isolated server was cleaned up.
   It copied the executable to standalone/cadence-server and booted it from
   that fresh working directory, using embedded defaults and no Go checkout.
 
-Latest full checkpoint: 279 workspace tests + strict workspace/all-targets
+Latest full checkpoint: 284 workspace tests + strict workspace/all-targets
 clippy passed. The full runner passed scheduler differential fixtures and all
-three wire/SDK drivers against the latest binary. Coverage is 21 behavioral
-scheduler scenarios + 4 UUID cases + 7 limit cases.
+three wire/SDK drivers against the latest binary. Coverage includes 21 behavioral
+scheduler scenarios + 4 UUID cases + 7 limit cases, and 82 history-version/branch
+cases against real Go algorithms, codec and mocked SQL history-store operations.
 
 Standalone startup is now independent of go/config/development.yaml; explicit
---config still works. All eight full-runner stages pass. Next major work should
-move beyond the RPC surface toward production persistence/schema compatibility,
-version branches/replication, or configuration layering (Go base/env/AZ and
-CADENCE_* selection are not ported). Do not lose the remaining inventory gaps.
+--config still works. All nine full-runner stages pass. Next concrete task:
+fix Admin raw-history V2 before replication application. It currently ignores
+requested version items, uses inclusive endpoints (Go excludes both), omits
+version history, serializes timestamps in milliseconds, and has weak cursors.
+Port Go's target-branch/default-range and pagination-token algorithms with
+fixtures. Global failover calculation/gating and passive roles still need work.
+Production backends, independent services, and Go config layering remain open.
 
 ## Runtime
 

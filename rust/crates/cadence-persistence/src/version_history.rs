@@ -266,6 +266,18 @@ mod tests {
         remote: Vec<[i64; 2]>,
         #[serde(default, rename = "eventID")]
         event_id: i64,
+        #[serde(default, rename = "treeID")]
+        tree_id: String,
+        #[serde(default, rename = "branchID")]
+        branch_id: String,
+        #[serde(default, rename = "newBranchID")]
+        new_branch_id: String,
+        #[serde(default)]
+        ancestors: Vec<cadence_api::types::HistoryBranchRange>,
+        #[serde(default)]
+        token: String,
+        #[serde(default)]
+        fork_node: i64,
         expected: Value,
     }
     fn history(items: &[[i64; 2]]) -> VersionHistory {
@@ -293,6 +305,41 @@ mod tests {
             histories: c.histories.iter().map(|v| history(v)).collect(),
         };
         Ok(match c.op.as_str() {
+            "branch_encode" => {
+                let branch = cadence_api::types::HistoryBranch {
+                    tree_id: c.tree_id.clone(),
+                    branch_id: c.branch_id.clone(),
+                    ancestors: c.ancestors.clone(),
+                };
+                json!(crate::history_branch::encode(&branch)
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>())
+            }
+            "branch_decode" | "branch_fork" => {
+                let branch = if c.op == "branch_decode" {
+                    let token: Vec<u8> = c
+                        .token
+                        .as_bytes()
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|v| u8::from_str_radix(std::str::from_utf8(v).unwrap(), 16).unwrap())
+                        .collect();
+                    crate::history_branch::decode(&token)?
+                } else {
+                    crate::history_branch::fork(
+                        &cadence_api::types::HistoryBranch {
+                            tree_id: c.tree_id.clone(),
+                            branch_id: c.branch_id.clone(),
+                            ancestors: c.ancestors.clone(),
+                        },
+                        c.fork_node,
+                        &c.new_branch_id,
+                    )?
+                };
+                json!({"treeID": branch.tree_id, "branchID": branch.branch_id, "ancestors": branch.ancestors})
+            }
             "new_item" => pair(new_item(c.item[0], c.item[1])),
             "add" => {
                 all.histories[c.branch].add_or_update(&new_item(c.item[0], c.item[1]))?;

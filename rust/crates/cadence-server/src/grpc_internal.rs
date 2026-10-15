@@ -1047,6 +1047,10 @@ fn history_mutable_state_response(
         Some(CloseStatus::TimedOut) => (3, 6),
         _ => (3, 0),
     };
+    let current_branch_token = view.version_histories.as_ref().and_then(|histories| {
+        histories.histories.get(histories.current_version_history_index as usize)
+    }).map(|history| history.branch_token.clone()).unwrap_or_default();
+    let version_histories = view.version_histories.map(crate::grpc_convert::version_histories_out);
     h::GetMutableStateResponse {
         workflow_execution: Some(cadence_proto::api::WorkflowExecution {
             workflow_id: view.workflow_id,
@@ -1079,10 +1083,10 @@ fn history_mutable_state_response(
             nanos: 0,
         }),
         event_store_version: 0,
-        current_branch_token: vec![],
+        current_branch_token,
         workflow_state,
         workflow_close_state,
-        version_histories: None,
+        version_histories,
         is_sticky_task_list_enabled: false,
         history_size: view.history_size_bytes,
     }

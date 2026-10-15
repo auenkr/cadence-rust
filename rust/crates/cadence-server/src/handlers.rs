@@ -84,7 +84,13 @@ impl AppState {
         &self,
         domain: &str,
     ) -> Result<InMemoryExecutionStore, EntityNotExistsError> {
-        let id = self.domains.domain_id(domain)?;
+        let metadata = self.domains.describe(&DescribeDomainRequest {
+            name: Some(domain.to_string()), uuid: None,
+        })?;
+        let id = metadata.domain_info.unwrap_or_default().uuid;
+        let version = if metadata.is_global_domain { metadata.failover_version }
+            else { cadence_persistence::version_history::EMPTY_VERSION };
+        self.executions.set_domain_version(&id, version);
         Ok(self.executions.with_domain_id(&id))
     }
 }

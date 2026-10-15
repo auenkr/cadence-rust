@@ -776,6 +776,23 @@ pub fn schedule_entry_out(v: tk_schedule::ScheduleListEntry) -> p::ScheduleListE
     }
 }
 
+
+pub fn version_history_out(value: t::VersionHistory) -> cadence_proto::admin::VersionHistory {
+    cadence_proto::admin::VersionHistory {
+        branch_token: value.branch_token,
+        items: value.items.into_iter().map(|item| cadence_proto::admin::VersionHistoryItem {
+            event_id: item.event_id, version: item.version,
+        }).collect(),
+    }
+}
+
+pub fn version_histories_out(value: t::VersionHistories) -> cadence_proto::shared::VersionHistories {
+    cadence_proto::shared::VersionHistories {
+        current_version_history_index: value.current_version_history_index,
+        histories: value.histories.into_iter().map(version_history_out).collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

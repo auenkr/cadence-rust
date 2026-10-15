@@ -107,7 +107,7 @@ impl InMemoryDomainStore {
             info: info.clone(),
             configuration,
             replication,
-            failover_version: 0,
+            failover_version: if is_global_domain { 0 } else { crate::version_history::EMPTY_VERSION },
             is_global_domain,
             failover_audit: Vec::new(),
             isolation_groups: None,
@@ -676,7 +676,10 @@ impl InMemoryDomainStore {
         let store = Self::new();
         {
             let mut inner = store.inner.write().expect("domain store lock");
-            for record in snapshot {
+            for mut record in snapshot {
+                if !record.is_global_domain {
+                    record.failover_version = crate::version_history::EMPTY_VERSION;
+                }
                 inner
                     .by_id
                     .insert(record.info.uuid.clone(), record.info.name.clone());
@@ -741,7 +744,7 @@ mod tests {
                 uuid: Some("uuid-1".into()),
             })
             .unwrap();
-        assert_eq!(by_id.failover_version, 0);
+        assert_eq!(by_id.failover_version, crate::version_history::EMPTY_VERSION);
     }
 
     fn global_sample(domain: &str, uuid: &str) -> (

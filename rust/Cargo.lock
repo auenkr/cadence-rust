@@ -263,6 +263,7 @@ version = "0.1.0"
 dependencies = [
  "cadence-api",
  "cadence-common",
+ "cadence-thrift",
  "chrono",
  "rand",
  "serde",

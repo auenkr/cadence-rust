@@ -151,7 +151,7 @@ working directory. It separately verifies that an explicit Go YAML config still
 parses. The copied binary and server working directory are retained with logs.
 
 History version-branch primitives are compared with the pinned Go persistence
-implementation using 68 shared fixtures:
+implementation using 82 shared fixtures:
 
 ```sh
 python3 tests/run-version-history-compat.py
@@ -161,3 +161,10 @@ The fixtures cover inclusive version ranges, append validation, lowest common
 ancestors, branch selection/ties, rebuilt branches, and exact error/panic text.
 The full runner also executes this differential check. Branch utilities alone
 do not establish replication application or persistence-backend compatibility.
+
+The version-history differential suite also checks exact Go binary branch-token
+bytes and ancestor clipping through Go's real SQL history store with a mocked DB.
+Execution-state tests cover committed tips, buffered/transient events, reset
+ancestry, snapshots, and legacy zero-version histories. Internal gRPC checks
+validate local `EmptyVersion=-24`, branch tokens, and version histories in both
+mutable-state responses. Real replication application remains separate work.

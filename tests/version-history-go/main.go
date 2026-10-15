@@ -2,20 +2,52 @@
 package main
 
 import (
+	"context"
+	"database/sql/driver"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	workflow "github.com/uber/cadence/.gen/go/shared"
+	"github.com/uber/cadence/common/codec"
 	p "github.com/uber/cadence/common/persistence"
+	"github.com/uber/cadence/common/persistence/serialization"
+	psql "github.com/uber/cadence/common/persistence/sql"
+	"github.com/uber/cadence/common/persistence/sql/sqlplugin"
+	"github.com/uber/cadence/common/types"
+	"go.uber.org/mock/gomock"
 	"os"
 )
 
 type item = [2]int64
+type ancestor struct {
+	BranchID               string
+	BeginNodeID, EndNodeID int64
+}
+type reporter struct{}
+
+func (reporter) Errorf(f string, a ...any) { panic(fmt.Sprintf(f, a...)) }
+func (reporter) Fatalf(f string, a ...any) { panic(fmt.Sprintf(f, a...)) }
+func branchResult(tree, branch string, ancestors []ancestor) any {
+	if ancestors == nil {
+		ancestors = []ancestor{}
+	}
+	values := []map[string]any{}
+	for _, a := range ancestors {
+		values = append(values, map[string]any{"branchID": a.BranchID, "beginNodeID": a.BeginNodeID, "endNodeID": a.EndNodeID})
+	}
+	return map[string]any{"treeID": tree, "branchID": branch, "ancestors": values}
+}
+
 type testCase struct {
-	Name, Op               string
-	Histories              [][]item
-	Current, Branch, Index int
-	Item                   item
-	Remote                 []item
-	EventID                int64
+	TreeID, BranchID, Token, NewBranchID string
+	Ancestors                            []ancestor
+	ForkNode                             int64
+	Name, Op                             string
+	Histories                            [][]item
+	Current, Branch, Index               int
+	Item                                 item
+	Remote                               []item
+	EventID                              int64
 }
 
 func history(items []item) *p.VersionHistory {
@@ -51,6 +83,56 @@ func evaluate(c testCase) (result any) {
 	var err error
 	fail := func(e error) any { return map[string]any{"error": e.Error()} }
 	switch c.Op {
+	case "branch_encode":
+		branch := &workflow.HistoryBranch{TreeID: &c.TreeID, BranchID: &c.BranchID, Ancestors: []*workflow.HistoryBranchRange{}}
+		for _, a := range c.Ancestors {
+			a := a
+			branch.Ancestors = append(branch.Ancestors, &workflow.HistoryBranchRange{BranchID: &a.BranchID, BeginNodeID: &a.BeginNodeID, EndNodeID: &a.EndNodeID})
+		}
+		token, e := codec.NewThriftRWEncoder().Encode(branch)
+		if e != nil {
+			return fail(e)
+		}
+		return hex.EncodeToString(token)
+	case "branch_decode":
+		token, e := hex.DecodeString(c.Token)
+		if e != nil {
+			return fail(e)
+		}
+		var branch workflow.HistoryBranch
+		if e = codec.NewThriftRWEncoder().Decode(token, &branch); e != nil {
+			return fail(e)
+		}
+		ancestors := []ancestor{}
+		for _, a := range branch.Ancestors {
+			ancestors = append(ancestors, ancestor{a.GetBranchID(), a.GetBeginNodeID(), a.GetEndNodeID()})
+		}
+		return branchResult(branch.GetTreeID(), branch.GetBranchID(), ancestors)
+	case "branch_fork":
+		ctrl := gomock.NewController(reporter{})
+		defer ctrl.Finish()
+		db := sqlplugin.NewMockDB(ctrl)
+		parser := serialization.NewMockParser(ctrl)
+		parser.EXPECT().HistoryTreeInfoToBlob(gomock.Any()).Return(p.DataBlob{}, nil)
+		db.EXPECT().InsertIntoHistoryTree(gomock.Any(), gomock.Any()).Return(driver.RowsAffected(1), nil)
+		store, e := psql.NewHistoryV2Persistence(db, nil, parser, nil)
+		if e != nil {
+			return fail(e)
+		}
+		source := types.HistoryBranch{TreeID: c.TreeID, BranchID: c.BranchID}
+		for _, a := range c.Ancestors {
+			source.Ancestors = append(source.Ancestors, &types.HistoryBranchRange{BranchID: a.BranchID, BeginNodeID: a.BeginNodeID, EndNodeID: a.EndNodeID})
+		}
+		response, e := store.ForkHistoryBranch(context.Background(), &p.InternalForkHistoryBranchRequest{ForkBranchInfo: source, ForkNodeID: c.ForkNode, NewBranchID: c.NewBranchID})
+		if e != nil {
+			return fail(e)
+		}
+		ancestors := []ancestor{}
+		for _, a := range response.NewBranchInfo.Ancestors {
+			ancestors = append(ancestors, ancestor{a.BranchID, a.BeginNodeID, a.EndNodeID})
+		}
+		return branchResult(response.NewBranchInfo.TreeID, response.NewBranchInfo.BranchID, ancestors)
+
 	case "new_item":
 		return pair(p.NewVersionHistoryItem(c.Item[0], c.Item[1]))
 	case "add":

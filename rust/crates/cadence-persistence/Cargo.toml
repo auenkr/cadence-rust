@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+cadence-thrift = { path = "../cadence-thrift" }
 cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
 serde = { version = "1", features = ["derive"] }

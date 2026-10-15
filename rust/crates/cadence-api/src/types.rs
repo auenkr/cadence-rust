@@ -571,7 +571,8 @@ pub struct VersionHistoryItem {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionHistory {
-    #[serde(rename = "branchToken", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "branchToken", default, skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes", deserialize_with = "crate::b64::deserialize_bytes")]
     pub branch_token: Vec<u8>,
     #[serde(rename = "items", default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<VersionHistoryItem>,
