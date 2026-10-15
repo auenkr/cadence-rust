@@ -715,7 +715,11 @@ impl a::admin_api_server::AdminApi for Admin {
                 .history_batches
                 .into_iter()
                 .map(|b| cadence_proto::api::DataBlob {
-                    encoding_type: 2,
+                    encoding_type: match b.encoding_type {
+                        Some(cadence_api::enums::EncodingType::ThriftRW) => 1,
+                        Some(cadence_api::enums::EncodingType::JSON) => 2,
+                        _ => 0,
+                    },
                     data: b.data,
                 })
                 .collect(),

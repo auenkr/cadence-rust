@@ -1258,3 +1258,25 @@ engine. Added `InMemoryExecutionStore::set_start_execution_metadata` to record
 parent link, attempt, expiration, and first-decision backoff supplied by
 history's internal start workflow execution. Strict clippy and full workspace tests
 pass (284 tests); committed two checkpoints and pushed.
+
+## 2026-10-15: Go-compatible raw-history blobs and cursor normalization
+
+- Replaced raw-history V2's internal-millisecond JSON arrays with Go persistence
+  version-0 ThriftRW History blobs (0x59 preamble, typed event list, nanosecond
+  wire timestamps); gRPC reports the actual encoding rather than hardcoded JSON.
+- Matched Go's emitted empty signal strings/request ID. Added Go-produced byte
+  fixtures for signal and empty batches, corruption/trailing-data checks, and
+  a differential runner regenerating original Go serializer output in temp files.
+- Corrected pagination ordering: normalize omitted bounds against the cursor's
+  version-history snapshot before comparing request and token. Original-IDL
+  gRPC tests verify page-two continuation and changed-bound rejection, and pass
+  the actual network blob through the original Go persistence decoder.
+- Full ten-stage compatibility runner PASSED, with strict workspace clippy,
+  scheduler/version-history/history-blob differential checks, standalone build,
+  original-IDL public/internal gRPC and existing Go SDK TChannel. Evidence:
+  /tmp/cadence-history-blob-compat-v2/results.json; exit file 0. Test server cleaned
+  up. User development server remains unchanged and has not been restarted.
+- Corrected inventory wording so zero RPC adapter gaps cannot imply full behavior.
+  ReplicateEventsV2 remains a no-op; production branch storage, original append
+  batches, lossless remote timestamp precision and passive state reconstruction
+  remain open. Details and source anchors: memory/replication-next.md.

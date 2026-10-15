@@ -14,7 +14,7 @@ Adapters present: 8 / 8.
 
 Present: RegisterDomain, DescribeDomain, ListDomains, UpdateDomain, FailoverDomain, DeprecateDomain, DeleteDomain, ListFailoverHistory.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## MetaAPI
 
@@ -22,7 +22,7 @@ Adapters present: 1 / 1.
 
 Present: Health.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## ScheduleAPI
 
@@ -30,7 +30,7 @@ Adapters present: 8 / 8.
 
 Present: CreateSchedule, DescribeSchedule, ListSchedules, DeleteSchedule, PauseSchedule, UnpauseSchedule, BackfillSchedule, UpdateSchedule.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## SemaphoreAPI
 
@@ -38,7 +38,7 @@ Adapters present: 1 / 1.
 
 Present: CreateSemaphore.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## VisibilityAPI
 
@@ -46,7 +46,7 @@ Adapters present: 7 / 7.
 
 Present: ListWorkflowExecutions, ListOpenWorkflowExecutions, ListClosedWorkflowExecutions, ListArchivedWorkflowExecutions, ScanWorkflowExecutions, CountWorkflowExecutions, GetSearchAttributes.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## WorkerAPI
 
@@ -54,7 +54,7 @@ Adapters present: 14 / 14.
 
 Present: PollForDecisionTask, RespondDecisionTaskCompleted, RespondDecisionTaskFailed, PollForActivityTask, RespondActivityTaskCompleted, RespondActivityTaskCompletedByID, RespondActivityTaskFailed, RespondActivityTaskFailedByID, RespondActivityTaskCanceled, RespondActivityTaskCanceledByID, RecordActivityTaskHeartbeat, RecordActivityTaskHeartbeatByID, RespondQueryTaskCompleted, ResetStickyTaskList.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## WorkflowAPI
 
@@ -62,7 +62,7 @@ Adapters present: 18 / 18.
 
 Present: RestartWorkflowExecution, StartWorkflowExecution, StartWorkflowExecutionAsync, SignalWorkflowExecution, SignalWithStartWorkflowExecution, SignalWithStartWorkflowExecutionAsync, ResetWorkflowExecution, RequestCancelWorkflowExecution, TerminateWorkflowExecution, DescribeWorkflowExecution, QueryWorkflow, DescribeTaskList, GetTaskListsByDomain, ListTaskListPartitions, GetClusterInfo, GetWorkflowExecutionHistory, RefreshWorkflowTasks, DiagnoseWorkflowExecution.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## AdminAPI (internal/administrative)
 
@@ -72,7 +72,7 @@ Definitions: go/idls/proto/uber/cadence/admin/v1/service.proto.
 
 Present: DescribeWorkflowExecution, DescribeHistoryHost, DescribeShardDistribution, CloseShard, RemoveTask, ResetQueue, DescribeQueue, GetWorkflowExecutionRawHistoryV2, GetReplicationMessages, GetDLQReplicationMessages, GetDomainReplicationMessages, ReapplyEvents, AddSearchAttribute, DescribeCluster, CountDLQMessages, ReadDLQMessages, PurgeDLQMessages, MergeDLQMessages, RefreshWorkflowTasks, ResendReplicationTasks, GetCrossClusterTasks, RespondCrossClusterTasksCompleted, GetDynamicConfig, UpdateDynamicConfig, RestoreDynamicConfig, ListDynamicConfig, GetOperationalDynamicConfig, UpdateOperationalDynamicConfig, RestoreOperationalDynamicConfig, ListOperationalDynamicConfig, DeleteWorkflow, MaintainCorruptWorkflow, GetGlobalIsolationGroups, UpdateGlobalIsolationGroups, GetDomainIsolationGroups, UpdateDomainIsolationGroups, GetDomainAsyncWorkflowConfiguraton, UpdateDomainAsyncWorkflowConfiguraton, UpdateTaskListPartitionConfig.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## HistoryAPI (internal/administrative)
 
@@ -82,7 +82,7 @@ Definitions: go/proto/internal/uber/cadence/history/v1/service.proto.
 
 Present: StartWorkflowExecution, SignalWorkflowExecution, SignalWithStartWorkflowExecution, ResetWorkflowExecution, TerminateWorkflowExecution, DescribeWorkflowExecution, QueryWorkflow, ResetStickyTaskList, GetMutableState, PollMutableState, RecordDecisionTaskStarted, RespondDecisionTaskCompleted, RespondDecisionTaskFailed, RecordActivityTaskStarted, RespondActivityTaskCompleted, RespondActivityTaskFailed, RespondActivityTaskCanceled, RecordActivityTaskHeartbeat, RequestCancelWorkflowExecution, RemoveSignalMutableState, ScheduleDecisionTask, RecordChildExecutionCompleted, ReplicateEventsV2, SyncShardStatus, SyncActivity, DescribeMutableState, DescribeHistoryHost, CloseShard, RemoveTask, ResetQueue, DescribeQueue, GetReplicationMessages, GetDLQReplicationMessages, ReapplyEvents, RefreshWorkflowTasks, CountDLQMessages, ReadDLQMessages, PurgeDLQMessages, MergeDLQMessages, NotifyFailoverMarkers, GetCrossClusterTasks, RespondCrossClusterTasksCompleted, GetFailoverInfo, RatelimitUpdate.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## MatchingAPI (internal/administrative)
 
@@ -92,7 +92,7 @@ Definitions: go/proto/internal/uber/cadence/matching/v1/service.proto.
 
 Present: PollForDecisionTask, PollForActivityTask, AddDecisionTask, AddActivityTask, QueryWorkflow, RespondQueryTaskCompleted, CancelOutstandingPoll, DescribeTaskList, ListTaskListPartitions, GetTaskListsByDomain, UpdateTaskListPartitionConfig, RefreshTaskListPartitionConfig, AcquireSemaphore.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## ShardDistributorExecutorCanaryAPI (internal/administrative)
 
@@ -102,7 +102,7 @@ Definitions: rust/proto/shard-manager/uber/cadence/sharddistributor/v1/canary.pr
 
 Present: Ping.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## ShardDistributorExecutorAPI (internal/administrative)
 
@@ -112,7 +112,7 @@ Definitions: rust/proto/shard-manager/uber/cadence/sharddistributor/v1/executor.
 
 Present: Heartbeat.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## ShardDistributorAPI (internal/administrative)
 
@@ -122,7 +122,7 @@ Definitions: rust/proto/shard-manager/uber/cadence/sharddistributor/v1/service.p
 
 Present: GetShardOwner, InspectShard, GetNamespaceState, WatchNamespaceState, ListNamespaces, DrainShards, UndrainShards, GetDrainedShards, ForceResetNamespace.
 
-Unported: none.
+RPC adapter gaps: none. Behavioral parity is incomplete; see the required work below.
 
 ## Other required work
 

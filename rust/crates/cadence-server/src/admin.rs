@@ -737,6 +737,7 @@ pub async fn get_workflow_execution_raw_history(
 
     let mut req = req;
     let mut persistence_token = Vec::new();
+    let mut continuation = None;
     let histories: cadence_api::types::VersionHistories = if req.next_page_token.is_empty() {
         match executions.mutable_state_view(&req.domain, &execution) {
             Ok(view) => match view.version_histories {
@@ -750,11 +751,10 @@ pub async fn get_workflow_execution_raw_history(
     } else {
         match RawHistoryToken::from_bytes(&req.next_page_token) {
             Ok(token) => {
-                if let Err(e) = token.validate(&req) {
-                    return bad_request(e);
-                }
                 persistence_token = token.persistence_token.clone().unwrap_or_default();
-                token.version_histories.clone().unwrap_or_default()
+                let histories = token.version_histories.clone().unwrap_or_default();
+                continuation = Some(token);
+                histories
             }
             Err(e) => return bad_request(e),
         }
@@ -767,6 +767,14 @@ pub async fn get_workflow_execution_raw_history(
         Ok(h) => h.clone(),
         Err(e) => return bad_request(e),
     };
+    // Go fills omitted bounds from the cursor's history snapshot before it
+    // compares request and cursor. Clients repeat their original unbounded
+    // request on subsequent pages.
+    if let Some(token) = continuation {
+        if let Err(e) = token.validate(&req) {
+            return bad_request(e);
+        }
+    }
 
     // Exclusive-exclusive empty range check.
     if req.start_event_id.unwrap_or(0) + 1 == req.end_event_id.unwrap_or(0) {
@@ -786,7 +794,7 @@ pub async fn get_workflow_execution_raw_history(
         &persistence_token,
     ) {
         Ok((events, new_persistence_token)) => {
-            let batch = serde_json::to_vec(&events).unwrap_or_default();
+            let batch = cadence_thrift::history_blob::encode(events);
             let next_page_token = if new_persistence_token.is_empty() {
                 Vec::new()
             } else {
@@ -809,10 +817,7 @@ pub async fn get_workflow_execution_raw_history(
             };
             ok_json(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
                 next_page_token,
-                history_batches: vec![cadence_api::types::DataBlob {
-                    encoding_type: None,
-                    data: batch,
-                }],
+                history_batches: vec![batch],
                 version_history: Some(target_history),
             })
         }

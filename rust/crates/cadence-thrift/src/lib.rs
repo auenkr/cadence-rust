@@ -6,6 +6,7 @@
 //! field builders), and `convert.rs` (struct converters).
 
 pub mod convert;
+pub mod history_blob;
 pub mod protocol;
 pub mod service;
 pub mod value;

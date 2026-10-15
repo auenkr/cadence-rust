@@ -1,6 +1,7 @@
 // Independent clients load the original Go service IDLs, not Rust generated code.
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { createRequire } = require('node:module');
 const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
@@ -283,6 +284,21 @@ async function run() {
   await adminCall('RefreshWorkflowTasks', { domain, workflowExecution: adminExec });
   const raw = await adminCall('GetWorkflowExecutionRawHistoryV2', { domain, workflowExecution: adminExec, pageSize: 10 });
   assert.equal(raw.historyBatches.length, 1);
+  assert.equal(raw.historyBatches[0].encodingType, 'ENCODING_TYPE_THRIFTRW');
+  // Decode the actual network blob with Go's original persistence serializer.
+  const rawEvents = JSON.parse(execFileSync('go', ['run', '../tests/history-blob-go/main.go', 'decode'], {
+    cwd: path.resolve(__dirname, '../go'), input: raw.historyBatches[0].data, timeout: 120000,
+  }).toString());
+  assert.equal(rawEvents[0].eventId, 1);
+  assert.equal(rawEvents[0].version, -24);
+  assert(BigInt(rawEvents[0].timestamp) > 1000000000000000000n);
+  assert.equal(rawEvents[0].workflowExecutionStartedEventAttributes.workflowType.name, start.request.workflowType.name);
+  const firstRawPage = await adminCall('GetWorkflowExecutionRawHistoryV2', { domain, workflowExecution: adminExec, pageSize: 1 });
+  assert(firstRawPage.nextPageToken.length > 0);
+  const secondRawPage = await adminCall('GetWorkflowExecutionRawHistoryV2', { domain, workflowExecution: adminExec, pageSize: 1, nextPageToken: firstRawPage.nextPageToken });
+  assert.equal(secondRawPage.historyBatches.length, 1);
+  await assert.rejects(adminCall('GetWorkflowExecutionRawHistoryV2', { domain, workflowExecution: adminExec, pageSize: 1,
+    startEvent: { eventId: '1', version: '-24' }, nextPageToken: firstRawPage.nextPageToken }), error => error.code === grpc.status.INVALID_ARGUMENT);
   const adminDesc = await adminCall('DescribeWorkflowExecution', { domain, workflowExecution: adminExec });
   assert(adminDesc.mutableStateInDatabase.length > 0);
   const maintained = await adminCall('MaintainCorruptWorkflow', { domain, workflowExecution: adminExec });

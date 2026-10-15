@@ -168,3 +168,17 @@ Execution-state tests cover committed tips, buffered/transient events, reset
 ancestry, snapshots, and legacy zero-version histories. Internal gRPC checks
 validate local `EmptyVersion=-24`, branch tokens, and version histories in both
 mutable-state responses. Real replication application remains separate work.
+
+Raw-history persistence blobs are checked against the original Go serializer:
+
+```sh
+python3 tests/run-history-blob-compat.py
+```
+
+This regenerates fixtures in a temporary directory and checks byte equality for
+signal-event and empty batches, including the version preamble, nanosecond
+timestamp, negative event version and opaque payload. The internal gRPC driver
+also passes an actual Rust raw-history response to Go's persistence decoder and
+checks pagination with omitted bounds and changed-bound rejection. These checks
+are included in the full compatibility runner. Raw-history export does not imply
+remote event application or distributed replication is implemented.

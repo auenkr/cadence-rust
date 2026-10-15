@@ -4055,10 +4055,13 @@ impl FromThrift for WorkflowExecutionSignaledEventAttributes {
 impl ToThrift for WorkflowExecutionSignaledEventAttributes {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.sstr(10, &self.signal_name);
+        f.fields
+            .push((10, Value::Bytes(self.signal_name.as_bytes().to_vec())));
         f.sbytes(20, &self.input);
-        f.sstr(30, &self.identity);
-        f.sstr(40, &self.request_id);
+        f.fields
+            .push((30, Value::Bytes(self.identity.as_bytes().to_vec())));
+        f.fields
+            .push((40, Value::Bytes(self.request_id.as_bytes().to_vec())));
         f.finish()
     }
 }

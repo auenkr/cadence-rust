@@ -59,14 +59,25 @@ three wire/SDK drivers against the latest binary. Coverage includes 21 behaviora
 scheduler scenarios + 4 UUID cases + 7 limit cases, and 82 history-version/branch
 cases against real Go algorithms, codec and mocked SQL history-store operations.
 
-Standalone startup is now independent of go/config/development.yaml; explicit
---config still works. All nine full-runner stages pass. Next concrete task:
-fix Admin raw-history V2 before replication application. It currently ignores
-requested version items, uses inclusive endpoints (Go excludes both), omits
-version history, serializes timestamps in milliseconds, and has weak cursors.
-Port Go's target-branch/default-range and pagination-token algorithms with
-fixtures. Global failover calculation/gating and passive roles still need work.
-Production backends, independent services, and Go config layering remain open.
+Standalone startup is independent of go/config/development.yaml; explicit
+--config still works. Earlier raw-history V2 work added requested version-item
+selection, exclusive bounds and structured cursors. Latest work replaces raw
+JSON batches with Go version-0 ThriftRW history batches, sets the actual gRPC
+encoding, and normalizes omitted bounds before validating pagination cursors.
+A new Go serializer oracle provides byte fixtures and decodes actual network
+responses. Full validation PASSED in tmux cadence-rust:blob-full-check: all ten stages,
+including workspace tests, strict clippy, three Go differential suites, copied
+standalone binary/config, public/internal gRPC and Go SDK TChannel. Evidence:
+/tmp/cadence-history-blob-compat-v2/results.json and outer exit file (0).
+The internal client decoded the network blob with Go persistence and checked
+omitted-bound continuation plus changed-bound rejection. See replication-next.md
+for remaining raw-history storage/precision and remote-application limitations.
+
+ReplicateEventsV2 remains a validated no-op. Internal guard removal in prior
+commits only routes metadata to the local engine; forwarded requests and
+external-child/failover semantics are not established. Next major work is real
+passive history/state application with branch conflict handling and failover
+version gating, plus production backends and independent service lifecycles.
 
 ## Runtime
 

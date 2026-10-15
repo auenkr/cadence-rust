@@ -19,6 +19,42 @@ fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(dir.join(name)).unwrap_or_else(|_| panic!("missing fixture {name}"))
 }
 
+#[test]
+fn persistence_history_blob_matches_go() {
+    use cadence_api::service_types::{HistoryEvent, WorkflowExecutionSignaledEventAttributes};
+    use cadence_thrift::history_blob::{decode, encode};
+    let events = vec![HistoryEvent {
+        event_id: 7,
+        timestamp: Some(1_700_000_000_123),
+        event_type: Some(EventType::WorkflowExecutionSignaled),
+        version: -24,
+        task_id: 19,
+        workflow_execution_signaled_event_attributes: Some(
+            WorkflowExecutionSignaledEventAttributes {
+                signal_name: "wake".into(),
+                input: vec![0, 255, 42],
+                identity: "oracle".into(),
+                ..Default::default()
+            },
+        ),
+        ..Default::default()
+    }];
+    for (name, events) in [
+        ("history_blob.bin", events),
+        ("history_blob_empty.bin", vec![]),
+    ] {
+        let blob = encode(events.clone());
+        assert_eq!(blob.data, fixture(name));
+        assert_eq!(decode(&blob).unwrap(), events);
+        let mut corrupt = blob.clone();
+        corrupt.data[0] = 0;
+        assert!(decode(&corrupt).is_err());
+        let mut trailing = blob;
+        trailing.data.push(0);
+        assert!(decode(&trailing).is_err());
+    }
+}
+
 /// Decode `(envelope, args-struct)` from a CALL/REPLY fixture.
 fn decode_envelope(bytes: &[u8]) -> (String, MessageType, i32, Struct) {
     let mut r = Reader::new(bytes);
