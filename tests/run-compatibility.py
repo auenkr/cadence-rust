@@ -5,6 +5,7 @@ All server/client processes are local. No Go Cadence server is started.
 Run long checks in tmux session cadence-rust, per the repository instructions.
 """
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 
 def main():
@@ -54,6 +56,7 @@ def main():
         run("workspace-tests", ["cargo", "test", "--manifest-path", manifest, "--workspace"])
         run("workspace-clippy", ["cargo", "clippy", "--manifest-path", manifest,
                                  "--workspace", "--all-targets", "--", "-D", "warnings"])
+    run("matching-differential", [sys.executable, str(root / "tests/run-matching-compat.py")])
     run("scheduler-differential", [sys.executable, str(root / "tests/run-scheduler-compat.py")])
     run("version-history-differential", [sys.executable, str(root / "tests/run-version-history-compat.py")])
     run("history-blob-differential", [sys.executable, str(root / "tests/run-history-blob-compat.py")])
@@ -76,6 +79,7 @@ def main():
     server_workdir.mkdir(exist_ok=True)
     binary = server_workdir / "cadence-server"
     shutil.copy2(root / "rust/target/debug/cadence-server", binary)
+    run("service-listeners", [sys.executable, str(root / "tests/check-service-listeners.py"), str(binary)], cwd=server_workdir)
     run("go-config-compat", [str(binary), "check-config", "--config",
                              str(root / "go/config/development.yaml")], cwd=server_workdir)
     run("cluster-config-cli", [sys.executable, str(root / "tests/check-cluster-config-cli.py"), str(binary)], cwd=server_workdir)
@@ -129,6 +133,17 @@ def main():
                     if time.monotonic() >= deadline:
                         raise RuntimeError(f"server not ready; see {artifacts / 'server.log'}")
                     time.sleep(0.1)
+            # These drivers intentionally exercise rapid successive failovers.
+            # Keep Go's one-minute production default; override only this server.
+            override = {"configName": "frontend.failoverCoolDown", "configValues": [
+                {"value": {"EncodingType": 1, "Data": base64.b64encode(b'"0s"').decode()}}]}
+            with urllib.request.urlopen(urllib.request.Request(
+                    f"http://127.0.0.1:{http}/api/v1/admin/dynamic-config/update",
+                    data=json.dumps(override).encode(), headers={"Content-Type": "application/json"}), timeout=5) as response:
+                assert response.status == 200
+            (artifacts / "test-policy-overrides.json").write_text(json.dumps(override, indent=2) + "\n")
+            run("service-workflow-probe", ["node", "tests/service-workflow-compat.cjs",
+                f"127.0.0.1:{frontend}", f"127.0.0.1:{matching}"], timeout=120)
             run("public-grpc", ["node", "tests/grpc-compat.cjs", f"127.0.0.1:{frontend}"], timeout=300)
             run("internal-grpc", ["node", "tests/internal-grpc-compat.cjs"], env={
                 **env, "CADENCE_GRPC_PEER": f"127.0.0.1:{frontend}",

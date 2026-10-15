@@ -773,6 +773,11 @@ async fn list_workflows(
 // Router
 // ---------------------------------------------------------------------------
 
+/// HTTP liveness endpoint for roles that do not host public frontend APIs.
+pub fn health_router() -> Router {
+    Router::new().route("/health", get(health))
+}
+
 pub fn router(state: AppState) -> Router {
     let shared = Arc::new(state);
     Router::new()

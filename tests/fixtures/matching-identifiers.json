@@ -1,0 +1,520 @@
+[
+  {
+    "name": "",
+    "root": "",
+    "partition": 0,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "",
+      "2": "",
+      "20": "",
+      "3": "",
+      "9223372036854775807": ""
+    }
+  },
+  {
+    "name": "0",
+    "root": "0",
+    "partition": 0,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "",
+      "2": "",
+      "20": "",
+      "3": "",
+      "9223372036854775807": ""
+    }
+  },
+  {
+    "name": "list0",
+    "root": "list0",
+    "partition": 0,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "",
+      "2": "",
+      "20": "",
+      "3": "",
+      "9223372036854775807": ""
+    }
+  },
+  {
+    "name": "/list0",
+    "root": "/list0",
+    "partition": 0,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "",
+      "2": "",
+      "20": "",
+      "3": "",
+      "9223372036854775807": ""
+    }
+  },
+  {
+    "name": "/list0/",
+    "root": "/list0/",
+    "partition": 0,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "",
+      "2": "",
+      "20": "",
+      "3": "",
+      "9223372036854775807": ""
+    }
+  },
+  {
+    "name": "__cadence_sys/list0",
+    "root": "__cadence_sys/list0",
+    "partition": 0,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "",
+      "2": "",
+      "20": "",
+      "3": "",
+      "9223372036854775807": ""
+    }
+  },
+  {
+    "name": "/__cadence_sys_list0",
+    "root": "/__cadence_sys_list0",
+    "partition": 0,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "",
+      "2": "",
+      "20": "",
+      "3": "",
+      "9223372036854775807": ""
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/1",
+    "root": "list0",
+    "partition": 1,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "list0",
+      "2": "list0",
+      "20": "list0",
+      "3": "list0",
+      "9223372036854775807": "list0"
+    }
+  },
+  {
+    "name": "/__cadence_sys//list0//41",
+    "root": "/list0/",
+    "partition": 41,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys//list0//40",
+      "2": "/__cadence_sys//list0//20",
+      "20": "/__cadence_sys//list0//2",
+      "3": "/__cadence_sys//list0//13",
+      "9223372036854775807": "/__cadence_sys//list0//-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys//__cadence_sys/sys/0/41",
+    "root": "/__cadence_sys/sys/0",
+    "partition": 41,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys//__cadence_sys/sys/0/40",
+      "2": "/__cadence_sys//__cadence_sys/sys/0/20",
+      "20": "/__cadence_sys//__cadence_sys/sys/0/2",
+      "3": "/__cadence_sys//__cadence_sys/sys/0/13",
+      "9223372036854775807": "/__cadence_sys//__cadence_sys/sys/0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys/",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys/0",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys/0",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys//1",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys//1",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys//0",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys//0",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys/list0",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys/list0",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys/list0/0",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys/list0/0",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys/list0/-1",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys/list0/-1",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys/list0/+1",
+    "root": "list0",
+    "partition": 1,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "list0",
+      "2": "list0",
+      "20": "list0",
+      "3": "list0",
+      "9223372036854775807": "list0"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/0002",
+    "root": "list0",
+    "partition": 2,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/1",
+      "2": "list0",
+      "20": "list0",
+      "3": "list0",
+      "9223372036854775807": "/__cadence_sys/list0/-2"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/ 1",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys/list0/ 1",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys/list0/\u0661",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys/list0/\u0661",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys/list0/9223372036854775807",
+    "root": "list0",
+    "partition": 9223372036854775807,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/9223372036854775806",
+      "2": "/__cadence_sys/list0/-4611686018427387905",
+      "20": "/__cadence_sys/list0/-461168601842738790",
+      "3": "/__cadence_sys/list0/-3074457345618258603",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/9223372036854775808",
+    "root": "",
+    "partition": 0,
+    "error": "invalid partitioned task list name /__cadence_sys/list0/9223372036854775808",
+    "parents": null
+  },
+  {
+    "name": "/__cadence_sys/list0/2",
+    "root": "list0",
+    "partition": 2,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/1",
+      "2": "list0",
+      "20": "list0",
+      "3": "list0",
+      "9223372036854775807": "/__cadence_sys/list0/-2"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/3",
+    "root": "list0",
+    "partition": 3,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/2",
+      "2": "/__cadence_sys/list0/1",
+      "20": "list0",
+      "3": "list0",
+      "9223372036854775807": "/__cadence_sys/list0/-2"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/4",
+    "root": "list0",
+    "partition": 4,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/3",
+      "2": "/__cadence_sys/list0/1",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/1",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/5",
+    "root": "list0",
+    "partition": 5,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/4",
+      "2": "/__cadence_sys/list0/2",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/1",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/6",
+    "root": "list0",
+    "partition": 6,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/5",
+      "2": "/__cadence_sys/list0/2",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/1",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/7",
+    "root": "list0",
+    "partition": 7,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/6",
+      "2": "/__cadence_sys/list0/3",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/2",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/8",
+    "root": "list0",
+    "partition": 8,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/7",
+      "2": "/__cadence_sys/list0/3",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/2",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/9",
+    "root": "list0",
+    "partition": 9,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/8",
+      "2": "/__cadence_sys/list0/4",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/2",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/10",
+    "root": "list0",
+    "partition": 10,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/9",
+      "2": "/__cadence_sys/list0/4",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/3",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/11",
+    "root": "list0",
+    "partition": 11,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/10",
+      "2": "/__cadence_sys/list0/5",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/3",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/12",
+    "root": "list0",
+    "partition": 12,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/11",
+      "2": "/__cadence_sys/list0/5",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/3",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/13",
+    "root": "list0",
+    "partition": 13,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/12",
+      "2": "/__cadence_sys/list0/6",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/4",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/14",
+    "root": "list0",
+    "partition": 14,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/13",
+      "2": "/__cadence_sys/list0/6",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/4",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/15",
+    "root": "list0",
+    "partition": 15,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/14",
+      "2": "/__cadence_sys/list0/7",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/4",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/16",
+    "root": "list0",
+    "partition": 16,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/15",
+      "2": "/__cadence_sys/list0/7",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/5",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/17",
+    "root": "list0",
+    "partition": 17,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/16",
+      "2": "/__cadence_sys/list0/8",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/5",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/18",
+    "root": "list0",
+    "partition": 18,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/17",
+      "2": "/__cadence_sys/list0/8",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/5",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/19",
+    "root": "list0",
+    "partition": 19,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/18",
+      "2": "/__cadence_sys/list0/9",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/6",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  },
+  {
+    "name": "/__cadence_sys/list0/20",
+    "root": "list0",
+    "partition": 20,
+    "error": "",
+    "parents": {
+      "0": "",
+      "1": "/__cadence_sys/list0/19",
+      "2": "/__cadence_sys/list0/9",
+      "20": "list0",
+      "3": "/__cadence_sys/list0/6",
+      "9223372036854775807": "/__cadence_sys/list0/-1"
+    }
+  }
+]

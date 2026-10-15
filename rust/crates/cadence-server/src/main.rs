@@ -219,7 +219,12 @@ async fn main() -> anyhow::Result<()> {
             let history_state = state.clone();
             let matching_state = state.clone();
             let tchannel_state = state.clone();
-            let app = handlers::router(state);
+            let run_frontend = wanted.contains(&service::ServiceName::Frontend);
+            let app = if run_frontend {
+                handlers::router(state)
+            } else {
+                handlers::health_router()
+            };
             let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
             println!(
                 "cadence-server running on {addr}: {}",
@@ -243,8 +248,10 @@ async fn main() -> anyhow::Result<()> {
                 .or_else(|| frontend_rpc.map(|r| r.port).filter(|p| *p > 0))
                 .unwrap_or(7933);
             let tchannel_addr = std::net::SocketAddr::from((grpc_bind, tchannel_port));
-            println!("Cadence gRPC frontend listening on {grpc_addr}");
-            println!("Cadence TChannel frontend listening on {tchannel_addr}");
+            if run_frontend {
+                println!("Cadence gRPC frontend listening on {grpc_addr}");
+                println!("Cadence TChannel frontend listening on {tchannel_addr}");
+            }
             let history_rpc = cfg.services.get("history").map(|s| &s.rpc);
             let history_addr = std::net::SocketAddr::from((
                 if history_rpc.is_some_and(|r| r.bind_on_local_host) {
@@ -281,8 +288,20 @@ async fn main() -> anyhow::Result<()> {
                         .await
                         .map_err(anyhow::Error::from)
                 },
-                cadence_server::grpc::serve(grpc_addr, grpc_state),
-                cadence_server::tchannel::serve(tchannel_addr, tchannel_state),
+                async {
+                    if run_frontend {
+                        cadence_server::grpc::serve(grpc_addr, grpc_state).await
+                    } else {
+                        std::future::pending::<anyhow::Result<()>>().await
+                    }
+                },
+                async {
+                    if run_frontend {
+                        cadence_server::tchannel::serve(tchannel_addr, tchannel_state).await
+                    } else {
+                        std::future::pending::<anyhow::Result<()>>().await
+                    }
+                },
                 async {
                     if run_history {
                         cadence_server::grpc_internal::serve(history_addr, history_state).await

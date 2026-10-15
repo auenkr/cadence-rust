@@ -6,6 +6,42 @@ tests. The active goal is incomplete. Do not equate RPC adapter coverage with
 behavioral compatibility. Keep working autonomously; use tmux cadence-rust for
 long processes. Save progress, commit, and push after compaction.
 
+## Active service-by-service migration (2026-10-15)
+
+User now requires completing and mixed-Go-service validating one role at a time.
+Read service-migration-plan.md: Matching -> History -> Frontend -> Worker.
+Do not resume unrelated frontend/domain work while Matching is active.
+Matching is NOT complete: embedded Rust engine coupling blocks replacement of
+Go Matching alongside Go History/Frontend. Need independent durable task queue,
+History RPC clients, membership/routing and a mixed-service harness.
+
+Verified Matching checkpoint: partition parsing/tree arithmetic, Go configuration
+validation/server-owned update versions/no-ops, version-gated cache refresh/root
+reload, Go deprecated count/map conversion, acknowledgement state, and selected
+service listeners. Full final runner PASSED 18 stages, 296 workspace tests,
+strict clippy, original-Go differential suites, isolated listeners, copied-binary
+startup/config, shared workflow/Matching probe, public/internal gRPC and Go SDK
+TChannel. Evidence: /tmp/cadence-matching-wire-final/results.json and outer exit 0.
+All-Go baseline separately PASSED with original four services + SQLite:
+/tmp/cadence-go-baseline-repro/results.json. Both baseline servers were cleaned
+up. This is baseline comparison, NOT mixed-service replacement validation.
+
+NEXT: matching-owned durable task store (Go task_lists/tasks schemas, lease/range
+fencing, SQL serialization) and History RPC delivery. Current AddTask still checks
+local workflow state and polls delegate through embedded frontend. Membership,
+remote domain cache, routing/forwarding and query/semaphore integration remain.
+No service is complete; do not proceed to History before Matching's gates pass.
+
+Baseline findings: gRPC Go YARPC needs rpc-encoding: proto. New-domain caches
+can briefly reject a domain during inter-role propagation; shared probe retries
+only that exact provisioning error. Go partition protobuf mapper requires count
+fields consistent with map sizes; mismatches synthesize empty metadata maps.
+Full Rust compatibility runner explicitly applies test-only cooldown 0 using the
+admin endpoint; the latest commit's production policy retains Go's minute default.
+The pre-existing dynamic-policy differential harness is still unverified/broken
+(numeric enum input cannot unmarshal in Go, no expected values); it was never in
+the combined runner and is not included in the pass above.
+
 ## Latest verified UpdateDomain controller checkpoint
 
 Optional patch DTOs retain false/zero/empty-string and target presence across

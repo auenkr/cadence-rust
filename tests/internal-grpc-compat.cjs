@@ -168,10 +168,24 @@ async function run() {
   // where Go emits an explicit empty message and protobufjs crashes on the
   // omission). Go/Java SDKs parse either shape. The driver uses a
   // non-degenerate shape; see memory/progress.md.
-  await call('Matching', 'UpdateTaskListPartitionConfig', { domainId, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', partitionConfig: { version: '7', readPartitions: { 0: { isolationGroups: ['a'] } }, writePartitions: { 1: { isolationGroups: ['b'] } } } });
+  await call('Matching', 'UpdateTaskListPartitionConfig', { domainId, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', partitionConfig: { version: '7', numReadPartitions: 2, numWritePartitions: 1, readPartitions: { 0: { isolationGroups: ['a'] }, 1: { isolationGroups: ['b'] } }, writePartitions: { 0: { isolationGroups: ['a'] } } } });
   await call('Matching', 'RefreshTaskListPartitionConfig', { domainId, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY' });
   const taskListInfo = await call('Matching', 'DescribeTaskList', { domainId, request: { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY' } });
-  assert.equal(taskListInfo.partitionConfig.version, '7');
+  assert.equal(taskListInfo.partitionConfig.version, '1');
+  await assert.rejects(call('Matching', 'UpdateTaskListPartitionConfig', { domainId, taskList: idleList, partitionConfig: {} }), error => error.code === grpc.status.INVALID_ARGUMENT && error.details === 'read partitions < 1');
+  await assert.rejects(call('Matching', 'UpdateTaskListPartitionConfig', { domainId, taskList: { name: `/__cadence_sys/${idleList.name}/1` }, partitionConfig: {} }), error => error.code === grpc.status.INVALID_ARGUMENT);
+  await assert.rejects(call('Matching', 'RefreshTaskListPartitionConfig', { domainId, taskList: idleList, partitionConfig: {} }), error => error.code === grpc.status.INVALID_ARGUMENT);
+  const nestedPartitions = await call('Matching', 'ListTaskListPartitions', { domain, taskList: { name: `/__cadence_sys/${idleList.name}/3` } });
+  assert.equal(nestedPartitions.decisionTaskListPartitions[0].key, idleList.name);
+  const childPartition = { name: `/__cadence_sys/${idleList.name}/1` };
+  const pushedConfig = { version: '8', numReadPartitions: 2, numWritePartitions: 1, readPartitions: { 0: { isolationGroups: ['a'] }, 1: { isolationGroups: ['b'] } }, writePartitions: { 0: { isolationGroups: ['a'] } } };
+  await call('Matching', 'RefreshTaskListPartitionConfig', { domainId, taskList: childPartition, taskListType: 'TASK_LIST_TYPE_ACTIVITY', partitionConfig: pushedConfig });
+  await call('Matching', 'RefreshTaskListPartitionConfig', { domainId, taskList: childPartition, taskListType: 'TASK_LIST_TYPE_ACTIVITY', partitionConfig: { ...pushedConfig, version: '7' } });
+  const childDescription = () => call('Matching', 'DescribeTaskList', { domainId, request: { domain, taskList: childPartition, taskListType: 'TASK_LIST_TYPE_ACTIVITY' } });
+  assert.equal((await childDescription()).partitionConfig.version, '8');
+  await call('Matching', 'RefreshTaskListPartitionConfig', { domainId, taskList: childPartition, taskListType: 'TASK_LIST_TYPE_ACTIVITY' });
+  assert.equal((await childDescription()).partitionConfig.version, '1');
+
   assert(taskListInfo.pollers.some(poller => poller.identity === 'cancel-test'));
   // Matching task injection: unknown schedule IDs are NOT_FOUND; a fresh
   // run accepts AddDecisionTask and the task is then pollable.
@@ -372,7 +386,7 @@ async function run() {
   await adminCall('UpdateDomainAsyncWorkflowConfiguraton', { domain, configuration: { enabled: true, predefinedQueueName: 'q' } });
   const asyncCfg = await adminCall('GetDomainAsyncWorkflowConfiguraton', { domain });
   assert.equal(asyncCfg.configuration.enabled, true);
-  await adminCall('UpdateTaskListPartitionConfig', { domain, taskList: { name: 'admin-tl' }, taskListType: 'TASK_LIST_TYPE_DECISION', partitionConfig: { version: '3' } });
+  await adminCall('UpdateTaskListPartitionConfig', { domain, taskList: { name: 'admin-tl' }, taskListType: 'TASK_LIST_TYPE_DECISION', partitionConfig: { version: '3', numReadPartitions: 2, numWritePartitions: 1, readPartitions: { 0: { isolationGroups: ['a'] }, 1: { isolationGroups: ['a'] } }, writePartitions: { 0: { isolationGroups: ['a'] } } } });
   await assert.rejects(adminCall('AddSearchAttribute', { searchAttribute: { DomainID: 'INDEXED_VALUE_TYPE_KEYWORD' } }), error => error.code === grpc.status.INVALID_ARGUMENT);
   const adminWf = `admin-${id}`;
   const adminStart = await call('History', 'StartWorkflowExecution', { domainId: recreatedId, request: { ...start.request, workflowId: adminWf, requestId: randomUUID() } });

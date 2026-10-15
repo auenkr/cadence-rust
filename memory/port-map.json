@@ -35,7 +35,8 @@
     ],
     "evidence": [
       "Node gRPC workflow/activity wire checks; missing types/methods remain in service inventory",
-      "UpdateDomain mask handling now preserves optional fields without pre-reading domain state; controller and original-IDL transport validation passed for core update cases. Wider mapping coverage remains partial."
+      "UpdateDomain mask handling now preserves optional fields without pre-reading domain state; controller and original-IDL transport validation passed for core update cases. Wider mapping coverage remains partial.",
+      "Matching partition wire conversion now reproduces deprecated count/map disagreement behavior and emits actual partition counts; nine original-Go mapper fixtures and all-Go direct Matching probe expose this contract."
     ]
   },
   "go/common/backoff/cron.go": {
@@ -157,6 +158,35 @@
     ],
     "evidence": [
       "Optional UpdateDomain patch DTOs and config/failover predicates, core structs/enums and task APIs; many types, unknown-field compatibility and full symbol parity remain unreviewed."
+    ]
+  },
+  "go/service/matching/tasklist/identifier.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/task_list.rs",
+      "rust/crates/cadence-server/src/grpc_matching.rs"
+    ],
+    "evidence": [
+      "42 original-Go identifier/partition-parent fixtures, including reserved names, signed/overflow suffixes and tree arithmetic. Rust RPC routing validates partition names; Identifier diagnostic formatting and complete distributed routing remain outside this mapping."
+    ]
+  },
+  "go/service/matching/tasklist/task_list_manager.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/executions.rs",
+      "rust/crates/cadence-server/src/grpc_matching.rs"
+    ],
+    "evidence": [
+      "12 original-Go updatePartitionConfig operation sequences verify validation, unchanged/default no-ops and server-owned versions. Local refresh cache/recovery checks cover version gates and root reload; durable task-list backend and cross-host notifications remain incomplete."
+    ]
+  },
+  "go/common/messaging/ackManager.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/ack_manager.rs"
+    ],
+    "evidence": [
+      "Ported acknowledgement watermark, backlog and read/set semantics. Original-Go operation-sequence oracle added; logging and matching-owned queue integration remain incomplete."
     ]
   }
 }

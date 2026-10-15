@@ -1409,3 +1409,51 @@ pass (284 tests); committed two checkpoints and pushed.
   Highest next gap is runtime cooldown/dynamic policy, not further test-count
   expansion. Full archival, notification/distributed graceful state processing,
   replication and production persistence remain incomplete. Goal stays active.
+
+## 2026-10-15: switch to service-by-service migration, Matching first
+
+- User explicitly requests completing one service role and validating it with
+  other Go roles before moving on. New service-migration-plan.md tracks Matching,
+  History, Frontend and Worker completion gates. Matching remains incomplete:
+  local-engine-coupled adapters do not replace Go Matching in a mixed cluster.
+- Ported partition name/parser/tree arithmetic with 42 original-Go fixtures;
+  enforced name validation in internal polling, add, cancel, describe and config
+  routes; partition listings resolve the root for non-root inputs.
+- Corrected config validation, root/kind restrictions, default/unchanged no-ops,
+  server-assigned versions, refresh version gating and nil reload, plus local
+  notification/cache and snapshot recovery. Twelve actual-Go manager operation
+  sequences compare configs/errors. Production metadata storage remains pending.
+- Ported common messaging acknowledgement state with 15 original-Go operation
+  sequences: sparse/out-of-order/duplicate reads and acks, monotonic setters and
+  Go's backlog increment on invalid reads. Queue integration/logging remain pending.
+- Fixed --services matching/history opening unselected frontend ports/routes.
+  New process test holds unused ports occupied and verifies health-only HTTP.
+- Built original Go server in /tmp/cadence-go-mixed; booted all four roles with
+  SQLite/automatic schema setup. An 11-event workflow/activity/heartbeat probe
+  passed, then direct Matching partition RPCs passed as well. Reproducible runner
+  tests/run-go-service-baseline.py produced /tmp/cadence-go-baseline-repro/results.json
+  (probeExitCode 0). Its process is cleaned up by the runner. Ad hoc baseline was
+  also stopped. This is all-Go baseline evidence, not mixed-service validation.
+- Go baseline exposed required rpc-encoding: proto and deprecated partition-count
+  behavior: when counts disagree with map size, Go synthesizes count partitions
+  and discards supplied metadata. Added nine actual-Go mapper fixtures, matching
+  Rust conversion, output counts and client fixtures containing consistent counts.
+- Initial full Rust suite passed 295 tests/clippy and pre-existing differential
+  suites, then network failover hit the latest commit's real cooldown default.
+  Runner now explicitly sets test-only cooldown 0 through admin; product default
+  stays one minute. Further network validation is running after the wire fixes.
+- Attempting to include the pre-existing dynamic-policy oracle exposed an existing
+  harness error: numeric EncodingType fixtures fail Go's string enum unmarshal,
+  and fixtures lack expected values. That suite was not in the existing combined
+  runner; it remains excluded and is NOT claimed validated by this checkpoint.
+- Final in-progress runner: cadence-rust:matching-wire-final;
+  /tmp/cadence-matching-wire-final.log and artifacts/results.json. Record final
+  outcomes before calling this checkpoint verified. No entire service is complete.
+
+- Final verification PASSED: 18 combined-runner stages, 296 workspace tests,
+  strict clippy, all included original-Go suites, service-selected listener checks,
+  copied executable/config checks, shared Matching/workflow probe, public/internal
+  gRPC and existing Go SDK TChannel. Evidence:
+  /tmp/cadence-matching-wire-final/results.json and outer exit 0. Isolated Rust
+  server and both Go baseline servers were cleaned up. Work is a Matching
+  checkpoint; independent durable queue/History delivery/mixed topology remain.

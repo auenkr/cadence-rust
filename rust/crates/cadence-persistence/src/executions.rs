@@ -621,6 +621,8 @@ pub(crate) struct Inner {
     pub(crate) semaphore_holds: HashMap<(String, String, i32), Vec<crate::semaphores::SemaphoreHold>>,
     /// (domain namespace, task list, task-list type) -> partition config.
     pub(crate) partition_configs: HashMap<(String, String, i32), StoredPartitionConfig>,
+    /// Per-manager cache; unlike root partition metadata this is not persisted.
+    pub(crate) partition_config_cache: HashMap<(String, String, i32), StoredPartitionConfig>,
 }
 
 impl Inner {
@@ -6977,37 +6979,108 @@ impl InMemoryExecutionStore {
                 ),
             ));
         }
+        let invalid = |message: String| TaskError::InvalidToken(
+            cadence_api::errors::BadRequestError::new(message));
+        let name = cadence_common::task_list::TaskListName::parse(task_list).map_err(invalid)?;
+        if !name.is_root() {
+            return Err(invalid("Only root partition's partition config can be updated.".into()));
+        }
+        if config.read_partitions.is_empty() {
+            return Err(invalid("read partitions < 1".into()));
+        }
+        if config.write_partitions.is_empty() {
+            return Err(invalid("write partitions < 1".into()));
+        }
+        if config.read_partitions.len() < config.write_partitions.len() {
+            return Err(invalid(format!("read partitions ({}) < write partitions ({})",
+                config.read_partitions.len(), config.write_partitions.len())));
+        }
+        if !config.read_partitions.contains_key(&0) {
+            return Err(invalid("the root partition must always be in read partitions".into()));
+        }
+        if !config.write_partitions.contains_key(&0) {
+            return Err(invalid("the root partition must always be in write partitions".into()));
+        }
+        for id in config.write_partitions.keys() {
+            if !config.read_partitions.contains_key(id) {
+                return Err(invalid(format!("partition {id} included in write but not read")));
+            }
+        }
         let mut inner = self.inner.write().expect("execution store lock");
         let namespace = inner.domain_id(domain);
-        inner.partition_configs.insert(
-            (namespace, task_list.to_string(), task_list_type),
-            config,
-        );
+        let key = (namespace, task_list.to_string(), task_list_type);
+        let version = if let Some(old) = inner.partition_configs.get(&key) {
+            if old.read_partitions == config.read_partitions && old.write_partitions == config.write_partitions {
+                return Ok(());
+            }
+            old.version
+        } else {
+            if config.read_partitions.len() == 1 && config.write_partitions.len() == 1 {
+                return Ok(());
+            }
+            0
+        };
+        let mut config = config;
+        config.version = version.wrapping_add(1);
+        // In this process, deliver the same version-gated notification Go sends
+        // to existing non-root managers. Cross-host delivery remains separate.
+        for ((cached_domain, cached_name, cached_type), cached) in &mut inner.partition_config_cache {
+            if cached_domain == &key.0 && *cached_type == task_list_type
+                && cadence_common::task_list::TaskListName::parse(cached_name)
+                    .is_ok_and(|name| name.root() == task_list)
+                && cached.version < config.version
+            {
+                *cached = config.clone();
+            }
+        }
+        inner.partition_configs.insert(key, config);
         Ok(())
     }
 
-    /// Refresh a cached partition config, mirroring Go matching
-    /// `RefreshTaskListPartitionConfig`. Single process shares state, so this
-    /// verifies the domain and stored entry exist.
+    /// Reload this manager's cache from the root's persisted metadata.
     pub fn refresh_partition_config(
         &self,
         domain: &str,
         task_list: &str,
         task_list_type: i32,
     ) -> Result<(), TaskError> {
-        let inner = self.inner.read().expect("execution store lock");
+        self.refresh_partition_config_with(domain, task_list, task_list_type, None)
+    }
+
+    /// Go's nil refresh forcibly reloads persistence; pushed configs only advance
+    /// a non-root manager's version. A push never writes root persistence.
+    pub fn refresh_partition_config_with(
+        &self,
+        domain: &str,
+        task_list: &str,
+        task_list_type: i32,
+        pushed: Option<StoredPartitionConfig>,
+    ) -> Result<(), TaskError> {
+        let invalid = |message: String| TaskError::InvalidToken(
+            cadence_api::errors::BadRequestError::new(message));
+        let name = cadence_common::task_list::TaskListName::parse(task_list).map_err(invalid)?;
+        if name.is_root() && pushed.is_some() {
+            return Err(invalid("PartitionConfig must be nil for root partition.".into()));
+        }
+        let mut inner = self.inner.write().expect("execution store lock");
         let namespace = inner.domain_id(domain);
-        if !inner
-            .domain_ids
-            .values()
-            .any(|id| id == &namespace)
+        if !inner.domain_ids.values().any(|id| id == &namespace)
             && !inner.domain_names.contains_key(&namespace)
         {
-            return Err(TaskError::InvalidToken(
-                cadence_api::errors::BadRequestError::new("Domain does not exist.".to_string()),
-            ));
+            return Err(invalid("Domain does not exist.".into()));
         }
-        let _ = (task_list, task_list_type);
+        let key = (namespace.clone(), task_list.to_owned(), task_list_type);
+        if let Some(config) = pushed {
+            if inner.partition_config_cache.get(&key).is_none_or(|old| old.version < config.version) {
+                inner.partition_config_cache.insert(key, config);
+            }
+        } else {
+            let persisted = inner.partition_configs.get(&(namespace, name.root().to_owned(), task_list_type)).cloned();
+            match persisted {
+                Some(config) => { inner.partition_config_cache.insert(key, config); }
+                None => { inner.partition_config_cache.remove(&key); }
+            }
+        }
         Ok(())
     }
 
@@ -7020,10 +7093,13 @@ impl InMemoryExecutionStore {
     ) -> Option<StoredPartitionConfig> {
         let inner = self.inner.read().expect("execution store lock");
         let namespace = inner.domain_id(domain);
-        inner
-            .partition_configs
-            .get(&(namespace, task_list.to_string(), task_list_type))
-            .cloned()
+        let name = cadence_common::task_list::TaskListName::parse(task_list).ok()?;
+        if !name.is_root() {
+            if let Some(config) = inner.partition_config_cache.get(&(namespace.clone(), task_list.to_owned(), task_list_type)) {
+                return Some(config.clone());
+            }
+        }
+        inner.partition_configs.get(&(namespace, name.root().to_owned(), task_list_type)).cloned()
     }
 
     /// Requeue a scheduled-but-unstarted decision task, mirroring Go
@@ -7490,6 +7566,7 @@ impl InMemoryExecutionStore {
             semaphores: snapshot.semaphores.into_iter().collect(),
             semaphore_holds: snapshot.semaphore_holds.into_iter().collect(),
             partition_configs: snapshot.partition_configs.into_iter().collect(),
+            partition_config_cache: HashMap::new(),
         };
         Self {
             inner: std::sync::Arc::new(std::sync::RwLock::new(inner)),
@@ -8697,19 +8774,72 @@ mod advanced_tests {
     }
 
     #[test]
+    fn matching_partition_refresh_versions_and_recovery() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let config = |version, count| StoredPartitionConfig {
+            version,
+            read_partitions: (0..count).map(|id| (id, vec![])).collect(),
+            write_partitions: [(0, vec![])].into_iter().collect(),
+        };
+        store.update_partition_config("d", "tl", 0, true, config(90, 2)).unwrap();
+        let child = "/__cadence_sys/tl/1";
+        store.refresh_partition_config_with("d", child, 0, Some(config(8, 3))).unwrap();
+        store.refresh_partition_config_with("d", child, 0, Some(config(7, 4))).unwrap();
+        store.refresh_partition_config_with("d", child, 0, Some(config(8, 5))).unwrap();
+        assert_eq!(store.partition_config("d", child, 0).unwrap().read_partitions.len(), 3);
+        assert_eq!(store.partition_config("d", "tl", 0).unwrap().version, 1);
+        assert!(store.partition_config("d", child, 1).is_none());
+        store.refresh_partition_config("d", child, 0).unwrap();
+        assert_eq!(store.partition_config("d", child, 0).unwrap().version, 1);
+        store.update_partition_config("d", "tl", 0, true, config(90, 4)).unwrap();
+        assert_eq!(store.partition_config("d", child, 0).unwrap().version, 2);
+        store.refresh_partition_config_with("d", child, 0, Some(config(9, 3))).unwrap();
+        let recovered = InMemoryExecutionStore::restore(store.snapshot());
+        assert_eq!(recovered.partition_config("d", child, 0).unwrap().version, 2);
+        assert!(store.refresh_partition_config_with("d", "tl", 0, Some(config(10, 2))).is_err());
+    }
+
+    #[test]
+    fn matching_partition_go_fixtures() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../../../tests/fixtures/matching-partitions.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            let store = InMemoryExecutionStore::new();
+            store.register_domain_name("d");
+            for (update, expected) in case["updates"].as_array().unwrap().iter().zip(case["results"].as_array().unwrap()) {
+                let config: StoredPartitionConfig = serde_json::from_value(update.clone()).unwrap();
+                let error = match store.update_partition_config("d", "tl", 0, true, config) {
+                    Ok(()) => String::new(),
+                    Err(TaskError::InvalidToken(error)) => error.message,
+                    Err(other) => panic!("{other:?}"),
+                };
+                assert_eq!(error, expected["error"].as_str().unwrap());
+                let actual = serde_json::to_value(store.partition_config("d", "tl", 0)).unwrap();
+                assert_eq!(actual, expected["config"]);
+            }
+            // Partition state is retained across development snapshot recovery.
+            let recovered = InMemoryExecutionStore::restore(store.snapshot());
+            assert_eq!(serde_json::to_value(recovered.partition_config("d", "tl", 0)).unwrap(),
+                       serde_json::to_value(store.partition_config("d", "tl", 0)).unwrap());
+        }
+    }
+
+    #[test]
     fn partition_config_round_trips_through_store() {
         let store = InMemoryExecutionStore::new();
         store.register_domain_name("d");
         let config = StoredPartitionConfig {
             version: 3,
             read_partitions: [(0, vec!["a".to_string()])].into_iter().collect(),
-            write_partitions: HashMap::new(),
+            write_partitions: [(0, vec![]), (1, vec![])].into_iter().collect(),
         };
+        let mut config = config;
+        config.read_partitions.insert(1, vec![]);
         store
             .update_partition_config("d", "tl", 1, true, config)
             .unwrap();
         let got = store.partition_config("d", "tl", 1).unwrap();
-        assert_eq!(got.version, 3);
+        assert_eq!(got.version, 1);
         assert_eq!(got.read_partitions[&0], vec!["a".to_string()]);
         store.refresh_partition_config("d", "tl", 1).unwrap();
         // Non-normal kinds are rejected like Go.

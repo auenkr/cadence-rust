@@ -252,3 +252,38 @@ archival state machines and distributed graceful failover still require porting.
 
 The combined runner defaults to one Cargo build job to bound peak memory during
 large RPC test links. Set `CARGO_BUILD_JOBS` explicitly to override that choice.
+
+Matching service primitive differential checks:
+
+```sh
+python3 tests/run-matching-compat.py
+```
+
+Original-Go overlays check task-list partition naming/tree arithmetic, actual
+manager partition-config validation and update versions/no-ops, and queue ack
+watermark/backlog operation sequences. Rust checks use the same fixtures and
+also test local config cache refresh/recovery. The combined runner includes this
+suite. These checks do not establish independent Matching service replacement:
+that requires Rust-owned durable task queues and mixed Go-service integration.
+See `memory/service-migration-plan.md` for the active service completion gates.
+
+The original Go four-service baseline is reproducible with isolated SQLite
+files, free local ports, original configuration and automatic schema setup:
+
+```sh
+python3 tests/run-go-service-baseline.py
+# Reuse an existing Go build:
+python3 tests/run-go-service-baseline.py --binary /path/to/go/cadence-server
+```
+
+Run this long check in tmux `cadence-rust`. Logs, configuration, databases and
+results stay in its printed artifacts directory; its server is stopped afterward.
+The same `service-workflow-compat.cjs FRONTEND_PEER MATCHING_PEER` probe runs
+against both the all-Go baseline and the isolated Rust server, verifying direct
+Matching partition RPCs and an 11-event workflow/activity history. This is a
+baseline comparison, not yet a mixed Go/Rust service deployment.
+
+The combined Rust runner explicitly overrides `frontend.failoverCoolDown` to
+zero through the admin endpoint because the fixture drivers immediately perform
+successive failovers. The server retains Go's one-minute default. The override
+is recorded in the runner's artifacts directory.

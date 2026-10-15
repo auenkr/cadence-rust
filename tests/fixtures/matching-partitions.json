@@ -1,0 +1,400 @@
+[
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {},
+        "write_partitions": {}
+      }
+    ],
+    "results": [
+      {
+        "error": "read partitions < 1",
+        "config": null,
+        "writes": 0
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": []
+        },
+        "write_partitions": {}
+      }
+    ],
+    "results": [
+      {
+        "error": "write partitions < 1",
+        "config": null,
+        "writes": 0
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": []
+        },
+        "write_partitions": {
+          "0": [],
+          "1": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "read partitions (1) < write partitions (2)",
+        "config": null,
+        "writes": 0
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "1": []
+        },
+        "write_partitions": {
+          "1": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "the root partition must always be in read partitions",
+        "config": null,
+        "writes": 0
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": [],
+          "1": []
+        },
+        "write_partitions": {
+          "1": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "the root partition must always be in write partitions",
+        "config": null,
+        "writes": 0
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": [],
+          "1": []
+        },
+        "write_partitions": {
+          "0": [],
+          "2": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "partition 2 included in write but not read",
+        "config": null,
+        "writes": 0
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": []
+        },
+        "write_partitions": {
+          "0": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "",
+        "config": null,
+        "writes": 0
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": [],
+          "1": []
+        },
+        "write_partitions": {
+          "0": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "",
+        "config": {
+          "version": 1,
+          "read_partitions": {
+            "0": [],
+            "1": []
+          },
+          "write_partitions": {
+            "0": []
+          }
+        },
+        "writes": 1
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": [],
+          "1": []
+        },
+        "write_partitions": {
+          "0": [],
+          "1": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "",
+        "config": {
+          "version": 1,
+          "read_partitions": {
+            "0": [],
+            "1": []
+          },
+          "write_partitions": {
+            "0": [],
+            "1": []
+          }
+        },
+        "writes": 1
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "-1": [],
+          "0": []
+        },
+        "write_partitions": {
+          "-1": [],
+          "0": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "",
+        "config": {
+          "version": 1,
+          "read_partitions": {
+            "-1": [],
+            "0": []
+          },
+          "write_partitions": {
+            "-1": [],
+            "0": []
+          }
+        },
+        "writes": 1
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": [],
+          "1": []
+        },
+        "write_partitions": {
+          "0": []
+        }
+      },
+      {
+        "version": -4,
+        "read_partitions": {
+          "0": [],
+          "1": []
+        },
+        "write_partitions": {
+          "0": []
+        }
+      },
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": [],
+          "1": [],
+          "2": []
+        },
+        "write_partitions": {
+          "0": []
+        }
+      },
+      {
+        "version": 900,
+        "read_partitions": {},
+        "write_partitions": {}
+      }
+    ],
+    "results": [
+      {
+        "error": "",
+        "config": {
+          "version": 1,
+          "read_partitions": {
+            "0": [],
+            "1": []
+          },
+          "write_partitions": {
+            "0": []
+          }
+        },
+        "writes": 1
+      },
+      {
+        "error": "",
+        "config": {
+          "version": 1,
+          "read_partitions": {
+            "0": [],
+            "1": []
+          },
+          "write_partitions": {
+            "0": []
+          }
+        },
+        "writes": 1
+      },
+      {
+        "error": "",
+        "config": {
+          "version": 2,
+          "read_partitions": {
+            "0": [],
+            "1": [],
+            "2": []
+          },
+          "write_partitions": {
+            "0": []
+          }
+        },
+        "writes": 2
+      },
+      {
+        "error": "read partitions < 1",
+        "config": {
+          "version": 2,
+          "read_partitions": {
+            "0": [],
+            "1": [],
+            "2": []
+          },
+          "write_partitions": {
+            "0": []
+          }
+        },
+        "writes": 2
+      }
+    ]
+  },
+  {
+    "updates": [
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": []
+        },
+        "write_partitions": {
+          "0": []
+        }
+      },
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": [],
+          "1": []
+        },
+        "write_partitions": {
+          "0": []
+        }
+      },
+      {
+        "version": 900,
+        "read_partitions": {
+          "0": []
+        },
+        "write_partitions": {
+          "0": []
+        }
+      }
+    ],
+    "results": [
+      {
+        "error": "",
+        "config": null,
+        "writes": 0
+      },
+      {
+        "error": "",
+        "config": {
+          "version": 1,
+          "read_partitions": {
+            "0": [],
+            "1": []
+          },
+          "write_partitions": {
+            "0": []
+          }
+        },
+        "writes": 1
+      },
+      {
+        "error": "",
+        "config": {
+          "version": 2,
+          "read_partitions": {
+            "0": []
+          },
+          "write_partitions": {
+            "0": []
+          }
+        },
+        "writes": 2
+      }
+    ]
+  }
+]

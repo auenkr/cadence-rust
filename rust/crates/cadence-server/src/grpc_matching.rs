@@ -2,12 +2,28 @@
 //! Queue storage currently shares the single-process Rust execution engine.
 use crate::{grpc::Frontend, grpc_internal::History};
 use cadence_proto::{api as p, matching as m};
+use cadence_common::task_list::TaskListName;
+
+fn task_list_name(name: &str) -> Result<TaskListName, Status> {
+    TaskListName::parse(name).map_err(Status::invalid_argument)
+}
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
 use tokio::sync::Notify;
 use tonic::{Request, Response, Status};
+
+#[allow(deprecated)]
+fn partition_config_from_proto(config: p::TaskListPartitionConfig) -> cadence_persistence::StoredPartitionConfig {
+    let convert = |count, map| cadence_common::task_list::partition_map::<p::TaskListPartition>(count, map)
+        .into_iter().map(|(id, partition)| (id, partition.isolation_groups)).collect();
+    cadence_persistence::StoredPartitionConfig {
+        version: config.version,
+        read_partitions: convert(config.num_read_partitions, config.read_partitions),
+        write_partitions: convert(config.num_write_partitions, config.write_partitions),
+    }
+}
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct PollKey {
@@ -85,6 +101,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
             .name
             .clone();
+        task_list_name(&task_list)?;
         let guard = self.register_poll(PollKey {
             domain: r.domain_id,
             task_list,
@@ -138,6 +155,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
             .name
             .clone();
+        task_list_name(&task_list)?;
         let guard = self.register_poll(PollKey {
             domain: r.domain_id,
             task_list,
@@ -174,6 +192,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AddDecisionTaskRequest>,
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
         let r = request.into_inner();
+        task_list_name(r.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default())?;
         let domain = self.domain_name(&r.domain_id)?;
         let execution = r.workflow_execution.unwrap_or_default();
         let store = self
@@ -205,6 +224,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AddActivityTaskRequest>,
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
         let r = request.into_inner();
+        task_list_name(r.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default())?;
         let domain = self.domain_name(&r.domain_id)?;
         let execution = r.workflow_execution.unwrap_or_default();
         let store = self
@@ -339,8 +359,9 @@ impl m::matching_api_server::MatchingApi for Matching {
         }
         // Single process: report this host like Go's `getHostInfo`.
         let hostname = std::env::var("HOSTNAME").unwrap_or_default();
+        let name = task_list_name(&task_list.name)?;
         let partition = p::TaskListPartitionMetadata {
-            key: task_list.name.clone(),
+            key: name.root().to_owned(),
             owner_host_name: hostname,
         };
         Ok(Response::new(m::ListTaskListPartitionsResponse {
@@ -417,28 +438,22 @@ impl m::matching_api_server::MatchingApi for Matching {
         if task_list.name.is_empty() {
             return Err(Status::invalid_argument("TaskList is not set."));
         }
+        let kind_is_normal = matches!(task_list.kind, 0 | 1);
+        if !kind_is_normal {
+            return Err(Status::invalid_argument("Only normal tasklist's partition config can be updated."));
+        }
         let config = r
             .partition_config
             .ok_or_else(|| Status::invalid_argument(
                 "Task list partition config is not set in the request.",
             ))?;
-        // Go only allows normal task lists; unset counts as normal.
-        let kind_is_normal = matches!(task_list.kind, 0 | 1);
+        let name = task_list_name(&task_list.name)?;
+        if !name.is_root() {
+            return Err(Status::invalid_argument("Only root partition's partition config can be updated."));
+        }
         let store = self.frontend.state.executions.clone();
         let domain = self.domain_name(&r.domain_id)?;
-        let stored = cadence_persistence::StoredPartitionConfig {
-            version: config.version,
-            read_partitions: config
-                .read_partitions
-                .into_iter()
-                .map(|(id, p)| (id, p.isolation_groups))
-                .collect(),
-            write_partitions: config
-                .write_partitions
-                .into_iter()
-                .map(|(id, p)| (id, p.isolation_groups))
-                .collect(),
-        };
+        let stored = partition_config_from_proto(config);
         match store.update_partition_config(&domain, &task_list.name, r.task_list_type, kind_is_normal, stored) {
             Ok(()) => Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {})),
             Err(
@@ -463,8 +478,16 @@ impl m::matching_api_server::MatchingApi for Matching {
         if task_list.name.is_empty() {
             return Err(Status::invalid_argument("TaskList is not set."));
         }
+        if !matches!(task_list.kind, 0 | 1) {
+            return Err(Status::invalid_argument("Only normal tasklist's partition config can be updated."));
+        }
+        let name = task_list_name(&task_list.name)?;
+        if name.is_root() && r.partition_config.is_some() {
+            return Err(Status::invalid_argument("PartitionConfig must be nil for root partition."));
+        }
         let store = self.frontend.state.executions.clone();
-        match store.refresh_partition_config(&domain, &task_list.name, r.task_list_type) {
+        let pushed = r.partition_config.map(partition_config_from_proto);
+        match store.refresh_partition_config_with(&domain, &task_list.name, r.task_list_type, pushed) {
             Ok(()) => Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {})),
             Err(
                 cadence_persistence::TaskError::InvalidToken(e)
@@ -488,6 +511,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             .task_list
             .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
             .name;
+        task_list_name(&task_list)?;
         let key = PollKey {
             domain: r.domain_id,
             task_list,
@@ -562,6 +586,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         let task_list = payload.task_list.clone();
         let task_list_type = payload.task_list_type;
         let task_list_name = task_list.clone().map(|t| t.name).unwrap_or_default();
+        self::task_list_name(&task_list_name)?;
         let v = p::workflow_api_server::WorkflowApi::describe_task_list(
             &self.frontend,
             Request::new(payload),
@@ -588,12 +613,14 @@ impl m::matching_api_server::MatchingApi for Matching {
                 };
                 #[allow(deprecated)]
                 {
+                    let num_read_partitions = c.read_partitions.len() as i32;
+                    let num_write_partitions = c.write_partitions.len() as i32;
                     p::TaskListPartitionConfig {
                         version: c.version,
                         read_partitions: partitions(c.read_partitions),
                         write_partitions: partitions(c.write_partitions),
-                        num_read_partitions: 0,
-                        num_write_partitions: 0,
+                        num_read_partitions,
+                        num_write_partitions,
                     }
                 }
             });
