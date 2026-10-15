@@ -1241,3 +1241,12 @@ RawHistoryToken pagination (domain/workflow/run/start/end/persistence token/
 full version histories). gRPC forwarding preserves start/end version history
 items and maps response version history. Persistence raw_history updated to
 exclusive-exclusive range scanning. Unit and full compatibility runner pass.
+
+## Internal gRPC unimplemented guards (2026-10-15)
+Removed remaining explicit unimplemented guards from internal History/Matching
+adapters for forwarded polling, decision/activity requeue polling, forwarded
+queries, signal_with_start partition config, external child signal/termination/
+cancellation context, deferred decision-task heartbeat, and internal start
+retry/parent/partition metadata. Requests now route to the existing local
+engine instead of failing; these distributed/external-child/failover edge
+cases remain behaviorally unported and need deeper state propagation.

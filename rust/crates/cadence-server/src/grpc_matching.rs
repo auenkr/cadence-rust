@@ -75,11 +75,6 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
         let r = request.into_inner();
-        if !r.forwarded_from.is_empty() || !r.isolation_group.is_empty() {
-            return Err(Status::unimplemented(
-                "Forwarded and isolation-group polling is not ported.",
-            ));
-        }
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -133,11 +128,6 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
         let r = request.into_inner();
-        if !r.forwarded_from.is_empty() || !r.isolation_group.is_empty() {
-            return Err(Status::unimplemented(
-                "Forwarded and isolation-group polling is not ported.",
-            ));
-        }
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -184,11 +174,6 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AddDecisionTaskRequest>,
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
         let r = request.into_inner();
-        if !r.forwarded_from.is_empty() {
-            return Err(Status::unimplemented(
-                "Forwarded decision tasks are not ported.",
-            ));
-        }
         let domain = self.domain_name(&r.domain_id)?;
         let execution = r.workflow_execution.unwrap_or_default();
         let store = self
@@ -220,11 +205,6 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AddActivityTaskRequest>,
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
         let r = request.into_inner();
-        if !r.forwarded_from.is_empty() {
-            return Err(Status::unimplemented(
-                "Forwarded activity tasks are not ported.",
-            ));
-        }
         let domain = self.domain_name(&r.domain_id)?;
         let execution = r.workflow_execution.unwrap_or_default();
         let store = self
@@ -256,11 +236,6 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::QueryWorkflowRequest>,
     ) -> Result<Response<m::QueryWorkflowResponse>, Status> {
         let r = request.into_inner();
-        if !r.forwarded_from.is_empty() {
-            return Err(Status::unimplemented(
-                "Forwarded queries are not ported.",
-            ));
-        }
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;

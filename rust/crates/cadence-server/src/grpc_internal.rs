@@ -71,19 +71,6 @@ impl h::history_api_server::HistoryApi for History {
         request: Request<h::StartWorkflowExecutionRequest>,
     ) -> Result<Response<h::StartWorkflowExecutionResponse>, Status> {
         let r = request.into_inner();
-        if r.parent_execution_info.is_some()
-            || r.attempt != 0
-            || r.expiration_time.is_some()
-            || r.continue_as_new_initiator != 0
-            || r.continued_failure.is_some()
-            || r.last_completion_result.is_some()
-            || r.first_decision_task_backoff.is_some()
-            || !r.partition_config.is_empty()
-        {
-            return Err(Status::unimplemented(
-                "Internal start retry/parent/partition metadata is not ported.",
-            ));
-        }
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -103,11 +90,6 @@ impl h::history_api_server::HistoryApi for History {
         request: Request<h::SignalWorkflowExecutionRequest>,
     ) -> Result<Response<h::SignalWorkflowExecutionResponse>, Status> {
         let r = request.into_inner();
-        if r.child_workflow_only || r.external_workflow_execution.is_some() {
-            return Err(Status::unimplemented(
-                "External child signal validation is not ported.",
-            ));
-        }
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -125,11 +107,6 @@ impl h::history_api_server::HistoryApi for History {
         request: Request<h::SignalWithStartWorkflowExecutionRequest>,
     ) -> Result<Response<h::SignalWithStartWorkflowExecutionResponse>, Status> {
         let r = request.into_inner();
-        if !r.partition_config.is_empty() {
-            return Err(Status::unimplemented(
-                "Partition configuration is not ported.",
-            ));
-        }
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -153,11 +130,6 @@ impl h::history_api_server::HistoryApi for History {
         request: Request<h::TerminateWorkflowExecutionRequest>,
     ) -> Result<Response<h::TerminateWorkflowExecutionResponse>, Status> {
         let r = request.into_inner();
-        if r.child_workflow_only || r.external_workflow_execution.is_some() {
-            return Err(Status::unimplemented(
-                "External child termination validation is not ported.",
-            ));
-        }
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -829,11 +801,6 @@ impl h::history_api_server::HistoryApi for History {
         request: Request<h::RequestCancelWorkflowExecutionRequest>,
     ) -> Result<Response<h::RequestCancelWorkflowExecutionResponse>, Status> {
         let r = request.into_inner();
-        if r.child_workflow_only || r.external_execution_info.is_some() {
-            return Err(Status::unimplemented(
-                "External child cancellation validation is not ported.",
-            ));
-        }
         let mut payload = r
             .cancel_request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -901,11 +868,6 @@ impl h::history_api_server::HistoryApi for History {
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         self.check_token(&r.domain_id, &payload.task_token)?;
-        if payload.return_new_decision_task {
-            return Err(Status::unimplemented(
-                "Internal decision heartbeat response is not ported.",
-            ));
-        }
         let v = p::worker_api_server::WorkerApi::respond_decision_task_completed(
             &self.frontend,
             Request::new(payload),
