@@ -73,6 +73,7 @@ def main():
     shutil.copy2(root / "rust/target/debug/cadence-server", binary)
     run("go-config-compat", [str(binary), "check-config", "--config",
                              str(root / "go/config/development.yaml")], cwd=server_workdir)
+    run("cluster-config-cli", [sys.executable, str(root / "tests/check-cluster-config-cli.py"), str(binary)], cwd=server_workdir)
     command = [str(binary), "start", "--port", str(http),
                "--grpc-port", str(frontend), "--history-grpc-port", str(history),
                "--matching-grpc-port", str(matching), "--tchannel-port", str(tchannel)]

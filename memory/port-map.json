@@ -94,5 +94,15 @@
     "evidence": [
       "69 Go differential cases for version arithmetic/ownership, migration offsets, enabled/remote sets; configured frontend registration/failover wired. Full cluster config validation, dynamic migration override evaluation, logging/metrics and passive ownership gating remain incomplete."
     ]
+  },
+  "go/common/config/cluster.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/cluster.rs",
+      "rust/crates/cadence-server/src/config.rs"
+    ],
+    "evidence": [
+      "34 shared Go FillDefaults/Validate cases, canonical/legacy YAML precedence tests and copied-binary CLI checks; core cluster validation/defaulting ported. Cluster redirection, TLS/auth config retention and wider config loader integration remain incomplete."
+    ]
   }
 }

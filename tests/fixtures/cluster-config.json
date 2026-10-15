@@ -1,0 +1,1694 @@
+[
+  {
+    "expected": {
+      "config": null,
+      "errors": [
+        "ClusterGroupMetadata cannot be empty"
+      ]
+    },
+    "fillDefaults": true,
+    "input": null,
+    "name": "missing metadata"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {},
+        "clusterInformation": {},
+        "currentClusterName": "",
+        "failoverVersionIncrement": 0,
+        "masterClusterName": "",
+        "primaryClusterName": ""
+      },
+      "errors": [
+        "current cluster name is empty",
+        "empty cluster group",
+        "primary cluster name is empty",
+        "version increment is 0"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {},
+    "name": "empty metadata"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "valid defaults"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "",
+            "rpcTransport": ""
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster a: rpc name / address is empty",
+        "cluster a: rpc transport must tchannel or grpc",
+        "cluster b: rpc name / address is empty"
+      ]
+    },
+    "fillDefaults": false,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "valid raw without defaults"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": ""
+      },
+      "errors": [
+        "primary cluster name is empty"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10
+    },
+    "name": "missing primaryClusterName"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "current cluster name is empty"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing currentClusterName"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {},
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "current cluster is not specified in the cluster group",
+        "empty cluster group",
+        "primary cluster is not specified in the cluster group"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing clusterGroup"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "unknown"
+      },
+      "errors": [
+        "primary cluster is not specified in the cluster group"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "unknown"
+    },
+    "name": "unknown primaryClusterName"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "unknown",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "current cluster is not specified in the cluster group"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "unknown",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "unknown currentClusterName"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 0,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster a: version increment 0 is smaller than initial version: 0",
+        "cluster b: version increment 0 is smaller than initial version: 2",
+        "version increment is 0"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 0,
+      "primaryClusterName": "a"
+    },
+    "name": "increment 0"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": -10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster a: version increment -10 is smaller than initial version: 0",
+        "cluster b: version increment -10 is smaller than initial version: 2"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": -10,
+      "primaryClusterName": "a"
+    },
+    "name": "increment -10"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 1,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: version increment 1 is smaller than initial version: 2"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 1,
+      "primaryClusterName": "a"
+    },
+    "name": "increment 1"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 2,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: version increment 2 is smaller than initial version: 2"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 2,
+      "primaryClusterName": "a"
+    },
+    "name": "increment 2"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 3,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 3,
+      "primaryClusterName": "a"
+    },
+    "name": "increment 3"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 9223372036854775807,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 9223372036854775807,
+      "primaryClusterName": "a"
+    },
+    "name": "increment 9223372036854775807"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": -1,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: version increment 10 is smaller than initial version: -1"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": -1,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "offset -1"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 10,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: version increment 10 is smaller than initial version: 10"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 10,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "offset 10"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 11,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: version increment 10 is smaller than initial version: 11"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 11,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "offset 11"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "initial versions of the cluster group have duplicates"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "offset 0"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": false,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": false,
+          "initialFailoverVersion": 2,
+          "rpcTransport": ""
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing address enabled False transport "
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": false,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": false,
+          "initialFailoverVersion": 2,
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing address enabled False transport grpc"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": false,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": false,
+          "initialFailoverVersion": 2,
+          "rpcTransport": "tchannel"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing address enabled False transport tchannel"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": false,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "http"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: rpc transport must tchannel or grpc"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": false,
+          "initialFailoverVersion": 2,
+          "rpcTransport": "http"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing address enabled False transport http"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: rpc name / address is empty"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcTransport": ""
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing address enabled True transport "
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: rpc name / address is empty"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing address enabled True transport grpc"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: rpc name / address is empty"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcTransport": "tchannel"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing address enabled True transport tchannel"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "http"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster b: rpc name / address is empty",
+        "cluster b: rpc transport must tchannel or grpc"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcTransport": "http"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "missing address enabled True transport http"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          },
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": [
+        "cluster with empty name defined"
+      ]
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        },
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "empty cluster name"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "b",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "masterClusterName": "b",
+      "primaryClusterName": "a"
+    },
+    "name": "canonical primary wins"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "a",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterInformation": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "masterClusterName": "a"
+    },
+    "name": "legacy fallback"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {
+          "legacy": {
+            "enabled": false,
+            "initialFailoverVersion": 4,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "",
+            "rpcName": "",
+            "rpcTransport": ""
+          }
+        },
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "clusterInformation": {
+        "legacy": {
+          "initialFailoverVersion": 4
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "canonical group wins"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {},
+      "clusterInformation": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "empty canonical group uses legacy"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": 0,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "newInitialFailoverVersion": 0,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "migration zero retains presence"
+  },
+  {
+    "expected": {
+      "config": {
+        "clusterGroup": {
+          "a": {
+            "enabled": true,
+            "initialFailoverVersion": 0,
+            "newInitialFailoverVersion": null,
+            "rpcAddress": "localhost:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "tchannel"
+          },
+          "b": {
+            "enabled": true,
+            "initialFailoverVersion": 2,
+            "newInitialFailoverVersion": 999,
+            "rpcAddress": "remote:7833",
+            "rpcName": "cadence-frontend",
+            "rpcTransport": "grpc"
+          }
+        },
+        "clusterInformation": {},
+        "currentClusterName": "a",
+        "failoverVersionIncrement": 10,
+        "masterClusterName": "",
+        "primaryClusterName": "a"
+      },
+      "errors": []
+    },
+    "fillDefaults": true,
+    "input": {
+      "clusterGroup": {
+        "a": {
+          "enabled": true,
+          "initialFailoverVersion": 0,
+          "rpcAddress": "localhost:7833"
+        },
+        "b": {
+          "enabled": true,
+          "initialFailoverVersion": 2,
+          "newInitialFailoverVersion": 999,
+          "rpcAddress": "remote:7833",
+          "rpcTransport": "grpc"
+        }
+      },
+      "currentClusterName": "a",
+      "failoverVersionIncrement": 10,
+      "primaryClusterName": "a"
+    },
+    "name": "migration offset unchecked by Go"
+  }
+]

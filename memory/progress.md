@@ -1309,3 +1309,28 @@ pass (284 tests); committed two checkpoints and pushed.
   the standard initial offset; utility fixtures also cover the override branch.
   Existing execution promotion/passive ownership gating and replication remain
   unported. Updating domain metadata alone does not establish failover behavior.
+
+## 2026-10-15: cluster config defaults/validation verified
+
+- Added Go ClusterGroupMetadata FillDefaults/Validate rules to the common
+  cluster module. Canonical and deprecated keys remain distinct; primary and
+  cluster-group fallbacks, enabled/disabled RPC requirements, transport checks,
+  increment/range/duplicate validation match 34 actual-Go differential cases.
+  Legacy group fallback retains Go's observable defaulted entries through both
+  map names. Oracle retains JSON integers exactly, including int64 maximum.
+- Config parsing now honors canonical-vs-deprecated top-level presence (an
+  explicit empty canonical object wins over legacy data). Startup/check-config
+  validate cluster metadata and no longer replace invalid/missing metadata
+  with cluster0 defaults. Embedded defaults remain available when no file is
+  specified. Dedicated config/YAML tests and all differential cases passed.
+- Full 13-stage compatibility runner PASSED: 288 workspace tests, strict
+  workspace/all-targets clippy, four differential suites (including 34 new
+  config cases), standalone copied-binary startup, 33 CLI configuration checks,
+  original-IDL public/internal gRPC and Go SDK TChannel. Evidence:
+  /tmp/cadence-cluster-config-compat/results.json and outer exit file 0.
+  Test servers cleaned up; user development server remains unchanged.
+- Traced next active-active work; concrete Go/Rust source anchors and newly
+  identified no-change/destination-ordering mismatches are in active-active-next.md.
+  No active-active engine changes landed in this checkpoint. Full config loader,
+  cluster TLS/auth/redirection and persistence/auth validation remain incomplete.
+- Source ledger: 11 partial, 2289 review-required files; none marked complete.

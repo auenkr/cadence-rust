@@ -27,8 +27,10 @@ pub struct Config {
     pub log: LogConfig,
     #[serde(default)]
     pub services: HashMap<String, ServiceConfig>,
-    #[serde(default, rename = "clusterMetadata", alias = "clusterGroupMetadata")]
-    pub cluster_metadata: ClusterMetadata,
+    #[serde(default, rename = "clusterGroupMetadata")]
+    pub cluster_metadata: Option<ClusterMetadata>,
+    #[serde(default, rename = "clusterMetadata")]
+    pub legacy_cluster_metadata: Option<ClusterMetadata>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,32 +152,7 @@ fn de_flex_u16<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ClusterMetadata {
-    #[serde(default, rename = "failoverVersionIncrement")]
-    pub failover_version_increment: i64,
-    #[serde(default, rename = "primaryClusterName", alias = "masterClusterName")]
-    pub primary_cluster_name: String,
-    #[serde(default, rename = "clusterGroup", alias = "clusterInformation")]
-    pub cluster_group: std::collections::BTreeMap<String, cadence_common::cluster::ClusterInformation>,
-    #[serde(default, rename = "enableGlobalDomain")]
-    pub enable_global_domain: bool,
-    #[serde(default, rename = "currentClusterName")]
-    pub current_cluster_name: String,
-    #[serde(default, rename = "clusterNameForFailoverVersionIncrement")]
-    pub cluster_name_for_failover_version_increment: String,
-}
-
-impl ClusterMetadata {
-    pub fn metadata(&self) -> cadence_common::cluster::Metadata {
-        cadence_common::cluster::Metadata {
-            failover_version_increment: self.failover_version_increment,
-            primary_cluster_name: self.primary_cluster_name.clone(),
-            current_cluster_name: self.current_cluster_name.clone(),
-            clusters: self.cluster_group.clone(),
-        }
-    }
-}
+pub type ClusterMetadata = cadence_common::cluster::GroupMetadata;
 
 impl Config {
     /// Embedded development defaults keep the executable independent of the
@@ -190,7 +167,14 @@ impl Config {
     }
 
     pub fn from_yaml(text: &str) -> anyhow::Result<Self> {
-        Ok(serde_yaml::from_str(&expand_env(text))?)
+        let mut config: Self = serde_yaml::from_str(&expand_env(text))?;
+        if config.cluster_metadata.is_none() {
+            config.cluster_metadata.clone_from(&config.legacy_cluster_metadata);
+        }
+        if let Some(metadata) = config.cluster_metadata.as_mut() {
+            metadata.fill_defaults();
+        }
+        Ok(config)
     }
 
     /// Service names this binary knows how to run.
@@ -211,6 +195,10 @@ impl Config {
         if self.persistence.num_history_shards < 0 {
             anyhow::bail!("numHistoryShards cannot be negative");
         }
+        let metadata = self.cluster_metadata.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("ClusterGroupMetadata cannot be empty"))?;
+        let errors = metadata.validation_errors();
+        if !errors.is_empty() { anyhow::bail!(errors.join("; ")); }
         Ok(())
     }
 }
@@ -287,8 +275,32 @@ services:
       port: 1234
 clusterMetadata:
   enableGlobalDomain: false
+  primaryClusterName: active
   currentClusterName: active
+  failoverVersionIncrement: 10
+  clusterGroup:
+    active:
+      enabled: true
+      initialFailoverVersion: 0
+      rpcAddress: localhost:1234
 "#;
+
+    #[test]
+    fn canonical_and_legacy_cluster_keys_use_go_precedence() {
+        let legacy = Config::from_yaml(SAMPLE).unwrap();
+        legacy.validate().unwrap();
+        let cluster = &legacy.cluster_metadata.as_ref().unwrap().cluster_group["active"];
+        assert_eq!(cluster.rpc_name, "cadence-frontend");
+        assert_eq!(cluster.rpc_transport, "tchannel");
+        let yaml = format!("{}\nclusterMetadata: {{currentClusterName: shadow}}\n", SAMPLE.replace("clusterMetadata:", "clusterGroupMetadata:"));
+        let both = Config::from_yaml(&yaml).unwrap();
+        both.validate().unwrap();
+        assert_eq!(both.cluster_metadata.as_ref().unwrap().current_cluster_name, "active");
+        let explicit_empty = Config::from_yaml(&format!("{SAMPLE}\nclusterGroupMetadata: {{}}\n")).unwrap();
+        assert!(explicit_empty.validate().is_err());
+        let missing = Config::from_yaml("log: {level: info}").unwrap();
+        assert_eq!(missing.validate().unwrap_err().to_string(), "ClusterGroupMetadata cannot be empty");
+    }
 
     #[test]
     fn embedded_defaults_match_go_development_config() {
@@ -304,7 +316,7 @@ clusterMetadata:
         let cfg = Config::from_yaml(SAMPLE).unwrap();
         assert_eq!(cfg.persistence.num_history_shards, 4);
         assert_eq!(cfg.services["frontend"].rpc.port, 1234);
-        assert_eq!(cfg.cluster_metadata.current_cluster_name, "active");
+        assert_eq!(cfg.cluster_metadata.as_ref().unwrap().current_cluster_name, "active");
         cfg.validate().unwrap();
     }
 

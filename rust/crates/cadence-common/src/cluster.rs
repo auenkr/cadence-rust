@@ -12,6 +12,110 @@ pub struct ClusterInformation {
     pub rpc_transport: String,
 }
 
+/// Configuration/defaulting from Go common/config/cluster.go. Deprecated
+/// fields remain distinct because canonical and legacy keys may coexist.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct GroupMetadata {
+    pub failover_version_increment: i64,
+    pub primary_cluster_name: String,
+    pub master_cluster_name: String,
+    pub current_cluster_name: String,
+    pub cluster_group: BTreeMap<String, ClusterInformation>,
+    pub cluster_information: BTreeMap<String, ClusterInformation>,
+    pub enable_global_domain: bool,
+    pub cluster_name_for_failover_version_increment: String,
+}
+
+impl GroupMetadata {
+    pub fn fill_defaults(&mut self) {
+        if self.primary_cluster_name.is_empty() && !self.master_cluster_name.is_empty() {
+            self.primary_cluster_name
+                .clone_from(&self.master_cluster_name);
+        }
+        let legacy_group = self.cluster_group.is_empty() && !self.cluster_information.is_empty();
+        if legacy_group {
+            self.cluster_group.clone_from(&self.cluster_information);
+        }
+        for cluster in self.cluster_group.values_mut() {
+            if cluster.rpc_name.is_empty() {
+                cluster.rpc_name = "cadence-frontend".into();
+            }
+            if cluster.rpc_transport.is_empty() {
+                cluster.rpc_transport = "tchannel".into();
+            }
+        }
+        // Go assigns the legacy map directly, so defaulted entries are visible
+        // through both names after fallback.
+        if legacy_group {
+            self.cluster_information.clone_from(&self.cluster_group);
+        }
+    }
+
+    /// Go aggregates all errors; map iteration order is unspecified there.
+    pub fn validation_errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        if self.primary_cluster_name.is_empty() {
+            errors.push("primary cluster name is empty".into());
+        }
+        if self.current_cluster_name.is_empty() {
+            errors.push("current cluster name is empty".into());
+        }
+        if self.failover_version_increment == 0 {
+            errors.push("version increment is 0".into());
+        }
+        if self.cluster_group.is_empty() {
+            errors.push("empty cluster group".into());
+        }
+        if !self.primary_cluster_name.is_empty()
+            && !self.cluster_group.contains_key(&self.primary_cluster_name)
+        {
+            errors.push("primary cluster is not specified in the cluster group".into());
+        }
+        if !self.current_cluster_name.is_empty()
+            && !self.cluster_group.contains_key(&self.current_cluster_name)
+        {
+            errors.push("current cluster is not specified in the cluster group".into());
+        }
+        let mut versions = std::collections::BTreeSet::new();
+        for (name, info) in &self.cluster_group {
+            if name.is_empty() {
+                errors.push("cluster with empty name defined".into());
+            }
+            versions.insert(info.initial_failover_version);
+            if self.failover_version_increment <= info.initial_failover_version
+                || info.initial_failover_version < 0
+            {
+                errors.push(format!(
+                    "cluster {name}: version increment {} is smaller than initial version: {}",
+                    self.failover_version_increment, info.initial_failover_version
+                ));
+            }
+            if info.enabled && (info.rpc_name.is_empty() || info.rpc_address.is_empty()) {
+                errors.push(format!("cluster {name}: rpc name / address is empty"));
+            }
+            if info.rpc_transport != "tchannel" && info.rpc_transport != "grpc" {
+                errors.push(format!(
+                    "cluster {name}: rpc transport must tchannel or grpc"
+                ));
+            }
+        }
+        if versions.len() != self.cluster_group.len() {
+            errors.push("initial versions of the cluster group have duplicates".into());
+        }
+        errors
+    }
+
+    pub fn metadata(&self) -> Metadata {
+        Metadata {
+            failover_version_increment: self.failover_version_increment,
+            primary_cluster_name: self.primary_cluster_name.clone(),
+            current_cluster_name: self.current_cluster_name.clone(),
+            clusters: self.cluster_group.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Metadata {
     pub failover_version_increment: i64,
@@ -122,6 +226,46 @@ impl Metadata {
 mod tests {
     use super::*;
     use serde_json::{json, Value};
+
+    #[test]
+    fn cluster_config_go_fixtures() {
+        let cases: Vec<Value> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/cluster-config.json"
+        ))
+        .unwrap();
+        for case in cases {
+            let (config, mut errors) = if case["input"].is_null() {
+                (
+                    Value::Null,
+                    vec!["ClusterGroupMetadata cannot be empty".to_string()],
+                )
+            } else {
+                let mut config: GroupMetadata =
+                    serde_json::from_value(case["input"].clone()).unwrap();
+                if case["fillDefaults"].as_bool().unwrap() {
+                    config.fill_defaults();
+                }
+                let errors = config.validation_errors();
+                let mut normalized = serde_json::to_value(config).unwrap();
+                normalized
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("enableGlobalDomain");
+                normalized
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("clusterNameForFailoverVersionIncrement");
+                (normalized, errors)
+            };
+            errors.sort();
+            assert_eq!(
+                json!({"config": config, "errors": errors}),
+                case["expected"],
+                "{}",
+                case["name"]
+            );
+        }
+    }
 
     #[test]
     fn cluster_metadata_go_fixtures() {

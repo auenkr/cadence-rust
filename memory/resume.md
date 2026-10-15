@@ -104,6 +104,29 @@ lookup, active-active attribute merge/version updates, in-flight execution
 promotion, passive mutation gating, queues and replication. New-domain version
 mapping alone is not production failover. This is a version-metadata checkpoint, not complete failover.
 
+## Latest verified cluster configuration checkpoint
+
+Go cluster-group defaults and validation now live in common::cluster::GroupMetadata.
+The config loader retains canonical/deprecated keys separately and applies Go
+fallback precedence before validating. Missing or invalid supplied metadata is
+rejected; main no longer silently substitutes default cluster0 metadata. No-file
+startup still uses embedded valid development defaults. 34 shared fixtures match
+actual Go FillDefaults/Validate, including legacy-map defaults and exact errors.
+
+Full runner PASSED all 13 stages: 288 workspace tests, strict clippy, Go
+differential suites, copied-binary embedded startup and 33 CLI config checks
+(including invalid startup), public/internal gRPC and existing Go SDK TChannel.
+Evidence: /tmp/cadence-cluster-config-compat/results.json and outer exit file 0.
+User development server was not restarted. Source ledger has 11 partial and
+2289 review-required files; none marked complete.
+
+Next concrete implementation is active-active attribute initialization/versioned
+merge. Read active-active-next.md: source trace found wholesale replacement in
+Rust vs preservation/version-aware merge in Go, incorrect repeated-domain-target
+no-change rejection, and destination-check ordering/legacy-field mismatches.
+Full config layering, cluster TLS/auth/redirection and persistence/auth validation
+remain separate gaps. Do not claim all Go configuration or failover is ported.
+
 ## Runtime
 
 User development server is cadence-rust:rust, HTTP 8080 / gRPC 7833 / history

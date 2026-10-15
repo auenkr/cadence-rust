@@ -105,12 +105,9 @@ async fn main() -> anyhow::Result<()> {
                 num_history_shards,
                 ..Default::default()
             };
-            if !cfg.cluster_metadata.current_cluster_name.is_empty() {
-                state.current_cluster_name = cfg.cluster_metadata.current_cluster_name.clone();
-            }
-            if !cfg.cluster_metadata.cluster_group.is_empty() {
-                state.cluster_metadata = cfg.cluster_metadata.metadata();
-            }
+            let metadata = cfg.cluster_metadata.as_ref().expect("validated cluster metadata");
+            state.current_cluster_name.clone_from(&metadata.current_cluster_name);
+            state.cluster_metadata = metadata.metadata();
             let frontend_rpc = cfg.services.get("frontend").map(|s| &s.rpc);
             if let Some(limit) = frontend_rpc
                 .map(|r| r.grpc_max_msg_size)

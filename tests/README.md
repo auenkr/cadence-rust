@@ -199,3 +199,13 @@ version 2 and failover to version 10. The original-Go-IDL client also checks
 versions 12 and 20 plus new execution history at version 20; it can encode the
 newer destination-check override missing from the older web IDL. To run that driver independently, configure the same remote cluster.
 These checks do not establish distributed ownership or passive replication.
+
+The cluster metadata differential runner also compares 34 configuration cases
+with Go's actual `ClusterGroupMetadata.FillDefaults` and `Validate`. Cases cover
+canonical/legacy precedence, empty and absent metadata, disabled clusters,
+duplicate/negative/out-of-range offsets, migration-offset presence, and RPC
+name/address/transport defaults. Validation errors are compared as sorted sets
+because Go iterates cluster maps in unspecified order. The full runner checks
+33 defaulted cases through the copied Rust CLI and verifies startup rejects a
+zero increment before opening listeners. Wider Go configuration layering,
+persistence validation, TLS/auth and redirection remain separate migration work.

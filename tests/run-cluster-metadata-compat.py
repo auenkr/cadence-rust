@@ -14,3 +14,13 @@ if actual != expected:
 subprocess.run(["cargo", "test", "--manifest-path", str(root / "rust/Cargo.toml"),
                 "-p", "cadence-common", "cluster_metadata_go_fixtures"], check=True)
 print(f"All {len(expected)} cluster metadata cases match Go and Rust")
+
+config_fixtures = root / "tests/fixtures/cluster-config.json"
+actual = json.loads(subprocess.check_output(
+    ["go", "run", "../tests/cluster-config-go/main.go", str(config_fixtures)], cwd=root / "go"))
+expected = json.loads(config_fixtures.read_text())
+if actual != expected:
+    raise RuntimeError("cluster config Go oracle results drifted")
+subprocess.run(["cargo", "test", "--manifest-path", str(root / "rust/Cargo.toml"),
+                "-p", "cadence-common", "cluster_config_go_fixtures"], check=True)
+print(f"All {len(expected)} cluster config cases match Go and Rust")
