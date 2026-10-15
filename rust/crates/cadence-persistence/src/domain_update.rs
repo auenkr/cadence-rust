@@ -5,7 +5,59 @@ use cadence_api::{
 };
 use cadence_common::cluster::Metadata;
 
-type Result<T> = std::result::Result<T, BadRequestError>;
+#[derive(Debug, thiserror::Error)]
+pub enum UpdateError {
+    #[error(transparent)]
+    Invalid(#[from] BadRequestError),
+    #[error(transparent)]
+    Busy(#[from] cadence_api::errors::ServiceBusyError),
+}
+impl UpdateError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Invalid(e) => &e.message,
+            Self::Busy(e) => &e.message,
+        }
+    }
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Busy(_))
+    }
+}
+fn invalid(message: impl Into<String>) -> UpdateError {
+    UpdateError::Invalid(BadRequestError::new(message))
+}
+type Result<T> = std::result::Result<T, UpdateError>;
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DomainPolicy {
+    pub cooldown_nanos: i64,
+    pub min_retention_days: i32,
+    pub max_bad_binaries: i64,
+    pub history_limit: i64,
+}
+impl Default for DomainPolicy {
+    fn default() -> Self {
+        Self {
+            cooldown_nanos: 60_000_000_000,
+            min_retention_days: 1,
+            max_bad_binaries: 10,
+            history_limit: 5,
+        }
+    }
+}
+fn check_cooldown(current: &DomainRecord, now: i64, policy: &DomainPolicy) -> Result<()> {
+    // Go compares time.Time values after adding a signed duration; avoid i64
+    // UnixNano overflow while preserving the nanosecond boundary comparison.
+    if i128::from(current.last_updated_time_nanos) + i128::from(policy.cooldown_nanos)
+        > i128::from(now)
+    {
+        return Err(
+            cadence_api::errors::ServiceBusyError::new("Domain update too frequent.").into(),
+        );
+    }
+    Ok(())
+}
 const MIXED: &str = "Cannot set active cluster to current cluster when other parameters are set.";
 const LOCAL: &str = "Local domains cannot perform failovers or change replication configuration";
 const PRIMARY: &str =
@@ -22,8 +74,9 @@ pub fn prepare(
     request: &UpdateDomainRequest,
     metadata: &Metadata,
     now: i64,
+    policy: &DomainPolicy,
 ) -> Result<PreparedUpdate> {
-    prepare_inner(current, request, metadata, now, false, None)
+    prepare_inner(current, request, metadata, now, false, None, policy)
 }
 
 pub fn prepare_failover(
@@ -32,8 +85,9 @@ pub fn prepare_failover(
     metadata: &Metadata,
     now: i64,
     reason: Option<&str>,
+    policy: &DomainPolicy,
 ) -> Result<PreparedUpdate> {
-    prepare_inner(current, request, metadata, now, true, reason)
+    prepare_inner(current, request, metadata, now, true, reason, policy)
 }
 
 fn prepare_inner(
@@ -43,6 +97,7 @@ fn prepare_inner(
     now: i64,
     force_failover: bool,
     reason: Option<&str>,
+    policy: &DomainPolicy,
 ) -> Result<PreparedUpdate> {
     let replication = request.replication_configuration.as_ref();
     if !current.is_global_domain
@@ -50,11 +105,11 @@ fn prepare_inner(
             r.active_cluster_name.is_some() || r.clusters.is_some() || r.active_clusters.is_some()
         }) || request.failover_timeout_in_seconds.is_some())
     {
-        return Err(BadRequestError::new(LOCAL));
+        return Err(invalid(LOCAL));
     }
     let failover = current.is_global_domain && (force_failover || request.is_failover());
     if failover && request.is_config_update() {
-        return Err(BadRequestError::new(MIXED));
+        return Err(invalid(MIXED));
     }
     let mut record = current.clone();
     let mut changed = false;
@@ -98,14 +153,15 @@ fn prepare_inner(
                 for (checksum, info) in incoming.binaries.iter().flatten() {
                     let mut info = info
                         .clone()
-                        .ok_or_else(|| BadRequestError::new("Bad binary info is missing."))?;
+                        .ok_or_else(|| invalid("Bad binary info is missing."))?;
                     info.created_time_nano = Some(now);
                     stored.insert(checksum.clone(), Some(info));
                 }
-                if stored.len() > 10 {
-                    return Err(BadRequestError::new(
-                        "Total resetBinaries cannot exceed the max limit: 10",
-                    ));
+                if stored.len() as i64 > policy.max_bad_binaries {
+                    return Err(invalid(format!(
+                        "Total resetBinaries cannot exceed the max limit: {}",
+                        policy.max_bad_binaries
+                    )));
                 }
                 // Go updateDomainConfiguration intentionally does not mark this alone
                 // as a config change. Its response can contain an unpersisted merge.
@@ -140,7 +196,7 @@ fn prepare_inner(
                 .and_then(|b| b.binaries.as_mut())
                 .and_then(|b| b.remove(checksum));
             if removed.is_none() {
-                return Err(BadRequestError::new(format!(
+                return Err(invalid(format!(
                     "Bad binary checksum {checksum} doesn't exists."
                 )));
             }
@@ -176,60 +232,62 @@ fn prepare_inner(
         }
     }
     if failover && !active_changed && !replication_changed {
-        return Err(BadRequestError::new("a failover was requested, but there was no change detected, the configuration was not updated"));
+        return Err(invalid("a failover was requested, but there was no change detected, the configuration was not updated"));
+    }
+    if failover {
+        check_cooldown(current, now, policy)?;
     }
     if failover && request.failover_timeout_in_seconds.is_some() {
         if !active_changed || record.replication.is_active_active() {
-            return Err(BadRequestError::new("Cannot start graceful failover without updating active cluster or in local domain."));
+            return Err(invalid("Cannot start graceful failover without updating active cluster or in local domain."));
         }
         if record.replication.active_cluster_name != metadata.current_cluster_name {
-            return Err(BadRequestError::new(
+            return Err(invalid(
                 "Cannot start the graceful failover from a to-be-passive cluster.",
             ));
         }
         if record.replication.active_cluster_name == current.replication.active_cluster_name {
-            return Err(BadRequestError::new(
+            return Err(invalid(
                 "Cannot start the graceful failover from an active cluster to an active cluster.",
             ));
         }
         if current.failover_end_time.is_some() {
-            return Err(BadRequestError::new(
-                "Cannot start concurrent graceful failover.",
-            ));
+            return Err(invalid("Cannot start concurrent graceful failover."));
         }
     }
     changed |= replication_changed;
     if record
         .configuration
         .workflow_execution_retention_period_in_days
-        < 1
+        < policy.min_retention_days
     {
-        return Err(BadRequestError::new(
-            "A valid retention period is not set on request.",
-        ));
+        return Err(invalid("A valid retention period is not set on request."));
     }
     if (record.configuration.history_archival_status == Some(ArchivalStatus::Enabled)
         && record.configuration.history_archival_uri.is_empty())
         || (record.configuration.visibility_archival_status == Some(ArchivalStatus::Enabled)
             && record.configuration.visibility_archival_uri.is_empty())
     {
-        return Err(BadRequestError::new(
+        return Err(invalid(
             "Invalid to enable archival without specifying a uri.",
         ));
     }
     if current.is_global_domain {
         domain_replication::validate_global(metadata, &record.replication)?;
         if changed && active_changed && !record.replication.is_active_active() {
-            return Err(BadRequestError::new(MIXED));
+            return Err(invalid(MIXED));
         }
         if !active_changed && !metadata.is_primary_cluster() {
-            return Err(BadRequestError::new(PRIMARY));
+            return Err(invalid(PRIMARY));
         }
     } else if record.replication.active_cluster_name != metadata.current_cluster_name
         || record.replication.clusters.len() != 1
         || record.replication.clusters[0].cluster_name != metadata.current_cluster_name
     {
-        return Err(BadRequestError::new("Invalid local domain clusters"));
+        return Err(invalid("Invalid local domain clusters"));
+    }
+    if current.is_global_domain && !failover {
+        check_cooldown(current, now, policy)?;
     }
     if failover {
         let version = current.failover_version.wrapping_add(i64::from(
@@ -252,6 +310,7 @@ fn prepare_inner(
                 now,
                 request.failover_timeout_in_seconds.is_some(),
                 reason,
+                policy.history_limit,
             );
         }
     }
@@ -288,6 +347,7 @@ fn append_failover_history(
     now: i64,
     graceful: bool,
     reason: Option<&str>,
+    history_limit: i64,
 ) {
     let data = record.info.data.get_or_insert_with(Default::default);
     let mut history: Vec<LegacyFailoverEvent> = data
@@ -317,7 +377,7 @@ fn append_failover_history(
             reason: reason.unwrap_or_default().into(),
         },
     );
-    history.truncate(5);
+    history.truncate(history_limit.max(0) as usize);
     data.insert(
         "FailoverHistory".into(),
         serde_json::to_string(&history)
@@ -398,8 +458,29 @@ mod tests {
             let mut response = Value::Null;
             let mut error = String::new();
             let mut writes = 0;
-            match prepare(&current, &request, &metadata, 1_700_000_000_000_000_000) {
-                Err(e) => error = e.message,
+            let mut policy: DomainPolicy =
+                serde_json::from_value(case.get("policy").cloned().unwrap_or(json!({}))).unwrap();
+            if case
+                .get("policy")
+                .and_then(|p| p.get("cooldownNanos"))
+                .is_none()
+            {
+                policy.cooldown_nanos = 0;
+            }
+            let mut current = current;
+            current.last_updated_time_nanos = case["lastUpdatedNanos"].as_i64().unwrap_or(0);
+            let mut kind = "";
+            match prepare(
+                &current,
+                &request,
+                &metadata,
+                1_700_000_000_000_000_000,
+                &policy,
+            ) {
+                Err(e) => {
+                    kind = if e.is_busy() { "busy" } else { "invalid" };
+                    error = e.message().into();
+                }
                 Ok(prepared) => {
                     response = normalize(&prepared.record);
                     if prepared.write {
@@ -409,7 +490,7 @@ mod tests {
                 }
             }
             assert_eq!(
-                json!({"error":error,"writes":writes,"response":response,"stored":normalize(&stored),"configVersion":stored.config_version,"previousVersion":stored.previous_failover_version,"endTime":stored.failover_end_time}),
+                json!({"error":error,"errorType":kind,"writes":writes,"response":response,"stored":normalize(&stored),"configVersion":stored.config_version,"previousVersion":stored.previous_failover_version,"endTime":stored.failover_end_time}),
                 case["expected"],
                 "{}",
                 case["name"]

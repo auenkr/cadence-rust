@@ -40,7 +40,7 @@ fn data_blob_out(v: cadence_api::types::DataBlob) -> cadence_proto::api::DataBlo
 
 fn data_blob_in(v: Option<cadence_proto::api::DataBlob>) -> Option<cadence_api::types::DataBlob> {
     v.map(|b| cadence_api::types::DataBlob {
-        encoding_type: None,
+        encoding_type: match b.encoding_type { 1 => Some(cadence_api::enums::EncodingType::ThriftRW), 2 => Some(cadence_api::enums::EncodingType::JSON), _ => None },
         data: b.data,
     })
 }

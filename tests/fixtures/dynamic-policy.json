@@ -1,0 +1,1251 @@
+[
+  {
+    "name": "default cooldown",
+    "key": "cooldown",
+    "domain": "a",
+    "values": []
+  },
+  {
+    "name": "default min",
+    "key": "min",
+    "domain": "a",
+    "values": []
+  },
+  {
+    "name": "default bad",
+    "key": "bad",
+    "domain": "a",
+    "values": []
+  },
+  {
+    "name": "default history",
+    "key": "history",
+    "domain": "a",
+    "values": []
+  },
+  {
+    "name": "number min 0",
+    "key": "min",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "MA=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad -1",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "LTE="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number history 0",
+    "key": "history",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "MA=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad 2.0",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mi4w"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad 2.5",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mi41"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad 2",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjIi"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad True",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "dHJ1ZQ=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad None",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "bnVsbA=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad 9223372036854775808",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "OTIyMzM3MjAzNjg1NDc3NTgwOA=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad 18446744073709551616",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "MTg0NDY3NDQwNzM3MDk1NTE2MTY="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "number bad -9223372036854776808",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "LTkyMjMzNzIwMzY4NTQ3NzY4MDg="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 0",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjAi"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 0s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjBzIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration -1s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Ii0xcyI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration +1m",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IisxbSI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1m2.5s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjFtMi41cyI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration .5ns",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Ii41bnMi"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1.9ns",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjEuOW5zIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1h2m3.000000004s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjFoMm0zLjAwMDAwMDAwNHMi"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1us",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjF1cyI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1\u00b5s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjFcdTAwYjVzIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1\u03bcs",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjFcdTAzYmNzIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration -9223372036854775808ns",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Ii05MjIzMzcyMDM2ODU0Nzc1ODA4bnMi"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 9223372036854775807ns",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjkyMjMzNzIwMzY4NTQ3NzU4MDducyI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 9223372036854775808ns",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjkyMjMzNzIwMzY4NTQ3NzU4MDhucyI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 0.0000000009s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjAuMDAwMDAwMDAwOXMi"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration  1s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IiAxcyI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1s ",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjFzICI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1d",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjFkIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjEi"
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 1.s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjEucyI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration .s",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Ii5zIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 0.333333333333333333333h",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjAuMzMzMzMzMzMzMzMzMzMzMzMzMzMzaCI="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "duration 60",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "NjA="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "bad last global",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mw=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "bad filtered overrides earlier global",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mw=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bad filtered overrides later global",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mw=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "bad first filtered wins",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mw=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bad other domain falls back",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mw=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImIi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bad malformed global ignored",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "e2Jyb2tlbg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "bad matched malformed uses builtin",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "e2Jyb2tlbg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bad invalid global type loses prior",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "ZmFsc2U="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "bad matched invalid type builtin",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "ZmFsc2U="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bad unsupported encoding skips global",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 0,
+          "data": "Mw=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "bad unsupported encoding matched builtin",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 0,
+          "data": "Mw=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bad unsupported filter ignored",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mw=="
+        },
+        "filters": [
+          {
+            "name": "unknown",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bad duplicate filters ignored",
+    "key": "bad",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mw=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          },
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cooldown last global",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjNzIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "cooldown filtered overrides earlier global",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjNzIg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cooldown filtered overrides later global",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjNzIg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "cooldown first filtered wins",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjNzIg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cooldown other domain falls back",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjNzIg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImIi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cooldown malformed global ignored",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "e2Jyb2tlbg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "cooldown matched malformed uses builtin",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "e2Jyb2tlbg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cooldown invalid global type loses prior",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "ZmFsc2U="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "cooldown matched invalid type builtin",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "ZmFsc2U="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cooldown unsupported encoding skips global",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 0,
+          "data": "IjNzIg=="
+        },
+        "filters": []
+      }
+    ]
+  },
+  {
+    "name": "cooldown unsupported encoding matched builtin",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 0,
+          "data": "IjNzIg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cooldown unsupported filter ignored",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjNzIg=="
+        },
+        "filters": [
+          {
+            "name": "unknown",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cooldown duplicate filters ignored",
+    "key": "cooldown",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjJzIg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "IjNzIg=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          },
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "min retention ignores domain filter",
+    "key": "min",
+    "domain": "a",
+    "values": [
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "Mg=="
+        },
+        "filters": []
+      },
+      {
+        "value": {
+          "encodingType": 1,
+          "data": "OQ=="
+        },
+        "filters": [
+          {
+            "name": "domainName",
+            "value": {
+              "encodingType": 1,
+              "data": "ImEi"
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

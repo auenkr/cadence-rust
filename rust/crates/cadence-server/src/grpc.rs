@@ -183,7 +183,7 @@ impl Frontend {
                     p::DomainAlreadyExistsError {},
                 ),
                 "WorkflowExecutionAlreadyStartedError" => Status::already_exists(message),
-                "ServiceBusyError" => Status::resource_exhausted(message),
+                "ServiceBusyError" => detailed_status(tonic::Code::ResourceExhausted, message, "ServiceBusyError", p::ServiceBusyError { reason: String::new() }),
                 "QueryFailedError" => detailed_status(
                     tonic::Code::InvalidArgument,
                     message,

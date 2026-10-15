@@ -67,6 +67,13 @@ func TestRustDomainUpdateFixtures(t *testing.T) {
 		Target         string            `json:"initialTarget"`
 		Request        rustUpdateRequest `json:"request"`
 		InitialHistory *string           `json:"initialHistory"`
+		LastUpdated    int64             `json:"lastUpdatedNanos"`
+		Policy         struct {
+			Cooldown int64  `json:"cooldownNanos"`
+			Min      *int32 `json:"minRetentionDays"`
+			Max      *int   `json:"maxBadBinaries"`
+			History  *int   `json:"historyLimit"`
+		} `json:"policy"`
 	}
 	if err = json.Unmarshal(data, &cases); err != nil {
 		t.Fatal(err)
@@ -100,6 +107,17 @@ func TestRustDomainUpdateFixtures(t *testing.T) {
 		if c.InitialHistory != nil {
 			initial.Info.Data["FailoverHistory"] = *c.InitialHistory
 		}
+		initial.LastUpdatedTime = c.LastUpdated
+		minimum, maximum, historyLimit := int32(1), 10, 5
+		if c.Policy.Min != nil {
+			minimum = *c.Policy.Min
+		}
+		if c.Policy.Max != nil {
+			maximum = *c.Policy.Max
+		}
+		if c.Policy.History != nil {
+			historyLimit = *c.Policy.History
+		}
 		stored := initial.DeepCopy()
 		writes := 0
 		manager.EXPECT().GetMetadata(gomock.Any()).Return(&p.GetMetadataResponse{NotificationVersion: 1}, nil)
@@ -119,7 +137,7 @@ func TestRustDomainUpdateFixtures(t *testing.T) {
 		archival := &archiver.MockArchivalMetadata{}
 		archival.On("GetHistoryConfig").Return(rustDisabledArchival{})
 		archival.On("GetVisibilityConfig").Return(rustDisabledArchival{})
-		handler := handlerImpl{domainManager: manager, domainReplicator: replicator, clusterMetadata: meta, domainAttrValidator: newAttrValidator(meta, 1), archivalMetadata: archival, timeSource: clock.NewMockedTimeSourceAt(time.Unix(1700000000, 0)), logger: log.NewNoop(), config: Config{MaxBadBinaryCount: func(string) int { return 10 }, FailoverCoolDown: func(string) time.Duration { return 0 }, FailoverHistoryMaxSize: func(string) int { return 5 }}}
+		handler := handlerImpl{domainManager: manager, domainReplicator: replicator, clusterMetadata: meta, domainAttrValidator: newAttrValidator(meta, minimum), archivalMetadata: archival, timeSource: clock.NewMockedTimeSourceAt(time.Unix(1700000000, 0)), logger: log.NewNoop(), config: Config{MaxBadBinaryCount: func(string) int { return maximum }, FailoverCoolDown: func(string) time.Duration { return time.Duration(c.Policy.Cooldown) }, FailoverHistoryMaxSize: func(string) int { return historyLimit }}}
 		request := &types.UpdateDomainRequest{Name: "domain", DeleteBadBinary: c.Request.Delete, FailoverTimeoutInSeconds: c.Request.Timeout}
 		if r := c.Request.Info; r != nil {
 			request.Description = r.Description
@@ -144,7 +162,14 @@ func TestRustDomainUpdateFixtures(t *testing.T) {
 		} else {
 			normalized = rustUpdateNormalize(&p.DomainInfo{Description: response.DomainInfo.Description, OwnerEmail: response.DomainInfo.OwnerEmail, Data: response.DomainInfo.Data}, &p.DomainConfig{Retention: response.Configuration.WorkflowExecutionRetentionPeriodInDays, EmitMetric: response.Configuration.EmitMetric, BadBinaries: *response.Configuration.BadBinaries}, &p.DomainReplicationConfig{ActiveClusterName: response.ReplicationConfiguration.ActiveClusterName, ActiveClusters: response.ReplicationConfiguration.ActiveClusters}, response.FailoverVersion)
 		}
-		expected := map[string]interface{}{"error": message, "writes": writes, "response": normalized, "stored": rustUpdateNormalize(stored.Info, stored.Config, stored.ReplicationConfig, stored.FailoverVersion), "configVersion": stored.ConfigVersion, "previousVersion": stored.PreviousFailoverVersion, "endTime": stored.FailoverEndTime}
+		errorType := ""
+		if err != nil {
+			errorType = "invalid"
+			if _, ok := err.(*types.ServiceBusyError); ok {
+				errorType = "busy"
+			}
+		}
+		expected := map[string]interface{}{"error": message, "errorType": errorType, "writes": writes, "response": normalized, "stored": rustUpdateNormalize(stored.Info, stored.Config, stored.ReplicationConfig, stored.FailoverVersion), "configVersion": stored.ConfigVersion, "previousVersion": stored.PreviousFailoverVersion, "endTime": stored.FailoverEndTime}
 		encoded, err := json.Marshal(expected)
 		if err != nil {
 			t.Fatal(err)

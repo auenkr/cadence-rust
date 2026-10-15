@@ -82,6 +82,18 @@ impl Default for AppState {
 }
 
 impl AppState {
+    pub fn domain_policy(&self, domain: &str) -> cadence_persistence::domain_update::DomainPolicy {
+        use cadence_persistence::{domain_update::DomainPolicy, dynamic_config};
+        let overlay = self.admin.dynamic_config.lock().expect("admin config lock");
+        let defaults = DomainPolicy::default();
+        DomainPolicy {
+            cooldown_nanos: dynamic_config::duration(overlay.property_values("frontend.failoverCoolDown"), Some(domain), defaults.cooldown_nanos),
+            min_retention_days: dynamic_config::integer(overlay.property_values("system.minRetentionDays"), None, i64::from(defaults.min_retention_days)) as i32,
+            max_bad_binaries: dynamic_config::integer(overlay.property_values("frontend.maxBadBinaries"), Some(domain), defaults.max_bad_binaries),
+            history_limit: dynamic_config::integer(overlay.property_values("frontend.failoverHistoryMaxSize"), Some(domain), defaults.history_limit),
+        }
+    }
+
     pub fn execution_store(
         &self,
         domain: &str,
@@ -219,8 +231,8 @@ async fn register_domain(
     if req.name.len() > state.limits.ids.domain_max {
         return bad_request(BadRequestError::new("Domain length exceeds limit."));
     }
-    if req.workflow_execution_retention_period_in_days <= 0 {
-        return bad_request(BadRequestError::new("RetentionDays is invalid."));
+    if req.workflow_execution_retention_period_in_days < state.domain_policy(&req.name).min_retention_days {
+        return bad_request(BadRequestError::new("A valid retention period is not set on request."));
     }
     let info = cadence_api::types::DomainInfo {
         name: req.name.clone(),
@@ -367,10 +379,11 @@ async fn failover_domain(
     }
     match state
         .domains
-        .failover(&req, &state.current_cluster_name, &state.cluster_metadata)
+        .failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name))
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FailoverError::Busy(message)) => error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message),
         Err(cadence_persistence::FailoverError::Invalid(message)) => {
             error_response("BadRequestError", StatusCode::BAD_REQUEST, message)
         }
@@ -423,9 +436,10 @@ async fn update_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.update(&req, &state.cluster_metadata) {
+    match state.domains.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FailoverError::Busy(message)) => error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message),
         Err(cadence_persistence::FailoverError::Invalid(message)) => bad_request(BadRequestError::new(message)),
     }
 }

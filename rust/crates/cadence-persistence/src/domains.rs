@@ -91,6 +91,16 @@ pub enum FailoverError {
     NotFound(#[from] EntityNotExistsError),
     #[error("{0}")]
     Invalid(String),
+    #[error("{0}")]
+    Busy(String),
+}
+impl From<crate::domain_update::UpdateError> for FailoverError {
+    fn from(error: crate::domain_update::UpdateError) -> Self {
+        match error {
+            crate::domain_update::UpdateError::Invalid(e) => Self::Invalid(e.message),
+            crate::domain_update::UpdateError::Busy(e) => Self::Busy(e.message),
+        }
+    }
 }
 
 fn now_nanos() -> i64 {
@@ -196,13 +206,14 @@ impl InMemoryDomainStore {
         &self,
         req: &UpdateDomainRequest,
         metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
     ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
         let mut inner = self.inner.write().expect("domain store lock");
         let current = inner.by_name.get(&req.name).ok_or_else(|| {
             EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
         })?;
-        let prepared = crate::domain_update::prepare(current, req, metadata, now_nanos())
-            .map_err(|e| FailoverError::Invalid(e.message))?;
+        let prepared = crate::domain_update::prepare(current, req, metadata, now_nanos(), policy)
+            .map_err(FailoverError::from)?;
         let mut candidate = prepared.record;
         if prepared.failover && prepared.write {
             candidate.failover_audit.push(FailoverAuditEntry {
@@ -240,6 +251,7 @@ impl InMemoryDomainStore {
         req: &cadence_api::types::FailoverDomainRequest,
         current_cluster: &str,
         metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
     ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
         use cadence_api::enums::FailoverType;
         let mut inner = self.inner.write().expect("domain store lock");
@@ -316,8 +328,9 @@ impl InMemoryDomainStore {
             metadata,
             now_nanos(),
             req.reason.as_deref(),
+            policy,
         )
-        .map_err(|e| FailoverError::Invalid(e.message))?;
+        .map_err(FailoverError::from)?;
         let mut candidate = prepared.record;
         candidate.failover_audit.push(FailoverAuditEntry {
             id: uuid::Uuid::new_v4().to_string(),
@@ -757,6 +770,10 @@ mod tests {
         (info, cfg, rep)
     }
 
+    fn test_policy() -> crate::domain_update::DomainPolicy {
+        crate::domain_update::DomainPolicy { cooldown_nanos: 0, ..Default::default() }
+    }
+
     fn cluster_metadata() -> cadence_common::cluster::Metadata {
         use cadence_common::cluster::{Metadata, ClusterInformation};
         Metadata {
@@ -783,7 +800,7 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = global_sample("g", "uuid-g");
         store.create(info, cfg, rep, true).unwrap();
-        let resp = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata()).unwrap();
+        let resp = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata(), &test_policy()).unwrap();
         assert_eq!(
             resp.replication_configuration.unwrap().active_cluster_name,
             "standby"
@@ -803,7 +820,7 @@ mod tests {
             "standby"
         );
         // An explicit same-cluster target is accepted without advancing an AP version.
-        let repeated = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata()).unwrap();
+        let repeated = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata(), &test_policy()).unwrap();
         assert_eq!(repeated.failover_version, 1);
     }
 
@@ -812,25 +829,25 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = sample("local", "uuid-local");
         store.create(info, cfg, rep, false).unwrap();
-        let err = store.failover(&failover_req("local", "other"), "other", &cluster_metadata()).unwrap_err();
+        let err = store.failover(&failover_req("local", "other"), "other", &cluster_metadata(), &test_policy()).unwrap_err();
         assert!(matches!(err, FailoverError::Invalid(_)));
         let err = store
-            .failover(&failover_req("missing", "other"), "other", &cluster_metadata())
+            .failover(&failover_req("missing", "other"), "other", &cluster_metadata(), &test_policy())
             .unwrap_err();
         assert!(matches!(err, FailoverError::NotFound(_)));
 
         let (info, cfg, rep) = global_sample("g2", "uuid-g2");
         store.create(info, cfg, rep, true).unwrap();
         // Wrong destination cluster without the skip flag.
-        let err = store.failover(&failover_req("g2", "standby"), "active", &cluster_metadata()).unwrap_err();
+        let err = store.failover(&failover_req("g2", "standby"), "active", &cluster_metadata(), &test_policy()).unwrap_err();
         assert!(matches!(err, FailoverError::Invalid(_)));
         // Skip flag accepts from any cluster.
         let mut req = failover_req("g2", "standby");
         req.skip_destination_cluster_check = true;
-        store.failover(&req, "active", &cluster_metadata()).unwrap();
+        store.failover(&req, "active", &cluster_metadata(), &test_policy()).unwrap();
         let mut back = failover_req("g2", "active");
         back.skip_destination_cluster_check = true;
-        assert_eq!(store.failover(&back, "active", &cluster_metadata()).unwrap().failover_version, 10);
+        assert_eq!(store.failover(&back, "active", &cluster_metadata(), &test_policy()).unwrap().failover_version, 10);
         // Paging: newest first, one per page.
         let (first, next) = store.failover_history("uuid-g2", 1, &[]).unwrap();
         assert_eq!(first.len(), 1);
@@ -877,7 +894,7 @@ mod tests {
                     ..Default::default()
                 }),
                 ..Default::default()
-            }, &cluster_metadata())
+            }, &cluster_metadata(), &test_policy())
             .unwrap();
         let info = updated.domain_info.unwrap();
         assert_eq!(info.description, "new");

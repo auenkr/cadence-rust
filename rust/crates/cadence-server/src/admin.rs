@@ -63,6 +63,11 @@ impl DynamicConfigOverlay {
         self.map(operational).get(name)?.iter().find(|v| filters_match(v, filters)).cloned()
     }
 
+    /// Ordered normal config entries for runtime property resolution.
+    pub fn property_values(&self, name: &str) -> &[DynamicConfigValue] {
+        self.normal.get(name).map(Vec::as_slice).unwrap_or(&[])
+    }
+
     /// Replace the value list, mirroring the config-store client's update.
     pub fn update(&mut self, operational: bool, name: &str, values: Vec<DynamicConfigValue>) {
         self.map_mut(operational).insert(name.to_string(), values);
@@ -72,7 +77,10 @@ impl DynamicConfigOverlay {
     /// mirroring the config-store client's restore.
     pub fn restore(&mut self, operational: bool, name: &str, filters: &[DynamicConfigFilter]) {
         if let Some(values) = self.map_mut(operational).get_mut(name) {
-            values.retain(|v| !filters_match(v, filters));
+            values.retain(|v| {
+                if filters.is_empty() { return !v.filters.is_empty(); }
+                v.filters.is_empty() || !filters_match(v, filters)
+            });
         }
     }
 

@@ -939,6 +939,9 @@ async fn refresh_tasks_and_diagnose_behave() {
 #[tokio::test]
 async fn failover_moves_global_domain_and_lists_history() {
     let mut state = AppState::default();
+    state.admin.dynamic_config.lock().unwrap().update(false, "frontend.failoverCoolDown", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob { encoding_type: Some(cadence_api::enums::EncodingType::JSON), data: br#""0s""#.to_vec() }), filters: vec![],
+    }]);
     state.cluster_metadata.clusters.insert("remote".into(), cadence_common::cluster::ClusterInformation {
         enabled: true, initial_failover_version: 2, ..Default::default()
     });

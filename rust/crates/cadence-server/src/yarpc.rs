@@ -101,6 +101,11 @@ impl AppError {
         }
     }
 
+    fn busy(message: String) -> Self {
+        let error = cadence_api::errors::ServiceBusyError::new(message.clone());
+        Self { exc_name: "ServiceBusyError", value: error.to_thrift(), message }
+    }
+
     fn entity_not_exists(message: String) -> Self {
         let e = EntityNotExistsError::new(message.clone());
         Self {
@@ -209,9 +214,9 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
             "Domain not set on request.".to_string(),
         ));
     }
-    if req.workflow_execution_retention_period_in_days <= 0 {
+    if req.workflow_execution_retention_period_in_days < state.domain_policy(&req.name).min_retention_days {
         return Err(AppError::bad_request(
-            "RetentionDays is invalid.".to_string(),
+            "A valid retention period is not set on request.".to_string(),
         ));
     }
     let info = cadence_api::types::DomainInfo {
@@ -397,9 +402,10 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domains.update(&req, &state.cluster_metadata) {
+    match state.domains.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::FailoverError::NotFound(e)) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FailoverError::Busy(message)) => Err(AppError::busy(message)),
         Err(cadence_persistence::FailoverError::Invalid(message)) => Err(AppError::bad_request(message)),
     }
 }
@@ -832,11 +838,12 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     validation::validate_failover_domain_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    match state.domains.failover(&req, &state.current_cluster_name, &state.cluster_metadata) {
+    match state.domains.failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name)) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::FailoverError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
+        Err(cadence_persistence::FailoverError::Busy(message)) => Err(AppError::busy(message)),
         Err(cadence_persistence::FailoverError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }

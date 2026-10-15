@@ -4,6 +4,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -52,6 +53,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -104,6 +106,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "A valid retention period is not set on request.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -142,6 +145,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "A valid retention period is not set on request.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -177,6 +181,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -233,6 +238,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -285,6 +291,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -337,6 +344,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -389,6 +397,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Local domains cannot perform failovers or change replication configuration",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -424,6 +433,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Local domains cannot perform failovers or change replication configuration",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -459,6 +469,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Local domains cannot perform failovers or change replication configuration",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -494,6 +505,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Local domains cannot perform failovers or change replication configuration",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -527,6 +539,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -592,6 +605,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -663,6 +677,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -703,6 +718,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Bad binary checksum missing doesn't exists.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -739,6 +755,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Total resetBinaries cannot exceed the max limit: 10",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -811,6 +828,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -864,6 +882,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Cluster is not primary cluster, cannot do domain registration or domain update.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -899,6 +918,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Cannot set active cluster to current cluster when other parameters are set.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -937,6 +957,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -991,6 +1012,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -1045,6 +1067,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "ActiveClusterName is required for all global domains.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -1080,6 +1103,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Active cluster is not contained in all clusters.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -1119,6 +1143,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Cannot set active cluster to current cluster when other parameters are set.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -1162,6 +1187,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": {
@@ -1247,6 +1273,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Cannot set active cluster to current cluster when other parameters are set.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -1312,6 +1339,7 @@
       "configVersion": 1,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": {
@@ -1421,6 +1449,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": {
@@ -1519,6 +1548,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Cannot start graceful failover without updating active cluster or in local domain.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -1581,6 +1611,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Cannot start the graceful failover from an active cluster to an active cluster.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -1617,6 +1648,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "Cannot start the graceful failover from a to-be-passive cluster.",
+      "errorType": "invalid",
       "previousVersion": -1,
       "response": null,
       "stored": {
@@ -1653,6 +1685,7 @@
       "configVersion": 0,
       "endTime": 1700000010000000000,
       "error": "",
+      "errorType": "",
       "previousVersion": 0,
       "response": {
         "active": null,
@@ -1709,6 +1742,7 @@
       "configVersion": 0,
       "endTime": null,
       "error": "",
+      "errorType": "",
       "previousVersion": -1,
       "response": {
         "active": null,
@@ -1753,6 +1787,953 @@
     "global": true,
     "initialHistory": "[{\"eventTime\":\"2020-01-01T00:00:00Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:01Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:02Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:03Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:04Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:05Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"}]",
     "name": "legacy history limit and Go JSON escaping",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "b"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Domain update too frequent.",
+      "errorType": "busy",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "lastUpdatedNanos": 1699999940000000001,
+    "name": "before boundary",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 1
+    },
+    "global": true,
+    "lastUpdatedNanos": 1699999940000000000,
+    "name": "exact boundary",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 1
+    },
+    "global": true,
+    "lastUpdatedNanos": 1699999939999999999,
+    "name": "after boundary",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Domain update too frequent.",
+      "errorType": "busy",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "lastUpdatedNanos": 1700000000000000000,
+    "name": "immediate default cooldown",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Domain update too frequent.",
+      "errorType": "busy",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "lastUpdatedNanos": 1700000000000000000,
+    "name": "cooldown precedes graceful validation",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "b"
+      },
+      "failoverTimeoutInSeconds": 10
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Cannot set active cluster to current cluster when other parameters are set.",
+      "errorType": "invalid",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "lastUpdatedNanos": 1700000000000000000,
+    "name": "mixed precedes cooldown",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      },
+      "replicationConfiguration": {
+        "activeClusterName": "b"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "A valid retention period is not set on request.",
+      "errorType": "invalid",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "lastUpdatedNanos": 1700000000000000000,
+    "name": "retention validation precedes config cooldown",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {
+      "configuration": {
+        "workflowExecutionRetentionPeriodInDays": 0
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Domain update too frequent.",
+      "errorType": "busy",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "lastUpdatedNanos": 1700000000000000000,
+    "name": "global noop is throttled",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {}
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "global": false,
+    "lastUpdatedNanos": 1700000000000000000,
+    "name": "local updates bypass cooldown",
+    "policy": {
+      "cooldownNanos": 60000000000
+    },
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 1
+    },
+    "global": true,
+    "lastUpdatedNanos": 1700000000000000000,
+    "name": "negative cooldown accepted",
+    "policy": {
+      "cooldownNanos": -1
+    },
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "A valid retention period is not set on request.",
+      "errorType": "invalid",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "name": "minimum override 8 retention 7",
+    "policy": {
+      "minRetentionDays": 8
+    },
+    "request": {
+      "configuration": {
+        "workflowExecutionRetentionPeriodInDays": 7
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 8,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 8,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "name": "minimum override 8 retention 8",
+    "policy": {
+      "minRetentionDays": 8
+    },
+    "request": {
+      "configuration": {
+        "workflowExecutionRetentionPeriodInDays": 8
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 0,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 0,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "name": "minimum override 0 retention 0",
+    "policy": {
+      "minRetentionDays": 0
+    },
+    "request": {
+      "configuration": {
+        "workflowExecutionRetentionPeriodInDays": 0
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 0,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 0,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "name": "minimum override -1 retention 0",
+    "policy": {
+      "minRetentionDays": -1
+    },
+    "request": {
+      "configuration": {
+        "workflowExecutionRetentionPeriodInDays": 0
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Total resetBinaries cannot exceed the max limit: 1",
+      "errorType": "invalid",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "name": "bad binary maximum 1",
+    "policy": {
+      "maxBadBinaries": 1
+    },
+    "request": {
+      "configuration": {
+        "emitMetric": false,
+        "badBinaries": {
+          "binaries": {
+            "new": {
+              "reason": "new"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "new": {
+            "reason": "new",
+            "createdTimeNano": 1700000000000000000
+          },
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": false,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "new": {
+            "reason": "new",
+            "createdTimeNano": 1700000000000000000
+          },
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": false,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "name": "bad binary maximum 2",
+    "policy": {
+      "maxBadBinaries": 2
+    },
+    "request": {
+      "configuration": {
+        "emitMetric": false,
+        "badBinaries": {
+          "binaries": {
+            "new": {
+              "reason": "new"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Total resetBinaries cannot exceed the max limit: -1",
+      "errorType": "invalid",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "name": "bad binary maximum -1",
+    "policy": {
+      "maxBadBinaries": -1
+    },
+    "request": {
+      "configuration": {
+        "emitMetric": false,
+        "badBinaries": {
+          "binaries": {
+            "new": {
+              "reason": "new"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "b",
+        "version": 2
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "b",
+        "version": 2
+      },
+      "writes": 1
+    },
+    "global": true,
+    "name": "history limit 0",
+    "policy": {
+      "historyLimit": 0
+    },
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "b"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "",
+      "errorType": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"a\",\"toCluster\":\"b\",\"failoverType\":\"Force\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "b",
+        "version": 2
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"a\",\"toCluster\":\"b\",\"failoverType\":\"Force\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "b",
+        "version": 2
+      },
+      "writes": 1
+    },
+    "global": true,
+    "name": "history limit 1",
+    "policy": {
+      "historyLimit": 1
+    },
     "request": {
       "replicationConfiguration": {
         "activeClusterName": "b"

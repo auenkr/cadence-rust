@@ -9,6 +9,7 @@
 
 pub mod backoff;
 pub mod cluster;
+pub mod duration;
 pub mod cron;
 pub mod jitter;
 pub mod retry;
