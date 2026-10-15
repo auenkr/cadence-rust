@@ -56,6 +56,7 @@ def main():
         run("workspace-tests", ["cargo", "test", "--manifest-path", manifest, "--workspace"])
         run("workspace-clippy", ["cargo", "clippy", "--manifest-path", manifest,
                                  "--workspace", "--all-targets", "--", "-D", "warnings"])
+    run("matching-storage-differential", [sys.executable, str(root / "tests/run-matching-storage-compat.py")])
     run("matching-differential", [sys.executable, str(root / "tests/run-matching-compat.py")])
     run("scheduler-differential", [sys.executable, str(root / "tests/run-scheduler-compat.py")])
     run("version-history-differential", [sys.executable, str(root / "tests/run-version-history-compat.py")])

@@ -1,0 +1,327 @@
+//! Go SQL matching blobs (sqlblobs.thrift), with exact optional containers.
+//! These are raw Thrift structs, unlike history branch tokens (no 0x59 prefix).
+use cadence_thrift::{value::read_struct, Error, Reader, Result, Struct, TType, Value, Writer};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskData {
+    pub workflow_id: String,
+    pub run_id: Option<Vec<u8>>,
+    pub schedule_id: i64,
+    pub expiry_nanos: i64,
+    pub created_nanos: i64,
+    pub partition_config: Option<BTreeMap<String, String>>,
+}
+/// time.Time{}.UnixNano(), as written by the pinned Go SQL serializer.
+pub const GO_ZERO_TIME_NANOS: i64 = -6_795_364_578_871_345_152;
+impl TaskData {
+    /// Go SQL CreateTasks computes expiry at persistence time, not enqueue time.
+    /// Nonpositive schedule-to-start timeout means no expiry (Go zero time).
+    pub fn at_creation(mut self, now_nanos: i64, schedule_to_start_seconds: i32) -> Self {
+        self.created_nanos = now_nanos;
+        self.expiry_nanos = if schedule_to_start_seconds > 0 {
+            now_nanos.wrapping_add(i64::from(schedule_to_start_seconds) * 1_000_000_000)
+        } else {
+            GO_ZERO_TIME_NANOS
+        };
+        self
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Partition {
+    pub isolation_groups: Option<Vec<String>>,
+}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartitionConfig {
+    pub version: i64,
+    pub num_read_partitions: i32,
+    pub num_write_partitions: i32,
+    pub read_partitions: Option<BTreeMap<i32, Partition>>,
+    pub write_partitions: Option<BTreeMap<i32, Partition>>,
+}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskListData {
+    pub kind: i16,
+    pub ack_level: i64,
+    pub expiry_nanos: i64,
+    pub last_updated_nanos: i64,
+    pub adaptive_partition_config: Option<PartitionConfig>,
+}
+
+fn i64_field(w: &mut Writer, id: i16, value: i64) {
+    w.write_field_begin(TType::I64, id);
+    w.write_i64(value);
+}
+fn i32_field(w: &mut Writer, id: i16, value: i32) {
+    w.write_field_begin(TType::I32, id);
+    w.write_i32(value);
+}
+pub fn encode_task(data: &TaskData) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.write_field_begin(TType::String, 10);
+    w.write_string(&data.workflow_id);
+    if let Some(run) = &data.run_id {
+        w.write_field_begin(TType::String, 12);
+        w.write_bytes(run);
+    }
+    i64_field(&mut w, 13, data.schedule_id);
+    i64_field(&mut w, 14, data.expiry_nanos);
+    i64_field(&mut w, 15, data.created_nanos);
+    if let Some(config) = &data.partition_config {
+        w.write_field_begin(TType::Map, 17);
+        w.write_map_begin(TType::String, TType::String, config.len());
+        for (key, value) in config {
+            w.write_string(key);
+            w.write_string(value);
+        }
+    }
+    w.write_field_stop();
+    w.into_bytes()
+}
+fn write_config(w: &mut Writer, config: &PartitionConfig) {
+    i64_field(w, 10, config.version);
+    i32_field(w, 12, config.num_read_partitions);
+    i32_field(w, 14, config.num_write_partitions);
+    for (id, map) in [
+        (16, &config.read_partitions),
+        (18, &config.write_partitions),
+    ] {
+        if let Some(map) = map {
+            w.write_field_begin(TType::Map, id);
+            w.write_map_begin(TType::I32, TType::Struct, map.len());
+            for (partition, metadata) in map {
+                w.write_i32(*partition);
+                if let Some(groups) = &metadata.isolation_groups {
+                    w.write_field_begin(TType::List, 10);
+                    w.write_list_begin(TType::String, groups.len());
+                    for group in groups {
+                        w.write_string(group);
+                    }
+                }
+                w.write_field_stop();
+            }
+        }
+    }
+    w.write_field_stop();
+}
+pub fn encode_task_list(data: &TaskListData) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.write_field_begin(TType::I16, 10);
+    w.write_i16(data.kind);
+    i64_field(&mut w, 12, data.ack_level);
+    i64_field(&mut w, 14, data.expiry_nanos);
+    i64_field(&mut w, 16, data.last_updated_nanos);
+    if let Some(config) = &data.adaptive_partition_config {
+        w.write_field_begin(TType::Struct, 18);
+        write_config(&mut w, config);
+    }
+    w.write_field_stop();
+    w.into_bytes()
+}
+fn i64_value(s: &Struct, id: i16) -> i64 {
+    match s.get(id) {
+        Some(Value::I64(value)) => *value,
+        _ => 0,
+    }
+}
+fn i32_value(s: &Struct, id: i16) -> i32 {
+    match s.get(id) {
+        Some(Value::I32(value)) => *value,
+        _ => 0,
+    }
+}
+fn string(value: &Value) -> Result<String> {
+    match value {
+        Value::Bytes(data) => Ok(String::from_utf8(data.clone())?),
+        _ => Err(Error::Invalid("expected string in matching blob".into())),
+    }
+}
+pub fn decode_task(bytes: &[u8]) -> Result<TaskData> {
+    let s = read_struct(&mut Reader::new(bytes))?;
+    let partition_config = match s.get(17) {
+        Some(Value::Map(values)) => Some(
+            values
+                .iter()
+                .map(|(k, v)| Ok((string(k)?, string(v)?)))
+                .collect::<Result<_>>()?,
+        ),
+        _ => None,
+    };
+    Ok(TaskData {
+        workflow_id: match s.get(10) {
+            Some(v @ Value::Bytes(_)) => string(v)?,
+            _ => String::new(),
+        },
+        run_id: match s.get(12) {
+            Some(Value::Bytes(bytes)) => Some(bytes.clone()),
+            _ => None,
+        },
+        schedule_id: i64_value(&s, 13),
+        expiry_nanos: i64_value(&s, 14),
+        created_nanos: i64_value(&s, 15),
+        partition_config,
+    })
+}
+fn read_partitions(s: &Struct, id: i16) -> Result<Option<BTreeMap<i32, Partition>>> {
+    let Some(Value::Map(values)) = s.get(id) else {
+        return Ok(None);
+    };
+    values
+        .iter()
+        .map(|(key, value)| {
+            let (Value::I32(key), Value::Struct(metadata)) = (key, value) else {
+                return Err(Error::Invalid("invalid matching partition entry".into()));
+            };
+            let isolation_groups = match metadata.get(10) {
+                Some(Value::List(values)) => {
+                    Some(values.iter().map(string).collect::<Result<_>>()?)
+                }
+                _ => None,
+            };
+            Ok((*key, Partition { isolation_groups }))
+        })
+        .collect::<Result<_>>()
+        .map(Some)
+}
+pub fn decode_task_list(bytes: &[u8]) -> Result<TaskListData> {
+    let s = read_struct(&mut Reader::new(bytes))?;
+    let adaptive_partition_config = match s.get(18) {
+        Some(Value::Struct(config)) => Some(PartitionConfig {
+            version: i64_value(config, 10),
+            num_read_partitions: i32_value(config, 12),
+            num_write_partitions: i32_value(config, 14),
+            read_partitions: read_partitions(config, 16)?,
+            write_partitions: read_partitions(config, 18)?,
+        }),
+        _ => None,
+    };
+    Ok(TaskListData {
+        kind: match s.get(10) {
+            Some(Value::I16(kind)) => *kind,
+            _ => 0,
+        },
+        ack_level: i64_value(&s, 12),
+        expiry_nanos: i64_value(&s, 14),
+        last_updated_nanos: i64_value(&s, 16),
+        adaptive_partition_config,
+    })
+}
+
+/// SQL data_encoding values used by the pinned Go parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlobEncoding {
+    ThriftRW,
+    ThriftRWSnappy,
+}
+impl BlobEncoding {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "thriftrw" => Ok(Self::ThriftRW),
+            "thriftrw_snappy" => Ok(Self::ThriftRWSnappy),
+            _ => Err(Error::Invalid(format!(
+                "unsupported matching blob encoding {value}"
+            ))),
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ThriftRW => "thriftrw",
+            Self::ThriftRWSnappy => "thriftrw_snappy",
+        }
+    }
+    pub fn encode(self, bytes: &[u8]) -> Result<Vec<u8>> {
+        match self {
+            Self::ThriftRW => Ok(bytes.to_vec()),
+            Self::ThriftRWSnappy => snap::raw::Encoder::new()
+                .compress_vec(bytes)
+                .map_err(|error| Error::Invalid(error.to_string())),
+        }
+    }
+    pub fn decode(self, bytes: &[u8]) -> Result<Vec<u8>> {
+        match self {
+            Self::ThriftRW => Ok(bytes.to_vec()),
+            Self::ThriftRWSnappy => snap::raw::Decoder::new()
+                .decompress_vec(bytes)
+                .map_err(|error| Error::Invalid(error.to_string())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn unhex(value: &str) -> Vec<u8> {
+        value
+            .as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|chunk| u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).unwrap())
+            .collect()
+    }
+    #[test]
+    fn matching_blob_create_expiry_matches_go_sql() {
+        let now = 1_700_000_000_123_456_789;
+        assert_eq!(
+            TaskData::default().at_creation(now, 0).expiry_nanos,
+            GO_ZERO_TIME_NANOS
+        );
+        assert_eq!(
+            TaskData::default().at_creation(now, -1).expiry_nanos,
+            GO_ZERO_TIME_NANOS
+        );
+        let data = TaskData::default().at_creation(now, 3);
+        assert_eq!(data.created_nanos, now);
+        assert_eq!(data.expiry_nanos, now + 3_000_000_000);
+    }
+
+    #[test]
+    fn matching_blob_original_go_fixtures() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/matching-blobs.json"
+        ))
+        .unwrap();
+        for case in cases.as_array().unwrap() {
+            let plain = unhex(case["thrift_hex"].as_str().unwrap());
+            assert_eq!(
+                BlobEncoding::ThriftRWSnappy
+                    .decode(&unhex(case["snappy_hex"].as_str().unwrap()))
+                    .unwrap(),
+                plain
+            );
+            assert_eq!(
+                BlobEncoding::ThriftRWSnappy
+                    .decode(&BlobEncoding::ThriftRWSnappy.encode(&plain).unwrap())
+                    .unwrap(),
+                plain
+            );
+            if case["kind"] == "task" {
+                let data: TaskData = serde_json::from_value(case["data"].clone()).unwrap();
+                assert_eq!(decode_task(&plain).unwrap(), data);
+                assert_eq!(encode_task(&data), plain);
+            } else {
+                let data: TaskListData = serde_json::from_value(case["data"].clone()).unwrap();
+                assert_eq!(decode_task_list(&plain).unwrap(), data);
+                assert_eq!(encode_task_list(&data), plain);
+            }
+        }
+    }
+    #[test]
+    fn matching_blob_unknown_fields_and_malformed_input() {
+        let mut bytes = encode_task(&TaskData::default());
+        bytes.pop();
+        let mut extra = Writer::new();
+        extra.write_field_begin(TType::String, 99);
+        extra.write_string("future field");
+        extra.write_field_stop();
+        bytes.extend(extra.into_bytes());
+        assert_eq!(decode_task(&bytes).unwrap(), TaskData::default());
+        for end in 0..bytes.len() {
+            assert!(decode_task(&bytes[..end]).is_err());
+        }
+        assert!(BlobEncoding::ThriftRWSnappy.decode(&[255]).is_err());
+        assert!(BlobEncoding::parse("json").is_err());
+    }
+}

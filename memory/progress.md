@@ -1457,3 +1457,22 @@ pass (284 tests); committed two checkpoints and pushed.
   /tmp/cadence-matching-wire-final/results.json and outer exit 0. Isolated Rust
   server and both Go baseline servers were cleaned up. Work is a Matching
   checkpoint; independent durable queue/History delivery/mixed topology remain.
+
+## 2026-10-15: independent Matching SQLite persistence
+
+- Added matching_blob for Go SQL task/list/config structs, raw Thrift and Snappy,
+  preserving nanoseconds, UUID bytes and optional containers. Eight original-Go
+  encoder fixtures match bytes; compressed Go input and Rust output interoperate.
+- Added SqliteTaskStore on exact Go task_lists/tasks schema: lease fencing,
+  atomic batch append, ordered reads/counts, metadata expiry, deletes and restart
+  recovery. Server selection and Matching RPC integration are NOT done yet.
+- Actual Go SQLite TaskStore and Rust exchange a database bidirectionally, with
+  mixed encodings, config writes, ownership change, stale-write rollback and
+  bounded delete. This uses real SQLite and real Go serialization, not mocks.
+- Final full compatibility runner PASSED 19 stages, 303 workspace tests,
+  strict clippy, all included Go differential checks, standalone/config/listener
+  checks, public/internal gRPC and existing Go SDK TChannel. Evidence:
+  /tmp/cadence-matching-storage-final/results.json and outer exit 0. Server cleaned up.
+- Source ledger now has 25 partial and 2275 review-required Go files, none complete.
+- Continuing Matching queue writer/reader next. A new matching_queue.rs draft is
+  not exported yet and was not compiled by this checkpoint. Preserve this boundary.

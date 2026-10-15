@@ -6,6 +6,18 @@ tests. The active goal is incomplete. Do not equate RPC adapter coverage with
 behavioral compatibility. Keep working autonomously; use tmux cadence-rust for
 long processes. Save progress, commit, and push after compaction.
 
+## Active durable Matching storage work
+
+Read matching-storage-next.md. New matching_blob/matching_sqlite modules port Go
+SQL blob formats and the two exact SQLite task tables, with lease fencing and
+atomic queue persistence operations. Focused tests and actual-Go bidirectional
+same-database interop PASSED (/tmp/cadence-matching-storage-interop2.log, exit 0).
+Final full runner PASSED 19 stages, 303 workspace tests and strict clippy:
+/tmp/cadence-matching-storage-final/results.json, outer exit 0. Backend is NOT selected by the server or wired to
+Matching handlers; matching-owned writer/reader + History RPC clients are next.
+A draft matching_queue.rs is being developed but was NOT exported/compiled in
+that storage-checkpoint run; validate it separately before treating it as done.
+
 ## Active service-by-service migration (2026-10-15)
 
 User now requires completing and mixed-Go-service validating one role at a time.

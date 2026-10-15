@@ -1,0 +1,482 @@
+//! Matching-owned task persistence on Go's SQLite task_lists/tasks schema.
+//! This store is independent of the workflow execution engine. The standalone
+//! Matching RPC delivery loop is a separate consumer of this persistence API.
+use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskListData};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use std::{path::Path, sync::Mutex, time::Duration};
+use uuid::Uuid;
+
+#[derive(Debug, thiserror::Error)]
+pub enum StorageError {
+    #[error("{0}")]
+    ConditionFailed(String),
+    #[error("task list does not exist")]
+    NotFound,
+    #[error(transparent)]
+    Sql(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Blob(#[from] cadence_thrift::Error),
+    #[error("missing limit parameter")]
+    MissingLimit,
+    #[error("delete failed: {0} rows affected instead of 1")]
+    DeleteCount(usize),
+}
+pub type Result<T> = std::result::Result<T, StorageError>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskListKey {
+    pub domain_id: Uuid,
+    pub name: String,
+    /// Go persistence types: 0 decision, 1 activity (not protobuf enum values).
+    pub task_type: i32,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskListRecord {
+    pub range_id: i64,
+    pub data: TaskListData,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllocatedTask {
+    pub task_id: i64,
+    pub data: TaskData,
+}
+
+pub struct SqliteTaskStore {
+    connection: Mutex<Connection>,
+    encoding: BlobEncoding,
+}
+impl SqliteTaskStore {
+    /// Open a database whose Cadence schema was already installed. No schema
+    /// changes or execution-store access occur here.
+    pub fn open(path: impl AsRef<Path>, encoding: BlobEncoding) -> Result<Self> {
+        let connection =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        connection.busy_timeout(Duration::from_secs(10))?;
+        connection.prepare("SELECT shard_id, domain_id, name, task_type, range_id, data, data_encoding FROM task_lists LIMIT 0")?;
+        connection.prepare("SELECT domain_id, task_list_name, task_type, task_id, data, data_encoding FROM tasks LIMIT 0")?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+            encoding,
+        })
+    }
+    /// Bootstrap only Matching's two tables in a NEW database. Existing Cadence
+    /// databases must use open(), leaving schema management to Cadence tooling.
+    pub fn create(path: impl AsRef<Path>, encoding: BlobEncoding) -> Result<Self> {
+        let connection = Connection::open_with_flags(
+            path.as_ref(),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+        )?;
+        connection.busy_timeout(Duration::from_secs(10))?;
+        connection.execute_batch("BEGIN IMMEDIATE")?;
+        let installed = connection.execute_batch(include_str!("../../../sql/matching-sqlite.sql"));
+        match installed {
+            Ok(()) => connection.execute_batch("COMMIT")?,
+            Err(error) => {
+                connection.execute_batch("ROLLBACK")?;
+                return Err(error.into());
+            }
+        }
+        drop(connection);
+        Self::open(path, encoding)
+    }
+    fn read_list(connection: &Connection, key: &TaskListKey) -> Result<Option<TaskListRecord>> {
+        let row: Option<(i64, Vec<u8>, String)> = connection.query_row(
+            "SELECT range_id, data, data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=? AND name=? AND task_type=?",
+            params![key.domain_id.as_bytes().as_slice(), key.name, key.task_type],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+        row.map(|(range_id, data, encoding)| {
+            Ok(TaskListRecord {
+                range_id,
+                data: blob::decode_task_list(&BlobEncoding::parse(&encoding)?.decode(&data)?)?,
+            })
+        })
+        .transpose()
+    }
+    pub fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
+        Self::read_list(&self.connection.lock().expect("matching SQL lock"), key)?
+            .ok_or(StorageError::NotFound)
+    }
+    fn fence(tx: &Transaction<'_>, key: &TaskListKey, expected: i64) -> Result<()> {
+        let range: Option<i64> = tx.query_row(
+            "SELECT range_id FROM task_lists WHERE shard_id=0 AND domain_id=? AND name=? AND task_type=?",
+            params![key.domain_id.as_bytes().as_slice(),key.name,key.task_type],|row|row.get(0)).optional()?;
+        match range {
+            Some(range) if range == expected => Ok(()),
+            Some(range) => Err(StorageError::ConditionFailed(format!(
+                "Task list range ID was {range} when it was should have been {expected}"
+            ))),
+            None => Err(StorageError::ConditionFailed(
+                "Task list does not exist.".into(),
+            )),
+        }
+    }
+    fn write_list(
+        &self,
+        tx: &Transaction<'_>,
+        key: &TaskListKey,
+        range: i64,
+        data: &TaskListData,
+    ) -> Result<()> {
+        let bytes = self.encoding.encode(&blob::encode_task_list(data))?;
+        tx.execute("UPDATE task_lists SET range_id=?, data=?, data_encoding=? WHERE shard_id=0 AND domain_id=? AND name=? AND task_type=?",
+            params![range,bytes,self.encoding.as_str(),key.domain_id.as_bytes().as_slice(),key.name,key.task_type])?;
+        Ok(())
+    }
+    /// Acquire/renew a lease. A zero previous range steals the current lease;
+    /// positive ranges must match. All subsequent writes fence on the range.
+    pub fn lease(
+        &self,
+        key: &TaskListKey,
+        kind: i16,
+        previous_range: i64,
+        now_nanos: i64,
+    ) -> Result<TaskListRecord> {
+        let mut connection = self.connection.lock().expect("matching SQL lock");
+        let mut current = match Self::read_list(&connection, key)? {
+            Some(record) => record,
+            None => {
+                let data = TaskListData {
+                    kind,
+                    last_updated_nanos: now_nanos,
+                    ..Default::default()
+                };
+                let bytes = self.encoding.encode(&blob::encode_task_list(&data))?;
+                connection.execute("INSERT INTO task_lists (shard_id,domain_id,name,task_type,range_id,data,data_encoding) VALUES (0,?,?,?,0,?,?)",
+                    params![key.domain_id.as_bytes().as_slice(),key.name,key.task_type,bytes,self.encoding.as_str()])?;
+                TaskListRecord { range_id: 0, data }
+            }
+        };
+        if previous_range > 0 && previous_range != current.range_id {
+            // Go's error prints the still-zero local range variable here.
+            return Err(StorageError::ConditionFailed(format!("leaseTaskList:renew failed:taskList:{}, taskListType:{}, haveRangeID:0, gotRangeID:{}",key.name,key.task_type,current.range_id)));
+        }
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Self::fence(&tx, key, current.range_id)?;
+        current.range_id = current.range_id.wrapping_add(1);
+        current.data.last_updated_nanos = now_nanos;
+        self.write_list(&tx, key, current.range_id, &current.data)?;
+        tx.commit()?;
+        // Go returns the requested kind while leaving existing stored kind alone.
+        current.data.kind = kind;
+        Ok(current)
+    }
+    pub fn update_task_list(
+        &self,
+        key: &TaskListKey,
+        range: i64,
+        mut data: TaskListData,
+        now_nanos: i64,
+    ) -> Result<()> {
+        data.last_updated_nanos = now_nanos;
+        data.expiry_nanos = if matches!(data.kind, 1 | 2) {
+            now_nanos.wrapping_add(86_400_000_000_000)
+        } else {
+            0
+        };
+        let mut connection = self.connection.lock().expect("matching SQL lock");
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Self::fence(&tx, key, range)?;
+        self.write_list(&tx, key, range, &data)?;
+        tx.commit()?;
+        Ok(())
+    }
+    /// Atomically append a batch. A stale lease or duplicate task rolls back
+    /// every inserted row, matching Go's insert-then-lock transaction.
+    pub fn create_tasks(
+        &self,
+        key: &TaskListKey,
+        range: i64,
+        tasks: &[AllocatedTask],
+    ) -> Result<()> {
+        let mut connection = self.connection.lock().expect("matching SQL lock");
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for task in tasks {
+            let bytes = self.encoding.encode(&blob::encode_task(&task.data))?;
+            tx.execute("INSERT INTO tasks (domain_id,task_list_name,task_type,task_id,data,data_encoding) VALUES (?,?,?,?,?,?)",
+                params![key.domain_id.as_bytes().as_slice(),key.name,key.task_type,task.task_id,bytes,self.encoding.as_str()])?;
+        }
+        Self::fence(&tx, key, range)?;
+        tx.commit()?;
+        Ok(())
+    }
+    /// Go SQL read interval: (read_level, max_read_level], ordered by task ID.
+    /// Expired tasks remain visible here; the queue reader handles their expiry.
+    pub fn get_tasks(
+        &self,
+        key: &TaskListKey,
+        read_level: i64,
+        max_read_level: i64,
+        batch_size: i64,
+    ) -> Result<Vec<AllocatedTask>> {
+        let connection = self.connection.lock().expect("matching SQL lock");
+        let mut query = connection.prepare("SELECT task_id,data,data_encoding FROM tasks WHERE domain_id=? AND task_list_name=? AND task_type=? AND task_id>? AND task_id<=? ORDER BY task_id LIMIT ?")?;
+        let rows = query.query_map(
+            params![
+                key.domain_id.as_bytes().as_slice(),
+                key.name,
+                key.task_type,
+                read_level,
+                max_read_level,
+                batch_size
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?;
+        rows.map(|row| {
+            let (task_id, bytes, encoding) = row?;
+            Ok(AllocatedTask {
+                task_id,
+                data: blob::decode_task(&BlobEncoding::parse(&encoding)?.decode(&bytes)?)?,
+            })
+        })
+        .collect()
+    }
+    pub fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> Result<i64> {
+        Ok(self.connection.lock().expect("matching SQL lock").query_row("SELECT COUNT(*) FROM tasks WHERE domain_id=? AND task_list_name=? AND task_type=? AND task_id>?",
+            params![key.domain_id.as_bytes().as_slice(),key.name,key.task_type,ack_level],|row|row.get(0))?)
+    }
+    /// Go does not require the current lease for single/batch task deletion.
+    pub fn complete_task(&self, key: &TaskListKey, task_id: i64) -> Result<()> {
+        self.connection.lock().expect("matching SQL lock").execute("DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_type=? AND task_id=?",
+            params![key.domain_id.as_bytes().as_slice(),key.name,key.task_type,task_id])?;
+        Ok(())
+    }
+    pub fn complete_tasks_less_than(
+        &self,
+        key: &TaskListKey,
+        inclusive_task_id: i64,
+        limit: i64,
+    ) -> Result<usize> {
+        if limit == 0 {
+            return Err(StorageError::MissingLimit);
+        }
+        Ok(self.connection.lock().expect("matching SQL lock").execute("DELETE FROM tasks WHERE rowid IN (SELECT rowid FROM tasks WHERE domain_id=? AND task_list_name=? AND task_type=? AND task_id<=? ORDER BY domain_id,task_list_name,task_type,task_id LIMIT ?)",
+            params![key.domain_id.as_bytes().as_slice(),key.name,key.task_type,inclusive_task_id,limit])?)
+    }
+    pub fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
+        let count = self.connection.lock().expect("matching SQL lock").execute("DELETE FROM task_lists WHERE shard_id=0 AND domain_id=? AND name=? AND task_type=? AND range_id=?",
+            params![key.domain_id.as_bytes().as_slice(),key.name,key.task_type,range])?;
+        if count != 1 {
+            return Err(StorageError::DeleteCount(count));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn key(name: &str) -> TaskListKey {
+        TaskListKey {
+            domain_id: Uuid::from_u128(1),
+            name: name.into(),
+            task_type: 0,
+        }
+    }
+    fn task(id: i64) -> AllocatedTask {
+        AllocatedTask {
+            task_id: id,
+            data: TaskData {
+                workflow_id: format!("workflow-{id}"),
+                schedule_id: 2,
+                run_id: Some(Uuid::from_u128(2).as_bytes().to_vec()),
+                ..Default::default()
+            },
+        }
+    }
+    #[test]
+    fn matching_sqlite_schema_matches_go() {
+        let source = include_str!("../../../../go/schema/sqlite/cadence/schema.sql");
+        let source = &source[source.find("CREATE TABLE tasks\n").unwrap()
+            ..source.find("CREATE TABLE replication_tasks\n").unwrap()];
+        assert_eq!(include_str!("../../../sql/matching-sqlite.sql"), source);
+    }
+    #[test]
+    fn matching_sqlite_leases_fence_writes_and_survive_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tasks.db");
+        let first = SqliteTaskStore::create(&path, BlobEncoding::ThriftRW).unwrap();
+        let key = key("queue");
+        let lease = first.lease(&key, 0, 0, 10).unwrap();
+        assert_eq!(lease.range_id, 1);
+        first
+            .create_tasks(&key, lease.range_id, &[task(1)])
+            .unwrap();
+        let second = SqliteTaskStore::open(&path, BlobEncoding::ThriftRWSnappy).unwrap();
+        let stolen = second.lease(&key, 0, 0, 20).unwrap();
+        assert_eq!(stolen.range_id, 2);
+        assert!(matches!(
+            first.lease(&key, 0, 1, 30),
+            Err(StorageError::ConditionFailed(_))
+        ));
+        assert!(matches!(
+            first.create_tasks(&key, 1, &[task(2)]),
+            Err(StorageError::ConditionFailed(_))
+        ));
+        assert_eq!(second.task_list_size(&key, 0).unwrap(), 1);
+        let mut changed = lease.data;
+        changed.ack_level = 77;
+        assert!(first.update_task_list(&key, 1, changed, 40).is_err());
+        assert_eq!(second.get_task_list(&key).unwrap().data.ack_level, 0);
+        second.create_tasks(&key, 2, &[task(3)]).unwrap();
+        drop(first);
+        drop(second);
+        let recovered = SqliteTaskStore::open(&path, BlobEncoding::ThriftRW).unwrap();
+        assert_eq!(recovered.get_task_list(&key).unwrap().range_id, 2);
+        assert_eq!(
+            recovered.get_tasks(&key, 0, 10, 10).unwrap(),
+            vec![task(1), task(3)]
+        );
+    }
+    #[test]
+    fn matching_sqlite_atomic_batches_bounds_expiry_and_deletes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tasks.db");
+        let store = SqliteTaskStore::create(&path, BlobEncoding::ThriftRWSnappy).unwrap();
+        let key = key("queue");
+        store.lease(&key, 1, 0, 10).unwrap();
+        store
+            .create_tasks(&key, 1, &[task(2), task(4), task(8)])
+            .unwrap();
+        assert!(store.create_tasks(&key, 1, &[task(9), task(4)]).is_err());
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 3);
+        assert_eq!(store.get_tasks(&key, 2, 8, 1).unwrap(), vec![task(4)]);
+        assert_eq!(store.get_tasks(&key, 4, 8, 10).unwrap(), vec![task(8)]);
+        let mut metadata = store.get_task_list(&key).unwrap().data;
+        metadata.ack_level = 4;
+        store.update_task_list(&key, 1, metadata, 50).unwrap();
+        assert_eq!(
+            store.get_task_list(&key).unwrap().data.expiry_nanos,
+            86_400_000_000_050
+        );
+        assert!(store.complete_tasks_less_than(&key, 8, 0).is_err());
+        assert_eq!(store.complete_tasks_less_than(&key, 4, 1).unwrap(), 1);
+        store.complete_task(&key, 4).unwrap();
+        store.complete_task(&key, 4).unwrap();
+        assert!(store.delete_task_list(&key, 0).is_err());
+        store.delete_task_list(&key, 1).unwrap();
+        // Go intentionally leaves orphan tasks for the background scanner.
+        assert_eq!(store.get_tasks(&key, 0, 10, 10).unwrap(), vec![task(8)]);
+        assert!(matches!(
+            store.get_task_list(&key),
+            Err(StorageError::NotFound)
+        ));
+    }
+    #[test]
+    fn matching_sqlite_namespaces_and_task_types_are_isolated() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tasks.db");
+        let store = SqliteTaskStore::create(&path, BlobEncoding::ThriftRW).unwrap();
+        let original = key("queue");
+        for key in [
+            original.clone(),
+            TaskListKey {
+                task_type: 1,
+                ..original.clone()
+            },
+            TaskListKey {
+                domain_id: Uuid::from_u128(3),
+                ..original.clone()
+            },
+        ] {
+            assert_eq!(store.lease(&key, 0, 0, 10).unwrap().range_id, 1);
+            store.create_tasks(&key, 1, &[task(1)]).unwrap();
+        }
+        assert_eq!(store.task_list_size(&original, 0).unwrap(), 1);
+        assert_eq!(store.task_list_size(&original, 1).unwrap(), 0);
+        assert!(SqliteTaskStore::create(&path, BlobEncoding::ThriftRW).is_err());
+        assert_eq!(store.task_list_size(&original, 0).unwrap(), 1);
+    }
+}
+
+#[cfg(test)]
+mod interop_tests {
+    use super::*;
+    use crate::matching_blob::{Partition, PartitionConfig};
+    use std::collections::BTreeMap;
+    #[test]
+    #[ignore = "requires original-Go SQLite seed; run tests/run-matching-storage-compat.py"]
+    fn matching_sqlite_go_database_interop() {
+        let path = std::env::var("CADENCE_MATCHING_SQLITE_DB").expect("Go fixture DB path");
+        let phase = std::env::var("CADENCE_MATCHING_SQLITE_PHASE").unwrap();
+        let store = SqliteTaskStore::open(path, BlobEncoding::ThriftRWSnappy).unwrap();
+        let key = TaskListKey {
+            domain_id: Uuid::from_u128(1),
+            name: "go-to-rust".into(),
+            task_type: 0,
+        };
+        let now = 1_700_000_000_123_456_789;
+        if phase == "verify" {
+            let tasks = store.get_tasks(&key, 0, 10, 10).unwrap();
+            assert_eq!(
+                tasks.iter().map(|task| task.task_id).collect::<Vec<_>>(),
+                vec![2, 3]
+            );
+            return;
+        }
+        let metadata = store.get_task_list(&key).unwrap();
+        assert_eq!(metadata.range_id, 1);
+        assert_eq!(metadata.data.ack_level, 0);
+        assert_eq!(
+            metadata
+                .data
+                .adaptive_partition_config
+                .as_ref()
+                .unwrap()
+                .version,
+            3
+        );
+        assert_eq!(metadata.data.last_updated_nanos, now + 1000);
+        let tasks = store.get_tasks(&key, 0, 10, 10).unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].data.expiry_nanos, -6_795_364_578_871_345_152);
+        assert_eq!(tasks[1].data.expiry_nanos, now + 3_000_000_000);
+        assert!(tasks
+            .iter()
+            .all(|task| task.data.created_nanos == now && task.data.workflow_id == "go-workflow"));
+        let lease = store.lease(&key, 1, 0, now + 1500).unwrap();
+        assert_eq!(lease.range_id, 2);
+        let task = AllocatedTask {
+            task_id: 3,
+            data: TaskData {
+                workflow_id: "rust-workflow".into(),
+                run_id: Some(Uuid::from_u128(2).as_bytes().to_vec()),
+                schedule_id: 5,
+                created_nanos: now + 2000,
+                expiry_nanos: -6_795_364_578_871_345_152,
+                partition_config: None,
+            },
+        };
+        assert!(store
+            .create_tasks(&key, 1, std::slice::from_ref(&task))
+            .is_err());
+        store.create_tasks(&key, 2, &[task]).unwrap();
+        let partitions = |ids: &[i32]| {
+            ids.iter()
+                .map(|id| {
+                    (
+                        *id,
+                        Partition {
+                            isolation_groups: Some(vec!["a".into()]),
+                        },
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        let mut data = lease.data;
+        data.ack_level = 1;
+        data.adaptive_partition_config = Some(PartitionConfig {
+            version: 4,
+            num_read_partitions: 2,
+            num_write_partitions: 1,
+            read_partitions: Some(partitions(&[0, 1])),
+            write_partitions: Some(partitions(&[0])),
+        });
+        store.update_task_list(&key, 2, data, now + 2000).unwrap();
+    }
+}

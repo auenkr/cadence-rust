@@ -75,3 +75,10 @@ directory without the Go checkout. Pass `--config /path/to/development.yaml`
 to load an existing Cadence YAML file explicitly. Default runtime persistence
 is still in memory (or development snapshots with `--data-dir`); configured
 production SQL/NoSQL backends remain unported.
+
+Matching now has an independent SQLite task-store component in
+`cadence-persistence::matching_sqlite`, using the original Go `tasks` and
+`task_lists` schemas and `thriftrw`/`thriftrw_snappy` blobs. Bidirectional tests
+exchange a real database file with Go's SQL TaskStore. This component is not yet
+wired into Matching RPC handlers or persistence configuration; the running server
+continues to use the embedded execution engine's task queues.

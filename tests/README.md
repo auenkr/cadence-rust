@@ -287,3 +287,17 @@ The combined Rust runner explicitly overrides `frontend.failoverCoolDown` to
 zero through the admin endpoint because the fixture drivers immediately perform
 successive failovers. The server retains Go's one-minute default. The override
 is recorded in the runner's artifacts directory.
+
+Matching SQL persistence interoperability:
+
+```sh
+python3 tests/run-matching-storage-compat.py
+```
+
+This checks the actual Go SQL task/list serializers (plain Thrift and Snappy),
+then exchanges one SQLite file between the original Go TaskStore and Rust:
+Go seeds rows, Rust reads and mutates them, Go validates Rust metadata/tasks and
+performs a bounded deletion, and Rust verifies the result. Rust tests also cover
+lease fencing across connections/restarts and atomic batch rollback. This is
+included in the combined runner. The SQLite component is not yet selected by
+server configuration or connected to Matching's RPC queue delivery loop.

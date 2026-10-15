@@ -188,5 +188,59 @@
     "evidence": [
       "Ported acknowledgement watermark, backlog and read/set semantics. Original-Go operation-sequence oracle added; logging and matching-owned queue integration remain incomplete."
     ]
+  },
+  "go/common/persistence/sql/sql_task_store.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_sqlite.rs"
+    ],
+    "evidence": [
+      "Lease/get/update task lists, atomic fenced append, bounded reads/counts/deletes and task-list deletion; focused Rust tests plus bidirectional real-Go SQLite store interop passed. Listing/Gob cursors, orphans/scanners, transport error mapping and full failure coverage remain incomplete."
+    ]
+  },
+  "go/common/persistence/sql/sqlplugin/sqlite/task.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_sqlite.rs"
+    ],
+    "evidence": [
+      "Single and bounded task deletion on exact Go SQLite schema; lease/append transactions exercise shared-file interoperability. Other plugin operations and complete backend selection remain unported."
+    ]
+  },
+  "go/common/persistence/serialization/thrift_mapper.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_blob.rs"
+    ],
+    "evidence": [
+      "TaskInfo, TaskListInfo and partition metadata only; eight real-Go byte fixtures, nil/empty containers, nanosecond timestamps, raw UUIDs and shared-file interoperability. All other mapper structs remain unported."
+    ]
+  },
+  "go/common/persistence/serialization/thrift_encoder.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_blob.rs"
+    ],
+    "evidence": [
+      "Matching task/list structs only, byte exact across eight Go fixtures. SQL raw structs deliberately omit the history token preamble; all unrelated persistence structs remain unported."
+    ]
+  },
+  "go/common/persistence/serialization/snappy_thrift_encoder.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_blob.rs"
+    ],
+    "evidence": [
+      "Raw-block Snappy matching task/list blobs, original-Go compressed fixtures and actual Go reading Rust-compressed SQLite rows. Other persistence structs remain unported."
+    ]
+  },
+  "go/common/persistence/serialization/thrift_decoder.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_blob.rs"
+    ],
+    "evidence": [
+      "Matching task/list decode with unknown-field handling, optional containers and actual Go SQLite rows. Other persistence structures, exact malformed-field parity and broader codec validation remain unported."
+    ]
   }
 }

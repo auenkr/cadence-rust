@@ -1,0 +1,154 @@
+[
+  {
+    "kind": "task",
+    "data": {
+      "created_nanos": 0,
+      "expiry_nanos": 0,
+      "partition_config": null,
+      "run_id": null,
+      "schedule_id": 0,
+      "workflow_id": ""
+    },
+    "thrift_hex": "0b000a000000000a000d00000000000000000a000e00000000000000000a000f000000000000000000",
+    "snappy_hex": "29240b000a000000000a000d01070101080a000e010701012c0a000f000000000000000000"
+  },
+  {
+    "kind": "task",
+    "data": {
+      "created_nanos": 1700000000123456789,
+      "expiry_nanos": -6795364578871345152,
+      "partition_config": null,
+      "run_id": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "schedule_id": 19,
+      "workflow_id": "wf-\u4e16\u754c"
+    },
+    "thrift_hex": "0b000a0000000977662de4b896e7958c0b000c00000010000102030405060708090a0b0c0d0e0f0a000d00000000000000130a000ea1b203eb3d1a00000a000f17979cfe3d85cd1500",
+    "snappy_hex": "49b00b000a0000000977662de4b896e7958c0b000c00000010000102030405060708090a0b0c0d0e0f0a000d00000001025c130a000ea1b203eb3d1a00000a000f17979cfe3d85cd1500"
+  },
+  {
+    "kind": "task",
+    "data": {
+      "created_nanos": 1,
+      "expiry_nanos": -1,
+      "partition_config": {},
+      "run_id": [],
+      "schedule_id": -24,
+      "workflow_id": "empty"
+    },
+    "thrift_hex": "0b000a00000005656d7074790b000c000000000a000dffffffffffffffe80a000effffffffffffffff0a000f00000000000000010d00110b0b0000000000",
+    "snappy_hex": "3e580b000a00000005656d7074790b000c000000000a000dff09010ce80a000e090a14ffff0a000f00090128010d00110b0b0000000000"
+  },
+  {
+    "kind": "task",
+    "data": {
+      "created_nanos": -6795364578871345152,
+      "expiry_nanos": -6795364578871345152,
+      "partition_config": {
+        "group": "zone-a"
+      },
+      "run_id": null,
+      "schedule_id": 0,
+      "workflow_id": "partition"
+    },
+    "thrift_hex": "0b000a00000009706172746974696f6e0a000d00000000000000000a000ea1b203eb3d1a00000a000fa1b203eb3d1a00000d00110b0b000000010000000567726f7570000000067a6f6e652d6100",
+    "snappy_hex": "4e4c0b000a00000009706172746974696f6e0a000d000d01340a000ea1b203eb3d1a00000a000f110b700d00110b0b000000010000000567726f7570000000067a6f6e652d6100"
+  },
+  {
+    "kind": "task_list",
+    "data": {
+      "ack_level": -1,
+      "adaptive_partition_config": null,
+      "expiry_nanos": 0,
+      "kind": 0,
+      "last_updated_nanos": 1700000000123456789
+    },
+    "thrift_hex": "06000a00000a000cffffffffffffffff0a000e00000000000000000a001017979cfe3d85cd1500",
+    "snappy_hex": "272006000a00000a000cff0d010c0a000e000d012c0a001017979cfe3d85cd1500"
+  },
+  {
+    "kind": "task_list",
+    "data": {
+      "ack_level": 0,
+      "adaptive_partition_config": {
+        "num_read_partitions": 0,
+        "num_write_partitions": 0,
+        "read_partitions": null,
+        "version": 0,
+        "write_partitions": null
+      },
+      "expiry_nanos": 1,
+      "kind": 1,
+      "last_updated_nanos": 1700000000123456789
+    },
+    "thrift_hex": "06000a00010a000c00000000000000000a000e00000000000000010a001017979cfe3d85cd150c00120a000a000000000000000008000c0000000008000e000000000000",
+    "snappy_hex": "442006000a00010a000c000d01080a000e0d0a44010a001017979cfe3d85cd150c00120a000a0d19400008000c0000000008000e000000000000"
+  },
+  {
+    "kind": "task_list",
+    "data": {
+      "ack_level": 1,
+      "adaptive_partition_config": {
+        "num_read_partitions": 1,
+        "num_write_partitions": 1,
+        "read_partitions": {},
+        "version": 7,
+        "write_partitions": {
+          "0": {
+            "isolation_groups": null
+          }
+        }
+      },
+      "expiry_nanos": 2,
+      "kind": 2,
+      "last_updated_nanos": 1700000000123456789
+    },
+    "thrift_hex": "06000a00020a000c00000000000000010a000e00000000000000020a001017979cfe3d85cd150c00120a000a000000000000000708000c0000000108000e000000010d0010080c000000000d0012080c0000000100000000000000",
+    "snappy_hex": "5b2006000a00020a000c0009010c010a000e090a0116381017979cfe3d85cd150c00120a000a0d19040708052f040108052b10010d001008053f3c0d0012080c0000000100000000000000"
+  },
+  {
+    "kind": "task_list",
+    "data": {
+      "ack_level": 2,
+      "adaptive_partition_config": {
+        "num_read_partitions": 1,
+        "num_write_partitions": 1,
+        "read_partitions": {
+          "3": {
+            "isolation_groups": []
+          }
+        },
+        "version": -24,
+        "write_partitions": {
+          "3": {
+            "isolation_groups": [
+              "a",
+              "\u4e16\u754c"
+            ]
+          }
+        }
+      },
+      "expiry_nanos": 3,
+      "kind": 3,
+      "last_updated_nanos": 1700000000123456789
+    },
+    "thrift_hex": "06000a00030a000c00000000000000020a000e00000000000000030a001017979cfe3d85cd150c00120a000affffffffffffffe808000c0000000108000e000000010d0010080c00000001000000030f000a0b00000000000d0012080c00000001000000030f000a0b00000002000000016100000006e4b896e7958c000000",
+    "snappy_hex": "7f2006000a00030a000c0009010c020a000e090a01163c1017979cfe3d85cd150c00120a000aff090104e808052f040108052b10010d001008013f2001000000030f000a0b05400c0d0012083e16004802000000016100000006e4b896e7958c000000"
+  }
+]
