@@ -90,3 +90,11 @@ The SDK driver also exercises workflow failure retry (attempt 0 to 1), successfu
 cron recurrence with last completion result, and an activity ScheduleToStart
 timeout on an unpolled task list. It terminates its cron workflow after checking
 successor history. Full workflow-task buffering/sticky/recovery remain unfinished.
+
+Cron time zone oracle (uses the pinned Go robfig parser; matching Rust cases
+are in `cadence-common::cron::tests::named_time_zones_and_dst`):
+
+```sh
+(cd go && go run ../tests/cron-timezone-compat.go)
+cargo test --manifest-path rust/Cargo.toml -p cadence-common named_time_zones_and_dst
+```

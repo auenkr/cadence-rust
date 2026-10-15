@@ -7,7 +7,7 @@
 //!
 //! Time base: like the Go code this operates on wall-clock fields. Go's
 //! parser defaults to `time.Local`; Cadence servers run in UTC containers, so
-//! this port uses UTC (see `parse_standard` for the `CRON_TZ` limitation).
+//! unqualified schedules use UTC; explicit TZ/CRON_TZ uses the IANA database.
 use std::time::Duration;
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
@@ -197,6 +197,7 @@ fn get_field(field: &str, b: Bounds, names: fn(&str) -> Option<u32>) -> Result<u
 pub enum Schedule {
     Spec(SpecSchedule),
     Every(Duration),
+    ZonedSpec(SpecSchedule, chrono_tz::Tz),
 }
 
 /// `SpecSchedule` from `spec.go`, restricted to the standard 5-field grammar.
@@ -217,6 +218,37 @@ impl Schedule {
     pub fn next(&self, t: NaiveDateTime) -> Option<NaiveDateTime> {
         match self {
             Schedule::Spec(s) => s.next(t),
+            Schedule::ZonedSpec(s, zone) => {
+                // Walk instants, not local wall time: a repeated DST minute must
+                // fire twice, while a nonexistent local minute must never fire.
+                // ParseStandard always fixes seconds to zero.
+                let mut candidate = t
+                    .with_nanosecond(0)?
+                    .checked_add_signed(chrono::Duration::seconds(1))?;
+                let year_limit = candidate.and_utc().with_timezone(zone).year() + 5;
+                loop {
+                    let local = candidate.and_utc().with_timezone(zone);
+                    if local.year() > year_limit {
+                        return None;
+                    }
+                    // Historical IANA offsets can include seconds. Align to a
+                    // local minute rather than assuming UTC minute boundaries.
+                    if local.second() != 0 {
+                        candidate = candidate.checked_add_signed(chrono::Duration::seconds(
+                            i64::from(60 - local.second()),
+                        ))?;
+                        continue;
+                    }
+                    if (1u64 << local.month()) & s.month != 0
+                        && s.day_matches(&local.naive_local())
+                        && (1u64 << local.hour()) & s.hour != 0
+                        && (1u64 << local.minute()) & s.minute != 0
+                    {
+                        return Some(candidate);
+                    }
+                    candidate = candidate.checked_add_signed(chrono::Duration::minutes(1))?;
+                }
+            }
             Schedule::Every(delay) => {
                 // ConstantDelaySchedule.Next: t.Add(delay - t.Nanosecond())
                 let nanos = t.and_utc().timestamp_nanos_opt()? % 1_000_000_000;
@@ -502,28 +534,26 @@ pub fn parse_standard(spec: &str) -> Result<Schedule, String> {
     if spec.is_empty() {
         return Err("empty spec string".to_owned());
     }
-    // Go resolves `TZ=`/`CRON_TZ=` through the system zone database. Cadence
-    // servers run in UTC, so only UTC zones are accepted here; anything else
-    // is a hard error instead of silently using the wrong wall clock.
-    let spec = if let Some(rest) = spec
+    let (zone, spec) = if let Some(rest) = spec
         .strip_prefix("TZ=")
         .or_else(|| spec.strip_prefix("CRON_TZ="))
     {
-        let (zone, body) = match rest.split_once(' ') {
-            Some((zone, body)) => (zone, body.trim()),
-            None => (rest, ""),
+        let (name, body) = rest.split_once(' ').unwrap_or((rest, ""));
+        let zone = if name.is_empty() || name == "Local" {
+            chrono_tz::UTC
+        } else {
+            name.parse::<chrono_tz::Tz>()
+                .map_err(|_| format!("provided bad location {name}: unknown time zone {name}"))?
         };
-        if !zone.eq_ignore_ascii_case("UTC") && !zone.is_empty() {
-            return Err(format!(
-                "provided bad location {zone}: only UTC zones are supported by this server"
-            ));
-        }
-        body
+        (Some(zone), body.trim())
     } else {
-        spec
+        (None, spec)
     };
     if spec.starts_with('@') {
-        return parse_descriptor(spec);
+        return parse_descriptor(spec).map(|schedule| match (schedule, zone) {
+            (Schedule::Spec(s), Some(zone)) => Schedule::ZonedSpec(s, zone),
+            (schedule, _) => schedule,
+        });
     }
     let fields: Vec<&str> = spec.split_whitespace().collect();
     // Standard parser options: Minute | Hour | Dom | Month | Dow.
@@ -541,14 +571,18 @@ pub fn parse_standard(spec: &str) -> Result<Schedule, String> {
     let dom = get_field(fields[2], DOM, |_| None)?;
     let month = get_field(fields[3], MONTHS, month_names)?;
     let dow = get_field(fields[4], DOW, dow_names)?;
-    Ok(Schedule::Spec(SpecSchedule {
+    let schedule = SpecSchedule {
         second,
         minute,
         hour,
         dom,
         month,
         dow,
-    }))
+    };
+    Ok(match zone {
+        Some(zone) => Schedule::ZonedSpec(schedule, zone),
+        None => Schedule::Spec(schedule),
+    })
 }
 
 /// `ValidateSchedule` from `go/common/backoff/cron.go`.
@@ -939,8 +973,37 @@ mod tests {
     }
 
     #[test]
-    fn non_utc_zones_are_rejected() {
-        assert!(parse_standard("CRON_TZ=America/New_York 5 16 * * *").is_err());
+    fn named_time_zones_and_dst() {
+        let next = |spec, now| parse_standard(spec).unwrap().next(dt(now)).unwrap();
+        assert_eq!(
+            next("CRON_TZ=America/New_York 5 16 * * *", "2026-01-01T00:00:00"),
+            dt("2026-01-01T21:05:00")
+        );
+        assert_eq!(
+            next("TZ=Asia/Kathmandu @daily", "2026-01-01T00:00:00"),
+            dt("2026-01-01T18:15:00")
+        );
+        assert_eq!(
+            next("TZ=America/New_York 30 2 * * *", "2026-03-08T00:00:00"),
+            dt("2026-03-09T06:30:00")
+        );
+        assert_eq!(
+            next("TZ=America/New_York 30 1 * * *", "2026-11-01T05:30:00"),
+            dt("2026-11-01T06:30:00")
+        );
+        assert_eq!(
+            next("TZ=America/New_York @every 1h", "2026-11-01T05:30:00"),
+            dt("2026-11-01T06:30:00")
+        );
+        assert_eq!(
+            next("TZ=America/New_York 30 1 * * *", "2026-11-01T05:29:59"),
+            dt("2026-11-01T05:30:00")
+        );
+        assert_eq!(
+            next("TZ=Asia/Kathmandu @daily", "1900-01-01T00:00:00"),
+            dt("1900-01-01T18:18:44")
+        );
+        assert!(parse_standard("TZ=Not/A_Zone * * * * *").is_err());
         assert!(parse_standard("TZ=UTC 5 16 * * *").is_ok());
     }
 }

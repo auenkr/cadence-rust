@@ -990,3 +990,24 @@
   ownership/failover, worker background roles, archival backends, dynamic
   config/quotas/auth). All 13/164 RPC definitions have concrete adapters;
   adapter presence does not prove complete engine behavior.
+
+- Cron timezone compatibility (2026-10-15): replaced explicit named-zone
+  rejection with bundled `chrono-tz` IANA rules for TZ=/CRON_TZ= schedules,
+  including descriptors. Zoned next-fire calculation walks UTC instants to
+  preserve both fall-back occurrences and skip nonexistent spring-forward
+  times; historical offsets with seconds align to local minute boundaries.
+  @every remains elapsed-time based. Tests cover New York winter and DST,
+  Kathmandu fractional-hour and historical second offsets, UTC, invalid zones.
+  `tests/cron-timezone-compat.go` reproduces expected values with the pinned
+  upstream Go robfig library; all six oracle cases pass.
+- Limitations: unqualified schedules and explicit Local still assume UTC,
+  as before; arbitrary host local timezone configuration is not ported.
+  Named-zone searches scan minutes up to the existing five-year horizon;
+  sparse/impossible expressions may cost more than the UTC fast path.
+  This change does not fill schedule-service timezone/calendar-spec gaps or
+  the broader engine-depth gaps listed above. No live server restart yet.
+- Validation: full workspace tests pass (263 tests), strict workspace/all-targets
+  clippy passes, final cadence-common rerun passes (22 tests), six pinned-Go
+  timezone oracle cases pass, and git diff --check is clean. Checks ran in
+  tmux cadence-rust. Live SDK drivers were not rerun because this change was
+  not deployed to the running server.

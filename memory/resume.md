@@ -1,5 +1,12 @@
 # Current resume checkpoint (2026-10-15)
 
+Latest follow-up: named TZ=/CRON_TZ= cron support now uses bundled IANA rules
+(chrono-tz), including DST folds/gaps and historical second offsets. See the
+last progress.md entry and tests/cron-timezone-compat.go. Workspace 263 tests,
+strict clippy, final common-crate tests and six Go oracle cases pass. Running
+server was not restarted. Local/unqualified schedules still assume UTC;
+sparse zoned schedules scan minutes up to the five-year horizon.
+
 Follow root AGENTS.md. All 164 RPCs across all 13 services now have concrete
 Rust adapters (commit 9ba9938ec, pushed to origin/master). Adapter presence
 does not prove complete engine behavior; many encode honest single-host
