@@ -28,6 +28,15 @@ pub const DEFAULT_TASK_START_TO_CLOSE_TIMEOUT_SECONDS: i32 = 10;
 /// fire processing.
 const MAX_FIRES_PER_TICK: usize = 100;
 
+/// Durable cursor for a queued Go scheduler BackfillRequest.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PendingBackfill {
+    pub backfill_id: String,
+    pub cursor_nanos: i64,
+    pub end_nanos: i64,
+    pub overlap: ScheduleOverlapPolicy,
+}
+
 /// A stored schedule: configuration plus runtime firing state.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScheduleRecord {
@@ -55,8 +64,10 @@ pub struct ScheduleRecord {
     pub running: Vec<(String, String)>,
     /// Buffered fire times (BUFFER overlap policy).
     pub buffer: VecDeque<i64>,
-    /// Completed backfills (progress retained like Go's BackfillInfo).
+    /// Backfill accounting; descriptions expose only pending entries.
     pub backfills: Vec<BackfillInfo>,
+    #[serde(default)]
+    pub pending_backfills: VecDeque<PendingBackfill>,
     /// One-shot catch-up override from UnpauseSchedule.
     pub unpause_catchup: Option<ScheduleCatchUpPolicy>,
     /// Go LastProcessedTime: includes catch-up fires skipped by policy.
@@ -88,7 +99,16 @@ impl ScheduleRecord {
             total_runs: self.total_runs,
             create_time_nano: Some(self.create_nanos),
             last_update_time_nano: Some(self.update_nanos),
-            ongoing_backfills: self.backfills.clone(),
+            ongoing_backfills: self
+                .pending_backfills
+                .iter()
+                .filter_map(|pending| {
+                    self.backfills
+                        .iter()
+                        .find(|b| b.backfill_id == pending.backfill_id)
+                        .cloned()
+                })
+                .collect(),
             missed_runs: self.missed_runs,
             skipped_runs: self.skipped_runs,
             buffered_fire_count: self.buffer.len() as i64,
@@ -355,6 +375,7 @@ impl crate::executions::InMemoryExecutionStore {
             running: Vec::new(),
             buffer: VecDeque::new(),
             backfills: Vec::new(),
+            pending_backfills: VecDeque::new(),
             unpause_catchup: None,
             last_processed_nanos: None,
             catch_up_pending: false,
@@ -578,9 +599,8 @@ impl crate::executions::InMemoryExecutionStore {
         started
     }
 
-    /// Record a backfill and execute its fires immediately, tracking
-    /// progress like Go's `BackfillInfo`. Duplicate backfill IDs are
-    /// deduplicated.
+    /// Queue a backfill like Go handleBackfill. Paused requests stay queued,
+    /// pending IDs deduplicate, and a full queue ignores further signals.
     pub fn backfill_schedule(
         &self,
         domain: &str,
@@ -591,70 +611,112 @@ impl crate::executions::InMemoryExecutionStore {
         backfill_id: &str,
     ) -> Result<(), ScheduleError> {
         let key = {
-            let inner = self.inner.read().expect("execution store lock");
-            Self::schedule_key(&inner, domain, schedule_id)
-        };
-        let (spec, already) = {
-            let inner = self.inner.read().expect("execution store lock");
-            match inner.schedules.get(&key) {
-                Some(r) if !r.deleted() => (
-                    r.spec.clone(),
-                    r.backfills.iter().any(|b| b.backfill_id == backfill_id),
-                ),
-                _ => {
-                    return Err(ScheduleError::NotFound(
-                        cadence_api::errors::EntityNotExistsError::new(format!(
-                            "schedule {schedule_id:?} does not exist in domain {domain:?}"
-                        )),
-                    ));
-                }
-            }
-        };
-        if already {
-            return Ok(());
-        }
-        let fires = spec_fires_in_range(
-            &spec,
-            start_nanos.saturating_sub(1_000_000_000),
-            end_nanos,
-            MAX_FIRES_PER_TICK,
-        );
-        let total = fires.len() as i32;
-        let id = if backfill_id.is_empty() {
-            uuid::Uuid::new_v4().to_string()
-        } else {
-            backfill_id.to_string()
-        };
-        {
             let mut inner = self.inner.write().expect("execution store lock");
-            if let Some(record) = inner.schedules.get_mut(&key) {
-                record.backfills.push(BackfillInfo {
-                    backfill_id: id.clone(),
-                    start_time_nano: Some(start_nanos),
-                    end_time_nano: Some(end_nanos),
-                    runs_completed: 0,
-                    runs_total: total,
-                });
+            let key = Self::schedule_key(&inner, domain, schedule_id);
+            let record = inner
+                .schedules
+                .get_mut(&key)
+                .filter(|r| !r.deleted())
+                .ok_or_else(|| {
+                    ScheduleError::NotFound(cadence_api::errors::EntityNotExistsError::new(
+                        format!("schedule {schedule_id:?} does not exist in domain {domain:?}"),
+                    ))
+                })?;
+            if end_nanos <= start_nanos
+                || record.pending_backfills.len() >= 10
+                || (!backfill_id.is_empty()
+                    && record
+                        .pending_backfills
+                        .iter()
+                        .any(|b| b.backfill_id == backfill_id))
+            {
+                return Ok(());
             }
-        }
-        let mut completed = 0;
-        for fire in fires {
-            self.fire_schedule_at(
-                &key.0,
-                &key.1,
-                fire,
-                overlap.unwrap_or(ScheduleOverlapPolicy::Invalid),
-                &format!("backfill:{id}"),
-            );
-            completed += 1;
-            let mut inner = self.inner.write().expect("execution store lock");
-            if let Some(record) = inner.schedules.get_mut(&key) {
-                if let Some(bf) = record.backfills.iter_mut().find(|b| b.backfill_id == id) {
-                    bf.runs_completed = completed;
-                }
-            }
-        }
+            let id = if backfill_id.is_empty() {
+                uuid::Uuid::new_v4().to_string()
+            } else {
+                backfill_id.to_string()
+            };
+            let cursor = start_nanos.saturating_sub(1_000_000_000);
+            let total = spec_fires_in_range(&record.spec, cursor, end_nanos, 100_000).len() as i32;
+            record.backfills.retain(|b| b.backfill_id != id);
+            record.backfills.push(BackfillInfo {
+                backfill_id: id.clone(),
+                start_time_nano: Some(start_nanos),
+                end_time_nano: Some(end_nanos),
+                runs_completed: 0,
+                runs_total: total,
+            });
+            record.pending_backfills.push_back(PendingBackfill {
+                backfill_id: id,
+                cursor_nanos: cursor,
+                end_nanos,
+                overlap: overlap.unwrap_or(ScheduleOverlapPolicy::Invalid),
+            });
+            key
+        };
+        self.process_schedule_backfills(&key.0, &key.1);
         Ok(())
+    }
+
+    /// Budgeted Go processBackfills: completed/overlap-skipped/buffered fires
+    /// all advance progress. Remaining cursors survive pause and restart.
+    fn process_schedule_backfills(&self, domain: &str, id: &str) -> usize {
+        let key = (domain.to_string(), id.to_string());
+        let mut budget = MAX_FIRES_PER_TICK;
+        let mut started = 0;
+        while budget > 0 {
+            let (spec, pending) = {
+                let inner = self.inner.read().expect("execution store lock");
+                let Some(record) = inner.schedules.get(&key) else {
+                    break;
+                };
+                if record.paused || record.deleted() {
+                    break;
+                }
+                let Some(pending) = record.pending_backfills.front() else {
+                    break;
+                };
+                (record.spec.clone(), pending.clone())
+            };
+            let fires =
+                spec_fires_in_range(&spec, pending.cursor_nanos, pending.end_nanos, budget + 1);
+            let count = fires.len().min(budget);
+            for fire in fires.iter().take(count) {
+                if self.fire_schedule_at(
+                    domain,
+                    id,
+                    *fire,
+                    pending.overlap,
+                    &format!("backfill:{}", pending.backfill_id),
+                ) {
+                    started += 1;
+                }
+            }
+            let mut inner = self.inner.write().expect("execution store lock");
+            let Some(record) = inner.schedules.get_mut(&key) else {
+                break;
+            };
+            if let Some(info) = record
+                .backfills
+                .iter_mut()
+                .find(|b| b.backfill_id == pending.backfill_id)
+            {
+                info.runs_completed += count as i32;
+                if let Some(next) = fires.get(count) {
+                    info.start_time_nano = Some(*next);
+                }
+            }
+            if fires.len() > count {
+                if let Some(front) = record.pending_backfills.front_mut() {
+                    front.cursor_nanos = fires[count - 1];
+                }
+            } else {
+                record.pending_backfills.pop_front();
+            }
+            budget -= count;
+        }
+        started
     }
 
     /// List schedules in a domain with opaque offset cursors. Returns
@@ -715,7 +777,19 @@ impl crate::executions::InMemoryExecutionStore {
                 .map(|(key, _)| key.clone())
                 .collect()
         };
+        let backfills: Vec<(String, String)> = {
+            let inner = self.inner.read().expect("execution store lock");
+            inner
+                .schedules
+                .iter()
+                .filter(|(_, r)| !r.pending_backfills.is_empty() && !r.paused && !r.deleted())
+                .map(|(key, _)| key.clone())
+                .collect()
+        };
         let mut started = 0;
+        for (domain, id) in backfills {
+            started += self.process_schedule_backfills(&domain, &id);
+        }
         for (domain, id) in &catch_up {
             started += self.process_schedule_catch_up(domain, id, now_nanos);
         }
@@ -1328,6 +1402,143 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_backfill_fixtures() {
+        #[derive(serde::Deserialize)]
+        struct Signal {
+            id: String,
+            start: i64,
+            end: i64,
+        }
+        #[derive(serde::Deserialize)]
+        struct Round {
+            attempted: usize,
+            pending: usize,
+            #[serde(default)]
+            completed: i32,
+            #[serde(default)]
+            start: i64,
+        }
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            signals: Vec<Signal>,
+            accepted: Vec<bool>,
+            queued: usize,
+            total: i32,
+            rounds: Vec<Round>,
+        }
+        let cases: Vec<Case> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/scheduler-backfill.json"
+        ))
+        .unwrap();
+        let base = nanos("2026-01-15T10:00:00Z");
+        for case in cases {
+            let mut store = test_store();
+            let mut req = create_req("backfill", "* * * * *");
+            req.state = Some(ScheduleState {
+                paused: true,
+                ..Default::default()
+            });
+            req.policies = Some(SchedulePolicies {
+                overlap_policy: Some(ScheduleOverlapPolicy::Concurrent),
+                ..Default::default()
+            });
+            store.create_schedule("d", &req).unwrap();
+            for (i, sig) in case.signals.iter().enumerate() {
+                let before = store
+                    .describe_schedule("d", "backfill")
+                    .unwrap()
+                    .info
+                    .unwrap()
+                    .ongoing_backfills
+                    .len();
+                store
+                    .backfill_schedule(
+                        "d",
+                        "backfill",
+                        base + sig.start * 60_000_000_000,
+                        base + sig.end * 60_000_000_000,
+                        None,
+                        &sig.id,
+                    )
+                    .unwrap();
+                let after = store
+                    .describe_schedule("d", "backfill")
+                    .unwrap()
+                    .info
+                    .unwrap()
+                    .ongoing_backfills
+                    .len();
+                assert_eq!(
+                    after > before,
+                    case.accepted[i],
+                    "{} signal {}",
+                    case.name,
+                    i
+                );
+            }
+            let info = store
+                .describe_schedule("d", "backfill")
+                .unwrap()
+                .info
+                .unwrap();
+            assert_eq!(
+                info.ongoing_backfills.len(),
+                case.queued,
+                "{} queued",
+                case.name
+            );
+            assert_eq!(
+                info.ongoing_backfills[0].runs_total, case.total,
+                "{} total",
+                case.name
+            );
+            assert_eq!(info.ongoing_backfills[0].runs_completed, 0);
+            assert_eq!(info.total_runs, 0);
+            // A paused queue must survive the same snapshot recovery as workflows.
+            let path = std::env::temp_dir()
+                .join(format!("cadence-backfill-{}.json", uuid::Uuid::new_v4()));
+            store.save_to_file(&path).unwrap();
+            store = InMemoryExecutionStore::load_from_file(&path).unwrap();
+            std::fs::remove_file(path).unwrap();
+            let namespace = {
+                let mut inner = store.inner.write().unwrap();
+                let key = InMemoryExecutionStore::schedule_key(&inner, "d", "backfill");
+                let record = inner.schedules.get_mut(&key).unwrap();
+                assert!(record.paused);
+                record.paused = false;
+                key.0
+            };
+            for want in case.rounds {
+                assert_eq!(
+                    store.process_schedule_backfills(&namespace, "backfill"),
+                    want.attempted,
+                    "{} attempted",
+                    case.name
+                );
+                let info = store
+                    .describe_schedule("d", "backfill")
+                    .unwrap()
+                    .info
+                    .unwrap();
+                assert_eq!(
+                    info.ongoing_backfills.len(),
+                    want.pending,
+                    "{} pending",
+                    case.name
+                );
+                if want.pending > 0 {
+                    assert_eq!(info.ongoing_backfills[0].runs_completed, want.completed);
+                    assert_eq!(
+                        info.ongoing_backfills[0].start_time_nano,
+                        Some(base + want.start * 60_000_000_000)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn scheduler_boundary_fixtures() {
         #[derive(serde::Deserialize)]
         struct Case {
@@ -1543,18 +1754,20 @@ mod tests {
         store
             .backfill_schedule("d", "s1", start, start + 3_600_000_000_000, None, "bf-1")
             .unwrap();
-        // Duplicate backfill IDs are deduplicated.
+        // A retry after draining is accepted; SKIP_NEW avoids an overlapping run.
         store
             .backfill_schedule("d", "s1", start, start + 3_600_000_000_000, None, "bf-1")
             .unwrap();
         let desc = store.describe_schedule("d", "s1").unwrap();
         let info = desc.info.unwrap();
-        assert_eq!(info.ongoing_backfills.len(), 1);
-        assert_eq!(info.ongoing_backfills[0].backfill_id, "bf-1");
+        assert!(info.ongoing_backfills.is_empty());
+        let inner = store.inner.read().unwrap();
+        let key = InMemoryExecutionStore::schedule_key(&inner, "d", "s1");
+        let record = inner.schedules.get(&key).unwrap();
         assert_eq!(
-            info.ongoing_backfills[0].runs_completed,
-            info.ongoing_backfills[0].runs_total
+            record.backfills[0].runs_completed,
+            record.backfills[0].runs_total
         );
-        assert_eq!(info.total_runs, info.ongoing_backfills[0].runs_total as i64);
+        assert_eq!(info.total_runs, record.backfills[0].runs_total as i64);
     }
 }

@@ -1059,3 +1059,23 @@
   passes. The preceding full-workspace checkpoint had 269 passing tests.
 - Go SDK TChannel driver against isolated updated Rust server completed with
   exit 0. All three external compatibility drivers passed this checkpoint.
+
+- Scheduler backfill queue (2026-10-15): persisted pending cursors and overlap
+  overrides replace the immediate, first-100-only path. Paused backfills stay
+  queued, ranges drain over bounded ticks after unpause, total counts use
+  Go's 100000 scan cap, and completed items disappear from ongoingBackfills.
+  Pending IDs deduplicate, invalid ranges and full ten-request queues are
+  ignored like Go handleBackfill (frontend validation remains separate).
+  Completed backfill accounting remains internal; it no longer prevents
+  reuse of a drained ID. Old snapshots default the new queue to empty.
+- Differential runner now has 17 shared scenarios calling real Go functions:
+  9 bounds/DST, 5 catch-up continuation/counters, 3 backfill queue/progress.
+  All pass. Backfill fixtures save/reload paused Rust snapshots before
+  execution. Persistence suite: 129 tests pass; strict persistence/all-targets
+  clippy clean. Last full-workspace checkpoint: 269 tests + strict clippy;
+  all three external compatibility drivers passed before recovery/backfill
+  follow-ups (isolated server currently serves that earlier binary).
+- Remaining schedule depth includes buffered trigger-source preservation,
+  buffer/concurrency system caps, per-execution budget sharing, real workflow
+  scheduler history/visibility parity and failure retry paths. Broader
+  production persistence/replication/distributed gaps remain unported.

@@ -115,3 +115,8 @@ The same runner also compares catch-up counters, watermarks, and per-unpause
 policy overrides against Go's `processMissedRunsAt`, including continuation
 across activity budgets and the 1000-fire scan cap. Rust recovery tests save
 and reload a snapshot between catch-up batches.
+
+Backfill fixtures also run through Go's actual `handleBackfill` and
+`processBackfills`: paused queues, pending-ID deduplication, range rejection,
+queue limits, and progress across batches. Rust saves/reloads each paused queue
+before draining it. Completed work disappears from `ongoingBackfills`.

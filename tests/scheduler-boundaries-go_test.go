@@ -98,3 +98,54 @@ func TestRustSchedulerCatchUpFixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestRustSchedulerBackfillFixtures(t *testing.T) {
+	var cases []struct {
+		Name    string
+		Signals []struct {
+			ID         string
+			Start, End int
+		}
+		Accepted      []bool
+		Queued, Total int
+		Rounds        []struct{ Attempted, Pending, Completed, Start int }
+	}
+	data, err := os.ReadFile(os.Getenv("CADENCE_SCHEDULER_BACKFILL_FIXTURES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			state := &SchedulerWorkflowState{Paused: true}
+			input := &SchedulerWorkflowInput{Spec: types.ScheduleSpec{CronExpression: "* * * * *"}}
+			scope := tally.NewTestScope("", nil)
+			for i, sig := range c.Signals {
+				accepted := handleBackfill(testLogger, scope, BackfillSignal{BackfillID: sig.ID, StartTime: base.Add(time.Duration(sig.Start) * time.Minute), EndTime: base.Add(time.Duration(sig.End) * time.Minute)}, state)
+				if accepted != c.Accepted[i] {
+					t.Fatalf("signal %d accepted=%v want=%v", i, accepted, c.Accepted[i])
+				}
+			}
+			sched := mustParseCron(t, "* * * * *")
+			budget := 100
+			processBackfills(nil, testLogger, scope, sched, input, state, &budget)
+			if budget != 100 || len(state.PendingBackfills) != c.Queued || int(state.PendingBackfills[0].RunsTotal) != c.Total || state.PendingBackfills[0].RunsCompleted != 0 {
+				t.Fatalf("paused queue=%+v budget=%d", state.PendingBackfills, budget)
+			}
+			state.Paused = false
+			for i, want := range c.Rounds {
+				budget := 100
+				processBackfills(nil, testLogger, scope, sched, input, state, &budget)
+				if 100-budget != want.Attempted || len(state.PendingBackfills) != want.Pending {
+					t.Fatalf("round %d budget=%d queue=%+v", i, budget, state.PendingBackfills)
+				}
+				if want.Pending > 0 && (int(state.PendingBackfills[0].RunsCompleted) != want.Completed || !state.PendingBackfills[0].StartTime.Equal(base.Add(time.Duration(want.Start)*time.Minute))) {
+					t.Fatalf("round %d progress=%+v want=%+v", i, state.PendingBackfills[0], want)
+				}
+			}
+		})
+	}
+}
