@@ -3,7 +3,10 @@
 package scheduler
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/uber/cadence/client/frontend"
+	"go.uber.org/mock/gomock"
 	"os"
 	"testing"
 	"time"
@@ -180,5 +183,37 @@ func TestRustSchedulerIdentityLimitsFixtures(t *testing.T) {
 		if buffer != c.Buffer || effectiveConcurrencyLimit(c.User) != c.Concurrency {
 			t.Fatalf("limits user=%d buffer=%d concurrency=%d", c.User, buffer, effectiveConcurrencyLimit(c.User))
 		}
+	}
+}
+
+func TestRustSchedulerOverlapFixtures(t *testing.T) {
+	var cases []struct {
+		Policy  int
+		Message string
+	}
+	data, err := os.ReadFile(os.Getenv("CADENCE_SCHEDULER_OVERLAP_FIXTURES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		t.Run(c.Message, func(t *testing.T) {
+			mock := frontend.NewMockClient(gomock.NewController(t))
+			execution := &types.WorkflowExecution{WorkflowID: "workflow", RunID: "run"}
+			var ok bool
+			var err error
+			if c.Policy == int(types.ScheduleOverlapPolicyCancelPrevious) {
+				mock.EXPECT().RequestCancelWorkflowExecution(gomock.Any(), gomock.Eq(&types.RequestCancelWorkflowExecutionRequest{Domain: "d", WorkflowExecution: execution, Cause: c.Message})).Return(nil)
+				ok, err = cancelWorkflow(context.Background(), mock, "d", &RunningWorkflowInfo{WorkflowID: "workflow", RunID: "run"})
+			} else {
+				mock.EXPECT().TerminateWorkflowExecution(gomock.Any(), gomock.Eq(&types.TerminateWorkflowExecutionRequest{Domain: "d", WorkflowExecution: execution, Reason: c.Message})).Return(nil)
+				ok, err = terminateWorkflow(context.Background(), mock, "d", &RunningWorkflowInfo{WorkflowID: "workflow", RunID: "run"})
+			}
+			if !ok || err != nil {
+				t.Fatalf("ok=%v err=%v", ok, err)
+			}
+		})
 	}
 }

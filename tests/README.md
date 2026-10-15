@@ -125,3 +125,7 @@ Scheduler identity fixtures compare deterministic request UUIDs with Go's
 `generateRequestID` (including the nested DNS namespace) and enforce the Go
 1000-entry buffer/concurrency ceilings. Engine tests preserve buffered backfill
 origins across snapshots and verify policy changes count dropped queued fires.
+
+Overlap fixtures compare Go's actual cancel/terminate client requests with Rust
+history and close status. `CANCEL_PREVIOUS` remains cooperative; only the latest
+started target receives either action, even if older runs are still open.

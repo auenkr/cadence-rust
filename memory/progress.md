@@ -1108,3 +1108,24 @@
   durable last-started tracking so older cancel-requested runs cannot become
   the overlap target after the latest run closes. Buffer draining also
   needs to use that last target, not all previous active runs. No fix yet.
+
+- Overlap cancellation semantics fixed (2026-10-15): CANCEL_PREVIOUS calls
+  the normal cooperative request-cancel path with Go's exact cause; old runs
+  stay open until workers close them. TERMINATE_PREVIOUS uses the normal
+  termination path and exact Go reason. Both act only on the last-started
+  target. Added durable last-started tracking separate from bounded active
+  runs, migrated legacy tracking on snapshot load, and stopped retaining an
+  unbounded active-run list for non-bounded policies. Buffer draining uses
+  the last target. Bounded tracking clears on policy transitions like Go.
+- Shared overlap fixture checks real Go cancelWorkflow/terminateWorkflow
+  requests using the upstream frontend mock, while Rust verifies history,
+  close status and that older cancel-requested runs are never targeted again.
+  Differential suite: 19 behavioral scenarios + 4 UUIDs + 7 limits pass.
+  Persistence suite 133 tests passes; strict persistence/all-targets clippy
+  passes. Prior full-workspace checkpoint: 275 tests + strict clippy.
+- Audit next: Go LastRunTime advances monotonically on every fire attempt,
+  including skips/buffering/failures, while Rust still updates it only on
+  successful starts; buffer draining can move its watermark backward. Also
+  missing actions/start errors must count MissedRuns and consume the fire.
+  PauseOnFailure and Jitter are present in API types but not acted upon in
+  the pinned Go scheduler implementation; do not invent behavior for them.

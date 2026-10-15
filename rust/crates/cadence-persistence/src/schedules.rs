@@ -100,6 +100,9 @@ pub struct ScheduleRecord {
     pub skipped_runs: i64,
     /// Fired target runs still believed open: (workflow_id, run_id).
     pub running: Vec<(String, String)>,
+    /// Go LastStartedWorkflow is independent of bounded concurrency tracking.
+    #[serde(default)]
+    pub last_started_run: Option<(String, String)>,
     /// Buffered fire times (BUFFER overlap policy).
     pub buffer: VecDeque<BufferedScheduleFire>,
     /// Backfill accounting; descriptions expose only pending entries.
@@ -364,6 +367,14 @@ impl crate::executions::InMemoryExecutionStore {
     pub(crate) fn resume_schedules_after_restart(&self) {
         let mut inner = self.inner.write().expect("execution store lock");
         for record in inner.schedules.values_mut() {
+            if record.last_started_run.is_none() {
+                record.last_started_run = record.running.last().cloned();
+            }
+            if record.policies.overlap_policy != Some(ScheduleOverlapPolicy::Concurrent)
+                || record.policies.concurrency_limit <= 0
+            {
+                record.running.clear();
+            }
             if !record.paused && !record.deleted() {
                 record.catch_up_pending = true;
             }
@@ -419,6 +430,7 @@ impl crate::executions::InMemoryExecutionStore {
             missed_runs: 0,
             skipped_runs: 0,
             running: Vec::new(),
+            last_started_run: None,
             buffer: VecDeque::new(),
             backfills: Vec::new(),
             pending_backfills: VecDeque::new(),
@@ -503,6 +515,12 @@ impl crate::executions::InMemoryExecutionStore {
             {
                 record.skipped_runs += record.buffer.len() as i64;
                 record.buffer.clear();
+            }
+            if record.policies.overlap_policy == Some(ScheduleOverlapPolicy::Concurrent)
+                && (policies.overlap_policy != Some(ScheduleOverlapPolicy::Concurrent)
+                    || policies.concurrency_limit == 0)
+            {
+                record.running.clear();
             }
             record.policies = policies;
         }
@@ -952,6 +970,20 @@ impl crate::executions::InMemoryExecutionStore {
                 })
                 .unwrap_or_default()
         };
+        let previous_running = {
+            let inner = self.inner.read().expect("execution store lock");
+            inner
+                .schedules
+                .get(&(domain.to_string(), schedule_id.to_string()))
+                .and_then(|r| r.last_started_run.as_ref().or_else(|| r.running.last()))
+                .filter(|(w, run)| {
+                    inner
+                        .by_run
+                        .get(&(domain.to_string(), w.clone(), run.clone()))
+                        .is_some_and(|record| record.is_open())
+                })
+                .cloned()
+        };
         {
             let mut inner = self.inner.write().expect("execution store lock");
             if let Some(r) = inner
@@ -968,7 +1000,7 @@ impl crate::executions::InMemoryExecutionStore {
         };
         match effective {
             ScheduleOverlapPolicy::SkipNew => {
-                if !running.is_empty() {
+                if previous_running.is_some() {
                     self.note_schedule_skip(domain, schedule_id, fire_nanos);
                     return false;
                 }
@@ -982,7 +1014,7 @@ impl crate::executions::InMemoryExecutionStore {
                 }
             }
             ScheduleOverlapPolicy::Buffer => {
-                if !running.is_empty() {
+                if previous_running.is_some() {
                     let mut inner = self.inner.write().expect("execution store lock");
                     if let Some(r) = inner
                         .schedules
@@ -1003,7 +1035,7 @@ impl crate::executions::InMemoryExecutionStore {
                 }
             }
             ScheduleOverlapPolicy::CancelPrevious | ScheduleOverlapPolicy::TerminatePrevious => {
-                for (w, run) in &running {
+                if let Some((w, run)) = &previous_running {
                     self.close_schedule_target(domain, w, run, effective);
                 }
             }
@@ -1055,7 +1087,12 @@ impl crate::executions::InMemoryExecutionStore {
                 .schedules
                 .get_mut(&(domain.to_string(), schedule_id.to_string()))
             {
-                r.running.push((workflow_id, run_id));
+                r.last_started_run = Some((workflow_id.clone(), run_id.clone()));
+                if effective == ScheduleOverlapPolicy::Concurrent && concurrency_limit > 0 {
+                    r.running.push((workflow_id, run_id));
+                } else {
+                    r.running.clear();
+                }
                 r.total_runs += 1;
                 r.last_run_nanos = Some(fire_nanos);
                 r.last_fire_nanos = Some(fire_nanos);
@@ -1081,7 +1118,7 @@ impl crate::executions::InMemoryExecutionStore {
         }
     }
 
-    /// Close a running target for CANCEL_PREVIOUS / TERMINATE_PREVIOUS.
+    /// Go cancelWorkflow / terminateWorkflow target only the latest run.
     fn close_schedule_target(
         &self,
         domain: &str,
@@ -1089,56 +1126,27 @@ impl crate::executions::InMemoryExecutionStore {
         run_id: &str,
         overlap: ScheduleOverlapPolicy,
     ) {
-        use cadence_api::service_types::HistoryEvent;
-        let mut inner = self.inner.write().expect("execution store lock");
-        let key = (
-            domain.to_string(),
-            workflow_id.to_string(),
-            run_id.to_string(),
-        );
-        if !inner.by_run.get(&key).is_some_and(|r| r.is_open()) {
-            return;
-        }
-        let (status, event_type, event) = if overlap == ScheduleOverlapPolicy::CancelPrevious {
-            (
-                WorkflowExecutionCloseStatus::Canceled,
-                cadence_api::enums::EventType::WorkflowExecutionCanceled,
-                HistoryEvent {
-                    workflow_execution_canceled_event_attributes: Some(
-                        cadence_api::tasks::WorkflowExecutionCanceledEventAttributes {
-                            decision_task_completed_event_id: 0,
-                            ..Default::default()
-                        },
-                    ),
+        let execution = Some(cadence_api::types::WorkflowExecution {
+            workflow_id: workflow_id.to_string(),
+            run_id: run_id.to_string(),
+        });
+        if overlap == ScheduleOverlapPolicy::CancelPrevious {
+            let _ = self.request_cancel(
+                &cadence_api::service_types::RequestCancelWorkflowExecutionRequest {
+                    domain: domain.to_string(),
+                    workflow_execution: execution,
+                    cause: "schedule overlap policy: CANCEL_PREVIOUS".to_string(),
                     ..Default::default()
                 },
-            )
+            );
         } else {
-            (
-                WorkflowExecutionCloseStatus::Terminated,
-                cadence_api::enums::EventType::WorkflowExecutionTerminated,
-                HistoryEvent {
-                    workflow_execution_terminated_event_attributes: Some(
-                        cadence_api::service_types::WorkflowExecutionTerminatedEventAttributes {
-                            reason: "terminated by schedule overlap policy".to_string(),
-                            ..Default::default()
-                        },
-                    ),
-                    ..Default::default()
-                },
-            )
-        };
-        Self::close_run_locked(
-            &mut inner,
-            domain,
-            workflow_id,
-            run_id,
-            status,
-            None,
-            Vec::new(),
-            event,
-            event_type,
-        );
+            let _ = self.terminate(&cadence_api::types::TerminateWorkflowExecutionRequest {
+                domain: domain.to_string(),
+                workflow_execution: execution,
+                reason: "schedule overlap policy: TERMINATE_PREVIOUS".to_string(),
+                ..Default::default()
+            });
+        }
     }
 
     /// Pause schedules whose tracked runs just closed as failed when
@@ -1158,6 +1166,7 @@ impl crate::executions::InMemoryExecutionStore {
             record
                 .running
                 .iter()
+                .chain(record.last_started_run.iter())
                 .filter(|(w, run)| {
                     inner
                         .by_run
@@ -1198,12 +1207,15 @@ impl crate::executions::InMemoryExecutionStore {
                     !r.paused
                         && !r.deleted()
                         && !r.buffer.is_empty()
-                        && r.running.iter().all(|(w, run)| {
-                            inner
-                                .by_run
-                                .get(&(((r.domain).clone()), w.clone(), run.clone()))
-                                .is_none_or(|rec| !rec.is_open())
-                        })
+                        && r.last_started_run
+                            .as_ref()
+                            .or_else(|| r.running.last())
+                            .is_none_or(|(w, run)| {
+                                inner
+                                    .by_run
+                                    .get(&(r.domain.clone(), w.clone(), run.clone()))
+                                    .is_none_or(|rec| !rec.is_open())
+                            })
                 })
                 .filter_map(|((d, id), r)| {
                     r.buffer.front().map(|f| (d.clone(), id.clone(), f.clone()))
@@ -1676,7 +1688,7 @@ mod tests {
                 .schedules
                 .get(&(namespace.clone(), "buffer".to_string()))
                 .unwrap();
-            let (workflow, run) = record.running[0].clone();
+            let (workflow, run) = record.last_started_run.clone().unwrap();
             inner
                 .by_run
                 .get_mut(&(namespace.clone(), workflow, run))
@@ -1765,6 +1777,113 @@ mod tests {
         assert!(r.buffer.is_empty());
         assert_eq!(r.skipped_runs, 1001);
         assert_eq!(r.policies.catch_up_window_in_seconds, Some(120));
+    }
+
+    #[test]
+    fn scheduler_overlap_fixtures() {
+        #[derive(serde::Deserialize)]
+        struct Case {
+            policy: i32,
+            message: String,
+            event: String,
+            closed: bool,
+        }
+        let cases: Vec<Case> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/scheduler-overlap.json"
+        ))
+        .unwrap();
+        for case in cases {
+            let store = test_store();
+            let policy = ScheduleOverlapPolicy::from_i32(case.policy).unwrap();
+            let mut req = create_req("overlap", "* * * * *");
+            req.policies = Some(SchedulePolicies {
+                overlap_policy: Some(policy),
+                ..Default::default()
+            });
+            store.create_schedule("d", &req).unwrap();
+            let namespace = store.inner.read().unwrap().domain_id("d");
+            let base = nanos("2026-01-15T10:00:00Z");
+            for i in 0..3 {
+                assert!(store.fire_schedule_at(
+                    &namespace,
+                    "overlap",
+                    base + i * 60_000_000_000,
+                    ScheduleOverlapPolicy::Invalid,
+                    "schedule"
+                ));
+            }
+            let mut inner = store.inner.write().unwrap();
+            let record = inner
+                .schedules
+                .get(&(namespace.clone(), "overlap".to_string()))
+                .unwrap();
+            assert!(record.running.is_empty());
+            let latest = record.last_started_run.clone().unwrap();
+            for i in 0..2 {
+                let workflow = fire_workflow_id("sched", "overlap", base + i * 60_000_000_000);
+                let record = inner
+                    .by_run
+                    .values()
+                    .find(|r| r.execution.workflow_id == workflow)
+                    .unwrap();
+                assert_eq!(!record.is_open(), case.closed);
+                let events: Vec<_> = record
+                    .history
+                    .iter()
+                    .filter(|e| e.event_type.is_some_and(|t| t.to_string() == case.event))
+                    .collect();
+                assert_eq!(events.len(), 1, "each prior run is targeted exactly once");
+                if case.closed {
+                    assert_eq!(
+                        events[0]
+                            .workflow_execution_terminated_event_attributes
+                            .as_ref()
+                            .unwrap()
+                            .reason,
+                        case.message
+                    );
+                } else {
+                    assert_eq!(
+                        events[0]
+                            .workflow_execution_cancel_requested_event_attributes
+                            .as_ref()
+                            .unwrap()
+                            .cause,
+                        case.message
+                    );
+                }
+            }
+            // Completing the latest target must not redirect the next overlap
+            // action at an older workflow that is still honoring cancellation.
+            inner
+                .by_run
+                .get_mut(&(namespace.clone(), latest.0, latest.1))
+                .unwrap()
+                .close_status = Some(WorkflowExecutionCloseStatus::Completed);
+            drop(inner);
+            assert!(store.fire_schedule_at(
+                &namespace,
+                "overlap",
+                base + 180_000_000_000,
+                ScheduleOverlapPolicy::Invalid,
+                "schedule"
+            ));
+            let inner = store.inner.read().unwrap();
+            let first = fire_workflow_id("sched", "overlap", base);
+            let record = inner
+                .by_run
+                .values()
+                .find(|r| r.execution.workflow_id == first)
+                .unwrap();
+            assert_eq!(
+                record
+                    .history
+                    .iter()
+                    .filter(|e| e.event_type.is_some_and(|t| t.to_string() == case.event))
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]

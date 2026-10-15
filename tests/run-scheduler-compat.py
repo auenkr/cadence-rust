@@ -24,6 +24,6 @@ with tempfile.TemporaryDirectory(prefix="cadence-scheduler-compat-") as director
     }}))
     subprocess.run([
         "go", "test", "-overlay", str(overlay),
-        "./service/worker/scheduler", "-run", "^TestRustScheduler(Boundary|CatchUp|Backfill|IdentityLimits)Fixtures$",
+        "./service/worker/scheduler", "-run", "^TestRustScheduler(Boundary|CatchUp|Backfill|IdentityLimits|Overlap)Fixtures$",
         "-count=1", "-v",
-    ], cwd=root / "go", env={**os.environ, "CADENCE_SCHEDULER_FIXTURES": str(fixture), "CADENCE_SCHEDULER_CATCHUP_FIXTURES": str(root / "tests/fixtures/scheduler-catchup.json"), "CADENCE_SCHEDULER_BACKFILL_FIXTURES": str(root / "tests/fixtures/scheduler-backfill.json"), "CADENCE_SCHEDULER_IDENTITY_FIXTURES": str(root / "tests/fixtures/scheduler-identity-limits.json")}, check=True)
+    ], cwd=root / "go", env={**os.environ, "CADENCE_SCHEDULER_FIXTURES": str(fixture), "CADENCE_SCHEDULER_CATCHUP_FIXTURES": str(root / "tests/fixtures/scheduler-catchup.json"), "CADENCE_SCHEDULER_BACKFILL_FIXTURES": str(root / "tests/fixtures/scheduler-backfill.json"), "CADENCE_SCHEDULER_IDENTITY_FIXTURES": str(root / "tests/fixtures/scheduler-identity-limits.json"), "CADENCE_SCHEDULER_OVERLAP_FIXTURES": str(root / "tests/fixtures/scheduler-overlap.json")}, check=True)

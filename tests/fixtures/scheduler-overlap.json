@@ -1,0 +1,4 @@
+[
+  {"policy":4,"message":"schedule overlap policy: CANCEL_PREVIOUS","event":"WorkflowExecutionCancelRequested","closed":false},
+  {"policy":5,"message":"schedule overlap policy: TERMINATE_PREVIOUS","event":"WorkflowExecutionTerminated","closed":true}
+]
