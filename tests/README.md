@@ -110,3 +110,8 @@ scheduler package to call its actual `computeNextRunTime` and
 `computeMissedFireTimes` functions. It leaves the Go source tree unchanged and
 requires no Go Cadence server. Fixtures cover inclusive schedule bounds, expired
 windows, and DST. Rust engine tests also cover delayed ticks and backfill bounds.
+
+The same runner also compares catch-up counters, watermarks, and per-unpause
+policy overrides against Go's `processMissedRunsAt`, including continuation
+across activity budgets and the 1000-fire scan cap. Rust recovery tests save
+and reload a snapshot between catch-up batches.

@@ -10,7 +10,9 @@
 
 use std::collections::VecDeque;
 
-use cadence_api::enums::{ScheduleCatchUpPolicy, ScheduleOverlapPolicy, WorkflowExecutionCloseStatus};
+use cadence_api::enums::{
+    ScheduleCatchUpPolicy, ScheduleOverlapPolicy, WorkflowExecutionCloseStatus,
+};
 use cadence_api::schedule::{
     BackfillInfo, ScheduleAction, ScheduleInfo, ScheduleListEntry, SchedulePauseInfo,
     SchedulePolicies, ScheduleSpec, ScheduleState,
@@ -57,6 +59,12 @@ pub struct ScheduleRecord {
     pub backfills: Vec<BackfillInfo>,
     /// One-shot catch-up override from UnpauseSchedule.
     pub unpause_catchup: Option<ScheduleCatchUpPolicy>,
+    /// Go LastProcessedTime: includes catch-up fires skipped by policy.
+    #[serde(default)]
+    pub last_processed_nanos: Option<i64>,
+    /// Continue catch-up on later ticks when the per-tick budget is exhausted.
+    #[serde(default)]
+    pub catch_up_pending: bool,
     /// Tombstone for deleted schedules (idempotent delete like Go).
     pub deleted_at_nanos: Option<i64>,
 }
@@ -182,8 +190,10 @@ fn next_spec_fire(
         Some(start) if after_nanos < start => start.checked_sub(1_000_000_000)?,
         _ => after_nanos,
     };
-    let next = schedule.next(cadence_common::cron::naive_from_nanos(cursor))?
-        .and_utc().timestamp_nanos_opt()?;
+    let next = schedule
+        .next(cadence_common::cron::naive_from_nanos(cursor))?
+        .and_utc()
+        .timestamp_nanos_opt()?;
     if spec.end_time_nano.is_some_and(|end| next > end) {
         None
     } else {
@@ -198,10 +208,15 @@ pub fn fires_in_range(
     to_nanos: i64,
     limit: usize,
 ) -> Vec<i64> {
-    spec_fires_in_range(&ScheduleSpec {
-        cron_expression: cron_expression.to_string(),
-        ..Default::default()
-    }, from_nanos, to_nanos, limit)
+    spec_fires_in_range(
+        &ScheduleSpec {
+            cron_expression: cron_expression.to_string(),
+            ..Default::default()
+        },
+        from_nanos,
+        to_nanos,
+        limit,
+    )
 }
 
 pub fn spec_fires_in_range(
@@ -289,11 +304,7 @@ impl crate::executions::InMemoryExecutionStore {
         let mut inner = self.inner.write().expect("execution store lock");
         let namespace = inner.domain_id(domain);
         let key = (namespace.clone(), req.schedule_id.clone());
-        if inner
-            .schedules
-            .get(&key)
-            .is_some_and(|r| !r.deleted())
-        {
+        if inner.schedules.get(&key).is_some_and(|r| !r.deleted()) {
             return Err(ScheduleError::Exists(format!(
                 "schedule {:?} already exists in domain {:?}",
                 req.schedule_id, req.domain
@@ -301,14 +312,11 @@ impl crate::executions::InMemoryExecutionStore {
         }
         let now = now_nanos();
         let paused = req.state.as_ref().is_some_and(|s| s.paused);
-        let (pause_reason, paused_by, paused_at) = match req.state.as_ref().and_then(|s| s.pause_info.as_ref()) {
-            Some(info) if paused => (
-                info.reason.clone(),
-                info.paused_by.clone(),
-                Some(now),
-            ),
-            _ => (String::new(), String::new(), paused.then_some(now)),
-        };
+        let (pause_reason, paused_by, paused_at) =
+            match req.state.as_ref().and_then(|s| s.pause_info.as_ref()) {
+                Some(info) if paused => (info.reason.clone(), info.paused_by.clone(), Some(now)),
+                _ => (String::new(), String::new(), paused.then_some(now)),
+            };
         let record = ScheduleRecord {
             domain: namespace.clone(),
             schedule_id: req.schedule_id.clone(),
@@ -325,7 +333,9 @@ impl crate::executions::InMemoryExecutionStore {
             update_nanos: now,
             last_fire_nanos: None,
             last_run_nanos: None,
-            next_run_nanos: if paused { None } else {
+            next_run_nanos: if paused {
+                None
+            } else {
                 next_spec_fire_nanos(&req.spec.clone().unwrap_or_default(), now)
             },
             total_runs: 0,
@@ -335,6 +345,8 @@ impl crate::executions::InMemoryExecutionStore {
             buffer: VecDeque::new(),
             backfills: Vec::new(),
             unpause_catchup: None,
+            last_processed_nanos: None,
+            catch_up_pending: false,
             deleted_at_nanos: None,
         };
         inner.schedules.insert(key, record);
@@ -355,9 +367,11 @@ impl crate::executions::InMemoryExecutionStore {
             )))
         })?;
         if record.deleted() {
-            return Err(ScheduleError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!("schedule {schedule_id:?} does not exist in domain {domain:?}"),
-            )));
+            return Err(ScheduleError::NotFound(
+                cadence_api::errors::EntityNotExistsError::new(format!(
+                    "schedule {schedule_id:?} does not exist in domain {domain:?}"
+                )),
+            ));
         }
         record.refresh_next_run(now_nanos());
         Ok(cadence_api::schedule::DescribeScheduleResponse {
@@ -386,12 +400,12 @@ impl crate::executions::InMemoryExecutionStore {
             )))
         })?;
         if record.deleted() {
-            return Err(ScheduleError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!(
+            return Err(ScheduleError::NotFound(
+                cadence_api::errors::EntityNotExistsError::new(format!(
                     "schedule {:?} does not exist in domain {:?}",
                     req.schedule_id, req.domain
-                ),
-            )));
+                )),
+            ));
         }
         if let Some(spec) = req.spec.clone() {
             record.spec = spec;
@@ -443,9 +457,11 @@ impl crate::executions::InMemoryExecutionStore {
             )))
         })?;
         if record.deleted() {
-            return Err(ScheduleError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!("schedule {schedule_id:?} does not exist in domain {domain:?}"),
-            )));
+            return Err(ScheduleError::NotFound(
+                cadence_api::errors::EntityNotExistsError::new(format!(
+                    "schedule {schedule_id:?} does not exist in domain {domain:?}"
+                )),
+            ));
         }
         record.paused = true;
         record.pause_reason = reason.to_string();
@@ -463,69 +479,92 @@ impl crate::executions::InMemoryExecutionStore {
         schedule_id: &str,
         catch_up: Option<ScheduleCatchUpPolicy>,
     ) -> Result<(), ScheduleError> {
-        // Resolve keys first so the catch-up pass can reuse fire logic.
-        let (namespace, key) = {
-            let inner = self.inner.read().expect("execution store lock");
-            let namespace = inner.domain_id(domain);
-            (namespace.clone(), (namespace, schedule_id.to_string()))
-        };
-        let now = now_nanos();
-        // Snapshot the catch-up inputs under the read lock.
-        let (spec, paused_at, watermark, policy, window, paused, deleted) = {
-            let inner = self.inner.read().expect("execution store lock");
-            match inner.schedules.get(&key) {
-                Some(r) => (
-                    r.spec.clone(),
-                    r.paused_at_nanos,
-                    r.last_fire_nanos,
-                    r.unpause_catchup
-                        .or(catch_up)
-                        .or(r.policies.catch_up_policy)
-                        .unwrap_or(ScheduleCatchUpPolicy::Skip),
-                    catch_up_window_nanos(&r.policies),
-                    r.paused,
-                    r.deleted(),
-                ),
-                None => {
-                    return Err(ScheduleError::NotFound(
-                        cadence_api::errors::EntityNotExistsError::new(format!(
-                            "schedule {schedule_id:?} does not exist in domain {domain:?}"
-                        )),
-                    ));
-                }
-            }
-        };
-        if deleted {
-            return Err(ScheduleError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!("schedule {schedule_id:?} does not exist in domain {domain:?}"),
-            )));
-        }
-        // Missed fires are those strictly after the watermark (or pause time)
-        // up to now.
-        let from = watermark.or(paused_at).unwrap_or(now);
-        let missed = if now > from {
-            spec_fires_in_range(&spec, from, now, MAX_FIRES_PER_TICK)
-        } else {
-            Vec::new()
-        };
-        let (to_fire, skipped) = apply_catch_up_policy(policy, window, &missed, now);
-        {
+        let key = {
             let mut inner = self.inner.write().expect("execution store lock");
-            let record = inner.schedules.get_mut(&key).expect("schedule exists");
+            let key = Self::schedule_key(&inner, domain, schedule_id);
+            let record = inner
+                .schedules
+                .get_mut(&key)
+                .filter(|r| !r.deleted())
+                .ok_or_else(|| {
+                    ScheduleError::NotFound(cadence_api::errors::EntityNotExistsError::new(
+                        format!("schedule {schedule_id:?} does not exist in domain {domain:?}"),
+                    ))
+                })?;
             record.paused = false;
             record.pause_reason.clear();
             record.paused_by.clear();
             record.paused_at_nanos = None;
-            record.unpause_catchup = None;
-            record.missed_runs += skipped;
-            record.update_nanos = now;
-            let _ = namespace;
-            let _ = paused;
-        }
-        for fire in to_fire {
-            self.fire_schedule_at(&key.0, &key.1, fire, ScheduleOverlapPolicy::Invalid, "catchup");
-        }
+            record.unpause_catchup = catch_up.filter(|p| *p != ScheduleCatchUpPolicy::Invalid);
+            record.catch_up_pending = true;
+            record.update_nanos = now_nanos();
+            key
+        };
+        self.process_schedule_catch_up(&key.0, &key.1, now_nanos());
         Ok(())
+    }
+
+    /// Go processMissedRunsAt, with the per-execution activity budget mapped
+    /// to a bounded tick. Persist both the watermark and one-shot override
+    /// across batches so skipped fires cannot become live fires on restart.
+    fn process_schedule_catch_up(&self, domain: &str, id: &str, now: i64) -> usize {
+        let (spec, watermark, policy, window) = {
+            let inner = self.inner.read().expect("execution store lock");
+            let Some(record) = inner.schedules.get(&(domain.to_string(), id.to_string())) else {
+                return 0;
+            };
+            if record.paused || record.deleted() || !record.catch_up_pending {
+                return 0;
+            }
+            (
+                record.spec.clone(),
+                record.catch_up_watermark(),
+                record
+                    .unpause_catchup
+                    .or(record.policies.catch_up_policy)
+                    .unwrap_or(ScheduleCatchUpPolicy::Skip),
+                catch_up_window_nanos(&record.policies),
+            )
+        };
+        // Go caps each scan at 1000, independently of the activity budget.
+        let missed = spec_fires_in_range(&spec, watermark, now, 1000);
+        let (to_fire, skipped) = apply_catch_up_policy(policy, window, &missed, now);
+        let processed = to_fire.len().min(MAX_FIRES_PER_TICK);
+        let mut started = 0;
+        for fire in to_fire.iter().take(processed) {
+            if self.fire_schedule_at(
+                domain,
+                id,
+                *fire,
+                ScheduleOverlapPolicy::Invalid,
+                "schedule",
+            ) {
+                started += 1;
+            }
+        }
+        let mut inner = self.inner.write().expect("execution store lock");
+        if let Some(record) = inner
+            .schedules
+            .get_mut(&(domain.to_string(), id.to_string()))
+        {
+            record.skipped_runs += skipped;
+            let partial = processed < to_fire.len();
+            let last = if partial {
+                to_fire.get(processed - 1)
+            } else {
+                missed.last()
+            };
+            if let Some(last) = last {
+                record.last_processed_nanos =
+                    Some(record.last_processed_nanos.unwrap_or(*last).max(*last));
+            }
+            record.catch_up_pending = partial || missed.len() == 1000;
+            if !record.catch_up_pending {
+                record.unpause_catchup = None;
+            }
+            record.refresh_next_run(now);
+        }
+        started
     }
 
     /// Record a backfill and execute its fires immediately, tracking
@@ -563,7 +602,12 @@ impl crate::executions::InMemoryExecutionStore {
         if already {
             return Ok(());
         }
-        let fires = spec_fires_in_range(&spec, start_nanos.saturating_sub(1_000_000_000), end_nanos, MAX_FIRES_PER_TICK);
+        let fires = spec_fires_in_range(
+            &spec,
+            start_nanos.saturating_sub(1_000_000_000),
+            end_nanos,
+            MAX_FIRES_PER_TICK,
+        );
         let total = fires.len() as i32;
         let id = if backfill_id.is_empty() {
             uuid::Uuid::new_v4().to_string()
@@ -584,7 +628,13 @@ impl crate::executions::InMemoryExecutionStore {
         }
         let mut completed = 0;
         for fire in fires {
-            self.fire_schedule_at(&key.0, &key.1, fire, overlap.unwrap_or(ScheduleOverlapPolicy::Invalid), &format!("backfill:{id}"));
+            self.fire_schedule_at(
+                &key.0,
+                &key.1,
+                fire,
+                overlap.unwrap_or(ScheduleOverlapPolicy::Invalid),
+                &format!("backfill:{id}"),
+            );
             completed += 1;
             let mut inner = self.inner.write().expect("execution store lock");
             if let Some(record) = inner.schedules.get_mut(&key) {
@@ -645,24 +695,45 @@ impl crate::executions::InMemoryExecutionStore {
     /// Fire all due schedules at `now_nanos`. Returns the number of target
     /// workflows started. Called by the server's background loop.
     pub fn fire_due_schedules(&self, now_nanos: i64) -> usize {
+        let catch_up: Vec<(String, String)> = {
+            let inner = self.inner.read().expect("execution store lock");
+            inner
+                .schedules
+                .iter()
+                .filter(|(_, r)| r.catch_up_pending && !r.paused && !r.deleted())
+                .map(|(key, _)| key.clone())
+                .collect()
+        };
+        let mut started = 0;
+        for (domain, id) in &catch_up {
+            started += self.process_schedule_catch_up(domain, id, now_nanos);
+        }
         // Collect due fires first to keep borrows simple.
         let due: Vec<(String, String, i64)> = {
             let inner = self.inner.read().expect("execution store lock");
             let mut due = Vec::new();
             for ((domain, id), record) in inner.schedules.iter() {
-                if record.paused || record.deleted() {
+                if record.paused
+                    || record.deleted()
+                    || catch_up.contains(&(domain.clone(), id.clone()))
+                {
                     continue;
                 }
-                let from = record.last_fire_nanos.unwrap_or(record.create_nanos);
+                let from = record.catch_up_watermark();
                 for fire in spec_fires_in_range(&record.spec, from, now_nanos, MAX_FIRES_PER_TICK) {
                     due.push((domain.clone(), id.clone(), fire));
                 }
             }
             due
         };
-        let mut started = 0;
         for (domain, id, fire) in due {
-            if self.fire_schedule_at(&domain, &id, fire, ScheduleOverlapPolicy::Invalid, "schedule") {
+            if self.fire_schedule_at(
+                &domain,
+                &id,
+                fire,
+                ScheduleOverlapPolicy::Invalid,
+                "schedule",
+            ) {
                 started += 1;
             }
         }
@@ -699,7 +770,9 @@ impl crate::executions::InMemoryExecutionStore {
                 Some(r) if !r.deleted() && !r.paused => (
                     r.action.clone(),
                     if overlap_override == ScheduleOverlapPolicy::Invalid {
-                        r.policies.overlap_policy.unwrap_or(ScheduleOverlapPolicy::Invalid)
+                        r.policies
+                            .overlap_policy
+                            .unwrap_or(ScheduleOverlapPolicy::Invalid)
                     } else {
                         overlap_override
                     },
@@ -826,7 +899,9 @@ impl crate::executions::InMemoryExecutionStore {
         };
         let run_id = match self.start(&req) {
             Ok(resp) => resp.run_id,
-            Err(crate::executions::StartError::AlreadyStarted(e)) if !e.run_id.is_empty() => e.run_id,
+            Err(crate::executions::StartError::AlreadyStarted(e)) if !e.run_id.is_empty() => {
+                e.run_id
+            }
             Err(_) => return false,
         };
         {
@@ -876,11 +951,7 @@ impl crate::executions::InMemoryExecutionStore {
             workflow_id.to_string(),
             run_id.to_string(),
         );
-        if !inner
-            .by_run
-            .get(&key)
-            .is_some_and(|r| r.is_open())
-        {
+        if !inner.by_run.get(&key).is_some_and(|r| r.is_open()) {
             return;
         }
         let (status, event_type, event) = if overlap == ScheduleOverlapPolicy::CancelPrevious {
@@ -912,7 +983,17 @@ impl crate::executions::InMemoryExecutionStore {
                 },
             )
         };
-        Self::close_run_locked(&mut inner, domain, workflow_id, run_id, status, None, Vec::new(), event, event_type);
+        Self::close_run_locked(
+            &mut inner,
+            domain,
+            workflow_id,
+            run_id,
+            status,
+            None,
+            Vec::new(),
+            event,
+            event_type,
+        );
     }
 
     /// Pause schedules whose tracked runs just closed as failed when
@@ -926,10 +1007,7 @@ impl crate::executions::InMemoryExecutionStore {
             else {
                 return;
             };
-            if !record
-                .policies
-                .pause_on_failure
-            {
+            if !record.policies.pause_on_failure {
                 return;
             }
             record
@@ -1004,6 +1082,12 @@ impl crate::executions::InMemoryExecutionStore {
 }
 
 impl ScheduleRecord {
+    fn catch_up_watermark(&self) -> i64 {
+        self.create_nanos
+            .max(self.last_fire_nanos.unwrap_or(self.create_nanos))
+            .max(self.last_processed_nanos.unwrap_or(self.create_nanos))
+    }
+
     fn deleted(&self) -> bool {
         self.deleted_at_nanos.is_some()
     }
@@ -1057,8 +1141,137 @@ mod tests {
     }
 
     fn nanos(value: &str) -> i64 {
-        chrono::DateTime::parse_from_rfc3339(value).unwrap()
-            .timestamp_nanos_opt().unwrap()
+        chrono::DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .timestamp_nanos_opt()
+            .unwrap()
+    }
+
+    fn catch_up_store(policy: ScheduleCatchUpPolicy) -> InMemoryExecutionStore {
+        let store = test_store();
+        let mut req = create_req("catch-up", "* * * * *");
+        req.policies = Some(SchedulePolicies {
+            overlap_policy: Some(ScheduleOverlapPolicy::Concurrent),
+            catch_up_policy: Some(ScheduleCatchUpPolicy::Skip),
+            ..Default::default()
+        });
+        store.create_schedule("d", &req).unwrap();
+        {
+            let mut inner = store.inner.write().unwrap();
+            let key = InMemoryExecutionStore::schedule_key(&inner, "d", "catch-up");
+            let r = inner.schedules.get_mut(&key).unwrap();
+            r.create_nanos = nanos("2026-01-15T10:00:00Z");
+            r.unpause_catchup = Some(policy);
+            r.catch_up_pending = true;
+        }
+        store
+    }
+
+    #[test]
+    fn scheduler_catch_up_fixtures() {
+        #[derive(serde::Deserialize)]
+        struct Round {
+            attempted: usize,
+            skipped: i64,
+            watermark: i64,
+            pending: bool,
+            #[serde(rename = "override")]
+            override_policy: i32,
+        }
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            policy: i32,
+            minutes: i64,
+            rounds: Vec<Round>,
+        }
+        let cases: Vec<Case> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/scheduler-catchup.json"
+        ))
+        .unwrap();
+        let base = nanos("2026-01-15T10:00:00Z");
+        for case in cases {
+            let store = catch_up_store(ScheduleCatchUpPolicy::from_i32(case.policy).unwrap());
+            let now = base + case.minutes * 60_000_000_000;
+            for want in case.rounds {
+                assert_eq!(
+                    store.fire_due_schedules(now),
+                    want.attempted,
+                    "{} attempted",
+                    case.name
+                );
+                let inner = store.inner.read().unwrap();
+                let key = InMemoryExecutionStore::schedule_key(&inner, "d", "catch-up");
+                let r = inner.schedules.get(&key).unwrap();
+                assert_eq!(r.skipped_runs, want.skipped, "{} skipped", case.name);
+                assert_eq!(
+                    r.last_processed_nanos,
+                    Some(base + want.watermark * 60_000_000_000),
+                    "{} watermark",
+                    case.name
+                );
+                assert_eq!(r.catch_up_pending, want.pending, "{} pending", case.name);
+                assert_eq!(
+                    r.unpause_catchup.unwrap_or(ScheduleCatchUpPolicy::Invalid) as i32,
+                    want.override_policy,
+                    "{} override",
+                    case.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn catch_up_skips_advance_watermark_without_live_replay() {
+        for (policy, runs, skips) in [
+            (ScheduleCatchUpPolicy::Skip, 0, 5),
+            (ScheduleCatchUpPolicy::One, 1, 4),
+            (ScheduleCatchUpPolicy::All, 5, 0),
+        ] {
+            let store = catch_up_store(policy);
+            let now = nanos("2026-01-15T10:05:00Z");
+            assert_eq!(store.fire_due_schedules(now), runs as usize);
+            assert_eq!(store.fire_due_schedules(now), 0);
+            let inner = store.inner.read().unwrap();
+            let key = InMemoryExecutionStore::schedule_key(&inner, "d", "catch-up");
+            let r = inner.schedules.get(&key).unwrap();
+            assert_eq!(r.total_runs, runs);
+            assert_eq!(r.skipped_runs, skips);
+            assert_eq!(r.missed_runs, 0);
+            assert_eq!(r.last_processed_nanos, Some(now));
+            assert_eq!(r.unpause_catchup, None);
+            assert!(!r.catch_up_pending);
+        }
+    }
+
+    #[test]
+    fn catch_up_override_survives_batches_and_snapshot_restart() {
+        let mut store = catch_up_store(ScheduleCatchUpPolicy::All);
+        let now = nanos("2026-01-15T14:10:00Z"); // 250 fires
+        assert_eq!(store.fire_due_schedules(now), 100);
+        let path =
+            std::env::temp_dir().join(format!("cadence-catchup-{}.json", uuid::Uuid::new_v4()));
+        store.save_to_file(&path).unwrap();
+        store = InMemoryExecutionStore::load_from_file(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        {
+            let inner = store.inner.read().unwrap();
+            let key = InMemoryExecutionStore::schedule_key(&inner, "d", "catch-up");
+            let r = inner.schedules.get(&key).unwrap();
+            assert!(r.catch_up_pending);
+            assert_eq!(r.unpause_catchup, Some(ScheduleCatchUpPolicy::All));
+        }
+        assert_eq!(store.fire_due_schedules(now), 100);
+        assert_eq!(store.fire_due_schedules(now), 50);
+        assert_eq!(store.fire_due_schedules(now), 0);
+        let inner = store.inner.read().unwrap();
+        let key = InMemoryExecutionStore::schedule_key(&inner, "d", "catch-up");
+        let r = inner.schedules.get(&key).unwrap();
+        assert_eq!(r.total_runs, 250);
+        assert_eq!(r.skipped_runs, 0);
+        assert_eq!(r.last_processed_nanos, Some(now));
+        assert_eq!(r.unpause_catchup, None);
+        assert!(!r.catch_up_pending);
     }
 
     #[test]
@@ -1076,7 +1289,8 @@ mod tests {
         }
         let cases: Vec<Case> = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/scheduler-boundaries.json"
-        )).unwrap();
+        ))
+        .unwrap();
         for case in cases {
             let spec = ScheduleSpec {
                 cron_expression: case.cron,
@@ -1084,10 +1298,18 @@ mod tests {
                 end_time_nano: case.end.as_deref().map(nanos),
                 ..Default::default()
             };
-            assert_eq!(next_spec_fire_nanos(&spec, nanos(&case.after)),
-                case.next.as_deref().map(nanos), "{} next", case.name);
-            assert_eq!(spec_fires_in_range(&spec, nanos(&case.after), nanos(&case.until), 1000),
-                case.fires.iter().map(|v| nanos(v)).collect::<Vec<_>>(), "{} fires", case.name);
+            assert_eq!(
+                next_spec_fire_nanos(&spec, nanos(&case.after)),
+                case.next.as_deref().map(nanos),
+                "{} next",
+                case.name
+            );
+            assert_eq!(
+                spec_fires_in_range(&spec, nanos(&case.after), nanos(&case.until), 1000),
+                case.fires.iter().map(|v| nanos(v)).collect::<Vec<_>>(),
+                "{} fires",
+                case.name
+            );
         }
     }
 
@@ -1134,8 +1356,16 @@ mod tests {
             ..Default::default()
         });
         store.create_schedule("d", &req).unwrap();
-        store.backfill_schedule("d", "bounded-backfill", start - 3_600_000_000_000,
-            end + 3_600_000_000_000, None, "bounds").unwrap();
+        store
+            .backfill_schedule(
+                "d",
+                "bounded-backfill",
+                start - 3_600_000_000_000,
+                end + 3_600_000_000_000,
+                None,
+                "bounds",
+            )
+            .unwrap();
         let inner = store.inner.read().unwrap();
         let key = InMemoryExecutionStore::schedule_key(&inner, "d", "bounded-backfill");
         let record = inner.schedules.get(&key).unwrap();
@@ -1167,15 +1397,12 @@ mod tests {
     #[test]
     fn catch_up_policy_matches_go() {
         let missed = vec![100, 200, 300];
-        let (fire, skipped) =
-            apply_catch_up_policy(ScheduleCatchUpPolicy::Skip, 0, &missed, 1000);
+        let (fire, skipped) = apply_catch_up_policy(ScheduleCatchUpPolicy::Skip, 0, &missed, 1000);
         assert!(fire.is_empty() && skipped == 3);
-        let (fire, skipped) =
-            apply_catch_up_policy(ScheduleCatchUpPolicy::One, 0, &missed, 1000);
+        let (fire, skipped) = apply_catch_up_policy(ScheduleCatchUpPolicy::One, 0, &missed, 1000);
         assert_eq!(fire, vec![300]);
         assert_eq!(skipped, 2);
-        let (fire, skipped) =
-            apply_catch_up_policy(ScheduleCatchUpPolicy::All, 0, &missed, 1000);
+        let (fire, skipped) = apply_catch_up_policy(ScheduleCatchUpPolicy::All, 0, &missed, 1000);
         assert_eq!(fire, missed);
         assert_eq!(skipped, 0);
         // Out-of-window fires are skipped even under ALL.
@@ -1192,7 +1419,9 @@ mod tests {
     #[test]
     fn crud_pause_unpause_delete_flow() {
         let store = test_store();
-        let id = store.create_schedule("d", &create_req("s1", "* * * * *")).unwrap();
+        let id = store
+            .create_schedule("d", &create_req("s1", "* * * * *"))
+            .unwrap();
         assert_eq!(id, "s1");
         // Duplicate creation is an exists error.
         assert!(matches!(
@@ -1232,7 +1461,9 @@ mod tests {
     #[test]
     fn firing_starts_target_workflows_with_skip_overlap() {
         let store = test_store();
-        store.create_schedule("d", &create_req("s1", "* * * * *")).unwrap();
+        store
+            .create_schedule("d", &create_req("s1", "* * * * *"))
+            .unwrap();
         // Fire after creation: the first due fire starts, the rest skip
         // while it runs (SKIP_NEW overlap).
         let started = store.fire_due_schedules(2_000_000_000_000_000_000);
@@ -1251,7 +1482,9 @@ mod tests {
     #[test]
     fn backfill_executes_range_and_tracks_progress() {
         let store = test_store();
-        store.create_schedule("d", &create_req("s1", "0 * * * *")).unwrap();
+        store
+            .create_schedule("d", &create_req("s1", "0 * * * *"))
+            .unwrap();
         // One hour range on an hourly cron: exactly one fire.
         let start = 1_700_000_100_000_000_000;
         store

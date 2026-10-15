@@ -1029,3 +1029,24 @@
   based on adapter counts. Next immediate audit: catch-up watermark and
   skipped counters, batch continuation, paused/backfill persistence. Major
   production/distributed gaps in migration-inventory.md remain open.
+
+- Scheduler catch-up continuation (2026-10-15): added snapshot-compatible
+  LastProcessedTime and pending-pass state. Skips now increment SkippedRuns
+  (not MissedRuns), advance the watermark, and cannot be replayed as live
+  fires. Unpause policy overrides persist across per-tick activity batches
+  and 1000-fire scans, then clear only on completion. Live ticks defer to
+  pending catch-up. Catch-up fires use the normal schedule request-ID source.
+- New shared catch-up fixtures compare real Go processMissedRunsAt against
+  Rust: SKIP/ONE/ALL, three activity batches, and 1500 missed fires across
+  the scan cap. Added Rust snapshot restart and no-replay tests. All 14
+  shared boundary/catch-up scenarios pass both implementations. Full
+  workspace: 269 tests pass; strict workspace/all-targets clippy passes.
+- Isolated verification server: tmux cadence-rust:migration-server, HTTP
+  18080 / frontend 17833 / history 17834 / matching 17835 / TChannel 17933,
+  scheduler+semaphore enabled, no data-dir. Node public/internal compatibility
+  drivers pass. Existing server cadence-rust:rust was not restarted. Go SDK
+  driver is running against isolated TChannel; final result pending.
+- Next recovery gap: mark restored active schedules for catch-up even if
+  they were not in a pending catch-up pass at snapshot time. Paused backfill
+  queues and backfill continuation are still incomplete. JSON snapshots
+  remain development-only; no production persistence or XDC equivalence.

@@ -14,7 +14,7 @@ root = Path(__file__).resolve().parent.parent
 fixture = root / "tests/fixtures/scheduler-boundaries.json"
 subprocess.run([
     "cargo", "test", "--manifest-path", str(root / "rust/Cargo.toml"),
-    "-p", "cadence-persistence", "scheduler_boundary_fixtures",
+    "-p", "cadence-persistence", "scheduler_",
 ], check=True)
 with tempfile.TemporaryDirectory(prefix="cadence-scheduler-compat-") as directory:
     overlay = Path(directory) / "overlay.json"
@@ -24,6 +24,6 @@ with tempfile.TemporaryDirectory(prefix="cadence-scheduler-compat-") as director
     }}))
     subprocess.run([
         "go", "test", "-overlay", str(overlay),
-        "./service/worker/scheduler", "-run", "^TestRustSchedulerBoundaryFixtures$",
+        "./service/worker/scheduler", "-run", "^TestRustScheduler(Boundary|CatchUp)Fixtures$",
         "-count=1", "-v",
-    ], cwd=root / "go", env={**os.environ, "CADENCE_SCHEDULER_FIXTURES": str(fixture)}, check=True)
+    ], cwd=root / "go", env={**os.environ, "CADENCE_SCHEDULER_FIXTURES": str(fixture), "CADENCE_SCHEDULER_CATCHUP_FIXTURES": str(root / "tests/fixtures/scheduler-catchup.json")}, check=True)

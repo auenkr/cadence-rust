@@ -1,0 +1,93 @@
+[
+  {
+    "name": "skip consumes missed fires",
+    "policy": 1,
+    "minutes": 5,
+    "rounds": [
+      {
+        "attempted": 0,
+        "skipped": 5,
+        "watermark": 5,
+        "pending": false,
+        "override": 0
+      }
+    ]
+  },
+  {
+    "name": "one runs latest",
+    "policy": 2,
+    "minutes": 5,
+    "rounds": [
+      {
+        "attempted": 1,
+        "skipped": 4,
+        "watermark": 5,
+        "pending": false,
+        "override": 0
+      }
+    ]
+  },
+  {
+    "name": "all fits budget",
+    "policy": 3,
+    "minutes": 5,
+    "rounds": [
+      {
+        "attempted": 5,
+        "skipped": 0,
+        "watermark": 5,
+        "pending": false,
+        "override": 0
+      }
+    ]
+  },
+  {
+    "name": "override survives three batches",
+    "policy": 3,
+    "minutes": 250,
+    "rounds": [
+      {
+        "attempted": 100,
+        "skipped": 0,
+        "watermark": 100,
+        "pending": true,
+        "override": 3
+      },
+      {
+        "attempted": 100,
+        "skipped": 0,
+        "watermark": 200,
+        "pending": true,
+        "override": 3
+      },
+      {
+        "attempted": 50,
+        "skipped": 0,
+        "watermark": 250,
+        "pending": false,
+        "override": 0
+      }
+    ]
+  },
+  {
+    "name": "skip continues beyond scan cap",
+    "policy": 1,
+    "minutes": 1500,
+    "rounds": [
+      {
+        "attempted": 0,
+        "skipped": 1000,
+        "watermark": 1000,
+        "pending": true,
+        "override": 1
+      },
+      {
+        "attempted": 0,
+        "skipped": 1500,
+        "watermark": 1500,
+        "pending": false,
+        "override": 0
+      }
+    ]
+  }
+]
