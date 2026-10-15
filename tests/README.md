@@ -98,3 +98,15 @@ are in `cadence-common::cron::tests::named_time_zones_and_dst`):
 (cd go && go run ../tests/cron-timezone-compat.go)
 cargo test --manifest-path rust/Cargo.toml -p cadence-common named_time_zones_and_dst
 ```
+
+Scheduler boundary differential checks use one fixture file for Rust and Go:
+
+```sh
+python3 tests/run-scheduler-compat.py
+```
+
+The runner tests the Rust evaluator, then overlays a test into the original Go
+scheduler package to call its actual `computeNextRunTime` and
+`computeMissedFireTimes` functions. It leaves the Go source tree unchanged and
+requires no Go Cadence server. Fixtures cover inclusive schedule bounds, expired
+windows, and DST. Rust engine tests also cover delayed ticks and backfill bounds.

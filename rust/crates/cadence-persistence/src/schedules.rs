@@ -166,6 +166,31 @@ pub fn next_fire_nanos(cron_expression: &str, after_nanos: i64) -> Option<i64> {
     next.and_utc().timestamp_nanos_opt()
 }
 
+/// Go scheduler `computeNextRunTime`: inclusive StartTime/EndTime bounds.
+/// Before StartTime Go uses StartTime minus one second as the cron cursor.
+pub fn next_spec_fire_nanos(spec: &ScheduleSpec, after_nanos: i64) -> Option<i64> {
+    let schedule = cadence_common::cron::parse_standard(&spec.cron_expression).ok()?;
+    next_spec_fire(&schedule, spec, after_nanos)
+}
+
+fn next_spec_fire(
+    schedule: &cadence_common::cron::Schedule,
+    spec: &ScheduleSpec,
+    after_nanos: i64,
+) -> Option<i64> {
+    let cursor = match spec.start_time_nano {
+        Some(start) if after_nanos < start => start.checked_sub(1_000_000_000)?,
+        _ => after_nanos,
+    };
+    let next = schedule.next(cadence_common::cron::naive_from_nanos(cursor))?
+        .and_utc().timestamp_nanos_opt()?;
+    if spec.end_time_nano.is_some_and(|end| next > end) {
+        None
+    } else {
+        Some(next)
+    }
+}
+
 /// Fire times in `(from_nanos, to_nanos]`, bounded like Go's budgeted batches.
 pub fn fires_in_range(
     cron_expression: &str,
@@ -173,10 +198,25 @@ pub fn fires_in_range(
     to_nanos: i64,
     limit: usize,
 ) -> Vec<i64> {
+    spec_fires_in_range(&ScheduleSpec {
+        cron_expression: cron_expression.to_string(),
+        ..Default::default()
+    }, from_nanos, to_nanos, limit)
+}
+
+pub fn spec_fires_in_range(
+    spec: &ScheduleSpec,
+    from_nanos: i64,
+    to_nanos: i64,
+    limit: usize,
+) -> Vec<i64> {
+    let Ok(schedule) = cadence_common::cron::parse_standard(&spec.cron_expression) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     let mut cursor = from_nanos;
     for _ in 0..limit {
-        match next_fire_nanos(cron_expression, cursor) {
+        match next_spec_fire(&schedule, spec, cursor) {
             Some(next) if next <= to_nanos => {
                 out.push(next);
                 cursor = next;
@@ -285,10 +325,9 @@ impl crate::executions::InMemoryExecutionStore {
             update_nanos: now,
             last_fire_nanos: None,
             last_run_nanos: None,
-            next_run_nanos: next_fire_nanos(
-                &req.spec.clone().unwrap_or_default().cron_expression,
-                now,
-            ),
+            next_run_nanos: if paused { None } else {
+                next_spec_fire_nanos(&req.spec.clone().unwrap_or_default(), now)
+            },
             total_runs: 0,
             missed_runs: 0,
             skipped_runs: 0,
@@ -432,11 +471,11 @@ impl crate::executions::InMemoryExecutionStore {
         };
         let now = now_nanos();
         // Snapshot the catch-up inputs under the read lock.
-        let (cron, paused_at, watermark, policy, window, paused, deleted) = {
+        let (spec, paused_at, watermark, policy, window, paused, deleted) = {
             let inner = self.inner.read().expect("execution store lock");
             match inner.schedules.get(&key) {
                 Some(r) => (
-                    r.spec.cron_expression.clone(),
+                    r.spec.clone(),
                     r.paused_at_nanos,
                     r.last_fire_nanos,
                     r.unpause_catchup
@@ -465,7 +504,7 @@ impl crate::executions::InMemoryExecutionStore {
         // up to now.
         let from = watermark.or(paused_at).unwrap_or(now);
         let missed = if now > from {
-            fires_in_range(&cron, from, now, MAX_FIRES_PER_TICK)
+            spec_fires_in_range(&spec, from, now, MAX_FIRES_PER_TICK)
         } else {
             Vec::new()
         };
@@ -505,11 +544,11 @@ impl crate::executions::InMemoryExecutionStore {
             let inner = self.inner.read().expect("execution store lock");
             Self::schedule_key(&inner, domain, schedule_id)
         };
-        let (cron, already) = {
+        let (spec, already) = {
             let inner = self.inner.read().expect("execution store lock");
             match inner.schedules.get(&key) {
                 Some(r) if !r.deleted() => (
-                    r.spec.cron_expression.clone(),
+                    r.spec.clone(),
                     r.backfills.iter().any(|b| b.backfill_id == backfill_id),
                 ),
                 _ => {
@@ -524,7 +563,7 @@ impl crate::executions::InMemoryExecutionStore {
         if already {
             return Ok(());
         }
-        let fires = fires_in_range(&cron, start_nanos.saturating_sub(1), end_nanos.saturating_sub(1), MAX_FIRES_PER_TICK);
+        let fires = spec_fires_in_range(&spec, start_nanos.saturating_sub(1_000_000_000), end_nanos, MAX_FIRES_PER_TICK);
         let total = fires.len() as i32;
         let id = if backfill_id.is_empty() {
             uuid::Uuid::new_v4().to_string()
@@ -614,24 +653,8 @@ impl crate::executions::InMemoryExecutionStore {
                 if record.paused || record.deleted() {
                     continue;
                 }
-                if let Some(spec_end) = record.spec.end_time_nano {
-                    if now_nanos >= spec_end {
-                        continue;
-                    }
-                }
-                let from = record
-                    .last_fire_nanos
-                    .or(Some(record.create_nanos))
-                    .unwrap_or(now_nanos)
-                    .max(record.spec.start_time_nano.unwrap_or(0));
-                for fire in fires_in_range(&record.spec.cron_expression, from, now_nanos, MAX_FIRES_PER_TICK) {
-                    if record
-                        .spec
-                        .end_time_nano
-                        .is_some_and(|end| fire >= end)
-                    {
-                        continue;
-                    }
+                let from = record.last_fire_nanos.unwrap_or(record.create_nanos);
+                for fire in spec_fires_in_range(&record.spec, from, now_nanos, MAX_FIRES_PER_TICK) {
                     due.push((domain.clone(), id.clone(), fire));
                 }
             }
@@ -990,13 +1013,7 @@ impl ScheduleRecord {
             self.next_run_nanos = None;
             return;
         }
-        let from = self
-            .last_fire_nanos
-            .unwrap_or(self.create_nanos)
-            .max(self.spec.start_time_nano.unwrap_or(0));
-        self.next_run_nanos = next_fire_nanos(&self.spec.cron_expression, from).filter(|next| {
-            self.spec.end_time_nano.is_none_or(|end| *next < end) && *next > now_nanos
-        });
+        self.next_run_nanos = next_spec_fire_nanos(&self.spec, now_nanos);
     }
 }
 
@@ -1037,6 +1054,93 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    fn nanos(value: &str) -> i64 {
+        chrono::DateTime::parse_from_rfc3339(value).unwrap()
+            .timestamp_nanos_opt().unwrap()
+    }
+
+    #[test]
+    fn scheduler_boundary_fixtures() {
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            cron: String,
+            after: String,
+            until: String,
+            start: Option<String>,
+            end: Option<String>,
+            next: Option<String>,
+            fires: Vec<String>,
+        }
+        let cases: Vec<Case> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/scheduler-boundaries.json"
+        )).unwrap();
+        for case in cases {
+            let spec = ScheduleSpec {
+                cron_expression: case.cron,
+                start_time_nano: case.start.as_deref().map(nanos),
+                end_time_nano: case.end.as_deref().map(nanos),
+                ..Default::default()
+            };
+            assert_eq!(next_spec_fire_nanos(&spec, nanos(&case.after)),
+                case.next.as_deref().map(nanos), "{} next", case.name);
+            assert_eq!(spec_fires_in_range(&spec, nanos(&case.after), nanos(&case.until), 1000),
+                case.fires.iter().map(|v| nanos(v)).collect::<Vec<_>>(), "{} fires", case.name);
+        }
+    }
+
+    #[test]
+    fn scheduler_tick_after_end_preserves_inclusive_fires() {
+        let store = test_store();
+        let start = nanos("2026-06-01T00:00:00Z");
+        let end = nanos("2026-06-01T01:00:00Z");
+        let mut req = create_req("bounded", "0 * * * *");
+        req.spec.as_mut().unwrap().start_time_nano = Some(start);
+        req.spec.as_mut().unwrap().end_time_nano = Some(end);
+        req.policies = Some(SchedulePolicies {
+            overlap_policy: Some(ScheduleOverlapPolicy::Concurrent),
+            ..Default::default()
+        });
+        store.create_schedule("d", &req).unwrap();
+        {
+            let mut inner = store.inner.write().unwrap();
+            let key = InMemoryExecutionStore::schedule_key(&inner, "d", "bounded");
+            let record = inner.schedules.get_mut(&key).unwrap();
+            record.create_nanos = start - 60_000_000_000;
+            record.refresh_next_run(record.create_nanos);
+            assert_eq!(record.next_run_nanos, Some(start));
+        }
+        assert_eq!(store.fire_due_schedules(end + 60_000_000_000), 2);
+        assert_eq!(store.fire_due_schedules(end + 120_000_000_000), 0);
+        let inner = store.inner.read().unwrap();
+        let key = InMemoryExecutionStore::schedule_key(&inner, "d", "bounded");
+        let record = inner.schedules.get(&key).unwrap();
+        assert_eq!(record.total_runs, 2);
+        assert_eq!(record.next_run_nanos, None);
+    }
+
+    #[test]
+    fn backfill_includes_endpoints_and_respects_spec() {
+        let store = test_store();
+        let start = nanos("2026-06-01T00:00:00Z");
+        let end = nanos("2026-06-01T01:00:00Z");
+        let mut req = create_req("bounded-backfill", "0 * * * *");
+        req.spec.as_mut().unwrap().start_time_nano = Some(start);
+        req.spec.as_mut().unwrap().end_time_nano = Some(end);
+        req.policies = Some(SchedulePolicies {
+            overlap_policy: Some(ScheduleOverlapPolicy::Concurrent),
+            ..Default::default()
+        });
+        store.create_schedule("d", &req).unwrap();
+        store.backfill_schedule("d", "bounded-backfill", start - 3_600_000_000_000,
+            end + 3_600_000_000_000, None, "bounds").unwrap();
+        let inner = store.inner.read().unwrap();
+        let key = InMemoryExecutionStore::schedule_key(&inner, "d", "bounded-backfill");
+        let record = inner.schedules.get(&key).unwrap();
+        assert_eq!(record.backfills[0].runs_total, 2);
+        assert_eq!(record.total_runs, 2);
     }
 
     #[test]

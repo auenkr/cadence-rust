@@ -1011,3 +1011,21 @@
   timezone oracle cases pass, and git diff --check is clean. Checks ran in
   tmux cadence-rust. Live SDK drivers were not rerun because this change was
   not deployed to the running server.
+
+- Scheduler inclusive bounds port (2026-10-15): centralized Go's
+  computeNextRunTime/computeMissedFireTimes rules in spec-aware evaluation.
+  StartTime and EndTime fires are inclusive; delayed ticks after EndTime no
+  longer discard the outstanding window. Next-run hints use current time,
+  not a stale creation/fire cursor. Backfill includes both endpoints and now
+  applies the schedule spec bounds. Unpause evaluation also uses the spec.
+- Added tests/fixtures/scheduler-boundaries.json, consumed by Rust and by a
+  test overlaid into the real Go scheduler package. The Python runner calls
+  real unexported Go functions without copying implementation or changing
+  Go source. All 9 differential fixtures pass, including DST. Persistence
+  suite: 123 tests pass; strict persistence/all-targets clippy clean. Added
+  engine regressions for delayed end-time ticks and bounded backfill.
+- Active objective expanded by user: keep working until full migration and
+  drop-in compatibility, adding compatibility tests. Do not mark complete
+  based on adapter counts. Next immediate audit: catch-up watermark and
+  skipped counters, batch continuation, paused/backfill persistence. Major
+  production/distributed gaps in migration-inventory.md remain open.
