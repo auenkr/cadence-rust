@@ -467,10 +467,8 @@ impl FromThrift for ActiveClusterInfo {
 impl ToThrift for ActiveClusterInfo {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.sstr(10, &self.active_cluster_name);
-        if self.failover_version != 0 {
-            f.fields.push((20, Value::I64(self.failover_version)));
-        }
+        f.fields.push((10, Value::Bytes(self.active_cluster_name.as_bytes().to_vec())));
+        f.fields.push((20, Value::I64(self.failover_version)));
         f.finish()
     }
 }
@@ -478,7 +476,7 @@ impl ToThrift for ActiveClusterInfo {
 impl FromThrift for ClusterAttributeScope {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
-            cluster_attributes: s.opt_map_str(10)?,
+            cluster_attributes: s.opt_map_str::<ActiveClusterInfo>(10)?.filter(|m| !m.is_empty()),
         })
     }
 }
@@ -494,7 +492,7 @@ impl ToThrift for ClusterAttributeScope {
 impl FromThrift for ActiveClusters {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
-            active_clusters_by_region: s.opt_map_str(10)?,
+            active_clusters_by_region: None,
             active_clusters_by_cluster_attribute: s.opt_map_str(11)?,
         })
     }
@@ -503,7 +501,6 @@ impl FromThrift for ActiveClusters {
 impl ToThrift for ActiveClusters {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.omap_str_struct(10, &self.active_clusters_by_region);
         f.omap_str_struct(11, &self.active_clusters_by_cluster_attribute);
         f.finish()
     }

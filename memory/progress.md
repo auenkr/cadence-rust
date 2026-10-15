@@ -1334,3 +1334,33 @@ pass (284 tests); committed two checkpoints and pushed.
   No active-active engine changes landed in this checkpoint. Full config loader,
   cluster TLS/auth/redirection and persistence/auth validation remain incomplete.
 - Source ledger: 11 partial, 2289 review-required files; none marked complete.
+
+## 2026-10-15: active-active registration and ordinary failover metadata verified
+
+- Added domain_replication helpers for Go registration initialization, incoming
+  and global membership validation, strict-version scope merge and update-version
+  computation. 62 shared cases invoke actual unexported Go functions by overlay;
+  they cover nil/empty maps, stale/equal conflicts, untouched state, new scopes,
+  negative/disabled/unknown updates, migration offsets and explicit target flags.
+- Registration initializes attributes from original per-cluster offsets and
+  ignores caller versions. FailoverDomain computes versions from stored state,
+  preserves untouched attributes/scopes, rejects no-change attribute requests,
+  accepts explicit same-domain targets like Go, and applies Go destination-error
+  ordering. Existing attribute audit changes compare versions, not cluster names.
+- Proto/Thrift adapters ignore deprecated region maps like pinned Go. Fixed zero
+  version emission in Thrift ActiveClusterInfo; actual Go mapper/codec binary
+  fixture catches omitted-zero regressions. Proto empty maps normalize like Go.
+- Full final-source 14-stage runner PASSED: 290 workspace tests, strict clippy,
+  all Go differential suites and copied-binary CLI/standalone/public/internal
+  gRPC/Go SDK TChannel checks. Network cases verify partial merges, initial and
+  computed versions, audit entries, sorted errors, negative updates, repeated AP
+  and AA targets and ignored legacy fields. Evidence:
+  /tmp/cadence-active-active-compat-v2/results.json; outer exit file 0.
+  Test servers cleaned up; user development server was not restarted.
+- The first full run passed before the zero-version Thrift correction; the v2
+  run above validates final source including that fix. Source ledger now has
+  15 partial and 2285 review-required files, none marked complete.
+- UpdateDomain config/failover dispatch still replaces attributes wholesale;
+  graceful state transitions/AA rejection, primary restrictions, dynamic override
+  lookup, workflow routing, passive ownership and replication remain open.
+  Updated active-active-next.md and resume.md with these exact boundaries.

@@ -55,6 +55,7 @@ def main():
     run("version-history-differential", [sys.executable, str(root / "tests/run-version-history-compat.py")])
     run("history-blob-differential", [sys.executable, str(root / "tests/run-history-blob-compat.py")])
     run("cluster-metadata-differential", [sys.executable, str(root / "tests/run-cluster-metadata-compat.py")])
+    run("active-active-differential", [sys.executable, str(root / "tests/run-active-active-compat.py")])
     run("server-build", ["cargo", "build", "--manifest-path", manifest, "-p", "cadence-server"])
     # Reserve all five ports together to avoid selecting the same port twice.
     reservations = [socket.socket() for _ in range(5)]

@@ -6,6 +6,32 @@ tests. The active goal is incomplete. Do not equate RPC adapter coverage with
 behavioral compatibility. Keep working autonomously; use tmux cadence-rust for
 long processes. Save progress, commit, and push after compaction.
 
+## Latest verified active-active registration/failover checkpoint
+
+Active-active helpers now initialize registration versions from original cluster
+offsets, validate incoming update versions, compute server-side versions and
+merge only strictly newer attributes while preserving untouched state. Domain
+registration and FailoverDomain use them across transports. Explicit same-cluster
+domain targets now match Go: AP version stays equal; AA domain fencing advances.
+Destination errors follow scope/attribute ordering. Audit attribute comparison
+uses version changes. Proto/Thrift mappers ignore deprecated region maps; Thrift
+zero-valued attribute versions are explicitly emitted like Go.
+
+62 shared fixtures call the actual Go helpers via overlay; a separate Go mapper/
+codec fixture checks exact zero-version Thrift bytes. Full runner PASSED all 14
+stages, 290 workspace tests and strict clippy, standalone/config checks, public/
+internal gRPC and existing Go SDK TChannel. Evidence:
+/tmp/cadence-active-active-compat-v2/results.json and outer exit file 0. User
+development server unchanged; test servers cleaned up. Ledger: 15 partial and
+2285 review-required Go files, none marked complete.
+
+Next: read active-active-next.md and port UpdateDomain's configuration/failover
+dispatch, field presence, version updates and atomic validation. It STILL replaces
+attribute maps wholesale. Also pending: graceful failover (including AA rejection),
+primary restrictions, dynamic migration override evaluation, workflow attribute
+routing, passive ownership and replication. Empty-map wire presence needs broader
+codec work. This checkpoint is not a complete domain service or replication port.
+
 All 164 RPCs in all 13 services have concrete Rust adapters. Significant
 single-host/no-op behavior remains behind that surface, especially replication,
 queue/shard operations and failover. Read migration-inventory.md for the major
@@ -120,10 +146,9 @@ Evidence: /tmp/cadence-cluster-config-compat/results.json and outer exit file 0.
 User development server was not restarted. Source ledger has 11 partial and
 2289 review-required files; none marked complete.
 
-Next concrete implementation is active-active attribute initialization/versioned
-merge. Read active-active-next.md: source trace found wholesale replacement in
-Rust vs preservation/version-aware merge in Go, incorrect repeated-domain-target
-no-change rejection, and destination-check ordering/legacy-field mismatches.
+The later active-active checkpoint above ports registration/failover attribute
+initialization and merging. UpdateDomain remains the next domain-handler gap;
+read active-active-next.md for exact source anchors and validation boundaries.
 Full config layering, cluster TLS/auth/redirection and persistence/auth validation
 remain separate gaps. Do not claim all Go configuration or failover is ported.
 

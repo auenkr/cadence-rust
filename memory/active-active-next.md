@@ -1,6 +1,6 @@
 # Active-active domain continuation (2026-10-15)
 
-Current source findings, not yet implemented:
+Go reference rules (registration/failover helpers now ported; UpdateDomain remains incomplete):
 
 - Go common/domain/handler.go activeClustersFromRegisterRequest (1829): local
   domains and absent/empty scopes yield nil. Attribute registration versions
@@ -21,31 +21,44 @@ Current source findings, not yet implemented:
   maps; nil vs empty and Go pointer behavior need explicit fixture handling.
 - updateReplicationConfig marks activeClusterChanged=true whenever a domain
   ActiveClusterName pointer is supplied, even if equal to existing. Therefore
-  current Rust's blanket intended==record rejection appears wrong for repeated
-  explicit domain-target requests. Verify with a differential test against the
-  actual helper/handler before changing the existing Rust no-change expectation.
+  Rust now accepts repeated explicit domain targets; actual helper fixtures
+  verify the presence flag and network checks verify AP unchanged versions and
+  AA domain-level fencing increments.
 - FailoverDomain destination validation sorts scopes then attribute names;
-  current Rust sorts target cluster names and consults legacy region fields
-  that Go's current internal types no longer have. Original Go proto mapper
-  ignores deprecated region_to_cluster; Rust grpc_convert still preserves it.
+  Rust now uses that ordering and ignores legacy region fields. Original Go
+  proto/Thrift mappers ignore deprecated region maps; Rust adapters now match.
 
-Rust integration points:
+Rust integration status:
 
-- handlers::domain_replication currently copies request ActiveClusters directly.
-- InMemoryDomainStore::failover replaces active_clusters wholesale. It already
-  computes domain-level AA fencing from current+1 using cluster metadata.
-- DomainStore::update also replaces scopes wholesale and currently bypasses
-  the Go domain handler's distinction between configuration and failover updates.
-- grpc_convert::active_clusters_in/out currently emits deprecated region maps.
-- Thrift converters/types still expose the old region map; preserve public wire
-  compatibility, but follow current Go internal semantics for engine behavior.
+- cadence-persistence::domain_replication ports registration_attributes,
+  validate_incoming, validate_global, merge_scopes and build_update.
+- handlers::domain_replication calls registration and global membership helpers;
+  both HTTP/gRPC and Thrift registration use that shared path.
+- DomainStore::failover validates/merges attributes, computes versions from
+  stored state, preserves other attributes, and uses scoped destination ordering.
+- DomainStore::update STILL replaces scopes wholesale. The Go distinction between
+  configuration and failover updates, field presence and response state must be
+  ported there next; do not describe all domain update behavior as complete.
+- grpc_convert and Thrift mapping ignore deprecated region maps; protobuf empty
+  maps normalize like Go's mapper. Thrift ActiveClusterInfo now emits version 0
+  explicitly: Go's mapper dereferences that field rather than tolerating absence.
+- Audit comparison for existing attributes now follows version changes rather
+  than cluster-name changes, matching Go ToFailoverEvents. Full audit removal
+  paths and persistence backend semantics still need review.
 
-Suggested next implementation: a persistence domain-replication helper module
-for Go registration, validation, versioned merge and update; Go overlay test in
-package domain calling actual unexported functions (as scheduler fixtures do),
-with shared JSON cases and normalized Rust/Go scope names. Construct handlerImpl
-with clusterMetadata and domainAttrValidator only for helper-level tests; whole
-handler tests need mocked domain manager, clock, config and replication producer.
-Then connect registration/failover/update and verify original-IDL network reads
-and ListFailoverHistory attributes/versions. Do not claim passive ownership or
-replication merely because domain metadata matches.
+Evidence: 62 shared cases call actual unexported Go helpers via a test overlay,
+plus a binary fixture from the real Go mapper/codec. Original-IDL gRPC checks
+cover initialization, partial merges, caller-version replacement, audit versions,
+no-change attributes, negative updates, repeated explicit targets, and sorted
+error selection. Latest full run PASSED all 14 stages: /tmp/cadence-active-active-compat-v2/
+results.json and outer exit file 0. It included 290 workspace tests, strict
+clippy, differential suites and all network/SDK drivers. User development
+server was not restarted; isolated test servers were cleaned up.
+
+Next: port UpdateDomain handler dispatch/presence atomically across transports,
+registration primary-cluster restrictions, active-active graceful rejection and
+full graceful state transitions, per-domain migration override lookup, workflow
+attribute routing and passive ownership/replication. The generic Thrift Fields
+builder still omits empty maps; exact empty-container presence needs broader wire
+codec work, especially before relying on raw domain replication. No passive
+replication or complete active-active domain service claim is justified yet.

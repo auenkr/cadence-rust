@@ -1,0 +1,2759 @@
+[
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": true,
+    "incoming": null,
+    "name": "register global True None",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": false,
+    "incoming": null,
+    "name": "register global False None",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": true,
+    "incoming": {},
+    "name": "register global True {}",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": false,
+    "incoming": {},
+    "name": "register global False {}",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": true,
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "register global True {'activeClustersByClusterAttribute': {}}",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": false,
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "register global False {'activeClustersByClusterAttribute': {}}",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {}
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": true,
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": null
+        }
+      }
+    },
+    "name": "register global True {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': None}}}",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": false,
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": null
+        }
+      }
+    },
+    "name": "register global False {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': None}}}",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": true,
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "register global True {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'b', 'failoverVersion': 999}}}}}",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": false,
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "register global False {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'b', 'failoverVersion': 999}}}}}",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "Cluster unknown not found. Domain cannot be registered in this cluster for scope \"city\" and attribute \"x\"",
+      "target": "a"
+    },
+    "global": true,
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "unknown",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "name": "register unknown cluster",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "disabled",
+                "failoverVersion": 4
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "global": true,
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "disabled",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "register disabled initial offset",
+    "op": "register"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": null,
+    "name": "merge nil maps None None",
+    "op": "merge"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": null
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {},
+    "name": "merge nil maps None {}",
+    "op": "merge"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": {}
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "merge nil maps None {'activeClustersByClusterAttribute': {}}",
+    "op": "merge"
+  },
+  {
+    "existing": {},
+    "expected": {
+      "active": {
+        "scopes": null
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": null,
+    "name": "merge nil maps {} None",
+    "op": "merge"
+  },
+  {
+    "existing": {},
+    "expected": {
+      "active": {
+        "scopes": {}
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {},
+    "name": "merge nil maps {} {}",
+    "op": "merge"
+  },
+  {
+    "existing": {},
+    "expected": {
+      "active": {
+        "scopes": {}
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "merge nil maps {} {'activeClustersByClusterAttribute': {}}",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "expected": {
+      "active": {
+        "scopes": {}
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": null,
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {}} None",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "expected": {
+      "active": {
+        "scopes": {}
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {},
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {}} {}",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "expected": {
+      "active": {
+        "scopes": {}
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {}} {'activeClustersByClusterAttribute': {}}",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": null
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": null
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": null,
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': None}}} None",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": null
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": null
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {},
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': None}}} {}",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": null
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": null
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': None}}} {'activeClustersByClusterAttribute': {}}",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": null,
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'a', 'failoverVersion': 10}, 'y': {'activeClusterName': 'b', 'failoverVersion': 2}}}, 'region': {'clusterAttributes': {'r': {'activeClusterName': 'a', 'failoverVersion': 20}}}}} None",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {},
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'a', 'failoverVersion': 10}, 'y': {'activeClusterName': 'b', 'failoverVersion': 2}}}, 'region': {'clusterAttributes': {'r': {'activeClusterName': 'a', 'failoverVersion': 20}}}}} {}",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "merge nil maps {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'a', 'failoverVersion': 10}, 'y': {'activeClusterName': 'b', 'failoverVersion': 2}}}, 'region': {'clusterAttributes': {'r': {'activeClusterName': 'a', 'failoverVersion': 20}}}}} {'activeClustersByClusterAttribute': {}}",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 9
+            }
+          }
+        }
+      }
+    },
+    "name": "merge version 9",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 10
+            }
+          }
+        }
+      }
+    },
+    "name": "merge version 10",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "b",
+                "failoverVersion": 11
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 11
+            }
+          }
+        }
+      }
+    },
+    "name": "merge version 11",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "b",
+                "failoverVersion": 22
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 22
+            }
+          }
+        }
+      }
+    },
+    "name": "merge version 22",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              },
+              "z": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "new": {
+            "attributes": {
+              "n": {
+                "activeClusterName": "a",
+                "failoverVersion": 0
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "z": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "new": {
+          "clusterAttributes": {
+            "n": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "name": "merge new attribute and scope",
+    "op": "merge"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": null,
+    "name": "build None",
+    "op": "build"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {},
+    "name": "build {}",
+    "op": "build"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "build {'activeClustersByClusterAttribute': {}}",
+    "op": "build"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "b",
+                "failoverVersion": 12
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "build {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'b', 'failoverVersion': 999}}}}}",
+    "op": "build"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "build {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'a', 'failoverVersion': 999}}}}}",
+    "op": "build"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              },
+              "z": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "z": {
+              "activeClusterName": "b",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "build {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'z': {'activeClusterName': 'b', 'failoverVersion': 999}}}}}",
+    "op": "build"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "build creates attributes",
+    "op": "build"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": {}
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "build empty scopes from nil",
+    "op": "build"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 13
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": true,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "build migration overrides offset",
+    "op": "build",
+    "useNew": true
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": null,
+    "name": "update None",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {},
+    "name": "update {}",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "update {'activeClustersByClusterAttribute': {}}",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "b",
+                "failoverVersion": 12
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": true,
+      "changed": false,
+      "configChanged": true,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "update {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'b', 'failoverVersion': 999}}}}}",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "update {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'x': {'activeClusterName': 'a', 'failoverVersion': 999}}}}}",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              },
+              "z": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": true,
+      "changed": false,
+      "configChanged": true,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "z": {
+              "activeClusterName": "b",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "update {'activeClustersByClusterAttribute': {'city': {'clusterAttributes': {'z': {'activeClusterName': 'b', 'failoverVersion': 999}}}}}",
+    "op": "update"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": true,
+      "changed": false,
+      "configChanged": true,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "b",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "update creates attributes",
+    "op": "update"
+  },
+  {
+    "existing": null,
+    "expected": {
+      "active": {
+        "scopes": {}
+      },
+      "activeChanged": true,
+      "changed": false,
+      "configChanged": true,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {}
+    },
+    "name": "update empty scopes from nil",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 13
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": true,
+      "changed": false,
+      "configChanged": true,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "update migration overrides offset",
+    "op": "update",
+    "useNew": true
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": true,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": null,
+    "name": "update explicit target a",
+    "op": "update",
+    "target": "a"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": true,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "b"
+    },
+    "incoming": null,
+    "name": "update explicit target b",
+    "op": "update",
+    "target": "b"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "invalid failover version: -1",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": -1
+            }
+          }
+        }
+      }
+    },
+    "name": "validate validation a -1",
+    "op": "validate"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "invalid failover version: -1",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": -1
+            }
+          }
+        }
+      }
+    },
+    "name": "update validation a -1",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "Invalid active cluster name: disabled",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "disabled",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "name": "validate validation disabled 0",
+    "op": "validate"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "Invalid active cluster name: disabled",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "disabled",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "name": "update validation disabled 0",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "Invalid active cluster name: unknown",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "unknown",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "name": "validate validation unknown 0",
+    "op": "validate"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "Invalid active cluster name: unknown",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "unknown",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "name": "update validation unknown 0",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "name": "validate validation a 0",
+    "op": "validate"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "name": "update validation a 0",
+    "op": "update"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": null,
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "validate validation a 999",
+    "op": "validate"
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 10
+            },
+            "y": {
+              "activeClusterName": "b",
+              "failoverVersion": 2
+            }
+          }
+        },
+        "region": {
+          "clusterAttributes": {
+            "r": {
+              "activeClusterName": "a",
+              "failoverVersion": 20
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "active": {
+        "scopes": {
+          "city": {
+            "attributes": {
+              "x": {
+                "activeClusterName": "a",
+                "failoverVersion": 10
+              },
+              "y": {
+                "activeClusterName": "b",
+                "failoverVersion": 2
+              }
+            }
+          },
+          "region": {
+            "attributes": {
+              "r": {
+                "activeClusterName": "a",
+                "failoverVersion": 20
+              }
+            }
+          }
+        }
+      },
+      "activeChanged": false,
+      "changed": false,
+      "configChanged": false,
+      "error": "",
+      "target": "a"
+    },
+    "incoming": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 999
+            }
+          }
+        }
+      }
+    },
+    "name": "update validation a 999",
+    "op": "update"
+  }
+]

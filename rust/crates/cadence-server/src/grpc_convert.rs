@@ -129,31 +129,15 @@ pub fn active_clusters_in(v: p::ActiveClusters) -> t::ActiveClusters {
             failover_version: v.failover_version,
         }
     }
+    let scopes = v.active_clusters_by_cluster_attribute;
     t::ActiveClusters {
-        active_clusters_by_region: Some(
-            v.region_to_cluster
-                .into_iter()
-                .map(|(k, v)| (k, info(v)))
-                .collect(),
-        ),
-        active_clusters_by_cluster_attribute: Some(
-            v.active_clusters_by_cluster_attribute
-                .into_iter()
-                .map(|(k, s)| {
-                    (
-                        k,
-                        t::ClusterAttributeScope {
-                            cluster_attributes: Some(
-                                s.cluster_attributes
-                                    .into_iter()
-                                    .map(|(k, v)| (k, info(v)))
-                                    .collect(),
-                            ),
-                        },
-                    )
-                })
-                .collect(),
-        ),
+        active_clusters_by_region: None,
+        active_clusters_by_cluster_attribute: (!scopes.is_empty()).then(|| scopes.into_iter().map(|(name, scope)| {
+            let attributes = scope.cluster_attributes;
+            (name, t::ClusterAttributeScope {
+                cluster_attributes: (!attributes.is_empty()).then(|| attributes.into_iter().map(|(name, value)| (name, info(value))).collect()),
+            })
+        }).collect()),
     }
 }
 #[allow(deprecated)]
@@ -165,12 +149,7 @@ pub fn active_clusters_out(v: t::ActiveClusters) -> p::ActiveClusters {
         }
     }
     p::ActiveClusters {
-        region_to_cluster: v
-            .active_clusters_by_region
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(k, v)| (k, info(v)))
-            .collect(),
+        region_to_cluster: Default::default(),
         active_clusters_by_cluster_attribute: v
             .active_clusters_by_cluster_attribute
             .unwrap_or_default()

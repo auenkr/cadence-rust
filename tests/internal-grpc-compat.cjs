@@ -49,6 +49,57 @@ async function run() {
   });
   assert(versionHistory.history.events.length > 0);
   assert(versionHistory.history.events.every(e => e.version === '20'));
+  const aaDomain = `active-active-${id}`;
+  const attr = (name, version = '999') => ({ activeClusterName: name, failoverVersion: version });
+  const city = attributes => ({ activeClustersByClusterAttribute: { city: { clusterAttributes: attributes } } });
+  await call('Domain', 'RegisterDomain', { name: aaDomain, isGlobalDomain: true,
+    activeClusterName: 'cluster0', clusters: [{ clusterName: 'cluster0' }, { clusterName: 'remote' }],
+    workflowExecutionRetentionPeriod: { seconds: '259200' },
+    activeClusters: { activeClustersByClusterAttribute: {
+      city: { clusterAttributes: { x: attr('cluster0'), y: attr('remote', '-1') } },
+      region: { clusterAttributes: { keep: attr('cluster0') } },
+    }, regionToCluster: { ignored: attr('unconfigured') } },
+  });
+  const initialAA = (await call('Domain', 'DescribeDomain', { name: aaDomain })).domain;
+  const scopes = d => d.activeClusters.activeClustersByClusterAttribute;
+  assert.equal(scopes(initialAA).city.clusterAttributes.x.failoverVersion, '0');
+  assert.equal(scopes(initialAA).city.clusterAttributes.y.failoverVersion, '2');
+  assert.deepEqual(initialAA.activeClusters.regionToCluster, {});
+  const aaFailover = activeClusters => call('Domain', 'FailoverDomain', {
+    domainName: aaDomain, activeClusters, skipDestinationClusterCheck: true,
+  });
+  await assert.rejects(call('Domain', 'FailoverDomain', { domainName: aaDomain,
+    activeClusters: { activeClustersByClusterAttribute: {
+      aaa: { clusterAttributes: { first: attr('z-first') } },
+      zzz: { clusterAttributes: { last: attr('a-last') } },
+    } },
+  }), e => e.code === grpc.status.INVALID_ARGUMENT && e.details.includes('"z-first"'));
+  const changedAA = (await aaFailover(city({ x: attr('remote') }))).domain;
+  assert.equal(changedAA.failoverVersion, '10');
+  assert.equal(scopes(changedAA).city.clusterAttributes.x.failoverVersion, '2');
+  assert.equal(scopes(changedAA).city.clusterAttributes.y.failoverVersion, '2');
+  assert.deepEqual(scopes(changedAA).region, scopes(initialAA).region);
+  await assert.rejects(aaFailover(city({ x: attr('remote') })), e =>
+    e.code === grpc.status.INVALID_ARGUMENT && e.details.includes('no change detected'));
+  await assert.rejects(aaFailover(city({ x: attr('cluster0', '-1') })), e =>
+    e.code === grpc.status.INVALID_ARGUMENT && e.details === 'invalid failover version: -1');
+  const returnedAA = (await aaFailover(city({ x: attr('cluster0') }))).domain;
+  assert.equal(returnedAA.failoverVersion, '20');
+  assert.equal(scopes(returnedAA).city.clusterAttributes.x.failoverVersion, '10');
+  const addedAA = (await aaFailover(city({ z: attr('remote') }))).domain;
+  assert.equal(addedAA.failoverVersion, '30');
+  assert.equal(scopes(addedAA).city.clusterAttributes.z.failoverVersion, '2');
+  assert.equal(scopes(addedAA).city.clusterAttributes.x.failoverVersion, '10');
+  const aaAudit = await call('Domain', 'ListFailoverHistory', { filters: { domainId: initialAA.id } });
+  assert.equal(aaAudit.failoverEvents.length, 3);
+  assert(aaAudit.failoverEvents.every(e => e.clusterFailovers.length === 1));
+  assert.deepEqual(aaAudit.failoverEvents.map(e => e.clusterFailovers[0].clusterAttribute.name), ['z', 'x', 'x']);
+  assert.equal(aaAudit.failoverEvents[1].clusterFailovers[0].fromCluster.failoverVersion, '2');
+  assert.equal(aaAudit.failoverEvents[1].clusterFailovers[0].toCluster.failoverVersion, '10');
+  const repeatedTarget = await call('Domain', 'FailoverDomain', { domainName: aaDomain, domainActiveClusterName: 'cluster0' });
+  assert.equal(repeatedTarget.domain.failoverVersion, '40');
+  const repeatedAP = await call('Domain', 'FailoverDomain', { domainName: globalVersionDomain, domainActiveClusterName: 'cluster0' });
+  assert.equal(repeatedAP.domain.failoverVersion, '20');
   const domainMetadata = (await call('Domain', 'DescribeDomain', { name: domain })).domain;
   assert.equal(domainMetadata.failoverVersion, '-24');
   const domainId = domainMetadata.id;

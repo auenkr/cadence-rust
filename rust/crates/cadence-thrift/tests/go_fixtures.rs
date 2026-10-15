@@ -276,3 +276,22 @@ fn go_signal_args_decode() {
     assert_eq!(req.input, b"payload");
     assert_eq!(req.request_id, "4D1E4058-6FCF-4BA8-BF16-8FA8B02F9651");
 }
+
+#[test]
+fn active_active_zero_version_matches_go_mapper() {
+    let active = ActiveClusters {
+        // The pinned Go mapper ignores this deprecated wire field.
+        active_clusters_by_region: Some(std::collections::HashMap::from([(
+            "ignored".into(), ActiveClusterInfo { active_cluster_name: "unknown".into(), failover_version: 999 },
+        )])),
+        active_clusters_by_cluster_attribute: Some(std::collections::HashMap::from([(
+            "city".into(), ClusterAttributeScope { cluster_attributes: Some(std::collections::HashMap::from([(
+                "x".into(), ActiveClusterInfo { active_cluster_name: "a".into(), failover_version: 0 },
+            )])) },
+        )])),
+    };
+    let mut writer = Writer::new();
+    writer.write_u8(0x59);
+    write_struct(&mut writer, &active.to_thrift());
+    assert_eq!(writer.into_bytes(), fixture("active_clusters_zero.bin"));
+}

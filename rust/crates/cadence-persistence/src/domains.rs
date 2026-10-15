@@ -291,25 +291,19 @@ impl InMemoryDomainStore {
                     )));
                 }
             }
-            if let Some(clusters) = req.active_clusters.as_ref() {
-                let mut targets: Vec<&String> = Vec::new();
-                if let Some(by_region) = clusters.active_clusters_by_region.as_ref() {
-                    targets.extend(by_region.values().map(|info| &info.active_cluster_name));
-                }
-                if let Some(by_attr) = clusters.active_clusters_by_cluster_attribute.as_ref() {
-                    for scope in by_attr.values() {
-                        if let Some(attrs) = scope.cluster_attributes.as_ref() {
-                            targets.extend(attrs.values().map(|info| &info.active_cluster_name));
+            if let Some(scopes) = req.active_clusters.as_ref().and_then(|c| c.active_clusters_by_cluster_attribute.as_ref()) {
+                let mut scopes: Vec<_> = scopes.iter().collect();
+                scopes.sort_by_key(|(name, _)| *name);
+                for (_, scope) in scopes {
+                    let mut attributes: Vec<_> = scope.cluster_attributes.iter().flatten().collect();
+                    attributes.sort_by_key(|(name, _)| *name);
+                    for (_, info) in attributes {
+                        let target = &info.active_cluster_name;
+                        if target != current_cluster {
+                            return Err(FailoverError::Invalid(format!(
+                                "Failover requests must be sent to the destination cluster: this request targets cluster {target:?} but was received by cluster {current_cluster:?}. Re-run it against the destination cluster's frontend, or set skipDestinationClusterCheck to override."
+                            )));
                         }
-                    }
-                }
-                targets.sort();
-                targets.dedup();
-                for target in targets {
-                    if target != current_cluster {
-                        return Err(FailoverError::Invalid(format!(
-                            "Failover requests must be sent to the destination cluster: this request targets cluster {target:?} but was received by cluster {current_cluster:?}. Re-run it against the destination cluster's frontend, or set skipDestinationClusterCheck to override."
-                        )));
                     }
                 }
             }
@@ -319,20 +313,20 @@ impl InMemoryDomainStore {
         if let Some(target) = req.domain_active_cluster_name.clone() {
             intended.active_cluster_name = target;
         }
-        if let Some(clusters) = req.active_clusters.clone() {
-            intended.active_clusters = Some(clusters);
-        }
-        if intended == record.replication {
+        crate::domain_replication::validate_incoming(metadata, req.active_clusters.as_ref())
+            .map_err(|e| FailoverError::Invalid(e.message))?;
+        let (attributes, attributes_changed) = crate::domain_replication::build_update(
+            metadata, record.replication.active_clusters.as_ref(), req.active_clusters.as_ref(), false)
+            .map_err(|e| FailoverError::Invalid(e.message))?;
+        if attributes_changed { intended.active_clusters = attributes; }
+        // Go treats an explicit domain target as an update even when equal.
+        if req.domain_active_cluster_name.is_none() && !attributes_changed {
             return Err(FailoverError::Invalid(
                 "a failover was requested, but there was no change detected, the configuration was not updated".to_string(),
             ));
         }
-        if !metadata.clusters.get(&intended.active_cluster_name).is_some_and(|c| c.enabled) {
-            return Err(FailoverError::Invalid(format!("Invalid cluster name: {}", intended.active_cluster_name)));
-        }
-        if !intended.clusters.iter().any(|c| c.cluster_name == intended.active_cluster_name) {
-            return Err(FailoverError::Invalid("Active cluster is not contained in all clusters.".into()));
-        }
+        crate::domain_replication::validate_global(metadata, &intended)
+            .map_err(|e| FailoverError::Invalid(e.message))?;
         let current_version = record.failover_version.wrapping_add(i64::from(
             record.replication.is_active_active() || intended.is_active_active()));
         let next_version = metadata.next_failover_version(&intended.active_cluster_name, current_version, false)
@@ -454,7 +448,7 @@ impl InMemoryDomainStore {
                     let after_info = after_attrs.and_then(|m| m.get(name));
                     let before_info = before_attrs.and_then(|m| m.get(name));
                     let changed = match (before_info, after_info) {
-                        (Some(b), Some(a)) => b.active_cluster_name != a.active_cluster_name,
+                        (Some(b), Some(a)) => b.failover_version != a.failover_version,
                         (None, Some(_)) => true,
                         _ => false,
                     };
@@ -827,9 +821,9 @@ mod tests {
             cf[0].to_cluster.as_ref().unwrap().active_cluster_name,
             "standby"
         );
-        // No-change failovers are rejected like Go.
-        let err = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata()).unwrap_err();
-        assert!(matches!(err, FailoverError::Invalid(_)));
+        // An explicit same-cluster target is accepted without advancing an AP version.
+        let repeated = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata()).unwrap();
+        assert_eq!(repeated.failover_version, 1);
     }
 
     #[test]

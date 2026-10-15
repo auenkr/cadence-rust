@@ -5,6 +5,7 @@
 //! backends (SQL/NoSQL) implement the same traits in follow-ups.
 
 pub mod domains;
+pub mod domain_replication;
 pub mod history_branch;
 pub mod executions;
 pub mod schedules;

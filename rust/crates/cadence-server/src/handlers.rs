@@ -115,28 +115,22 @@ pub(crate) fn domain_replication(
     } else {
         req.clusters.clone()
     };
-    if !req.is_global_domain {
-        if active_cluster_name != state.current_cluster_name {
+    let active_clusters = cadence_persistence::domain_replication::registration_attributes(
+        &state.cluster_metadata, req.is_global_domain, req.active_clusters.as_ref())?;
+    let replication = cadence_api::types::DomainReplicationConfiguration {
+        active_cluster_name, clusters, active_clusters,
+    };
+    if req.is_global_domain {
+        cadence_persistence::domain_replication::validate_global(&state.cluster_metadata, &replication)?;
+    } else {
+        if replication.active_cluster_name != state.current_cluster_name {
             return Err(BadRequestError::new("Invalid local domain active cluster"));
         }
-        if clusters.len() != 1 || clusters[0].cluster_name != active_cluster_name {
+        if replication.clusters.len() != 1 || replication.clusters[0].cluster_name != replication.active_cluster_name {
             return Err(BadRequestError::new("Invalid local domain clusters"));
         }
-    } else {
-        for cluster in clusters.iter().map(|c| &c.cluster_name).chain(std::iter::once(&active_cluster_name)) {
-            if !state.cluster_metadata.clusters.get(cluster).is_some_and(|c| c.enabled) {
-                return Err(BadRequestError::new(format!("Invalid cluster name: {cluster}")));
-            }
-        }
-        if !clusters.iter().any(|c| c.cluster_name == active_cluster_name) {
-            return Err(BadRequestError::new("Active cluster is not contained in all clusters."));
-        }
     }
-    Ok(cadence_api::types::DomainReplicationConfiguration {
-        active_cluster_name,
-        clusters,
-        active_clusters: req.active_clusters.clone(),
-    })
+    Ok(replication)
 }
 
 fn now_millis() -> i64 {

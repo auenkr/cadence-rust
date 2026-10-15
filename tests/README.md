@@ -209,3 +209,23 @@ because Go iterates cluster maps in unspecified order. The full runner checks
 33 defaulted cases through the copied Rust CLI and verifies startup rejects a
 zero increment before opening listeners. Wider Go configuration layering,
 persistence validation, TLS/auth and redirection remain separate migration work.
+
+Active-active domain state helpers are compared with the original Go package:
+
+```sh
+python3 tests/run-active-active-compat.py
+```
+
+A Go test overlay calls actual registration, validation, update and merge
+functions against 62 shared cases. Coverage includes nil/empty scope maps,
+strictly newer versions, stale/equal conflicts, new and untouched attributes,
+server-computed versions, migration offsets and explicit same-cluster targets.
+A separate byte fixture from the Go mapper/codec verifies zero-valued Thrift
+attribute versions are emitted and deprecated region fields are omitted.
+
+The original-IDL gRPC driver exercises registration's initial offsets, partial
+failovers preserving other scopes, negative update rejection, no-change attribute
+rejection, explicit same-cluster domain requests, sorted destination validation,
+and attribute versions in ListFailoverHistory. The full runner includes these
+checks. UpdateDomain configuration/failover dispatch, graceful failover, workflow
+attribute routing and passive replication remain separate unfinished work.

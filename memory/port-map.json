@@ -104,5 +104,43 @@
     "evidence": [
       "34 shared Go FillDefaults/Validate cases, canonical/legacy YAML precedence tests and copied-binary CLI checks; core cluster validation/defaulting ported. Cluster redirection, TLS/auth config retention and wider config loader integration remain incomplete."
     ]
+  },
+  "go/common/domain/clusterattributes.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/domain_replication.rs"
+    ],
+    "evidence": [
+      "Actual Go mergeActiveActiveScopes and mergeScope exercised through shared fixtures; strict-newer version rule and untouched scope/attribute preservation ported. Remote domain replication consumer integration remains unported."
+    ]
+  },
+  "go/common/domain/handler.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/domain_replication.rs",
+      "rust/crates/cadence-persistence/src/domains.rs",
+      "rust/crates/cadence-server/src/handlers.rs"
+    ],
+    "evidence": [
+      "62 actual-Go registration/build/update/validation/merge cases plus original-IDL active-active failover checks; registration initialization and FailoverDomain attribute merge ported. UpdateDomain config/failover dispatch, graceful failover, primary restrictions and replication producer remain incomplete."
+    ]
+  },
+  "go/common/domain/attrValidator.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/domain_replication.rs"
+    ],
+    "evidence": [
+      "Incoming active-active validation and global replica membership checks connected to registration/failover; actual Go invalid/disabled/negative update fixtures. Wider domain config validation remains incomplete."
+    ]
+  },
+  "go/common/types/mapper/thrift/shared.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-thrift/src/convert.rs"
+    ],
+    "evidence": [
+      "Active-active deprecated-region omission, zero-valued version presence and Go mapper/codec binary fixture. Other shared mappings, empty-container wire presence and complete unknown-field compatibility remain under review."
+    ]
   }
 }
