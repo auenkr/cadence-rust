@@ -48,6 +48,7 @@ pub struct AppState {
     pub scheduler_enabled: bool,
     pub semaphore_enabled: bool,
     pub current_cluster_name: String,
+    pub cluster_metadata: cadence_common::cluster::Metadata,
     pub grpc_max_message_size: usize,
     pub domains: InMemoryDomainStore,
     pub executions: InMemoryExecutionStore,
@@ -67,6 +68,7 @@ impl Default for AppState {
             scheduler_enabled: false,
             semaphore_enabled: false,
             current_cluster_name: "cluster0".to_string(),
+            cluster_metadata: cadence_common::cluster::Metadata::default(),
             grpc_max_message_size: 4 * 1024 * 1024,
             domains: InMemoryDomainStore::new(),
             executions: InMemoryExecutionStore::new(),
@@ -119,6 +121,15 @@ pub(crate) fn domain_replication(
         }
         if clusters.len() != 1 || clusters[0].cluster_name != active_cluster_name {
             return Err(BadRequestError::new("Invalid local domain clusters"));
+        }
+    } else {
+        for cluster in clusters.iter().map(|c| &c.cluster_name).chain(std::iter::once(&active_cluster_name)) {
+            if !state.cluster_metadata.clusters.get(cluster).is_some_and(|c| c.enabled) {
+                return Err(BadRequestError::new(format!("Invalid cluster name: {cluster}")));
+            }
+        }
+        if !clusters.iter().any(|c| c.cluster_name == active_cluster_name) {
+            return Err(BadRequestError::new("Active cluster is not contained in all clusters."));
         }
     }
     Ok(cadence_api::types::DomainReplicationConfiguration {
@@ -239,9 +250,15 @@ async fn register_domain(
         Ok(v) => v,
         Err(e) => return bad_request(e),
     };
+    let failover_version = if req.is_global_domain {
+        match state.cluster_metadata.next_failover_version(&replication.active_cluster_name, 0, false) {
+            Ok(version) => version,
+            Err(e) => return bad_request(BadRequestError::new(e)),
+        }
+    } else { cadence_persistence::version_history::EMPTY_VERSION };
     match state
         .domains
-        .create(info, configuration, replication, req.is_global_domain)
+        .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
     {
         Ok(resp) => {
             state.executions.register_domain(
@@ -356,7 +373,7 @@ async fn failover_domain(
     }
     match state
         .domains
-        .failover(&req, &state.current_cluster_name)
+        .failover(&req, &state.current_cluster_name, &state.cluster_metadata)
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),

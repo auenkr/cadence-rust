@@ -108,6 +108,9 @@ async fn main() -> anyhow::Result<()> {
             if !cfg.cluster_metadata.current_cluster_name.is_empty() {
                 state.current_cluster_name = cfg.cluster_metadata.current_cluster_name.clone();
             }
+            if !cfg.cluster_metadata.cluster_group.is_empty() {
+                state.cluster_metadata = cfg.cluster_metadata.metadata();
+            }
             let frontend_rpc = cfg.services.get("frontend").map(|s| &s.rpc);
             if let Some(limit) = frontend_rpc
                 .map(|r| r.grpc_max_msg_size)

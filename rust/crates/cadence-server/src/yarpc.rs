@@ -234,9 +234,13 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
     };
     let replication = crate::handlers::domain_replication(state, &req)
         .map_err(|e| AppError::bad_request(e.message))?;
+    let failover_version = if req.is_global_domain {
+        state.cluster_metadata.next_failover_version(&replication.active_cluster_name, 0, false)
+            .map_err(AppError::bad_request)?
+    } else { cadence_persistence::version_history::EMPTY_VERSION };
     match state
         .domains
-        .create(info, configuration, replication, req.is_global_domain)
+        .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
     {
         Ok(_) => {
             state.executions.register_domain(
@@ -827,7 +831,7 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     validation::validate_failover_domain_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    match state.domains.failover(&req, &state.current_cluster_name) {
+    match state.domains.failover(&req, &state.current_cluster_name, &state.cluster_metadata) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::FailoverError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))

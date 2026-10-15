@@ -254,6 +254,7 @@ dependencies = [
  "chrono-tz",
  "rand",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 

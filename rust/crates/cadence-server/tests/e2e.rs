@@ -938,7 +938,11 @@ async fn refresh_tasks_and_diagnose_behave() {
 
 #[tokio::test]
 async fn failover_moves_global_domain_and_lists_history() {
-    let app = router(AppState::default());
+    let mut state = AppState::default();
+    state.cluster_metadata.clusters.insert("remote".into(), cadence_common::cluster::ClusterInformation {
+        enabled: true, initial_failover_version: 2, ..Default::default()
+    });
+    let app = router(state);
     // Global domain starting active on a remote cluster.
     let (status, _) = call(
         app.clone(),
@@ -985,7 +989,7 @@ async fn failover_moves_global_domain_and_lists_history() {
     .await;
     assert_eq!(status, StatusCode::OK, "{resp}");
     assert_eq!(resp["replicationConfiguration"]["activeClusterName"], "cluster0");
-    assert_eq!(resp["failoverVersion"], 1);
+    assert_eq!(resp["failoverVersion"], 10);
 
     // History lists the failover event; paging cursors work.
     let domain_id = resp["domainInfo"]["uuid"].as_str().unwrap().to_string();

@@ -39,3 +39,15 @@ handling, history-driven reconstruction of activities/timers/children/decisions,
 atomic continue-as-new writes, replication queues, acknowledgements and DLQ
 retry/merge behavior. Compare against actual Go code and original SDK replay;
 never substitute synthetic successful RPC responses for this state machinery.
+
+Cluster version prerequisite (2026-10-15): cadence-common::cluster now ports
+next-version arithmetic, version owner resolution (including migrating offsets),
+same-cluster checks and enabled/remote cluster sets. 69 cases compare with Go's
+actual cluster.Metadata. Global frontend registration and FailoverDomain now
+use configured offsets/increment. Current runtime paths pass migration override
+false; per-domain dynamic-config lookup remains unported. Config structs now
+retain the core clusterGroup fields, but full Go FillDefaults/Validate and
+primary-cluster restrictions still need faithful integration. Existing execution
+records retain their original current_version; they are not promoted merely by
+changing domain metadata. Passive request gating, replication task/source-cluster
+validation, queue fencing and state reconstruction remain required next work.

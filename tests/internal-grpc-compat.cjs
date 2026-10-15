@@ -26,6 +26,29 @@ async function run() {
   await Promise.all(Object.values(clients).map(client => new Promise((resolve, reject) => client.waitForReady(Date.now() + 30000, error => error ? reject(error) : resolve()))));
   const id = randomUUID(), domain = `rust-internal-history-${id}`, other = `${domain}-other`;
   for (const name of [domain, other]) await call('Domain', 'RegisterDomain', { name, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+  // The original IDL includes skip_destination_cluster_check; the older web
+  // IDL used by the public client intentionally cannot express that field.
+  const globalVersionDomain = `version-${id}`;
+  await call('Domain', 'RegisterDomain', { name: globalVersionDomain, isGlobalDomain: true,
+    activeClusterName: 'remote', clusters: [{ clusterName: 'remote' }, { clusterName: 'cluster0' }],
+    workflowExecutionRetentionPeriod: { seconds: '259200' } });
+  assert.equal((await call('Domain', 'DescribeDomain', { name: globalVersionDomain })).domain.failoverVersion, '2');
+  for (const [target, version] of [['cluster0', '10'], ['remote', '12'], ['cluster0', '20']]) {
+    const changed = await call('Domain', 'FailoverDomain', { domainName: globalVersionDomain,
+      domainActiveClusterName: target, skipDestinationClusterCheck: true });
+    assert.equal(changed.domain.failoverVersion, version);
+  }
+  const versionWorkflowId = `global-version-${id}`;
+  const versionRun = await call('Workflow', 'StartWorkflowExecution', {
+    domain: globalVersionDomain, workflowId: versionWorkflowId, workflowType: { name: 'VersionWorkflow' },
+    taskList: { name: 'version-check' }, requestId: randomUUID(),
+    executionStartToCloseTimeout: { seconds: '300' }, taskStartToCloseTimeout: { seconds: '10' },
+  });
+  const versionHistory = await call('Workflow', 'GetWorkflowExecutionHistory', {
+    domain: globalVersionDomain, workflowExecution: { workflowId: versionWorkflowId, runId: versionRun.runId },
+  });
+  assert(versionHistory.history.events.length > 0);
+  assert(versionHistory.history.events.every(e => e.version === '20'));
   const domainMetadata = (await call('Domain', 'DescribeDomain', { name: domain })).domain;
   assert.equal(domainMetadata.failoverVersion, '-24');
   const domainId = domainMetadata.id;

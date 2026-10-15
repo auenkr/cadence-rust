@@ -54,13 +54,19 @@ async function run() {
   assert.equal(described.domain.workflowExecutionRetentionPeriod.seconds, '259200');
   const byId = await call('DomainAPI', 'DescribeDomain', { id: described.domain.id });
   const globalDomain = `global-${uuid}`;
+  await assert.rejects(call('DomainAPI', 'RegisterDomain', {
+    name: `invalid-${uuid}`, isGlobalDomain: true, activeClusterName: 'unconfigured',
+    clusters: [{ clusterName: 'unconfigured' }], workflowExecutionRetentionPeriod: { seconds: '259200' },
+  }), error => error.code === grpc.status.INVALID_ARGUMENT);
   await call('DomainAPI', 'RegisterDomain', {
     name: globalDomain, workflowExecutionRetentionPeriod: { seconds: '259200' },
     isGlobalDomain: true, clusters: [{ clusterName: 'remote' }, { clusterName: 'cluster0' }],
     activeClusterName: 'remote',
   });
+  assert.equal((await call('DomainAPI', 'DescribeDomain', { name: globalDomain })).domain.failoverVersion, '2');
   const failed = await call('DomainAPI', 'FailoverDomain', { domainName: globalDomain, domainActiveClusterName: 'cluster0' });
   assert.equal(failed.domain.activeClusterName, 'cluster0');
+  assert.equal(failed.domain.failoverVersion, '10');
   const globalId = (await call('DomainAPI', 'DescribeDomain', { name: globalDomain })).domain.id;
   const failoverHistory = await call('DomainAPI', 'ListFailoverHistory', { filters: { domainId: globalId } });
   assert.equal(failoverHistory.failoverEvents.length, 1);

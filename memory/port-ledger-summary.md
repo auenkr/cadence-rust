@@ -18,8 +18,8 @@ Partial file mappings are not completion claims.
     "const": 5884
   },
   "filesByStatus": {
-    "review_required": 2291,
-    "partial": 9
+    "review_required": 2290,
+    "partial": 10
   }
 }
 ```

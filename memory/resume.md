@@ -79,6 +79,31 @@ external-child/failover semantics are not established. Next major work is real
 passive history/state application with branch conflict handling and failover
 version gating, plus production backends and independent service lifecycles.
 
+## Latest verified cluster-version checkpoint
+
+Common cluster version arithmetic/ownership and migration-offset fallback now
+match 69 original-Go differential fixtures. Configured increment and cluster
+offsets feed frontend global registration/failover (including Thrift), replacing
+placeholder +1 versions. Compatibility clients now require configured remote offset 2,
+cluster0 offset 0 and increment 10; full runner supplies a standalone YAML and
+separately boots embedded defaults before that. It checks 2 -> 10 -> 12 -> 20
+failovers and history version 20 on a new active-cluster execution.
+
+Latest full runner PASSED all 12 stages in tmux cadence-rust:cluster-full-check;
+/tmp/cadence-cluster-metadata-compat-v4/results.json and outer exit file 0.
+286 workspace tests, strict workspace/all-targets clippy, four Go differential
+suites, copied-binary embedded-default startup and configured-server public/
+internal gRPC plus Go SDK TChannel all passed. Test servers were cleaned up;
+user development server was not restarted. The older web IDL cannot encode the
+new destination-check override, so reverse-failover checks use original Go IDL.
+Port ledger has 10 partial and 2290 review-required files; no source file is
+marked fully ported.
+
+Remaining: Go config validation/default layering, dynamic migration override
+lookup, active-active attribute merge/version updates, in-flight execution
+promotion, passive mutation gating, queues and replication. New-domain version
+mapping alone is not production failover. This is a version-metadata checkpoint, not complete failover.
+
 ## Runtime
 
 User development server is cadence-rust:rust, HTTP 8080 / gRPC 7833 / history

@@ -8,6 +8,7 @@
 //! - [`semaphore`] — semaphore owner-ID codec (`go/common/semaphore`).
 
 pub mod backoff;
+pub mod cluster;
 pub mod cron;
 pub mod jitter;
 pub mod retry;

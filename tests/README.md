@@ -182,3 +182,20 @@ also passes an actual Rust raw-history response to Go's persistence decoder and
 checks pagination with omitted bounds and changed-bound rejection. These checks
 are included in the full compatibility runner. Raw-history export does not imply
 remote event application or distributed replication is implemented.
+
+Cluster version ownership and failover arithmetic are compared with Go:
+
+```sh
+python3 tests/run-cluster-metadata-compat.py
+```
+
+The shared fixtures call the actual Go cluster.Metadata methods and cover
+signed division, overflow, migration offsets, disabled-cluster resolution,
+local EmptyVersion, unresolved versions, and enabled/remote sets. The full
+compatibility runner first boots the copied Rust binary with embedded defaults,
+then boots it with a standalone YAML containing cluster0 (offset 0) and remote
+(offset 2), increment 10. The public gRPC driver checks global registration at
+version 2 and failover to version 10. The original-Go-IDL client also checks
+versions 12 and 20 plus new execution history at version 20; it can encode the
+newer destination-check override missing from the older web IDL. To run that driver independently, configure the same remote cluster.
+These checks do not establish distributed ownership or passive replication.

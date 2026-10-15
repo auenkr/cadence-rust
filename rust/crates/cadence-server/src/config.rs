@@ -152,12 +152,29 @@ fn de_flex_u16<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClusterMetadata {
+    #[serde(default, rename = "failoverVersionIncrement")]
+    pub failover_version_increment: i64,
+    #[serde(default, rename = "primaryClusterName", alias = "masterClusterName")]
+    pub primary_cluster_name: String,
+    #[serde(default, rename = "clusterGroup", alias = "clusterInformation")]
+    pub cluster_group: std::collections::BTreeMap<String, cadence_common::cluster::ClusterInformation>,
     #[serde(default, rename = "enableGlobalDomain")]
     pub enable_global_domain: bool,
     #[serde(default, rename = "currentClusterName")]
     pub current_cluster_name: String,
     #[serde(default, rename = "clusterNameForFailoverVersionIncrement")]
     pub cluster_name_for_failover_version_increment: String,
+}
+
+impl ClusterMetadata {
+    pub fn metadata(&self) -> cadence_common::cluster::Metadata {
+        cadence_common::cluster::Metadata {
+            failover_version_increment: self.failover_version_increment,
+            primary_cluster_name: self.primary_cluster_name.clone(),
+            current_cluster_name: self.current_cluster_name.clone(),
+            clusters: self.cluster_group.clone(),
+        }
+    }
 }
 
 impl Config {

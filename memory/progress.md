@@ -1280,3 +1280,32 @@ pass (284 tests); committed two checkpoints and pushed.
   ReplicateEventsV2 remains a no-op; production branch storage, original append
   batches, lossless remote timestamp precision and passive state reconstruction
   remain open. Details and source anchors: memory/replication-next.md.
+
+## 2026-10-15: cluster metadata/version migration in progress
+
+- Ported Go cluster.Metadata version arithmetic, owner resolution, migration
+  offset fallback, same-cluster comparison and enabled/remote sets into
+  cadence-common::cluster. 69 shared cases were produced by the actual Go
+  methods and passed Rust differential verification, including signed/overflow
+  arithmetic and EmptyVersion handling.
+- Parsed configured increment/primary/current/cluster-group data and wired
+  global registration's initial version plus FailoverDomain on HTTP/gRPC and
+  Thrift paths to metadata. Active-active domain-level version fencing bumps
+  from current+1 like Go; full per-attribute merging remains unported.
+- Global registration now rejects unconfigured/disabled clusters and missing
+  active-cluster membership; failover uses configured offsets rather than +1.
+  Added configured round-trip checks 2 -> 10 -> 12 -> 20 and new-run versions.
+- Full validation PASSED all 12 stages in cadence-rust:cluster-full-check:
+  286 workspace tests, strict clippy, four Go differential suites, copied-binary
+  embedded-default startup, configured-server public/internal gRPC and Go SDK
+  TChannel. Evidence: /tmp/cadence-cluster-metadata-compat-v4/results.json and
+  outer exit file 0. Test servers cleaned up; development server unchanged.
+- Earlier checks caught and fixed a local cluster-count condition accidentally
+  nested under global validation. The older web IDL drops the destination-check
+  override; reverse-failover checks now use the original Go IDL. The Go source
+  ledger now records 10 partial and 2290 review-required files, none complete.
+- Full cluster config validation/default layering and dynamic per-domain
+  migration override evaluation remain incomplete. Public paths currently use
+  the standard initial offset; utility fixtures also cover the override branch.
+  Existing execution promotion/passive ownership gating and replication remain
+  unported. Updating domain metadata alone does not establish failover behavior.

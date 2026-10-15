@@ -1,0 +1,638 @@
+[
+  {
+    "name": "next a from -24 migration False",
+    "op": "next",
+    "target": "a",
+    "current": -24,
+    "other": 0,
+    "useNew": false,
+    "expected": -20
+  },
+  {
+    "name": "next a from -24 migration True",
+    "op": "next",
+    "target": "a",
+    "current": -24,
+    "other": 0,
+    "useNew": true,
+    "expected": -17
+  },
+  {
+    "name": "next a from -11 migration False",
+    "op": "next",
+    "target": "a",
+    "current": -11,
+    "other": 0,
+    "useNew": false,
+    "expected": -10
+  },
+  {
+    "name": "next a from -11 migration True",
+    "op": "next",
+    "target": "a",
+    "current": -11,
+    "other": 0,
+    "useNew": true,
+    "expected": -7
+  },
+  {
+    "name": "next a from -1 migration False",
+    "op": "next",
+    "target": "a",
+    "current": -1,
+    "other": 0,
+    "useNew": false,
+    "expected": 0
+  },
+  {
+    "name": "next a from -1 migration True",
+    "op": "next",
+    "target": "a",
+    "current": -1,
+    "other": 0,
+    "useNew": true,
+    "expected": 3
+  },
+  {
+    "name": "next a from 0 migration False",
+    "op": "next",
+    "target": "a",
+    "current": 0,
+    "other": 0,
+    "useNew": false,
+    "expected": 0
+  },
+  {
+    "name": "next a from 0 migration True",
+    "op": "next",
+    "target": "a",
+    "current": 0,
+    "other": 0,
+    "useNew": true,
+    "expected": 3
+  },
+  {
+    "name": "next a from 2 migration False",
+    "op": "next",
+    "target": "a",
+    "current": 2,
+    "other": 0,
+    "useNew": false,
+    "expected": 10
+  },
+  {
+    "name": "next a from 2 migration True",
+    "op": "next",
+    "target": "a",
+    "current": 2,
+    "other": 0,
+    "useNew": true,
+    "expected": 3
+  },
+  {
+    "name": "next a from 4 migration False",
+    "op": "next",
+    "target": "a",
+    "current": 4,
+    "other": 0,
+    "useNew": false,
+    "expected": 10
+  },
+  {
+    "name": "next a from 4 migration True",
+    "op": "next",
+    "target": "a",
+    "current": 4,
+    "other": 0,
+    "useNew": true,
+    "expected": 13
+  },
+  {
+    "name": "next a from 9 migration False",
+    "op": "next",
+    "target": "a",
+    "current": 9,
+    "other": 0,
+    "useNew": false,
+    "expected": 10
+  },
+  {
+    "name": "next a from 9 migration True",
+    "op": "next",
+    "target": "a",
+    "current": 9,
+    "other": 0,
+    "useNew": true,
+    "expected": 13
+  },
+  {
+    "name": "next a from 10 migration False",
+    "op": "next",
+    "target": "a",
+    "current": 10,
+    "other": 0,
+    "useNew": false,
+    "expected": 10
+  },
+  {
+    "name": "next a from 10 migration True",
+    "op": "next",
+    "target": "a",
+    "current": 10,
+    "other": 0,
+    "useNew": true,
+    "expected": 13
+  },
+  {
+    "name": "next a from 12 migration False",
+    "op": "next",
+    "target": "a",
+    "current": 12,
+    "other": 0,
+    "useNew": false,
+    "expected": 20
+  },
+  {
+    "name": "next a from 12 migration True",
+    "op": "next",
+    "target": "a",
+    "current": 12,
+    "other": 0,
+    "useNew": true,
+    "expected": 13
+  },
+  {
+    "name": "next a from 99 migration False",
+    "op": "next",
+    "target": "a",
+    "current": 99,
+    "other": 0,
+    "useNew": false,
+    "expected": 100
+  },
+  {
+    "name": "next a from 99 migration True",
+    "op": "next",
+    "target": "a",
+    "current": 99,
+    "other": 0,
+    "useNew": true,
+    "expected": 103
+  },
+  {
+    "name": "next a from 9223372036854775807 migration False",
+    "op": "next",
+    "target": "a",
+    "current": 9223372036854775807,
+    "other": 0,
+    "useNew": false,
+    "expected": -9223372036854775806
+  },
+  {
+    "name": "next a from 9223372036854775807 migration True",
+    "op": "next",
+    "target": "a",
+    "current": 9223372036854775807,
+    "other": 0,
+    "useNew": true,
+    "expected": -9223372036854775803
+  },
+  {
+    "name": "next b from -24 migration False",
+    "op": "next",
+    "target": "b",
+    "current": -24,
+    "other": 0,
+    "useNew": false,
+    "expected": -18
+  },
+  {
+    "name": "next b from -11 migration False",
+    "op": "next",
+    "target": "b",
+    "current": -11,
+    "other": 0,
+    "useNew": false,
+    "expected": -8
+  },
+  {
+    "name": "next b from -1 migration False",
+    "op": "next",
+    "target": "b",
+    "current": -1,
+    "other": 0,
+    "useNew": false,
+    "expected": 2
+  },
+  {
+    "name": "next b from 0 migration False",
+    "op": "next",
+    "target": "b",
+    "current": 0,
+    "other": 0,
+    "useNew": false,
+    "expected": 2
+  },
+  {
+    "name": "next b from 2 migration False",
+    "op": "next",
+    "target": "b",
+    "current": 2,
+    "other": 0,
+    "useNew": false,
+    "expected": 2
+  },
+  {
+    "name": "next b from 4 migration False",
+    "op": "next",
+    "target": "b",
+    "current": 4,
+    "other": 0,
+    "useNew": false,
+    "expected": 12
+  },
+  {
+    "name": "next b from 9 migration False",
+    "op": "next",
+    "target": "b",
+    "current": 9,
+    "other": 0,
+    "useNew": false,
+    "expected": 12
+  },
+  {
+    "name": "next b from 10 migration False",
+    "op": "next",
+    "target": "b",
+    "current": 10,
+    "other": 0,
+    "useNew": false,
+    "expected": 12
+  },
+  {
+    "name": "next b from 12 migration False",
+    "op": "next",
+    "target": "b",
+    "current": 12,
+    "other": 0,
+    "useNew": false,
+    "expected": 12
+  },
+  {
+    "name": "next b from 99 migration False",
+    "op": "next",
+    "target": "b",
+    "current": 99,
+    "other": 0,
+    "useNew": false,
+    "expected": 102
+  },
+  {
+    "name": "next b from 9223372036854775807 migration False",
+    "op": "next",
+    "target": "b",
+    "current": 9223372036854775807,
+    "other": 0,
+    "useNew": false,
+    "expected": -9223372036854775804
+  },
+  {
+    "name": "next disabled from -24 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": -24,
+    "other": 0,
+    "useNew": false,
+    "expected": -16
+  },
+  {
+    "name": "next disabled from -11 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": -11,
+    "other": 0,
+    "useNew": false,
+    "expected": -6
+  },
+  {
+    "name": "next disabled from -1 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": -1,
+    "other": 0,
+    "useNew": false,
+    "expected": 4
+  },
+  {
+    "name": "next disabled from 0 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": 0,
+    "other": 0,
+    "useNew": false,
+    "expected": 4
+  },
+  {
+    "name": "next disabled from 2 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": 2,
+    "other": 0,
+    "useNew": false,
+    "expected": 4
+  },
+  {
+    "name": "next disabled from 4 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": 4,
+    "other": 0,
+    "useNew": false,
+    "expected": 4
+  },
+  {
+    "name": "next disabled from 9 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": 9,
+    "other": 0,
+    "useNew": false,
+    "expected": 14
+  },
+  {
+    "name": "next disabled from 10 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": 10,
+    "other": 0,
+    "useNew": false,
+    "expected": 14
+  },
+  {
+    "name": "next disabled from 12 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": 12,
+    "other": 0,
+    "useNew": false,
+    "expected": 14
+  },
+  {
+    "name": "next disabled from 99 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": 99,
+    "other": 0,
+    "useNew": false,
+    "expected": 104
+  },
+  {
+    "name": "next disabled from 9223372036854775807 migration False",
+    "op": "next",
+    "target": "disabled",
+    "current": 9223372036854775807,
+    "other": 0,
+    "useNew": false,
+    "expected": -9223372036854775802
+  },
+  {
+    "name": "resolve -24",
+    "op": "resolve",
+    "target": "",
+    "current": -24,
+    "other": 0,
+    "useNew": false,
+    "expected": "a"
+  },
+  {
+    "name": "resolve -14",
+    "op": "resolve",
+    "target": "",
+    "current": -14,
+    "other": 0,
+    "useNew": false,
+    "expected": {
+      "error": "failed to resolve failover version to a cluster: could not resolve failover version: -14"
+    }
+  },
+  {
+    "name": "resolve -1",
+    "op": "resolve",
+    "target": "",
+    "current": -1,
+    "other": 0,
+    "useNew": false,
+    "expected": {
+      "error": "failed to resolve failover version to a cluster: could not resolve failover version: -1"
+    }
+  },
+  {
+    "name": "resolve 0",
+    "op": "resolve",
+    "target": "",
+    "current": 0,
+    "other": 0,
+    "useNew": false,
+    "expected": "a"
+  },
+  {
+    "name": "resolve 2",
+    "op": "resolve",
+    "target": "",
+    "current": 2,
+    "other": 0,
+    "useNew": false,
+    "expected": "b"
+  },
+  {
+    "name": "resolve 3",
+    "op": "resolve",
+    "target": "",
+    "current": 3,
+    "other": 0,
+    "useNew": false,
+    "expected": "a"
+  },
+  {
+    "name": "resolve 4",
+    "op": "resolve",
+    "target": "",
+    "current": 4,
+    "other": 0,
+    "useNew": false,
+    "expected": "disabled"
+  },
+  {
+    "name": "resolve 5",
+    "op": "resolve",
+    "target": "",
+    "current": 5,
+    "other": 0,
+    "useNew": false,
+    "expected": {
+      "error": "failed to resolve failover version to a cluster: could not resolve failover version: 5"
+    }
+  },
+  {
+    "name": "resolve 10",
+    "op": "resolve",
+    "target": "",
+    "current": 10,
+    "other": 0,
+    "useNew": false,
+    "expected": "a"
+  },
+  {
+    "name": "resolve 12",
+    "op": "resolve",
+    "target": "",
+    "current": 12,
+    "other": 0,
+    "useNew": false,
+    "expected": "b"
+  },
+  {
+    "name": "resolve 13",
+    "op": "resolve",
+    "target": "",
+    "current": 13,
+    "other": 0,
+    "useNew": false,
+    "expected": "a"
+  },
+  {
+    "name": "resolve 14",
+    "op": "resolve",
+    "target": "",
+    "current": 14,
+    "other": 0,
+    "useNew": false,
+    "expected": "disabled"
+  },
+  {
+    "name": "resolve 15",
+    "op": "resolve",
+    "target": "",
+    "current": 15,
+    "other": 0,
+    "useNew": false,
+    "expected": {
+      "error": "failed to resolve failover version to a cluster: could not resolve failover version: 15"
+    }
+  },
+  {
+    "name": "resolve 9223372036854775807",
+    "op": "resolve",
+    "target": "",
+    "current": 9223372036854775807,
+    "other": 0,
+    "useNew": false,
+    "expected": {
+      "error": "failed to resolve failover version to a cluster: could not resolve failover version: 9223372036854775807"
+    }
+  },
+  {
+    "name": "same 0 10",
+    "op": "same",
+    "target": "",
+    "current": 0,
+    "other": 10,
+    "useNew": false,
+    "expected": true
+  },
+  {
+    "name": "same 0 3",
+    "op": "same",
+    "target": "",
+    "current": 0,
+    "other": 3,
+    "useNew": false,
+    "expected": true
+  },
+  {
+    "name": "same 3 13",
+    "op": "same",
+    "target": "",
+    "current": 3,
+    "other": 13,
+    "useNew": false,
+    "expected": true
+  },
+  {
+    "name": "same 2 12",
+    "op": "same",
+    "target": "",
+    "current": 2,
+    "other": 12,
+    "useNew": false,
+    "expected": true
+  },
+  {
+    "name": "same 0 2",
+    "op": "same",
+    "target": "",
+    "current": 0,
+    "other": 2,
+    "useNew": false,
+    "expected": false
+  },
+  {
+    "name": "same 4 14",
+    "op": "same",
+    "target": "",
+    "current": 4,
+    "other": 14,
+    "useNew": false,
+    "expected": true
+  },
+  {
+    "name": "same -24 -24",
+    "op": "same",
+    "target": "",
+    "current": -24,
+    "other": -24,
+    "useNew": false,
+    "expected": false
+  },
+  {
+    "name": "same 5 15",
+    "op": "same",
+    "target": "",
+    "current": 5,
+    "other": 15,
+    "useNew": false,
+    "expected": false
+  },
+  {
+    "name": "same 3 0",
+    "op": "same",
+    "target": "",
+    "current": 3,
+    "other": 0,
+    "useNew": false,
+    "expected": true
+  },
+  {
+    "name": "same 13 2",
+    "op": "same",
+    "target": "",
+    "current": 13,
+    "other": 2,
+    "useNew": false,
+    "expected": false
+  },
+  {
+    "name": "enabled remote all sets",
+    "op": "sets",
+    "target": "",
+    "current": 0,
+    "other": 0,
+    "useNew": false,
+    "expected": {
+      "all": 3,
+      "enabled": 2,
+      "primary": true,
+      "remote": 1
+    }
+  }
+]

@@ -97,6 +97,18 @@ impl InMemoryDomainStore {
         replication: DomainReplicationConfiguration,
         is_global_domain: bool,
     ) -> Result<DescribeDomainResponse, DomainAlreadyExistsError> {
+        self.create_with_version(info, configuration, replication, is_global_domain,
+            if is_global_domain { 0 } else { crate::version_history::EMPTY_VERSION })
+    }
+
+    pub fn create_with_version(
+        &self,
+        info: DomainInfo,
+        configuration: DomainConfiguration,
+        replication: DomainReplicationConfiguration,
+        is_global_domain: bool,
+        failover_version: i64,
+    ) -> Result<DescribeDomainResponse, DomainAlreadyExistsError> {
         let mut inner = self.inner.write().expect("domain store lock");
         if inner.by_name.contains_key(&info.name) || inner.by_id.contains_key(&info.uuid) {
             return Err(DomainAlreadyExistsError {
@@ -107,7 +119,7 @@ impl InMemoryDomainStore {
             info: info.clone(),
             configuration,
             replication,
-            failover_version: if is_global_domain { 0 } else { crate::version_history::EMPTY_VERSION },
+            failover_version,
             is_global_domain,
             failover_audit: Vec::new(),
             isolation_groups: None,
@@ -242,6 +254,7 @@ impl InMemoryDomainStore {
         &self,
         req: &cadence_api::types::FailoverDomainRequest,
         current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
     ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
         use cadence_api::enums::FailoverType;
         let mut inner = self.inner.write().expect("domain store lock");
@@ -314,10 +327,20 @@ impl InMemoryDomainStore {
                 "a failover was requested, but there was no change detected, the configuration was not updated".to_string(),
             ));
         }
+        if !metadata.clusters.get(&intended.active_cluster_name).is_some_and(|c| c.enabled) {
+            return Err(FailoverError::Invalid(format!("Invalid cluster name: {}", intended.active_cluster_name)));
+        }
+        if !intended.clusters.iter().any(|c| c.cluster_name == intended.active_cluster_name) {
+            return Err(FailoverError::Invalid("Active cluster is not contained in all clusters.".into()));
+        }
+        let current_version = record.failover_version.wrapping_add(i64::from(
+            record.replication.is_active_active() || intended.is_active_active()));
+        let next_version = metadata.next_failover_version(&intended.active_cluster_name, current_version, false)
+            .map_err(FailoverError::Invalid)?;
         let before = record.replication.clone();
         let before_version = record.failover_version;
         record.replication = intended.clone();
-        record.failover_version += 1;
+        record.failover_version = next_version;
         let failover_type = if req.failover_timeout_in_seconds.is_some() {
             FailoverType::Graceful
         } else {
@@ -759,6 +782,19 @@ mod tests {
         (info, cfg, rep)
     }
 
+    fn cluster_metadata() -> cadence_common::cluster::Metadata {
+        use cadence_common::cluster::{Metadata, ClusterInformation};
+        Metadata {
+            failover_version_increment: 10,
+            primary_cluster_name: "active".into(),
+            current_cluster_name: "active".into(),
+            clusters: std::collections::BTreeMap::from([
+                ("active".into(), ClusterInformation { enabled: true, initial_failover_version: 0, ..Default::default() }),
+                ("standby".into(), ClusterInformation { enabled: true, initial_failover_version: 1, ..Default::default() }),
+            ]),
+        }
+    }
+
     fn failover_req(domain: &str, target: &str) -> cadence_api::types::FailoverDomainRequest {
         cadence_api::types::FailoverDomainRequest {
             domain_name: domain.to_string(),
@@ -772,7 +808,7 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = global_sample("g", "uuid-g");
         store.create(info, cfg, rep, true).unwrap();
-        let resp = store.failover(&failover_req("g", "standby"), "standby").unwrap();
+        let resp = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata()).unwrap();
         assert_eq!(
             resp.replication_configuration.unwrap().active_cluster_name,
             "standby"
@@ -792,7 +828,7 @@ mod tests {
             "standby"
         );
         // No-change failovers are rejected like Go.
-        let err = store.failover(&failover_req("g", "standby"), "standby").unwrap_err();
+        let err = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata()).unwrap_err();
         assert!(matches!(err, FailoverError::Invalid(_)));
     }
 
@@ -801,25 +837,25 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = sample("local", "uuid-local");
         store.create(info, cfg, rep, false).unwrap();
-        let err = store.failover(&failover_req("local", "other"), "other").unwrap_err();
+        let err = store.failover(&failover_req("local", "other"), "other", &cluster_metadata()).unwrap_err();
         assert!(matches!(err, FailoverError::Invalid(_)));
         let err = store
-            .failover(&failover_req("missing", "other"), "other")
+            .failover(&failover_req("missing", "other"), "other", &cluster_metadata())
             .unwrap_err();
         assert!(matches!(err, FailoverError::NotFound(_)));
 
         let (info, cfg, rep) = global_sample("g2", "uuid-g2");
         store.create(info, cfg, rep, true).unwrap();
         // Wrong destination cluster without the skip flag.
-        let err = store.failover(&failover_req("g2", "standby"), "active").unwrap_err();
+        let err = store.failover(&failover_req("g2", "standby"), "active", &cluster_metadata()).unwrap_err();
         assert!(matches!(err, FailoverError::Invalid(_)));
         // Skip flag accepts from any cluster.
         let mut req = failover_req("g2", "standby");
         req.skip_destination_cluster_check = true;
-        store.failover(&req, "active").unwrap();
+        store.failover(&req, "active", &cluster_metadata()).unwrap();
         let mut back = failover_req("g2", "active");
         back.skip_destination_cluster_check = true;
-        store.failover(&back, "active").unwrap();
+        assert_eq!(store.failover(&back, "active", &cluster_metadata()).unwrap().failover_version, 10);
         // Paging: newest first, one per page.
         let (first, next) = store.failover_history("uuid-g2", 1, &[]).unwrap();
         assert_eq!(first.len(), 1);

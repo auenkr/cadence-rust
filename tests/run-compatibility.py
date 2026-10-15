@@ -54,6 +54,7 @@ def main():
     run("scheduler-differential", [sys.executable, str(root / "tests/run-scheduler-compat.py")])
     run("version-history-differential", [sys.executable, str(root / "tests/run-version-history-compat.py")])
     run("history-blob-differential", [sys.executable, str(root / "tests/run-history-blob-compat.py")])
+    run("cluster-metadata-differential", [sys.executable, str(root / "tests/run-cluster-metadata-compat.py")])
     run("server-build", ["cargo", "build", "--manifest-path", manifest, "-p", "cadence-server"])
     # Reserve all five ports together to avoid selecting the same port twice.
     reservations = [socket.socket() for _ in range(5)]
@@ -75,6 +76,36 @@ def main():
     command = [str(binary), "start", "--port", str(http),
                "--grpc-port", str(frontend), "--history-grpc-port", str(history),
                "--matching-grpc-port", str(matching), "--tchannel-port", str(tchannel)]
+    # First boot the copied binary with no configuration file or Go checkout.
+    with (artifacts / "embedded-startup.log").open("w") as log:
+        embedded = subprocess.Popen(command, cwd=server_workdir, env=env, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 30
+            while True:
+                if embedded.poll() is not None:
+                    raise RuntimeError("embedded-default server exited")
+                try:
+                    with socket.create_connection(("127.0.0.1", frontend), timeout=0.2):
+                        break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("embedded-default server did not start")
+                    time.sleep(0.1)
+        finally:
+            embedded.terminate()
+            try:
+                embedded.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                embedded.kill()
+                embedded.wait()
+    results.append({"check": "embedded-startup", "exitCode": 0,
+                    "log": str(artifacts / "embedded-startup.log")})
+    # Exercise real configured-cluster version offsets, keeping all servers Rust.
+    config = server_workdir / "compat.yaml"
+    text = (root / "rust/config/development.yaml").read_text()
+    text = text.replace("  clusterGroup:\n", "  clusterGroup:\n    remote:\n      enabled: true\n      initialFailoverVersion: 2\n      rpcAddress: localhost:1\n      rpcName: cadence-frontend\n      rpcTransport: grpc\n", 1)
+    config.write_text(text)
+    command += ["--config", str(config)]
     (artifacts / "server.json").write_text(json.dumps({"command": command, "workingDirectory": str(server_workdir), "ports": {
         "http": http, "frontend": frontend, "history": history,
         "matching": matching, "tchannel": tchannel}}, indent=2) + "\n")

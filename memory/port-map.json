@@ -83,5 +83,16 @@
     "evidence": [
       "Workflow retry/cron timeout and four activity timeout types have unit checks; workflow-task timers, distributed task queues and recovery not ported"
     ]
+  },
+  "go/common/cluster/metadata.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/cluster.rs",
+      "rust/crates/cadence-server/src/config.rs",
+      "rust/crates/cadence-persistence/src/domains.rs"
+    ],
+    "evidence": [
+      "69 Go differential cases for version arithmetic/ownership, migration offsets, enabled/remote sets; configured frontend registration/failover wired. Full cluster config validation, dynamic migration override evaluation, logging/metrics and passive ownership gating remain incomplete."
+    ]
   }
 }
