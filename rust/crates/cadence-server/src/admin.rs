@@ -721,26 +721,12 @@ pub async fn get_workflow_execution_raw_history(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request>,
 ) -> Response {
+    use cadence_persistence::raw_history::{self, RawHistoryToken};
+
+    if let Err(e) = raw_history::validate_request(&req) {
+        return bad_request(e);
+    }
     let execution = req.execution.clone().unwrap_or_default();
-    if execution.workflow_id.is_empty() {
-        return bad_request(BadRequestError::new("Invalid WorkflowID."));
-    }
-    if execution.run_id.is_empty() {
-        return bad_request(BadRequestError::new("Invalid RunID."));
-    }
-    if req.maximum_page_size <= 0 {
-        return bad_request(BadRequestError::new("Invalid PageSize."));
-    }
-    if req.start_event_id.is_some() != req.start_event_version.is_some() {
-        return bad_request(BadRequestError::new(
-            "Invalid start event id and start event version combination.",
-        ));
-    }
-    if req.end_event_id.is_some() != req.end_event_version.is_some() {
-        return bad_request(BadRequestError::new(
-            "Invalid end event id and end event version combination.",
-        ));
-    }
     if let Some(e) = require_domain(&state, &req.domain).await {
         return e;
     }
@@ -748,25 +734,97 @@ pub async fn get_workflow_execution_raw_history(
         Ok(store) => store,
         Err(error) => return entity_not_exists(error),
     };
+
+    let mut req = req;
+    let mut persistence_token = Vec::new();
+    let histories: cadence_api::types::VersionHistories = if req.next_page_token.is_empty() {
+        match executions.mutable_state_view(&req.domain, &execution) {
+            Ok(view) => match view.version_histories {
+                Some(vh) => vh,
+                None => {
+                    return bad_request(BadRequestError::new("Invalid version histories."))
+                }
+            },
+            Err(e) => return entity_not_exists(e),
+        }
+    } else {
+        match RawHistoryToken::from_bytes(&req.next_page_token) {
+            Ok(token) => {
+                if let Err(e) = token.validate(&req) {
+                    return bad_request(e);
+                }
+                persistence_token = token.persistence_token.clone().unwrap_or_default();
+                token.version_histories.clone().unwrap_or_default()
+            }
+            Err(e) => return bad_request(e),
+        }
+    };
+    if histories.histories.is_empty() {
+        return bad_request(BadRequestError::new("Invalid version histories."));
+    }
+
+    let target_history = match raw_history::select_history(&mut req, &histories) {
+        Ok(h) => h.clone(),
+        Err(e) => return bad_request(e),
+    };
+
+    // Exclusive-exclusive empty range check.
+    if req.start_event_id.unwrap_or(0) + 1 == req.end_event_id.unwrap_or(0) {
+        return ok_json(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
+            next_page_token: Vec::new(),
+            history_batches: vec![],
+            version_history: Some(target_history),
+        });
+    }
+
     match executions.raw_history(
         &req.domain,
         &execution,
         req.start_event_id,
         req.end_event_id,
         req.maximum_page_size as usize,
-        &req.next_page_token,
+        &persistence_token,
     ) {
-        Ok((events, next_page_token)) => {
+        Ok((events, new_persistence_token)) => {
             let batch = serde_json::to_vec(&events).unwrap_or_default();
+            let next_page_token = if new_persistence_token.is_empty() {
+                Vec::new()
+            } else {
+                let new_token = RawHistoryToken {
+                    domain_name: req.domain.clone(),
+                    workflow_id: execution.workflow_id.clone(),
+                    run_id: execution.run_id.clone(),
+                    start_event_id: req.start_event_id.unwrap_or(0),
+                    start_event_version: req.start_event_version.unwrap_or(0),
+                    end_event_id: req.end_event_id.unwrap_or(0),
+                    end_event_version: req.end_event_version.unwrap_or(0),
+                    persistence_token: if new_persistence_token.is_empty() {
+                        None
+                    } else {
+                        Some(new_persistence_token)
+                    },
+                    version_histories: Some(histories.clone()),
+                };
+                new_token.to_bytes().unwrap_or_default()
+            };
             ok_json(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
                 next_page_token,
                 history_batches: vec![cadence_api::types::DataBlob {
                     encoding_type: None,
                     data: batch,
                 }],
+                version_history: Some(target_history),
             })
         }
-        Err(e) => entity_not_exists(e),
+        Err(e) => {
+            // Go returns empty response on EntityNotExists from DB.
+            let _ = e;
+            ok_json(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
+                next_page_token: Vec::new(),
+                history_batches: vec![],
+                version_history: Some(target_history),
+            })
+        }
     }
 }
 

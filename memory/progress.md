@@ -1231,3 +1231,13 @@
   Go admin handler's setRequestDefaultValueAndGetTargetVersionHistory and
   token validation with differential fixtures, then return real compatible
   history batches and selected version history before remote application.
+
+## Incremental raw-history V2 fix (2026-10-15)
+
+Admin GetWorkflowExecutionRawHistoryV2 now honors requested start/end version
+items, applies Go-exclusive (start, end) event slicing, switches target branch
+via version-history LCA, returns target VersionHistory, and uses structured
+RawHistoryToken pagination (domain/workflow/run/start/end/persistence token/
+full version histories). gRPC forwarding preserves start/end version history
+items and maps response version history. Persistence raw_history updated to
+exclusive-exclusive range scanning. Unit and full compatibility runner pass.

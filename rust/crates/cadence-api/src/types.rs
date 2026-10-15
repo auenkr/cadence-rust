@@ -561,11 +561,14 @@ pub struct HistoryBranch {
     pub ancestors: Vec<HistoryBranchRange>,
 }
 
+fn is_zero_i64(value: &i64) -> bool { *value == 0 }
+fn is_zero_i32(value: &i32) -> bool { *value == 0 }
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionHistoryItem {
-    #[serde(rename = "eventID", default)]
+    #[serde(rename = "eventID", default, skip_serializing_if = "is_zero_i64")]
     pub event_id: i64,
-    #[serde(rename = "version", default)]
+    #[serde(rename = "version", default, skip_serializing_if = "is_zero_i64")]
     pub version: i64,
 }
 
@@ -580,7 +583,7 @@ pub struct VersionHistory {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionHistories {
-    #[serde(rename = "currentVersionHistoryIndex", default)]
+    #[serde(rename = "currentVersionHistoryIndex", default, skip_serializing_if = "is_zero_i32")]
     pub current_version_history_index: i32,
     #[serde(rename = "histories", default, skip_serializing_if = "Vec::is_empty")]
     pub histories: Vec<VersionHistory>,

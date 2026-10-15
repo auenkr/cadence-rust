@@ -1782,8 +1782,8 @@ impl InMemoryExecutionStore {
         let record = inner.by_run.get(&key).ok_or_else(|| {
             EntityNotExistsError::new("Workflow execution does not exist.".to_string())
         })?;
-        let from = start_event_id.unwrap_or(1).max(1) as usize;
-        let to = end_event_id.unwrap_or(i64::MAX).max(0) as usize;
+        let lower = start_event_id.unwrap_or(0);
+        let upper = end_event_id.unwrap_or(i64::MAX);
         let offset: usize = if page_token.is_empty() {
             0
         } else {
@@ -1792,19 +1792,34 @@ impl InMemoryExecutionStore {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0)
         };
+        // Execution store history is sorted by event id; read only events in
+        // (lower, upper) to mirror Go ReadRawHistoryBranch exclusive-exclusive.
+        let mut range_start = 0usize;
+        while range_start < record.history.len()
+            && record.history[range_start].event_id <= lower
+        {
+            range_start += 1;
+        }
+        let mut range_end = range_start;
+        while range_end < record.history.len()
+            && record.history[range_end].event_id < upper
+        {
+            range_end += 1;
+        }
+        let range_len = range_end.saturating_sub(range_start);
+        let available = range_len.saturating_sub(offset);
+        let take = page_size.max(1).min(available);
         let events: Vec<HistoryEvent> = record
             .history
             .iter()
-            .skip(from.saturating_sub(1))
-            .take(to.saturating_sub(from.saturating_sub(1)))
-            .skip(offset)
-            .take(page_size.max(1))
+            .skip(range_start + offset)
+            .take(take)
             .cloned()
             .collect();
-        let taken = offset + events.len();
-        let remaining = record.history.len().saturating_sub(from.saturating_sub(1)).saturating_sub(taken);
+        let consumed = offset + events.len();
+        let remaining = range_len.saturating_sub(consumed);
         let next_page_token = if remaining > 0 {
-            taken.to_string().into_bytes()
+            consumed.to_string().into_bytes()
         } else {
             Vec::new()
         };
@@ -8701,9 +8716,14 @@ mod advanced_tests {
         let (rest, token2) = store.raw_history("d", &exec, None, None, 10, &token).unwrap();
         assert_eq!(rest.len(), 1);
         assert!(token2.is_empty());
-        // Start/end bounds select the decision-scheduled event only.
+        // Raw history is exclusive-exclusive: bounds (2, 2) produce no events.
         let (bounded, _) = store
             .raw_history("d", &exec, Some(2), Some(2), 10, &[])
+            .unwrap();
+        assert_eq!(bounded.len(), 0);
+        // Bounds (1, 3) select the decision-scheduled event only.
+        let (bounded, _) = store
+            .raw_history("d", &exec, Some(1), Some(3), 10, &[])
             .unwrap();
         assert_eq!(bounded.len(), 1);
         assert!(store

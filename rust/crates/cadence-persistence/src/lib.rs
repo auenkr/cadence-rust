@@ -11,6 +11,7 @@ pub mod schedules;
 pub mod semaphores;
 pub mod visibility;
 pub mod version_history;
+pub mod raw_history;
 
 pub use domains::{DomainRecord, FailoverError, InMemoryDomainStore};
 pub use executions::{

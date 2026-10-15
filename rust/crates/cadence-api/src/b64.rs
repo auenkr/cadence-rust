@@ -23,7 +23,9 @@ pub fn serialize_opt_bytes<S: Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S
 
 #[allow(dead_code)]
 pub fn deserialize_opt_bytes<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
-    Ok(Some(deserialize_bytes(d)?))
+    Option::<String>::deserialize(d)?.map(|text| {
+        B64.decode(text.as_bytes()).map_err(serde::de::Error::custom)
+    }).transpose()
 }
 
 pub fn serialize_b64_map<S: Serializer>(

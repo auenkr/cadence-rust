@@ -686,10 +686,10 @@ impl a::admin_api_server::AdminApi for Admin {
                     run_id: e.run_id,
                 }
             }),
-            start_event_id: None,
-            start_event_version: None,
-            end_event_id: None,
-            end_event_version: None,
+            start_event_id: r.start_event.as_ref().map(|e| e.event_id),
+            start_event_version: r.start_event.as_ref().map(|e| e.version),
+            end_event_id: r.end_event.as_ref().map(|e| e.event_id),
+            end_event_version: r.end_event.as_ref().map(|e| e.version),
             maximum_page_size: r.page_size,
             next_page_token: r.next_page_token,
         };
@@ -719,7 +719,9 @@ impl a::admin_api_server::AdminApi for Admin {
                     data: b.data,
                 })
                 .collect(),
-            version_history: None,
+            version_history: v
+                .version_history
+                .map(crate::grpc_convert::version_history_out),
         }))
     }
 

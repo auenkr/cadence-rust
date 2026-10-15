@@ -536,6 +536,12 @@ pub struct GetWorkflowExecutionRawHistoryV2Response {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub history_batches: Vec<crate::types::DataBlob>,
+    #[serde(
+        rename = "versionHistory",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub version_history: Option<crate::types::VersionHistory>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
