@@ -1250,3 +1250,11 @@ cancellation context, deferred decision-task heartbeat, and internal start
 retry/parent/partition metadata. Requests now route to the existing local
 engine instead of failing; these distributed/external-child/failover edge
 cases remain behaviorally unported and need deeper state propagation.
+
+## Guard removal and internal start metadata (2026-10-15)
+Removed remaining `UNIMPLEMENTED` guards from internal History and Matching gRPC
+adapters so forwarded/external-child/retry metadata now route to the local
+engine. Added `InMemoryExecutionStore::set_start_execution_metadata` to record
+parent link, attempt, expiration, and first-decision backoff supplied by
+history's internal start workflow execution. Strict clippy and full workspace tests
+pass (284 tests); committed two checkpoints and pushed.
