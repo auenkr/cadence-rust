@@ -41,7 +41,16 @@ func TestRustMatchingSQLiteInterop(t *testing.T) {
 	name := "go-to-rust"
 	run := "00000000-0000-0000-0000-000000000002"
 	now := time.Unix(0, 1700000000123456789)
+	source := "00000000-0000-0000-0000-000000000003"
 	if os.Getenv("CADENCE_MATCHING_SQLITE_PHASE") == "seed" {
+		cross, err := store.LeaseTaskList(ctx, &p.LeaseTaskListRequest{DomainID: domain, TaskList: "cross-domain", CurrentTimeStamp: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = store.CreateTasks(ctx, &p.CreateTasksRequest{TaskListInfo: cross.TaskListInfo, CurrentTimeStamp: now, Tasks: []*p.CreateTaskInfo{{TaskID: 1, Data: &p.TaskInfo{DomainID: source, WorkflowID: "cross-go", RunID: run}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
 		lease, err := store.LeaseTaskList(ctx, &p.LeaseTaskListRequest{DomainID: domain, TaskList: name, TaskListKind: 1, CurrentTimeStamp: now})
 		if err != nil {
 			t.Fatal(err)
@@ -63,6 +72,18 @@ func TestRustMatchingSQLiteInterop(t *testing.T) {
 			t.Fatal(err)
 		}
 	} else {
+		for _, id := range []string{domain, source} {
+			tasks, err := store.GetTasks(ctx, &p.GetTasksRequest{DomainID: id, TaskList: "cross-domain", ReadLevel: 0, BatchSize: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id == domain && len(tasks.Tasks) != 0 {
+				t.Fatal("source tasks leaked into target domain")
+			}
+			if id == source && (len(tasks.Tasks) != 2 || tasks.Tasks[1].WorkflowID != "cross-rust" || tasks.Tasks[1].DomainID != source) {
+				t.Fatalf("cross-domain tasks: %+v", tasks.Tasks)
+			}
+		}
 		info, err := store.GetTaskList(ctx, &p.GetTaskListRequest{DomainID: domain, TaskList: name})
 		if err != nil {
 			t.Fatal(err)

@@ -188,12 +188,22 @@ impl SqliteTaskStore {
         range: i64,
         tasks: &[AllocatedTask],
     ) -> Result<()> {
+        self.create_tasks_with_domains(key, range, tasks.iter().map(|task| (key.domain_id, task)))
+    }
+    /// Go fences the target task-list lease while each task row uses its own
+    /// source domain. The domain is a SQL key, not a field in the task blob.
+    pub fn create_tasks_with_domains<'a>(
+        &self,
+        key: &TaskListKey,
+        range: i64,
+        tasks: impl IntoIterator<Item = (Uuid, &'a AllocatedTask)>,
+    ) -> Result<()> {
         let mut connection = self.connection.lock().expect("matching SQL lock");
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for task in tasks {
+        for (domain, task) in tasks {
             let bytes = self.encoding.encode(&blob::encode_task(&task.data))?;
             tx.execute("INSERT INTO tasks (domain_id,task_list_name,task_type,task_id,data,data_encoding) VALUES (?,?,?,?,?,?)",
-                params![key.domain_id.as_bytes().as_slice(),key.name,key.task_type,task.task_id,bytes,self.encoding.as_str()])?;
+                params![domain.as_bytes().as_slice(),key.name,key.task_type,task.task_id,bytes,self.encoding.as_str()])?;
         }
         Self::fence(&tx, key, range)?;
         tx.commit()?;
@@ -411,6 +421,39 @@ mod interop_tests {
             task_type: 0,
         };
         let now = 1_700_000_000_123_456_789;
+        let mut cross_target = key.clone();
+        cross_target.name = "cross-domain".into();
+        let mut cross_source = cross_target.clone();
+        cross_source.domain_id = Uuid::from_u128(3);
+        assert!(store
+            .get_tasks(&cross_target, 0, 10, 10)
+            .unwrap()
+            .is_empty());
+        let cross_tasks = store.get_tasks(&cross_source, 0, 10, 10).unwrap();
+        assert_eq!(cross_tasks.len(), if phase == "verify" { 2 } else { 1 });
+        assert_eq!(cross_tasks[0].data.workflow_id, "cross-go");
+        if phase != "verify" {
+            let cross = AllocatedTask {
+                task_id: 2,
+                data: TaskData {
+                    workflow_id: "cross-rust".into(),
+                    run_id: Some(Uuid::from_u128(2).as_bytes().to_vec()),
+                    ..Default::default()
+                },
+            };
+            store
+                .create_tasks_with_domains(&cross_target, 1, [(cross_source.domain_id, &cross)])
+                .unwrap();
+            store.lease(&cross_target, 0, 0, now).unwrap();
+            let rejected = AllocatedTask {
+                task_id: 3,
+                ..cross
+            };
+            assert!(store
+                .create_tasks_with_domains(&cross_target, 1, [(cross_source.domain_id, &rejected)])
+                .is_err());
+            assert_eq!(store.get_tasks(&cross_source, 0, 10, 10).unwrap().len(), 2);
+        }
         if phase == "verify" {
             let tasks = store.get_tasks(&key, 0, 10, 10).unwrap();
             assert_eq!(

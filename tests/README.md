@@ -315,3 +315,9 @@ completed through Go Frontend; payload/header, heartbeat and 11-event history ar
 checked. The Rust delivery process reopens its SQLite queue on each poll. This
 probe is also the final stage of the combined runner. It tests the delivery
 boundary; the Go frontend is not yet routed to a Rust Matching RPC listener.
+
+The Matching SQLite interop stage also checks cross-domain activity row keys:
+task rows use the source domain while transaction fencing uses the target
+task-list lease. It verifies both Go-to-Rust and Rust-to-Go reads and rollback
+under a stale lease. Queue registry tests cover concurrent single ownership,
+shutdown acknowledgements, fencing and stale-manager teardown.

@@ -136,6 +136,7 @@ impl DurableTaskQueue {
         &self,
         state: &mut State,
         data: &[TaskData],
+        source_domain: uuid::Uuid,
         now: i64,
     ) -> Result<Vec<AllocatedTask>> {
         Self::active(state)?;
@@ -155,7 +156,11 @@ impl DurableTaskQueue {
             });
             state.next_id = state.next_id.wrapping_add(1);
         }
-        let result = self.store.create_tasks(&self.key, state.range_id, &tasks);
+        let result = self.store.create_tasks_with_domains(
+            &self.key,
+            state.range_id,
+            tasks.iter().map(|task| (source_domain, task)),
+        );
         // Go advances the read boundary after the write returns, even on error.
         // Allocated IDs are never reused after an uncertain persistence outcome.
         if let Some(last) = tasks.last() {
@@ -170,6 +175,22 @@ impl DurableTaskQueue {
         self.append_locked(
             &mut self.state.lock().expect("matching queue lock"),
             data,
+            self.key.domain_id,
+            now,
+        )
+    }
+    /// Preserve Go SQL's source-domain row keys for cross-domain activities.
+    /// Reading this queue still filters on the target task-list domain.
+    pub fn append_in_domain(
+        &self,
+        data: &[TaskData],
+        source_domain: uuid::Uuid,
+        now: i64,
+    ) -> Result<Vec<AllocatedTask>> {
+        self.append_locked(
+            &mut self.state.lock().expect("matching queue lock"),
+            data,
+            source_domain,
             now,
         )
     }
@@ -240,7 +261,7 @@ impl DurableTaskQueue {
             .ok_or(QueueError::NotInFlight(task_id))?
             .clone();
         let data = original.data.at_creation(now, 0);
-        let mut written = self.append_locked(&mut state, &[data], now)?;
+        let mut written = self.append_locked(&mut state, &[data], self.key.domain_id, now)?;
         state.in_flight.remove(&task_id);
         self.ack.ack_item(task_id);
         Ok(written.remove(0))
@@ -297,6 +318,28 @@ mod tests {
             ..Default::default()
         }
         .at_creation(100, 0)
+    }
+    #[test]
+    fn matching_queue_cross_domain_rows_keep_source_key_and_target_fence() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let target = key();
+        let queue = DurableTaskQueue::open(store.clone(), target.clone(), 0, n(100), 1).unwrap();
+        let mut source = target.clone();
+        source.domain_id = Uuid::from_u128(3);
+        queue
+            .append_in_domain(&[data()], source.domain_id, 2)
+            .unwrap();
+        assert!(queue.read_batch(n(100), n(10), 3).unwrap().tasks.is_empty());
+        assert_eq!(store.get_tasks(&source, 0, 100, 10).unwrap().len(), 1);
+        store.lease(&target, 0, 0, 4).unwrap();
+        assert!(queue
+            .append_in_domain(&[data()], source.domain_id, 5)
+            .is_err());
+        assert_eq!(store.get_tasks(&source, 0, 100, 10).unwrap().len(), 1);
     }
     #[test]
     fn matching_queue_original_go_reader_fixtures() {

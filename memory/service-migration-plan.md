@@ -16,6 +16,12 @@ engine and AddTask looks up local workflow state. Go Matching accepts queued
 references and calls History.Record*TaskStarted on delivery. Consequently current
 Rust Matching cannot replace Go Matching in a mixed Go/Rust cluster.
 
+Independent components now verified: Go-format SQLite store, durable queue core,
+Go History client, cancellation-safe delivery worker and basic queue registry.
+The 11-event live probe uses Go Frontend/History and Rust queue delivery, but
+bypasses the Matching RPC listener. It does not satisfy the replacement gate.
+Source-domain SQL writes are now checked against the original Go TaskStore.
+
 Completion gates:
 
 1. Exact task-list identity, partition configuration and version/cache semantics.

@@ -1,5 +1,27 @@
 # Active Matching queue / History delivery work
 
+## Source-domain SQL compatibility (2026-10-15)
+
+Ported Go's per-task source-domain SQL row keys with
+SqliteTaskStore::create_tasks_with_domains; original same-domain create_tasks
+delegates to it. The target TaskListKey still controls transaction lease fencing.
+DurableTaskQueue::append_in_domain exposes that distinction without adding fields
+to Go's exact task blob. Reads/rewrite of recovered tasks continue using the queue
+domain, as pinned Go SQL does. Do not normalize this behavior in RPC integration.
+
+Expanded actual-Go shared-database interop checks source rows in both directions,
+absence under target domain, and rollback of a rejected stale-lease source row.
+/tmp/cadence-source-domain-interop.exit = 0. Seventeen focused persistence tests
+and workspace all-target strict lint passed: /tmp/cadence-source-domain-final.exit
+= 0. Full accumulated regression PASSED all 21 stages and 321 workspace tests:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-registry-source-domain/results.json;
+/tmp/cadence-registry-source-domain-full.exit = 0. Includes strict lint,
+original-Go differentials, standalone SDK checks and actual-Go History delivery.
+
+Matching remains incomplete; this does not wire an RPC service or provide sync
+matching for source-domain activities.
+
+
 ## Queue registry checkpoint (2026-10-15)
 
 Added `matching_registry::QueueRegistry` and QueueHandle. Lease acquisition and

@@ -79,6 +79,9 @@ production SQL/NoSQL backends remain unported.
 Matching now has an independent SQLite task-store component in
 `cadence-persistence::matching_sqlite`, using the original Go `tasks` and
 `task_lists` schemas and `thriftrw`/`thriftrw_snappy` blobs. Bidirectional tests
-exchange a real database file with Go's SQL TaskStore. This component is not yet
+exchange a real database file with Go's SQL TaskStore, including source-domain
+activity row keys and target-domain lease fencing. Independent queue allocation,
+reader/ack recovery, cancellation-safe History delivery and registry lifecycle
+components are also available. These components are not yet
 wired into Matching RPC handlers or persistence configuration; the running server
 continues to use the embedded execution engine's task queues.

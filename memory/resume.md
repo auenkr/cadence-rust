@@ -1,314 +1,67 @@
 # Current resume checkpoint (2026-10-15)
 
-## Queue registry checkpoint (2026-10-15)
+Follow root AGENTS.md. The user requires continuing the entire Go-to-Rust rewrite,
+service by service: Matching -> History -> Frontend -> Worker. All roles remain
+incomplete. Keep working autonomously; use tmux session cadence-rust for long
+processes. After compaction save progress, commit and push. Never equate adapter
+coverage or a boundary probe with complete service parity.
 
-Added `matching_registry::QueueRegistry` and QueueHandle. Lease acquisition and
-registration share one blocking worker; concurrent requests get one owner.
-Append and notification share a worker so RPC cancellation does not skip wakeup.
-Ack flush visits all owners despite individual errors. Shutdown stops handles;
-unload checks pointer identity so old teardown cannot remove a replacement.
-Four registry tests plus seven delivery/History tests passed:
-`/tmp/cadence-registry-unload-tests.log` (11 passed). Strict workspace all-target lint passed;
-`/tmp/cadence-registry-unload.exit` = 0.
-This is an independent lifecycle component, not a running Matching replacement.
-RPC integration, configured ack timer, domain cache, ownership checks and idle
-unload still remain. Go reference: task_list_registry.go and task_reader.go.
+## Verified checkpoints
 
-Before AddActivity RPC wiring, port/test a source-domain SQL edge: original
-`sql_task_store.go:CreateTasks` writes each row with v.Data.DomainID while fencing
-TaskListInfo.DomainID. AddActivity engine supplies SourceDomainUUID as TaskInfo
-DomainID. Current Rust create_tasks assumes the queue domain for every row.
-Preserve pinned Go behavior; do not silently normalize source to target domain.
+- 90e14cfac: Go-compatible raw Thrift/Snappy Matching blobs and SQLite schemas,
+  leases, fenced atomic writes, recovery and Go/Rust shared-database interop.
+  Full 19-stage runner passed with 303 workspace tests.
+- eedeb54d9: durable queue ID allocation/read/ack/expiry/rewrite behavior,
+  original-Go reader fixtures, History client and cancellation-safe dispatcher.
+  Full 21-stage runner passed, including an 11-event workflow against actual Go
+  History and completion through Go Frontend. Evidence:
+  /home/ubuntu/.cache/cadence-rust-test-artifacts/matching-dispatch-verified/results.json.
+- bddc9003c: independent queue registry, concurrent single lease acquisition,
+  ack flush/shutdown and identity-checked unload. Eleven focused Matching tests
+  and strict workspace all-target clippy passed:
+  /tmp/cadence-registry-unload.exit = 0.
 
+## Latest source-domain continuation
 
-## Verified delivery checkpoint (2026-10-15)
+Go CreateTasks uses each task's source DomainID for its SQL row, while fencing
+TaskListInfo's target domain. Rust create_tasks_with_domains and queue
+append_in_domain now preserve that distinction. Extended actual-Go SQLite
+interop verifies both directions and rejected-lease rollback:
+/tmp/cadence-source-domain-interop.exit = 0.
+Seventeen focused persistence tests and strict workspace lint passed:
+/tmp/cadence-source-domain-final.exit = 0.
 
-All 21 compatibility stages passed using the unchanged original Go server:
-`/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-dispatch-verified/results.json`
-(outer exit 0). This includes SQLite/queue Go differential fixtures, strict
-workspace clippy, SDK checks, and an 11-event workflow with Rust queue delivery
-through actual Go History and completion through Go Frontend. Final cancellation
-worker checks passed: 7 focused tests and strict workspace all-target clippy
-(`/tmp/cadence-matching-dispatch-last-check.exit` = 0).
+Full accumulated runner PASSED all 21 stages and 321 workspace tests:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-registry-source-domain/results.json;
+/tmp/cadence-registry-source-domain-full.exit = 0. Includes strict lint, original-Go
+differentials, standalone SDK checks and actual-Go History delivery. Used unchanged
+original Go binary /tmp/cadence-go-mixed/cadence-server. Source-domain checkpoint
+is being committed/pushed with these notes.
 
-The listener still uses the embedded engine. Next: independent Matching queue
-registry and RPC integration, then route Go Frontend/History to Rust Matching.
-Queries, forwarding, ownership, domain lifecycle, throttling, semaphores, internal
-transport and production membership remain. Matching is NOT complete.
+## Next implementation
 
+Existing grpc_matching still delegates into the embedded engine. Independent
+storage/queue/History/dispatcher/registry components are NOT wired to the listener.
+Continue RPC integration and lifecycle: domain cache, owned queue registration,
+configured ack timer, ownership loss/unload and cancellation. Then query delivery,
+poller state, sticky lists, forwarding, partition scaling/isolation, throttling,
+semaphores, membership and internal Thrift/TChannel transport parity.
 
-Follow root AGENTS.md. The user explicitly requests continuing until the whole
-Go implementation is migrated, with drop-in compatibility and compatibility
-tests. The active goal is incomplete. Do not equate RPC adapter coverage with
-behavioral compatibility. Keep working autonomously; use tmux cadence-rust for
-long processes. Save progress, commit, and push after compaction.
+Live boundary probe bypasses the Go Matching listener; it does not demonstrate
+replacement of Go Matching. Need Go Frontend + Go History + Go Worker routed to
+Rust Matching, exercising original SDKs and crash/restart/failover. A test-only
+Go Fx PeerProvider decorator can advertise Rust Matching without changing the
+original Go business logic; see matching-delivery-next.md and Go cadence/fx.go.
 
-## Current queue / History delivery continuation
+Read service-migration-plan.md, matching-storage-next.md, matching-delivery-next.md,
+progress.md and port-map/ledger. No Go production sources changed. 29 source
+files are partial, none complete; the inventory remains deliberately conservative.
 
-Read matching-delivery-next.md first. Durable SQLite checkpoint 90e14cfac is
-pushed and fully verified. Queue core (6 focused tests + actual-Go reader/expiry
-fixtures) and History client (3 focused retry/metadata tests) now pass. They are
-not connected to the Matching listener. Live original-Go History delivery probe
-PASSED (/tmp/cadence-matching-go-history2/results.json, outer exit 0): Rust queue
-and History client drove an 11-event workflow completed through Go frontend.
-This does NOT replace the Go Matching listener. Full regression runs in
-cadence-rust:matching-delivery-full; this queue/client work is still uncommitted.
+## Known validation/resource details
 
-## Active durable Matching storage work
-
-Read matching-storage-next.md. New matching_blob/matching_sqlite modules port Go
-SQL blob formats and the two exact SQLite task tables, with lease fencing and
-atomic queue persistence operations. Focused tests and actual-Go bidirectional
-same-database interop PASSED (/tmp/cadence-matching-storage-interop2.log, exit 0).
-Final full runner PASSED 19 stages, 303 workspace tests and strict clippy:
-/tmp/cadence-matching-storage-final/results.json, outer exit 0. Backend is NOT selected by the server or wired to
-Matching handlers; matching-owned writer/reader + History RPC clients are next.
-A draft matching_queue.rs is being developed but was NOT exported/compiled in
-that storage-checkpoint run; validate it separately before treating it as done.
-
-## Active service-by-service migration (2026-10-15)
-
-User now requires completing and mixed-Go-service validating one role at a time.
-Read service-migration-plan.md: Matching -> History -> Frontend -> Worker.
-Do not resume unrelated frontend/domain work while Matching is active.
-Matching is NOT complete: embedded Rust engine coupling blocks replacement of
-Go Matching alongside Go History/Frontend. Need independent durable task queue,
-History RPC clients, membership/routing and a mixed-service harness.
-
-Verified Matching checkpoint: partition parsing/tree arithmetic, Go configuration
-validation/server-owned update versions/no-ops, version-gated cache refresh/root
-reload, Go deprecated count/map conversion, acknowledgement state, and selected
-service listeners. Full final runner PASSED 18 stages, 296 workspace tests,
-strict clippy, original-Go differential suites, isolated listeners, copied-binary
-startup/config, shared workflow/Matching probe, public/internal gRPC and Go SDK
-TChannel. Evidence: /tmp/cadence-matching-wire-final/results.json and outer exit 0.
-All-Go baseline separately PASSED with original four services + SQLite:
-/tmp/cadence-go-baseline-repro/results.json. Both baseline servers were cleaned
-up. This is baseline comparison, NOT mixed-service replacement validation.
-
-NEXT: matching-owned durable task store (Go task_lists/tasks schemas, lease/range
-fencing, SQL serialization) and History RPC delivery. Current AddTask still checks
-local workflow state and polls delegate through embedded frontend. Membership,
-remote domain cache, routing/forwarding and query/semaphore integration remain.
-No service is complete; do not proceed to History before Matching's gates pass.
-
-Baseline findings: gRPC Go YARPC needs rpc-encoding: proto. New-domain caches
-can briefly reject a domain during inter-role propagation; shared probe retries
-only that exact provisioning error. Go partition protobuf mapper requires count
-fields consistent with map sizes; mismatches synthesize empty metadata maps.
-Full Rust compatibility runner explicitly applies test-only cooldown 0 using the
-admin endpoint; the latest commit's production policy retains Go's minute default.
-The pre-existing dynamic-policy differential harness is still unverified/broken
-(numeric enum input cannot unmarshal in Go, no expected values); it was never in
-the combined runner and is not included in the pass above.
-
-## Latest verified UpdateDomain controller checkpoint
-
-Optional patch DTOs retain false/zero/empty-string and target presence across
-transports. New domain_update prepares a clone and publishes under one store
-lock after validation. Core data/configuration/failover dispatch, local/primary
-restrictions, bad-binary behavior, attribute promotion/merge, versions and
-graceful metadata match 34 actual Go controller cases. UpdateDomain and
-FailoverDomain share candidate logic; new DomainRecord metadata loads old
-snapshots with defaults. Opaque legacy history strings use Go field order,
-HTML/Unicode escaping and the correct default five-entry bound.
-
-Full runner PASSED all 15 stages: 291 workspace tests, strict clippy, Go
-differential suites, copied-binary standalone/config checks, public/internal
-gRPC and existing Go SDK TChannel. Evidence:
-/tmp/cadence-domain-update-compat-final/results.json and outer exit file 0.
-Test servers cleaned up; user development server unchanged. Initial parallel
-build hit the 1200s timeout under high IO/memory pressure; after its processes
-were confirmed terminal, serial builds passed. Combined runner now defaults to
-one Cargo job, overridable with CARGO_BUILD_JOBS. Final source then received only
-focused rustfmt formatting. Ledger: 16 partial, 2284 review-required, none complete.
-
-NEXT: domain-update-next.md. Runtime global cooldown (Go DEFAULT ONE MINUTE)
-remains unenforced; dynamic policies still use static defaults, archival provider
-state machines and distributed graceful callbacks/queues/fencing remain incomplete.
-The Go oracle explicitly configures cooldown 0 and disabled archival, so its pass
-must not be treated as proof of those unported paths. Next port real policy lookup/
-defaults and explicit compatibility-runner overrides, then archival/lifecycle.
-
-## Latest verified active-active registration/failover checkpoint
-
-Active-active helpers now initialize registration versions from original cluster
-offsets, validate incoming update versions, compute server-side versions and
-merge only strictly newer attributes while preserving untouched state. Domain
-registration and FailoverDomain use them across transports. Explicit same-cluster
-domain targets now match Go: AP version stays equal; AA domain fencing advances.
-Destination errors follow scope/attribute ordering. Audit attribute comparison
-uses version changes. Proto/Thrift mappers ignore deprecated region maps; Thrift
-zero-valued attribute versions are explicitly emitted like Go.
-
-62 shared fixtures call the actual Go helpers via overlay; a separate Go mapper/
-codec fixture checks exact zero-version Thrift bytes. Full runner PASSED all 14
-stages, 290 workspace tests and strict clippy, standalone/config checks, public/
-internal gRPC and existing Go SDK TChannel. Evidence:
-/tmp/cadence-active-active-compat-v2/results.json and outer exit file 0. User
-development server unchanged; test servers cleaned up. Ledger: 15 partial and
-2285 review-required Go files, none marked complete.
-
-Next: read active-active-next.md and port UpdateDomain's configuration/failover
-dispatch, field presence, version updates and atomic validation. It STILL replaces
-attribute maps wholesale. Also pending: graceful failover (including AA rejection),
-primary restrictions, dynamic migration override evaluation, workflow attribute
-routing, passive ownership and replication. Empty-map wire presence needs broader
-codec work. This checkpoint is not a complete domain service or replication port.
-
-All 164 RPCs in all 13 services have concrete Rust adapters. Significant
-single-host/no-op behavior remains behind that surface, especially replication,
-queue/shard operations and failover. Read migration-inventory.md for the major
-unported capabilities; its adapter counts are not completion evidence.
-
-## Latest work
-
-Scheduler behavior has been checked against actual Go scheduler functions via
-Go overlays (no copied Go implementation and no source-tree changes). Commits
-pushed this session:
-
-- 30576fd08: inclusive start/end bounds, delayed ticks, bounded backfill.
-- d3580c5a6: catch-up watermarks, skipped counters, batch overrides.
-- 5e2b9d8f0: catch-up on snapshot startup recovery.
-- 817dc47e8: paused/large backfill queues, pending-only descriptions.
-- 9a490be26: exact Go UUID namespaces, buffered origins, system limits.
-- 693964d8e: cooperative cancellation and durable latest-target tracking.
-- 7c08f363b: monotonic fire accounting and full isolated compatibility runner.
-- 3a2431677: embedded development defaults and copied-binary verification.
-- 0cdb0bc60: Go history-version algorithms with 68 differential cases.
-- Latest execution version checkpoint: durable version ranges/branch tokens,
-  -24 local versions, reset ancestry, snapshot upgrades, mutable-state metadata;
-  Go differential suite expanded to 82 cases including codec/SQL fork behavior.
-
-The latest checkpoint integrates version histories into stored executions,
-including buffered flushes and transient tasks, child/continue-as-new/reset,
-and snapshot recovery. New local history versions are -24; legacy zero-version
-Rust snapshots retain their original stream. GetMutableState and PollMutableState
-now expose durable branch tokens/version histories. Branch tokens use Go's
-0x59 + binary Thrift codec, with byte-exact and SQL-fork differential checks.
-ReplicateEventsV2 still accepts without applying events; do not claim replication.
-
-Commands:
-
-- python3 tests/run-scheduler-compat.py: shared Go/Rust boundary, catch-up,
-  backfill, identity/limits, overlap and accounting fixtures.
-- python3 tests/run-compatibility.py: workspace tests + strict clippy,
-  differential fixtures, server build, isolated server on free ports,
-  public/internal gRPC checks and existing Go SDK over TChannel. It prints
-  artifact paths, writes results.json, and stops its own server afterward.
-- Latest complete runner passed in tmux cadence-rust:version-verified-run;
-  artifacts /tmp/cadence-version-state-compat/results.json, outer log
-  /tmp/cadence-version-state-compat-run.log, exit file
-  /tmp/cadence-version-state-compat.exit (0). Its isolated server was cleaned up.
-  It copied the executable to standalone/cadence-server and booted it from
-  that fresh working directory, using embedded defaults and no Go checkout.
-
-Latest full checkpoint: 284 workspace tests + strict workspace/all-targets
-clippy passed. The full runner passed scheduler differential fixtures and all
-three wire/SDK drivers against the latest binary. Coverage includes 21 behavioral
-scheduler scenarios + 4 UUID cases + 7 limit cases, and 82 history-version/branch
-cases against real Go algorithms, codec and mocked SQL history-store operations.
-
-Standalone startup is independent of go/config/development.yaml; explicit
---config still works. Earlier raw-history V2 work added requested version-item
-selection, exclusive bounds and structured cursors. Latest work replaces raw
-JSON batches with Go version-0 ThriftRW history batches, sets the actual gRPC
-encoding, and normalizes omitted bounds before validating pagination cursors.
-A new Go serializer oracle provides byte fixtures and decodes actual network
-responses. Full validation PASSED in tmux cadence-rust:blob-full-check: all ten stages,
-including workspace tests, strict clippy, three Go differential suites, copied
-standalone binary/config, public/internal gRPC and Go SDK TChannel. Evidence:
-/tmp/cadence-history-blob-compat-v2/results.json and outer exit file (0).
-The internal client decoded the network blob with Go persistence and checked
-omitted-bound continuation plus changed-bound rejection. See replication-next.md
-for remaining raw-history storage/precision and remote-application limitations.
-
-ReplicateEventsV2 remains a validated no-op. Internal guard removal in prior
-commits only routes metadata to the local engine; forwarded requests and
-external-child/failover semantics are not established. Next major work is real
-passive history/state application with branch conflict handling and failover
-version gating, plus production backends and independent service lifecycles.
-
-## Latest verified cluster-version checkpoint
-
-Common cluster version arithmetic/ownership and migration-offset fallback now
-match 69 original-Go differential fixtures. Configured increment and cluster
-offsets feed frontend global registration/failover (including Thrift), replacing
-placeholder +1 versions. Compatibility clients now require configured remote offset 2,
-cluster0 offset 0 and increment 10; full runner supplies a standalone YAML and
-separately boots embedded defaults before that. It checks 2 -> 10 -> 12 -> 20
-failovers and history version 20 on a new active-cluster execution.
-
-Latest full runner PASSED all 12 stages in tmux cadence-rust:cluster-full-check;
-/tmp/cadence-cluster-metadata-compat-v4/results.json and outer exit file 0.
-286 workspace tests, strict workspace/all-targets clippy, four Go differential
-suites, copied-binary embedded-default startup and configured-server public/
-internal gRPC plus Go SDK TChannel all passed. Test servers were cleaned up;
-user development server was not restarted. The older web IDL cannot encode the
-new destination-check override, so reverse-failover checks use original Go IDL.
-Port ledger has 10 partial and 2290 review-required files; no source file is
-marked fully ported.
-
-Remaining: Go config validation/default layering, dynamic migration override
-lookup, active-active attribute merge/version updates, in-flight execution
-promotion, passive mutation gating, queues and replication. New-domain version
-mapping alone is not production failover. This is a version-metadata checkpoint, not complete failover.
-
-## Latest verified cluster configuration checkpoint
-
-Go cluster-group defaults and validation now live in common::cluster::GroupMetadata.
-The config loader retains canonical/deprecated keys separately and applies Go
-fallback precedence before validating. Missing or invalid supplied metadata is
-rejected; main no longer silently substitutes default cluster0 metadata. No-file
-startup still uses embedded valid development defaults. 34 shared fixtures match
-actual Go FillDefaults/Validate, including legacy-map defaults and exact errors.
-
-Full runner PASSED all 13 stages: 288 workspace tests, strict clippy, Go
-differential suites, copied-binary embedded startup and 33 CLI config checks
-(including invalid startup), public/internal gRPC and existing Go SDK TChannel.
-Evidence: /tmp/cadence-cluster-config-compat/results.json and outer exit file 0.
-User development server was not restarted. Source ledger has 11 partial and
-2289 review-required files; none marked complete.
-
-The later active-active checkpoint above ports registration/failover attribute
-initialization and merging. UpdateDomain remains the next domain-handler gap;
-read active-active-next.md for exact source anchors and validation boundaries.
-Full config layering, cluster TLS/auth/redirection and persistence/auth validation
-remain separate gaps. Do not claim all Go configuration or failover is ported.
-
-## Runtime
-
-User development server is cadence-rust:rust, HTTP 8080 / gRPC 7833 / history
-7834 / matching 7835 / TChannel 7933, data-dir .cadence-data, scheduler and
-semaphore enabled. It has NOT been restarted with this session's changes.
-The earlier isolated migration-server on ports 18080/17833-17835/17933 was
-stopped after its checks. The full runner uses fresh free ports and cleans up.
-The user prefers CLI; leave the web UI stopped.
-
-## Remaining gaps
-
-Production SQL/NoSQL persistence and Go schema compatibility, transactions and
-crash durability; history version branches and real replication application;
-distributed ownership/failover, independent services, worker/background roles;
-archival, advanced visibility, dynamic config/quotas/auth/telemetry; exhaustive
-workflow/history/failure/recovery and Go/Java SDK replay coverage. JSON snapshots
-are development storage, not production durability.
-
-Scheduler gaps still include Go scheduler-workflow histories/visibility,
-shared activity-budget semantics and transient failure/retry paths. Jitter and
-PauseOnFailure exist in API types but are not acted on in the pinned Go scheduler;
-do not invent behavior for them. Legacy numeric Rust buffers lacked trigger
-origins; they load with schedule-source fallback because lost data is unrecoverable.
-Unqualified/Local cron zones still assume UTC. Sparse zoned cron scans minutes
-up to the five-year horizon.
-
-## Stable lessons
-
-- SDKs use native TChannel, so HTTP/Thrift alone is insufficient.
-- Thrift timestamps use nanoseconds; stored history uses milliseconds;
-  protobuf timestamps and enum offsets require explicit conversion.
-- Domain identity must use UUIDs, including delete/recreate isolation.
-- History cursors bind run and snapshot end; visibility cursors need stable ordering.
-- gRPC message-size checks must account for inner JSON/base64 expansion.
-- Existing development server binaries lag source until rebuilt/restarted.
-- A passing limited suite never establishes complete production replacement.
+Use disk-backed artifact dirs under /home/ubuntu/.cache/cadence-rust-test-artifacts;
+/tmp is tmpfs and retained server binaries consume RAM. Serialize heavy links.
+The dynamic-policy differential oracle outside the combined runner has a known
+fixture enum mismatch and must not be represented as passing. Preserve the Go
+one-minute failover cooldown; combined-runner rapid-failover checks use an explicit
+test-only admin override. No PR exists for this work.

@@ -195,7 +195,8 @@
       "rust/crates/cadence-persistence/src/matching_sqlite.rs"
     ],
     "evidence": [
-      "Lease/get/update task lists, atomic fenced append, bounded reads/counts/deletes and task-list deletion; focused Rust tests plus bidirectional real-Go SQLite store interop passed. Listing/Gob cursors, orphans/scanners, transport error mapping and full failure coverage remain incomplete."
+      "Lease/get/update task lists, atomic fenced append, bounded reads/counts/deletes and task-list deletion; focused Rust tests plus bidirectional real-Go SQLite store interop passed. Listing/Gob cursors, orphans/scanners, transport error mapping and full failure coverage remain incomplete.",
+      "Actual-Go/Rust shared-database source-domain task rows and target-domain lease fencing, including rejected-lease atomic rollback; focused queue source-domain test."
     ]
   },
   "go/common/persistence/sql/sqlplugin/sqlite/task.go": {
