@@ -1,0 +1,1762 @@
+[
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "local empty request",
+    "request": {}
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": false,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": false,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "global": false,
+    "name": "local explicit false",
+    "request": {
+      "configuration": {
+        "emitMetric": false
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "A valid retention period is not set on request.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "local zero retention atomic",
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      },
+      "configuration": {
+        "workflowExecutionRetentionPeriodInDays": 0
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "A valid retention period is not set on request.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "local negative retention",
+    "request": {
+      "configuration": {
+        "workflowExecutionRetentionPeriodInDays": -1
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old",
+          "new": "value"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old",
+          "new": "value"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "global": false,
+    "name": "local merge data",
+    "request": {
+      "updatedInfo": {
+        "data": {
+          "new": "value"
+        }
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "global": false,
+    "name": "local empty data retains keys",
+    "request": {
+      "updatedInfo": {
+        "data": {}
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "global": false,
+    "name": "local clear description",
+    "request": {
+      "updatedInfo": {
+        "description": ""
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "global": false,
+    "name": "local clear owner",
+    "request": {
+      "updatedInfo": {
+        "ownerEmail": ""
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Local domains cannot perform failovers or change replication configuration",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "local rejects {'replicationConfiguration': {'activeClusterName': 'a'}}",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "a"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Local domains cannot perform failovers or change replication configuration",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "local rejects {'replicationConfiguration': {'clusters': []}}",
+    "request": {
+      "replicationConfiguration": {
+        "clusters": []
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Local domains cannot perform failovers or change replication configuration",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "local rejects {'replicationConfiguration': {'activeClusters': {}}}",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusters": {}
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Local domains cannot perform failovers or change replication configuration",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "local rejects {'failoverTimeoutInSeconds': 0}",
+    "request": {
+      "failoverTimeoutInSeconds": 0
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "new": {
+            "reason": "new",
+            "operator": "worker",
+            "createdTimeNano": 1700000000000000000
+          },
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "bad binary only response differs from storage",
+    "request": {
+      "configuration": {
+        "badBinaries": {
+          "binaries": {
+            "new": {
+              "reason": "new",
+              "operator": "worker",
+              "createdTimeNano": 42
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "new": {
+            "reason": "new",
+            "operator": "worker",
+            "createdTimeNano": 1700000000000000000
+          },
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": false,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "new": {
+            "reason": "new",
+            "operator": "worker",
+            "createdTimeNano": 1700000000000000000
+          },
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": false,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "global": false,
+    "name": "bad binary merge with emit writes",
+    "request": {
+      "configuration": {
+        "badBinaries": {
+          "binaries": {
+            "new": {
+              "reason": "new",
+              "operator": "worker",
+              "createdTimeNano": 42
+            }
+          }
+        },
+        "emitMetric": false
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {},
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "stored": {
+        "active": null,
+        "bad": {},
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 1
+    },
+    "global": false,
+    "name": "delete existing bad binary",
+    "request": {
+      "deleteBadBinary": "old"
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Bad binary checksum missing doesn't exists.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "delete missing atomic",
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      },
+      "deleteBadBinary": "missing"
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Total resetBinaries cannot exceed the max limit: 10",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": -24
+      },
+      "writes": 0
+    },
+    "global": false,
+    "name": "bad binary limit atomic",
+    "request": {
+      "configuration": {
+        "emitMetric": false,
+        "badBinaries": {
+          "binaries": {
+            "0": {
+              "reason": "reason"
+            },
+            "1": {
+              "reason": "reason"
+            },
+            "2": {
+              "reason": "reason"
+            },
+            "3": {
+              "reason": "reason"
+            },
+            "4": {
+              "reason": "reason"
+            },
+            "5": {
+              "reason": "reason"
+            },
+            "6": {
+              "reason": "reason"
+            },
+            "7": {
+              "reason": "reason"
+            },
+            "8": {
+              "reason": "reason"
+            },
+            "9": {
+              "reason": "reason"
+            },
+            "10": {
+              "reason": "reason"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "new",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 1
+    },
+    "global": true,
+    "name": "global config primary",
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      }
+    }
+  },
+  {
+    "currentCluster": "b",
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Cluster is not primary cluster, cannot do domain registration or domain update.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "global config secondary rejected",
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Cannot set active cluster to current cluster when other parameters are set.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "global mixed config failover rejected",
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      },
+      "replicationConfiguration": {
+        "activeClusterName": "b"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"a\",\"toCluster\":\"a\",\"failoverType\":\"Force\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"a\",\"toCluster\":\"a\",\"failoverType\":\"Force\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 1
+    },
+    "global": true,
+    "name": "global explicit same target",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "a"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"a\",\"toCluster\":\"b\",\"failoverType\":\"Force\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "b",
+        "version": 2
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"a\",\"toCluster\":\"b\",\"failoverType\":\"Force\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "b",
+        "version": 2
+      },
+      "writes": 1
+    },
+    "global": true,
+    "name": "global failover to b",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "b"
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "ActiveClusterName is required for all global domains.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "global empty target",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": ""
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Active cluster is not contained in all clusters.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "global remove active cluster atomic",
+    "request": {
+      "replicationConfiguration": {
+        "clusters": [
+          {
+            "clusterName": "b"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Cannot set active cluster to current cluster when other parameters are set.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "global clusters with failover rejected",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "b",
+        "clusters": [
+          {
+            "clusterName": "a"
+          },
+          {
+            "clusterName": "b"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": {
+          "scopes": {
+            "city": {
+              "attributes": {
+                "x": {
+                  "activeClusterName": "b",
+                  "failoverVersion": 2
+                }
+              }
+            }
+          }
+        },
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 10
+      },
+      "stored": {
+        "active": {
+          "scopes": {
+            "city": {
+              "attributes": {
+                "x": {
+                  "activeClusterName": "b",
+                  "failoverVersion": 2
+                }
+              }
+            }
+          }
+        },
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 10
+      },
+      "writes": 1
+    },
+    "global": true,
+    "name": "global promote active active",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusters": {
+          "activeClustersByClusterAttribute": {
+            "city": {
+              "clusterAttributes": {
+                "x": {
+                  "activeClusterName": "b",
+                  "failoverVersion": 999
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Cannot set active cluster to current cluster when other parameters are set.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "global mixed info and active attributes",
+    "request": {
+      "updatedInfo": {
+        "description": "new"
+      },
+      "replicationConfiguration": {
+        "activeClusters": {
+          "activeClustersByClusterAttribute": {
+            "city": {
+              "clusterAttributes": {
+                "x": {
+                  "activeClusterName": "b",
+                  "failoverVersion": 999
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            },
+            "keep": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "configVersion": 1,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": {
+          "scopes": {
+            "city": {
+              "attributes": {
+                "keep": {
+                  "activeClusterName": "a",
+                  "failoverVersion": 0
+                },
+                "x": {
+                  "activeClusterName": "b",
+                  "failoverVersion": 2
+                }
+              }
+            }
+          }
+        },
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 10
+      },
+      "stored": {
+        "active": {
+          "scopes": {
+            "city": {
+              "attributes": {
+                "keep": {
+                  "activeClusterName": "a",
+                  "failoverVersion": 0
+                },
+                "x": {
+                  "activeClusterName": "b",
+                  "failoverVersion": 2
+                }
+              }
+            }
+          }
+        },
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 10
+      },
+      "writes": 1
+    },
+    "global": true,
+    "name": "active active partial update",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusters": {
+          "activeClustersByClusterAttribute": {
+            "city": {
+              "clusterAttributes": {
+                "x": {
+                  "activeClusterName": "b",
+                  "failoverVersion": 999
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            },
+            "keep": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": {
+          "scopes": {
+            "city": {
+              "attributes": {
+                "keep": {
+                  "activeClusterName": "a",
+                  "failoverVersion": 0
+                },
+                "x": {
+                  "activeClusterName": "a",
+                  "failoverVersion": 0
+                }
+              }
+            }
+          }
+        },
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 10
+      },
+      "stored": {
+        "active": {
+          "scopes": {
+            "city": {
+              "attributes": {
+                "keep": {
+                  "activeClusterName": "a",
+                  "failoverVersion": 0
+                },
+                "x": {
+                  "activeClusterName": "a",
+                  "failoverVersion": 0
+                }
+              }
+            }
+          }
+        },
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 10
+      },
+      "writes": 1
+    },
+    "global": true,
+    "name": "active active same target fence",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "a"
+      }
+    }
+  },
+  {
+    "existing": {
+      "activeClustersByClusterAttribute": {
+        "city": {
+          "clusterAttributes": {
+            "x": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            },
+            "keep": {
+              "activeClusterName": "a",
+              "failoverVersion": 0
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Cannot start graceful failover without updating active cluster or in local domain.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": {
+          "scopes": {
+            "city": {
+              "attributes": {
+                "keep": {
+                  "activeClusterName": "a",
+                  "failoverVersion": 0
+                },
+                "x": {
+                  "activeClusterName": "a",
+                  "failoverVersion": 0
+                }
+              }
+            }
+          }
+        },
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "active active graceful rejected",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusters": {
+          "activeClustersByClusterAttribute": {
+            "city": {
+              "clusterAttributes": {
+                "x": {
+                  "activeClusterName": "b",
+                  "failoverVersion": 999
+                }
+              }
+            }
+          }
+        }
+      },
+      "failoverTimeoutInSeconds": 10
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Cannot start the graceful failover from an active cluster to an active cluster.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "graceful to active rejected",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "a"
+      },
+      "failoverTimeoutInSeconds": 10
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "Cannot start the graceful failover from a to-be-passive cluster.",
+      "previousVersion": -1,
+      "response": null,
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 0
+    },
+    "global": true,
+    "name": "graceful to remote rejected",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "b"
+      },
+      "failoverTimeoutInSeconds": 10
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": 1700000010000000000,
+      "error": "",
+      "previousVersion": 0,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"b\",\"toCluster\":\"a\",\"failoverType\":\"Grace\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"b\",\"toCluster\":\"a\",\"failoverType\":\"Grace\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "a",
+        "version": 0
+      },
+      "writes": 1
+    },
+    "global": true,
+    "initialTarget": "b",
+    "name": "graceful to destination",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "a"
+      },
+      "failoverTimeoutInSeconds": 10
+    }
+  },
+  {
+    "expected": {
+      "configVersion": 0,
+      "endTime": null,
+      "error": "",
+      "previousVersion": -1,
+      "response": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"a\",\"toCluster\":\"b\",\"failoverType\":\"Force\"},{\"eventTime\":\"2020-01-01T00:00:00Z\",\"fromCluster\":\"\\u003ca\\u0026b\\u003e\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:01Z\",\"fromCluster\":\"\\u003ca\\u0026b\\u003e\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:02Z\",\"fromCluster\":\"\\u003ca\\u0026b\\u003e\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:03Z\",\"fromCluster\":\"\\u003ca\\u0026b\\u003e\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "b",
+        "version": 2
+      },
+      "stored": {
+        "active": null,
+        "bad": {
+          "old": {
+            "reason": "old",
+            "createdTimeNano": 1
+          }
+        },
+        "data": {
+          "FailoverHistory": "[{\"eventTime\":\"2023-11-14T22:13:20Z\",\"fromCluster\":\"a\",\"toCluster\":\"b\",\"failoverType\":\"Force\"},{\"eventTime\":\"2020-01-01T00:00:00Z\",\"fromCluster\":\"\\u003ca\\u0026b\\u003e\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:01Z\",\"fromCluster\":\"\\u003ca\\u0026b\\u003e\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:02Z\",\"fromCluster\":\"\\u003ca\\u0026b\\u003e\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:03Z\",\"fromCluster\":\"\\u003ca\\u0026b\\u003e\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"}]",
+          "keep": "old"
+        },
+        "description": "old",
+        "emit": true,
+        "owner": "owner",
+        "retention": 7,
+        "target": "b",
+        "version": 2
+      },
+      "writes": 1
+    },
+    "global": true,
+    "initialHistory": "[{\"eventTime\":\"2020-01-01T00:00:00Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:01Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:02Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:03Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:04Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"},{\"eventTime\":\"2020-01-01T00:00:05Z\",\"fromCluster\":\"<a&b>\",\"toCluster\":\"b\",\"failoverType\":\"Force\",\"reason\":\"line\\u2028separator\\u2029\"}]",
+    "name": "legacy history limit and Go JSON escaping",
+    "request": {
+      "replicationConfiguration": {
+        "activeClusterName": "b"
+      }
+    }
+  }
+]

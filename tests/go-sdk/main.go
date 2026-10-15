@@ -173,6 +173,26 @@ func main() {
 	}
 	require(desc.ReplicationConfiguration.GetActiveClusterName() != "", "default active cluster missing")
 	require(len(desc.ReplicationConfiguration.Clusters) == 1, "default cluster list missing")
+	updated, err := rpc.UpdateDomain(ctx, &shared.UpdateDomainRequest{Name: ptr(domain), Configuration: &shared.DomainConfiguration{EmitMetric: ptr(false)}})
+	if err != nil {
+		panic(err)
+	}
+	require(!updated.Configuration.GetEmitMetric(), "explicit false emitMetric was lost")
+	for key, value := range map[string]string{"keep": "old", "next": "value"} {
+		_, err = rpc.UpdateDomain(ctx, &shared.UpdateDomainRequest{Name: ptr(domain), UpdatedInfo: &shared.UpdateDomainInfo{Data: map[string]string{key: value}}})
+		if err != nil {
+			panic(err)
+		}
+	}
+	_, err = rpc.UpdateDomain(ctx, &shared.UpdateDomainRequest{Name: ptr(domain), UpdatedInfo: &shared.UpdateDomainInfo{Description: ptr("must-rollback")}, Configuration: &shared.DomainConfiguration{WorkflowExecutionRetentionPeriodInDays: ptr(int32(0))}})
+	require(err != nil, "zero retention update was accepted")
+	desc, err = rpc.DescribeDomain(ctx, &shared.DescribeDomainRequest{Name: ptr(domain)})
+	if err != nil {
+		panic(err)
+	}
+	require(desc.DomainInfo.GetDescription() == "Go SDK via Rust native TChannel", "invalid update partially changed description")
+	require(desc.DomainInfo.Data["keep"] == "old" && desc.DomainInfo.Data["next"] == "value", "domain data update replaced existing keys")
+	require(!desc.Configuration.GetEmitMetric(), "omitted emitMetric reset explicit false")
 	// One pending long poll must not block another call on the shared peer.
 	pollCtx, pollCancel := context.WithTimeout(ctx, 2*time.Second)
 	pollDone := make(chan error, 1)

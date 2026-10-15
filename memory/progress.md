@@ -1364,3 +1364,48 @@ pass (284 tests); committed two checkpoints and pushed.
   graceful state transitions/AA rejection, primary restrictions, dynamic override
   lookup, workflow routing, passive ownership and replication remain open.
   Updated active-active-next.md and resume.md with these exact boundaries.
+
+## 2026-10-15: UpdateDomain controller migration in progress
+
+- Added optional configuration/replication patch DTOs so false/zero/empty-string
+  and target presence survive Thrift/JSON; protobuf masks no longer prefill a
+  stale domain snapshot or return unimplemented for every target change.
+- New domain_update candidate controller clones, classifies and validates before
+  a single store write. Data merges, explicit emitMetric=false, retention checks,
+  bad-binary timestamp/limit/merge/delete behavior and atomic rollback match
+  actual Go UpdateDomain. Configuration/failover versions, graceful end/previous
+  metadata and AP legacy history data are retained in development snapshots.
+  FailoverDomain now shares the candidate state logic after its own validation.
+- 33 actual-Go controller cases PASS against Rust, comparing response AND stored
+  state/write count. Oracle uses fixed clock, cooldown 0, min retention 1,
+  max binaries 10 and disabled archival. The Go binary-only no-write behavior is
+  intentionally preserved. Legacy history JSON field order was corrected after
+  the first differential check caught that opaque-string mismatch.
+- First full run's parallel debug build exceeded 1200s under high IO/memory
+  pressure. Confirmed cargo/rustc/linkers terminal, then retried with one job.
+  Serial workspace tests, strict clippy and all differential suites passed;
+  remaining network validation is in /tmp/cadence-domain-update-compat-serial.
+  Runner now defaults CARGO_BUILD_JOBS to 1, retaining explicit overrides.
+- Exact unfinished policy/lifecycle scope is in domain-update-next.md: default
+  global cooldown (Go 1 minute) and dynamic policies remain unenforced; archival
+  providers, graceful callbacks/queues, notification fencing and replication are
+  not complete. No full domain-service completion claim is justified.
+- Ledger now has 16 partial and 2284 review-required Go files, none complete.
+
+## 2026-10-15: UpdateDomain final controller checkpoint verified
+
+- Final Go-source audit found legacy failover-history default is FIVE entries,
+  not the initially selected ten. Corrected the bound and added a 34th actual-Go
+  case checking trimming plus HTML and Unicode separator escaping inside the
+  opaque history string. All 34 controller cases now match Go exactly within
+  their stated policy/archival configuration.
+- Final 15-stage runner PASSED with 291 workspace tests, strict clippy, all
+  differential suites, standalone/config checks, original-IDL public/internal
+  gRPC and existing Go SDK TChannel. Evidence:
+  /tmp/cadence-domain-update-compat-final/results.json and outer exit file 0.
+  Runtime source was frozen for this run; subsequent Rust edits were focused
+  rustfmt formatting only. Test servers cleaned up; development server unchanged.
+- Updated source ledger, resume.md, active-active-next.md and domain-update-next.md.
+  Highest next gap is runtime cooldown/dynamic policy, not further test-count
+  expansion. Full archival, notification/distributed graceful state processing,
+  replication and production persistence remain incomplete. Goal stays active.

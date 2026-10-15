@@ -334,58 +334,6 @@ impl p::domain_api_server::DomainApi for Frontend {
                 .as_ref()
                 .is_none_or(|m| m.paths.iter().any(|p| p == key))
         };
-        let old = self
-            .state
-            .domains
-            .describe(&st::DescribeDomainRequest {
-                name: Some(r.name.clone()),
-                uuid: None,
-            })
-            .map_err(|e| Status::not_found(e.message))?;
-        let old_config = old.configuration.clone().unwrap_or_default();
-        let old_replication = old.replication_configuration.clone().unwrap_or_default();
-        if selected("failover_timeout") && r.failover_timeout.is_some() {
-            return Err(Status::unimplemented(
-                "Graceful domain failover has not been ported.",
-            ));
-        }
-        if selected("active_cluster_name")
-            && !r.active_cluster_name.is_empty()
-            && r.active_cluster_name != old_replication.active_cluster_name
-        {
-            return Err(Status::unimplemented(
-                "Domain failover has not been ported.",
-            ));
-        }
-        if selected("history_archival_uri")
-            && r.history_archival_uri.is_empty()
-            && !old_config.history_archival_uri.is_empty()
-        {
-            return Err(Status::invalid_argument(
-                "Cannot clear history archival URI.",
-            ));
-        }
-        if selected("visibility_archival_uri")
-            && r.visibility_archival_uri.is_empty()
-            && !old_config.visibility_archival_uri.is_empty()
-        {
-            return Err(Status::invalid_argument(
-                "Cannot clear visibility archival URI.",
-            ));
-        }
-        let retention = if selected("workflow_execution_retention_period") {
-            r.workflow_execution_retention_period
-                .map(|d| {
-                    i32::try_from(d.seconds / 86400)
-                        .map_err(|_| Status::invalid_argument("RetentionDays is invalid."))
-                })
-                .transpose()?
-        } else {
-            None
-        };
-        if retention.is_some_and(|d| d <= 0) {
-            return Err(Status::invalid_argument("RetentionDays is invalid."));
-        }
         let bad_binaries = if selected("bad_binaries") {
             r.bad_binaries.clone().map(|b| t::BadBinaries {
                 binaries: Some(
@@ -411,58 +359,31 @@ impl p::domain_api_server::DomainApi for Frontend {
         } else {
             None
         };
-        let replication = if selected("clusters") && !r.clusters.is_empty() {
-            if !old.is_global_domain
-                && (r.clusters.len() != 1
-                    || r.clusters[0].cluster_name != self.state.current_cluster_name)
-            {
-                return Err(Status::invalid_argument("Invalid local domain clusters"));
-            }
-            Some(t::DomainReplicationConfiguration {
-                active_cluster_name: old_replication.active_cluster_name,
-                clusters: r
-                    .clusters
-                    .clone()
-                    .into_iter()
-                    .map(|c| t::ClusterReplicationConfiguration {
-                        cluster_name: c.cluster_name,
-                    })
-                    .collect(),
-                active_clusters: if selected("active_clusters") {
-                    r.active_clusters.clone().map(cv::active_clusters_in)
-                } else {
-                    old_replication.active_clusters
-                },
-            })
-        } else if selected("active_clusters") && r.active_clusters.is_some() {
-            Some(t::DomainReplicationConfiguration {
-                active_clusters: r.active_clusters.clone().map(cv::active_clusters_in),
-                ..Default::default()
-            })
-        } else {
-            None
-        };
         let input = st::UpdateDomainRequest {
             name: r.name.clone(),
             security_token: r.security_token.clone(),
             updated_info: Some(st::UpdateDomainInfo {
                 description: selected("description").then(|| r.description.clone()),
                 owner_email: selected("owner_email").then(|| r.owner_email.clone()),
-                data: selected("data").then(|| r.data.clone()),
+                data: (selected("data") && !r.data.is_empty()).then(|| r.data.clone()),
             }),
-            configuration: Some(t::DomainConfiguration {
-                workflow_execution_retention_period_in_days: retention.unwrap_or_default(),
+            configuration: Some(st::DomainConfigurationUpdate {
+                workflow_execution_retention_period_in_days: if selected(
+                    "workflow_execution_retention_period",
+                ) {
+                    r.workflow_execution_retention_period
+                        .map(|d| (d.seconds / 86400) as i32)
+                } else {
+                    None
+                },
                 bad_binaries,
                 history_archival_status: if selected("history_archival_status") {
                     cv::enum_in(r.history_archival_status, enums::ArchivalStatus::from_i32)?
                 } else {
                     None
                 },
-                history_archival_uri: if selected("history_archival_uri") {
-                    r.history_archival_uri.clone()
-                } else {
-                    String::new()
-                },
+                history_archival_uri: selected("history_archival_uri")
+                    .then(|| r.history_archival_uri.clone()),
                 visibility_archival_status: if selected("visibility_archival_status") {
                     cv::enum_in(
                         r.visibility_archival_status,
@@ -471,16 +392,33 @@ impl p::domain_api_server::DomainApi for Frontend {
                 } else {
                     None
                 },
-                visibility_archival_uri: if selected("visibility_archival_uri") {
-                    r.visibility_archival_uri.clone()
-                } else {
-                    String::new()
-                },
+                visibility_archival_uri: selected("visibility_archival_uri")
+                    .then(|| r.visibility_archival_uri.clone()),
                 ..Default::default()
             }),
-            replication_configuration: replication,
+            replication_configuration: Some(st::DomainReplicationConfigurationUpdate {
+                active_cluster_name: selected("active_cluster_name")
+                    .then(|| r.active_cluster_name.clone()),
+                clusters: (selected("clusters") && !r.clusters.is_empty()).then(|| {
+                    r.clusters
+                        .iter()
+                        .map(|c| t::ClusterReplicationConfiguration {
+                            cluster_name: c.cluster_name.clone(),
+                        })
+                        .collect()
+                }),
+                active_clusters: if selected("active_clusters") {
+                    r.active_clusters.clone().map(cv::active_clusters_in)
+                } else {
+                    None
+                },
+            }),
             delete_bad_binary: selected("delete_bad_binary").then(|| r.delete_bad_binary.clone()),
-            failover_timeout_in_seconds: None,
+            failover_timeout_in_seconds: if selected("failover_timeout") {
+                r.failover_timeout.map(|d| d.seconds as i32)
+            } else {
+                None
+            },
         };
         let v: st::UpdateDomainResponse = self
             .call(Method::PUT, "/api/v1/domains/update", &input)
@@ -495,6 +433,7 @@ impl p::domain_api_server::DomainApi for Frontend {
             })),
         }))
     }
+
     async fn register_domain(
         &self,
         request: tonic::Request<p::RegisterDomainRequest>,

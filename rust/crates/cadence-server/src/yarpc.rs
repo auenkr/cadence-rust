@@ -397,9 +397,10 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domains.update(&req) {
+    match state.domains.update(&req, &state.cluster_metadata) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(e) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FailoverError::NotFound(e)) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FailoverError::Invalid(message)) => Err(AppError::bad_request(message)),
     }
 }
 

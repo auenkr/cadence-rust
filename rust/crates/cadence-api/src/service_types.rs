@@ -171,6 +171,71 @@ pub struct CountWorkflowExecutionsRequest {
     pub query: String,
 }
 
+/// Optional fields retain update presence; response configuration uses scalars.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomainConfigurationUpdate {
+    #[serde(
+        rename = "workflowExecutionRetentionPeriodInDays",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workflow_execution_retention_period_in_days: Option<i32>,
+    #[serde(
+        rename = "emitMetric",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub emit_metric: Option<bool>,
+    #[serde(
+        rename = "badBinaries",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub bad_binaries: Option<BadBinaries>,
+    #[serde(
+        rename = "historyArchivalStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub history_archival_status: Option<ArchivalStatus>,
+    #[serde(
+        rename = "historyArchivalURI",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub history_archival_uri: Option<String>,
+    #[serde(
+        rename = "visibilityArchivalStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub visibility_archival_status: Option<ArchivalStatus>,
+    #[serde(
+        rename = "visibilityArchivalURI",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub visibility_archival_uri: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomainReplicationConfigurationUpdate {
+    #[serde(
+        rename = "activeClusterName",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_cluster_name: Option<String>,
+    #[serde(rename = "clusters", default, skip_serializing_if = "Option::is_none")]
+    pub clusters: Option<Vec<ClusterReplicationConfiguration>>,
+    #[serde(
+        rename = "activeClusters",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_clusters: Option<ActiveClusters>,
+}
+
 /// Wire shape of the Thrift `UpdateDomainRequest` (field IDs 10-70).
 /// The config-update predicate lives on a lighter struct in [`crate::domain`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,13 +272,13 @@ pub struct UpdateDomainRequest {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub configuration: Option<DomainConfiguration>,
+    pub configuration: Option<DomainConfigurationUpdate>,
     #[serde(
         rename = "replicationConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub replication_configuration: Option<DomainReplicationConfiguration>,
+    pub replication_configuration: Option<DomainReplicationConfigurationUpdate>,
     #[serde(
         rename = "securityToken",
         default,
@@ -232,6 +297,33 @@ pub struct UpdateDomainRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub failover_timeout_in_seconds: Option<i32>,
+}
+
+impl UpdateDomainRequest {
+    pub fn is_config_update(&self) -> bool {
+        self.updated_info
+            .as_ref()
+            .is_some_and(|i| i.description.is_some() || i.owner_email.is_some() || i.data.is_some())
+            || self.configuration.as_ref().is_some_and(|c| {
+                c.emit_metric.is_some()
+                    || c.workflow_execution_retention_period_in_days.is_some()
+                    || c.bad_binaries.is_some()
+                    || c.history_archival_status.is_some()
+                    || c.history_archival_uri.is_some()
+                    || c.visibility_archival_status.is_some()
+                    || c.visibility_archival_uri.is_some()
+            })
+            || self.delete_bad_binary.is_some()
+    }
+    pub fn is_failover(&self) -> bool {
+        self.replication_configuration.as_ref().is_some_and(|r| {
+            r.active_cluster_name.is_some()
+                || r.active_clusters
+                    .as_ref()
+                    .and_then(|a| a.active_clusters_by_cluster_attribute.as_ref())
+                    .is_some_and(|s| !s.is_empty())
+        }) || self.failover_timeout_in_seconds.is_some_and(|v| v > 0)
+    }
 }
 
 /// Wire shape of the Thrift `UpdateDomainResponse`.

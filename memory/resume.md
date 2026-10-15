@@ -6,6 +6,34 @@ tests. The active goal is incomplete. Do not equate RPC adapter coverage with
 behavioral compatibility. Keep working autonomously; use tmux cadence-rust for
 long processes. Save progress, commit, and push after compaction.
 
+## Latest verified UpdateDomain controller checkpoint
+
+Optional patch DTOs retain false/zero/empty-string and target presence across
+transports. New domain_update prepares a clone and publishes under one store
+lock after validation. Core data/configuration/failover dispatch, local/primary
+restrictions, bad-binary behavior, attribute promotion/merge, versions and
+graceful metadata match 34 actual Go controller cases. UpdateDomain and
+FailoverDomain share candidate logic; new DomainRecord metadata loads old
+snapshots with defaults. Opaque legacy history strings use Go field order,
+HTML/Unicode escaping and the correct default five-entry bound.
+
+Full runner PASSED all 15 stages: 291 workspace tests, strict clippy, Go
+differential suites, copied-binary standalone/config checks, public/internal
+gRPC and existing Go SDK TChannel. Evidence:
+/tmp/cadence-domain-update-compat-final/results.json and outer exit file 0.
+Test servers cleaned up; user development server unchanged. Initial parallel
+build hit the 1200s timeout under high IO/memory pressure; after its processes
+were confirmed terminal, serial builds passed. Combined runner now defaults to
+one Cargo job, overridable with CARGO_BUILD_JOBS. Final source then received only
+focused rustfmt formatting. Ledger: 16 partial, 2284 review-required, none complete.
+
+NEXT: domain-update-next.md. Runtime global cooldown (Go DEFAULT ONE MINUTE)
+remains unenforced; dynamic policies still use static defaults, archival provider
+state machines and distributed graceful callbacks/queues/fencing remain incomplete.
+The Go oracle explicitly configures cooldown 0 and disabled archival, so its pass
+must not be treated as proof of those unported paths. Next port real policy lookup/
+defaults and explicit compatibility-runner overrides, then archival/lifecycle.
+
 ## Latest verified active-active registration/failover checkpoint
 
 Active-active helpers now initialize registration versions from original cluster

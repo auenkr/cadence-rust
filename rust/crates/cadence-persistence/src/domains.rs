@@ -23,6 +23,14 @@ pub struct DomainRecord {
     /// Failover audit entries in publication order (Go domain audit logs).
     #[serde(default)]
     pub(crate) failover_audit: Vec<FailoverAuditEntry>,
+    #[serde(default)]
+    pub config_version: i64,
+    #[serde(default)]
+    pub last_updated_time_nanos: i64,
+    #[serde(default)]
+    pub failover_end_time: Option<i64>,
+    #[serde(default = "initial_previous_version")]
+    pub previous_failover_version: i64,
     /// Domain isolation-group overrides (Go domain isolation state).
     #[serde(default)]
     pub(crate) isolation_groups: Option<cadence_api::types::IsolationGroupConfiguration>,
@@ -30,6 +38,8 @@ pub struct DomainRecord {
     #[serde(default)]
     pub(crate) async_workflow_config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
 }
+
+fn initial_previous_version() -> i64 { -1 }
 
 impl DomainRecord {
     fn to_describe_response(&self) -> DescribeDomainResponse {
@@ -83,6 +93,11 @@ pub enum FailoverError {
     Invalid(String),
 }
 
+fn now_nanos() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|v| v.as_nanos() as i64).unwrap_or(0)
+}
+
 impl InMemoryDomainStore {
     #[must_use]
     pub fn new() -> Self {
@@ -122,6 +137,10 @@ impl InMemoryDomainStore {
             failover_version,
             is_global_domain,
             failover_audit: Vec::new(),
+            config_version: 0,
+            last_updated_time_nanos: now_nanos(),
+            failover_end_time: None,
+            previous_failover_version: -1,
             isolation_groups: None,
             async_workflow_config: None,
         };
@@ -172,79 +191,45 @@ impl InMemoryDomainStore {
             .ok_or_else(|| EntityNotExistsError::new(format!("Domain {name} does not exist.")))
     }
 
-    /// Mirrors Go `UpdateDomain`: only set fields change. The Thrift
-    /// `DomainConfiguration` has scalar retention/emitMetric (no presence),
-    /// so nonzero/changed values apply; nested optionals apply when set.
+    /// Prepare a full candidate under the store lock; publish only after validation.
     pub fn update(
         &self,
         req: &UpdateDomainRequest,
-    ) -> Result<cadence_api::service_types::UpdateDomainResponse, EntityNotExistsError> {
+        metadata: &cadence_common::cluster::Metadata,
+    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
         let mut inner = self.inner.write().expect("domain store lock");
-        let record = inner.by_name.get_mut(&req.name).ok_or_else(|| {
+        let current = inner.by_name.get(&req.name).ok_or_else(|| {
             EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
         })?;
-        if let Some(info) = req.updated_info.clone() {
-            if let Some(v) = info.description {
-                record.info.description = v;
-            }
-            if let Some(v) = info.owner_email {
-                record.info.owner_email = v;
-            }
-            if let Some(v) = info.data {
-                record.info.data = Some(v);
-            }
+        let prepared = crate::domain_update::prepare(current, req, metadata, now_nanos())
+            .map_err(|e| FailoverError::Invalid(e.message))?;
+        let mut candidate = prepared.record;
+        if prepared.failover && prepared.write {
+            candidate.failover_audit.push(FailoverAuditEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                created_nanos: candidate.last_updated_time_nanos,
+                failover_type: if req.failover_timeout_in_seconds.is_some() {
+                    FailoverType::Graceful
+                } else {
+                    FailoverType::Force
+                },
+                before: current.replication.clone(),
+                before_version: current.failover_version,
+                after: candidate.replication.clone(),
+                after_version: candidate.failover_version,
+            });
         }
-        if let Some(cfg) = req.configuration.clone() {
-            // NOTE: Thrift scalars carry no presence; retention applies when
-            // nonzero, while emitMetric (no detectable presence) is left
-            // untouched to avoid clobbering it with a default false.
-            if cfg.workflow_execution_retention_period_in_days != 0 {
-                record
-                    .configuration
-                    .workflow_execution_retention_period_in_days =
-                    cfg.workflow_execution_retention_period_in_days;
-            }
-            if let Some(v) = cfg.bad_binaries {
-                record.configuration.bad_binaries = Some(v);
-            }
-            if let Some(v) = cfg.history_archival_status {
-                record.configuration.history_archival_status = Some(v);
-            }
-            if !cfg.history_archival_uri.is_empty() {
-                record.configuration.history_archival_uri = cfg.history_archival_uri;
-            }
-            if let Some(v) = cfg.visibility_archival_status {
-                record.configuration.visibility_archival_status = Some(v);
-            }
-            if !cfg.visibility_archival_uri.is_empty() {
-                record.configuration.visibility_archival_uri = cfg.visibility_archival_uri;
-            }
+        let response = cadence_api::service_types::UpdateDomainResponse {
+            domain_info: Some(candidate.info.clone()),
+            configuration: Some(candidate.configuration.clone()),
+            replication_configuration: Some(candidate.replication.clone()),
+            failover_version: candidate.failover_version,
+            is_global_domain: candidate.is_global_domain,
+        };
+        if prepared.write {
+            inner.by_name.insert(req.name.clone(), candidate);
         }
-        if let Some(rep) = req.replication_configuration.clone() {
-            if !rep.active_cluster_name.is_empty() {
-                record.replication.active_cluster_name = rep.active_cluster_name;
-            }
-            if !rep.clusters.is_empty() {
-                record.replication.clusters = rep.clusters;
-            }
-            if let Some(v) = rep.active_clusters {
-                record.replication.active_clusters = Some(v);
-            }
-        }
-        if let Some(checksum) = req.delete_bad_binary.clone() {
-            if let Some(binaries) = record.configuration.bad_binaries.as_mut() {
-                if let Some(map) = binaries.binaries.as_mut() {
-                    map.remove(&checksum);
-                }
-            }
-        }
-        Ok(cadence_api::service_types::UpdateDomainResponse {
-            domain_info: Some(record.info.clone()),
-            configuration: Some(record.configuration.clone()),
-            replication_configuration: Some(record.replication.clone()),
-            failover_version: record.failover_version,
-            is_global_domain: record.is_global_domain,
-        })
+        Ok(response)
     }
 
     /// Errors for domain failover, mirroring Go's domain-handler mapping:
@@ -291,11 +276,16 @@ impl InMemoryDomainStore {
                     )));
                 }
             }
-            if let Some(scopes) = req.active_clusters.as_ref().and_then(|c| c.active_clusters_by_cluster_attribute.as_ref()) {
+            if let Some(scopes) = req
+                .active_clusters
+                .as_ref()
+                .and_then(|c| c.active_clusters_by_cluster_attribute.as_ref())
+            {
                 let mut scopes: Vec<_> = scopes.iter().collect();
                 scopes.sort_by_key(|(name, _)| *name);
                 for (_, scope) in scopes {
-                    let mut attributes: Vec<_> = scope.cluster_attributes.iter().flatten().collect();
+                    let mut attributes: Vec<_> =
+                        scope.cluster_attributes.iter().flatten().collect();
                     attributes.sort_by_key(|(name, _)| *name);
                     for (_, info) in attributes {
                         let target = &info.active_cluster_name;
@@ -308,50 +298,41 @@ impl InMemoryDomainStore {
                 }
             }
         }
-        // Compute the intended replication state and require an actual change.
-        let mut intended = record.replication.clone();
-        if let Some(target) = req.domain_active_cluster_name.clone() {
-            intended.active_cluster_name = target;
-        }
-        crate::domain_replication::validate_incoming(metadata, req.active_clusters.as_ref())
-            .map_err(|e| FailoverError::Invalid(e.message))?;
-        let (attributes, attributes_changed) = crate::domain_replication::build_update(
-            metadata, record.replication.active_clusters.as_ref(), req.active_clusters.as_ref(), false)
-            .map_err(|e| FailoverError::Invalid(e.message))?;
-        if attributes_changed { intended.active_clusters = attributes; }
-        // Go treats an explicit domain target as an update even when equal.
-        if req.domain_active_cluster_name.is_none() && !attributes_changed {
-            return Err(FailoverError::Invalid(
-                "a failover was requested, but there was no change detected, the configuration was not updated".to_string(),
-            ));
-        }
-        crate::domain_replication::validate_global(metadata, &intended)
-            .map_err(|e| FailoverError::Invalid(e.message))?;
-        let current_version = record.failover_version.wrapping_add(i64::from(
-            record.replication.is_active_active() || intended.is_active_active()));
-        let next_version = metadata.next_failover_version(&intended.active_cluster_name, current_version, false)
-            .map_err(FailoverError::Invalid)?;
-        let before = record.replication.clone();
-        let before_version = record.failover_version;
-        record.replication = intended.clone();
-        record.failover_version = next_version;
-        let failover_type = if req.failover_timeout_in_seconds.is_some() {
-            FailoverType::Graceful
-        } else {
-            FailoverType::Force
+        let update = UpdateDomainRequest {
+            name: req.domain_name.clone(),
+            replication_configuration: Some(
+                cadence_api::service_types::DomainReplicationConfigurationUpdate {
+                    active_cluster_name: req.domain_active_cluster_name.clone(),
+                    active_clusters: req.active_clusters.clone(),
+                    ..Default::default()
+                },
+            ),
+            failover_timeout_in_seconds: req.failover_timeout_in_seconds,
+            ..Default::default()
         };
-        record.failover_audit.push(FailoverAuditEntry {
+        let prepared = crate::domain_update::prepare_failover(
+            record,
+            &update,
+            metadata,
+            now_nanos(),
+            req.reason.as_deref(),
+        )
+        .map_err(|e| FailoverError::Invalid(e.message))?;
+        let mut candidate = prepared.record;
+        candidate.failover_audit.push(FailoverAuditEntry {
             id: uuid::Uuid::new_v4().to_string(),
-            created_nanos: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as i64)
-                .unwrap_or(0),
-            failover_type,
-            before,
-            before_version,
-            after: intended,
-            after_version: record.failover_version,
+            created_nanos: candidate.last_updated_time_nanos,
+            failover_type: if req.failover_timeout_in_seconds.is_some() {
+                FailoverType::Graceful
+            } else {
+                FailoverType::Force
+            },
+            before: record.replication.clone(),
+            before_version: record.failover_version,
+            after: candidate.replication.clone(),
+            after_version: candidate.failover_version,
         });
+        *record = candidate;
         Ok(cadence_api::types::FailoverDomainResponse {
             domain_info: Some(record.info.clone()),
             configuration: Some(record.configuration.clone()),
@@ -890,12 +871,13 @@ mod tests {
                     description: Some("new".into()),
                     ..Default::default()
                 }),
-                configuration: Some(DomainConfiguration {
+                configuration: Some(cadence_api::service_types::DomainConfigurationUpdate {
                     history_archival_status: Some(ArchivalStatus::Enabled),
+                    history_archival_uri: Some("file:///tmp/history".into()),
                     ..Default::default()
                 }),
                 ..Default::default()
-            })
+            }, &cluster_metadata())
             .unwrap();
         let info = updated.domain_info.unwrap();
         assert_eq!(info.description, "new");

@@ -689,6 +689,56 @@ impl ToThrift for UpdateDomainInfo {
     }
 }
 
+impl FromThrift for DomainConfigurationUpdate {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            workflow_execution_retention_period_in_days: s.opt_i32(10)?,
+            emit_metric: s.opt_bool(20)?,
+            bad_binaries: s.opt_struct(70)?,
+            history_archival_status: s.opt_enum(80)?,
+            history_archival_uri: s.opt_string(90)?,
+            visibility_archival_status: s.opt_enum(100)?,
+            visibility_archival_uri: s.opt_string(110)?,
+        })
+    }
+}
+impl ToThrift for DomainConfigurationUpdate {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, self.workflow_execution_retention_period_in_days);
+        if let Some(value) = self.emit_metric {
+            f.fields.push((20, Value::Bool(value)));
+        }
+        f.ostruct(70, self.bad_binaries.as_ref());
+        f.oenum(80, self.history_archival_status);
+        f.ostr(90, &self.history_archival_uri);
+        f.oenum(100, self.visibility_archival_status);
+        f.ostr(110, &self.visibility_archival_uri);
+        f.finish()
+    }
+}
+
+impl FromThrift for DomainReplicationConfigurationUpdate {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            active_cluster_name: s.opt_string(10)?,
+            clusters: s.opt_list(20)?,
+            active_clusters: s.opt_struct(30)?,
+        })
+    }
+}
+impl ToThrift for DomainReplicationConfigurationUpdate {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostr(10, &self.active_cluster_name);
+        if let Some(values) = &self.clusters {
+            f.olist(20, values);
+        }
+        f.ostruct(30, self.active_clusters.as_ref());
+        f.finish()
+    }
+}
+
 impl FromThrift for UpdateDomainRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {

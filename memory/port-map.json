@@ -34,7 +34,8 @@
       "rust/crates/cadence-server/src/grpc_decisions.rs"
     ],
     "evidence": [
-      "Node gRPC workflow/activity wire checks; missing types/methods remain in service inventory"
+      "Node gRPC workflow/activity wire checks; missing types/methods remain in service inventory",
+      "UpdateDomain mask handling now preserves optional fields without pre-reading domain state; controller and original-IDL transport validation passed for core update cases. Wider mapping coverage remains partial."
     ]
   },
   "go/common/backoff/cron.go": {
@@ -119,10 +120,12 @@
     "rustSources": [
       "rust/crates/cadence-persistence/src/domain_replication.rs",
       "rust/crates/cadence-persistence/src/domains.rs",
-      "rust/crates/cadence-server/src/handlers.rs"
+      "rust/crates/cadence-server/src/handlers.rs",
+      "rust/crates/cadence-persistence/src/domain_update.rs"
     ],
     "evidence": [
-      "62 actual-Go registration/build/update/validation/merge cases plus original-IDL active-active failover checks; registration initialization and FailoverDomain attribute merge ported. UpdateDomain config/failover dispatch, graceful failover, primary restrictions and replication producer remain incomplete."
+      "62 actual-Go registration/build/update/validation/merge cases plus original-IDL active-active failover checks; registration initialization and FailoverDomain attribute merge ported. Runtime cooldown/dynamic policy, archival state machines, distributed graceful lifecycle and replication producer remain incomplete.",
+      "34 actual Go UpdateDomain controller cases compare error, response, persisted state, write count and version/end metadata with min retention 1, max binaries 10, cooldown 0, archival disabled. Runtime archival providers, cooldown/dynamic policy and distributed failover lifecycle remain incomplete."
     ]
   },
   "go/common/domain/attrValidator.go": {
@@ -140,7 +143,20 @@
       "rust/crates/cadence-thrift/src/convert.rs"
     ],
     "evidence": [
-      "Active-active deprecated-region omission, zero-valued version presence and Go mapper/codec binary fixture. Other shared mappings, empty-container wire presence and complete unknown-field compatibility remain under review."
+      "Active-active deprecated-region omission, zero-valued version presence and Go mapper/codec binary fixture. Other shared mappings, empty-container wire presence and complete unknown-field compatibility remain under review.",
+      "Separate UpdateDomain optional patch types retain scalar false/zero and target presence through Thrift conversion; wider empty-container and unknown-field mapping remains incomplete."
+    ]
+  },
+  "go/common/types/shared.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-api/src/service_types.rs",
+      "rust/crates/cadence-api/src/domain.rs",
+      "rust/crates/cadence-api/src/types.rs",
+      "rust/crates/cadence-api/src/tasks.rs"
+    ],
+    "evidence": [
+      "Optional UpdateDomain patch DTOs and config/failover predicates, core structs/enums and task APIs; many types, unknown-field compatibility and full symbol parity remain unreviewed."
     ]
   }
 }

@@ -423,9 +423,10 @@ async fn update_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.update(&req) {
+    match state.domains.update(&req, &state.cluster_metadata) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FailoverError::Invalid(message)) => bad_request(BadRequestError::new(message)),
     }
 }
 

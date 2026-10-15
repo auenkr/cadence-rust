@@ -17,6 +17,9 @@ import time
 
 
 def main():
+    # Concurrent debug links of the generated RPC surface can exhaust this
+    # development host; callers can explicitly choose a larger job count.
+    os.environ.setdefault("CARGO_BUILD_JOBS", "1")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts-dir", type=Path)
     parser.add_argument("--skip-rust-checks", action="store_true",
@@ -56,6 +59,7 @@ def main():
     run("history-blob-differential", [sys.executable, str(root / "tests/run-history-blob-compat.py")])
     run("cluster-metadata-differential", [sys.executable, str(root / "tests/run-cluster-metadata-compat.py")])
     run("active-active-differential", [sys.executable, str(root / "tests/run-active-active-compat.py")])
+    run("domain-update-differential", [sys.executable, str(root / "tests/run-domain-update-compat.py")])
     run("server-build", ["cargo", "build", "--manifest-path", manifest, "-p", "cadence-server"])
     # Reserve all five ports together to avoid selecting the same port twice.
     reservations = [socket.socket() for _ in range(5)]

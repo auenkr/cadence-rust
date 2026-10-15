@@ -36,9 +36,10 @@ Rust integration status:
   both HTTP/gRPC and Thrift registration use that shared path.
 - DomainStore::failover validates/merges attributes, computes versions from
   stored state, preserves other attributes, and uses scoped destination ordering.
-- DomainStore::update STILL replaces scopes wholesale. The Go distinction between
-  configuration and failover updates, field presence and response state must be
-  ported there next; do not describe all domain update behavior as complete.
+- DomainStore::update now uses optional patch DTOs and the cloned candidate
+  controller in domain_update.rs. 34 actual-Go controller cases plus transport
+  checks cover ordinary config/failover behavior; see domain-update-next.md for
+  runtime policy, archival and distributed lifecycle limits.
 - grpc_convert and Thrift mapping ignore deprecated region maps; protobuf empty
   maps normalize like Go's mapper. Thrift ActiveClusterInfo now emits version 0
   explicitly: Go's mapper dereferences that field rather than tolerating absence.
@@ -55,9 +56,8 @@ results.json and outer exit file 0. It included 290 workspace tests, strict
 clippy, differential suites and all network/SDK drivers. User development
 server was not restarted; isolated test servers were cleaned up.
 
-Next: port UpdateDomain handler dispatch/presence atomically across transports,
-registration primary-cluster restrictions, active-active graceful rejection and
-full graceful state transitions, per-domain migration override lookup, workflow
+Next: port runtime UpdateDomain cooldown/dynamic policy, registration primary
+restrictions and full graceful state transitions (metadata/AA rejection now exist), per-domain migration override lookup, workflow
 attribute routing and passive ownership/replication. The generic Thrift Fields
 builder still omits empty maps; exact empty-container presence needs broader wire
 codec work, especially before relying on raw domain replication. No passive

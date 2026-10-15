@@ -6,6 +6,7 @@
 
 pub mod domains;
 pub mod domain_replication;
+pub mod domain_update;
 pub mod history_branch;
 pub mod executions;
 pub mod schedules;

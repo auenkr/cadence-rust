@@ -229,3 +229,26 @@ rejection, explicit same-cluster domain requests, sorted destination validation,
 and attribute versions in ListFailoverHistory. The full runner includes these
 checks. UpdateDomain configuration/failover dispatch, graceful failover, workflow
 attribute routing and passive replication remain separate unfinished work.
+
+UpdateDomain controller differential checks:
+
+```sh
+python3 tests/run-domain-update-compat.py
+```
+
+The Go overlay invokes the actual `UpdateDomain` handler with mocked persistence
+and replication transport. Its 34 cases compare errors, returned configuration,
+persisted state, write counts, config/failover versions, previous version and
+end-time metadata. The oracle explicitly uses a fixed clock, zero cooldown,
+retention minimum 1, bad-binary limit 10 and disabled archival; these cases do
+not validate production cooldowns or archival providers. They preserve Go's
+bad-binary-only response-without-write behavior.
+
+The original-IDL gRPC driver checks masks, empty values, merges, rollback,
+local/global restrictions, AA promotion/partial updates and graceful-AA rejection.
+The existing Go SDK driver checks Thrift `emitMetric=false`, omitted fields,
+data merging and zero-retention rollback over TChannel. Runtime dynamic policy,
+archival state machines and distributed graceful failover still require porting.
+
+The combined runner defaults to one Cargo build job to bound peak memory during
+large RPC test links. Set `CARGO_BUILD_JOBS` explicitly to override that choice.
