@@ -1079,3 +1079,32 @@
   buffer/concurrency system caps, per-execution budget sharing, real workflow
   scheduler history/visibility parity and failure retry paths. Broader
   production persistence/replication/distributed gaps remain unported.
+
+- Scheduler request IDs / buffered origin / limits (2026-10-15): audit found
+  the earlier deterministic-ID implementation used NAMESPACE_OID rather than
+  Go's nested UUIDv5(DNS, "cadence.scheduler") namespace. Fixed the namespace
+  and normalized backfill trigger IDs to source "backfill", as Go does.
+  Buffered entries now retain scheduled time, trigger/backfill origin and
+  overlap override across snapshots and draining. Legacy numeric Rust buffer
+  entries still deserialize, with schedule-source fallback (their original
+  source was not retained by the old implementation and cannot be recovered).
+- Applied Go's 1000-entry buffer and bounded concurrency ceilings. Policy
+  changes away from BUFFER clear queued fires and count drops as skipped;
+  omitted/zero catch-up-window updates preserve the previous positive window.
+  Spec updates cancel pending backfills and retain the processed watermark.
+- New direct-Go differential fixtures: four exact UUIDs and seven limit
+  boundaries. All pass with the previous 17 scheduler scenarios. Rust tests
+  cover a backfill override buffered under CONCURRENT, snapshot/drain request
+  ID preservation, legacy numeric buffer decoding, 1001 buffered attempts,
+  policy clearing and preserved windows. Full workspace checks running.
+- Validation for identity/buffer/limit checkpoint: full workspace 275 tests
+  pass; strict workspace/all-targets clippy passes. Differential runner
+  passes all 17 behavioral scenarios + 4 UUID cases + 7 limit cases.
+- Next concrete mismatch found in Go activity.go: CANCEL_PREVIOUS must
+  request cooperative cancellation with cause "schedule overlap policy:
+  CANCEL_PREVIOUS" rather than close the run as canceled. TERMINATE_PREVIOUS
+  uses reason "schedule overlap policy: TERMINATE_PREVIOUS". Both target
+  LastStartedWorkflow, not every tracked active run. Rust needs separate
+  durable last-started tracking so older cancel-requested runs cannot become
+  the overlap target after the latest run closes. Buffer draining also
+  needs to use that last target, not all previous active runs. No fix yet.

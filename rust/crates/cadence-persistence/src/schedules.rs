@@ -37,6 +37,44 @@ pub struct PendingBackfill {
     pub overlap: ScheduleOverlapPolicy,
 }
 
+/// Preserve the origin of queued fires for Go's deterministic request IDs.
+/// Legacy numeric entries remain readable from existing Rust snapshots.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum BufferedScheduleFire {
+    Legacy(i64),
+    Current {
+        scheduled_nanos: i64,
+        trigger: String,
+        overlap: ScheduleOverlapPolicy,
+    },
+}
+
+impl BufferedScheduleFire {
+    fn parts(&self) -> (i64, ScheduleOverlapPolicy, &str) {
+        match self {
+            Self::Legacy(time) => (*time, ScheduleOverlapPolicy::Invalid, "schedule"),
+            Self::Current {
+                scheduled_nanos,
+                trigger,
+                overlap,
+            } => (*scheduled_nanos, *overlap, trigger),
+        }
+    }
+}
+
+fn effective_buffer_limit(user: i32) -> usize {
+    if user <= 0 {
+        1000
+    } else {
+        user.min(1000) as usize
+    }
+}
+
+fn effective_concurrency_limit(user: i32) -> i32 {
+    user.min(1000)
+}
+
 /// A stored schedule: configuration plus runtime firing state.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScheduleRecord {
@@ -63,7 +101,7 @@ pub struct ScheduleRecord {
     /// Fired target runs still believed open: (workflow_id, run_id).
     pub running: Vec<(String, String)>,
     /// Buffered fire times (BUFFER overlap policy).
-    pub buffer: VecDeque<i64>,
+    pub buffer: VecDeque<BufferedScheduleFire>,
     /// Backfill accounting; descriptions expose only pending entries.
     pub backfills: Vec<BackfillInfo>,
     #[serde(default)]
@@ -157,8 +195,16 @@ pub(crate) fn now_nanos() -> i64 {
 /// fires deduplicate server-side.
 pub fn fire_request_id(schedule_id: &str, fire_nanos: i64, trigger: &str) -> String {
     uuid::Uuid::new_v5(
-        &uuid::Uuid::NAMESPACE_OID,
-        format!("{schedule_id}-{fire_nanos}-{trigger}").as_bytes(),
+        &uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, b"cadence.scheduler"),
+        format!(
+            "{schedule_id}-{fire_nanos}-{}",
+            if trigger.starts_with("backfill:") {
+                "backfill"
+            } else {
+                trigger
+            }
+        )
+        .as_bytes(),
     )
     .to_string()
 }
@@ -441,12 +487,23 @@ impl crate::executions::InMemoryExecutionStore {
         }
         if let Some(spec) = req.spec.clone() {
             record.spec = spec;
-            record.last_fire_nanos = None;
+            record.pending_backfills.clear();
         }
         if let Some(action) = req.action.clone() {
             record.action = action;
         }
-        if let Some(policies) = req.policies.clone() {
+        if let Some(mut policies) = req.policies.clone() {
+            if policies.catch_up_window_in_seconds.unwrap_or(0) <= 0
+                && record.policies.catch_up_window_in_seconds.unwrap_or(0) > 0
+            {
+                policies.catch_up_window_in_seconds = record.policies.catch_up_window_in_seconds;
+            }
+            if record.policies.overlap_policy == Some(ScheduleOverlapPolicy::Buffer)
+                && policies.overlap_policy != Some(ScheduleOverlapPolicy::Buffer)
+            {
+                record.skipped_runs += record.buffer.len() as i64;
+                record.buffer.clear();
+            }
             record.policies = policies;
         }
         if let Some(attrs) = req.search_attributes.clone() {
@@ -823,7 +880,7 @@ impl crate::executions::InMemoryExecutionStore {
             }
         }
         // Drain buffers for BUFFER schedules with nothing running.
-        self.drain_schedule_buffers();
+        started += self.drain_schedule_buffers();
         // Refresh next-run hints.
         {
             let mut inner = self.inner.write().expect("execution store lock");
@@ -917,7 +974,9 @@ impl crate::executions::InMemoryExecutionStore {
                 }
             }
             ScheduleOverlapPolicy::Concurrent => {
-                if concurrency_limit > 0 && running.len() >= concurrency_limit as usize {
+                if concurrency_limit > 0
+                    && running.len() >= effective_concurrency_limit(concurrency_limit) as usize
+                {
                     self.note_schedule_skip(domain, schedule_id, fire_nanos);
                     return false;
                 }
@@ -929,11 +988,12 @@ impl crate::executions::InMemoryExecutionStore {
                         .schedules
                         .get_mut(&(domain.to_string(), schedule_id.to_string()))
                     {
-                        let limit = r.policies.buffer_limit;
-                        if limit <= 0 || (r.buffer.len() as i32) < limit {
-                            if !r.buffer.contains(&fire_nanos) {
-                                r.buffer.push_back(fire_nanos);
-                            }
+                        if r.buffer.len() < effective_buffer_limit(r.policies.buffer_limit) {
+                            r.buffer.push_back(BufferedScheduleFire::Current {
+                                scheduled_nanos: fire_nanos,
+                                trigger: trigger.to_string(),
+                                overlap: effective,
+                            });
                         } else {
                             r.skipped_runs += 1;
                         }
@@ -1128,8 +1188,8 @@ impl crate::executions::InMemoryExecutionStore {
     }
 
     /// Drain one buffered fire per BUFFER schedule with nothing running.
-    fn drain_schedule_buffers(&self) {
-        let ready: Vec<(String, String, i64)> = {
+    fn drain_schedule_buffers(&self) -> usize {
+        let ready: Vec<(String, String, BufferedScheduleFire)> = {
             let inner = self.inner.read().expect("execution store lock");
             inner
                 .schedules
@@ -1137,7 +1197,6 @@ impl crate::executions::InMemoryExecutionStore {
                 .filter(|(_, r)| {
                     !r.paused
                         && !r.deleted()
-                        && r.policies.overlap_policy == Some(ScheduleOverlapPolicy::Buffer)
                         && !r.buffer.is_empty()
                         && r.running.iter().all(|(w, run)| {
                             inner
@@ -1146,9 +1205,12 @@ impl crate::executions::InMemoryExecutionStore {
                                 .is_none_or(|rec| !rec.is_open())
                         })
                 })
-                .filter_map(|((d, id), r)| r.buffer.front().map(|f| (d.clone(), id.clone(), *f)))
+                .filter_map(|((d, id), r)| {
+                    r.buffer.front().map(|f| (d.clone(), id.clone(), f.clone()))
+                })
                 .collect()
         };
+        let mut started = 0;
         for (domain, id, fire) in ready {
             {
                 let mut inner = self.inner.write().expect("execution store lock");
@@ -1156,8 +1218,12 @@ impl crate::executions::InMemoryExecutionStore {
                     r.buffer.pop_front();
                 }
             }
-            self.fire_schedule_at(&domain, &id, fire, ScheduleOverlapPolicy::Buffer, "buffer");
+            let (time, overlap, trigger) = fire.parts();
+            if self.fire_schedule_at(&domain, &id, time, overlap, trigger) {
+                started += 1;
+            }
         }
+        started
     }
 
     fn domain_name_str(&self, namespace: &str) -> String {
@@ -1536,6 +1602,169 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn scheduler_identity_limits_fixtures() {
+        #[derive(serde::Deserialize)]
+        struct Id {
+            schedule: String,
+            nanos: i64,
+            trigger: String,
+            id: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct Limit {
+            user: i32,
+            buffer: usize,
+            concurrency: i32,
+        }
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            ids: Vec<Id>,
+            limits: Vec<Limit>,
+        }
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/scheduler-identity-limits.json"
+        ))
+        .unwrap();
+        for case in fixture.ids {
+            assert_eq!(
+                fire_request_id(&case.schedule, case.nanos, &case.trigger),
+                case.id
+            );
+        }
+        for case in fixture.limits {
+            assert_eq!(effective_buffer_limit(case.user), case.buffer);
+            assert_eq!(effective_concurrency_limit(case.user), case.concurrency);
+        }
+    }
+
+    #[test]
+    fn scheduler_buffer_preserves_trigger_after_restart_and_drain() {
+        let mut store = test_store();
+        let mut req = create_req("buffer", "* * * * *");
+        req.policies = Some(SchedulePolicies {
+            overlap_policy: Some(ScheduleOverlapPolicy::Concurrent),
+            ..Default::default()
+        });
+        store.create_schedule("d", &req).unwrap();
+        let namespace = store.inner.read().unwrap().domain_id("d");
+        let base = nanos("2026-01-15T10:00:00Z");
+        assert!(store.fire_schedule_at(
+            &namespace,
+            "buffer",
+            base,
+            ScheduleOverlapPolicy::Invalid,
+            "schedule"
+        ));
+        assert!(!store.fire_schedule_at(
+            &namespace,
+            "buffer",
+            base + 60_000_000_000,
+            ScheduleOverlapPolicy::Buffer,
+            "backfill:original-id"
+        ));
+        let path =
+            std::env::temp_dir().join(format!("cadence-buffer-{}.json", uuid::Uuid::new_v4()));
+        store.save_to_file(&path).unwrap();
+        store = InMemoryExecutionStore::load_from_file(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        {
+            let mut inner = store.inner.write().unwrap();
+            let record = inner
+                .schedules
+                .get(&(namespace.clone(), "buffer".to_string()))
+                .unwrap();
+            let (workflow, run) = record.running[0].clone();
+            inner
+                .by_run
+                .get_mut(&(namespace.clone(), workflow, run))
+                .unwrap()
+                .close_status = Some(WorkflowExecutionCloseStatus::Completed);
+        }
+        assert_eq!(store.drain_schedule_buffers(), 1);
+        let inner = store.inner.read().unwrap();
+        let fire = base + 60_000_000_000;
+        let workflow = fire_workflow_id("sched", "buffer", fire);
+        assert!(inner.by_request_id.contains_key(&(
+            namespace.clone(),
+            workflow,
+            fire_request_id("buffer", fire, "backfill")
+        )));
+        assert!(inner
+            .schedules
+            .get(&(namespace, "buffer".to_string()))
+            .unwrap()
+            .buffer
+            .is_empty());
+        let legacy: BufferedScheduleFire = serde_json::from_str("1700000000000000000").unwrap();
+        assert_eq!(
+            legacy.parts(),
+            (
+                1_700_000_000_000_000_000,
+                ScheduleOverlapPolicy::Invalid,
+                "schedule"
+            )
+        );
+    }
+
+    #[test]
+    fn scheduler_buffer_caps_and_policy_change_count_dropped_fires() {
+        let store = test_store();
+        let mut req = create_req("buffer-cap", "* * * * *");
+        req.policies = Some(SchedulePolicies {
+            overlap_policy: Some(ScheduleOverlapPolicy::Buffer),
+            catch_up_window_in_seconds: Some(120),
+            ..Default::default()
+        });
+        store.create_schedule("d", &req).unwrap();
+        let namespace = store.inner.read().unwrap().domain_id("d");
+        let base = nanos("2026-01-15T10:00:00Z");
+        assert!(store.fire_schedule_at(
+            &namespace,
+            "buffer-cap",
+            base,
+            ScheduleOverlapPolicy::Invalid,
+            "schedule"
+        ));
+        for i in 1..=1001 {
+            assert!(!store.fire_schedule_at(
+                &namespace,
+                "buffer-cap",
+                base + i * 60_000_000_000,
+                ScheduleOverlapPolicy::Invalid,
+                "schedule"
+            ));
+        }
+        {
+            let inner = store.inner.read().unwrap();
+            let r = inner
+                .schedules
+                .get(&(namespace.clone(), "buffer-cap".to_string()))
+                .unwrap();
+            assert_eq!(r.buffer.len(), 1000);
+            assert_eq!(r.skipped_runs, 1);
+        }
+        store
+            .update_schedule(&cadence_api::schedule::UpdateScheduleRequest {
+                domain: "d".to_string(),
+                schedule_id: "buffer-cap".to_string(),
+                policies: Some(SchedulePolicies {
+                    overlap_policy: Some(ScheduleOverlapPolicy::SkipNew),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .unwrap();
+        let inner = store.inner.read().unwrap();
+        let r = inner
+            .schedules
+            .get(&(namespace, "buffer-cap".to_string()))
+            .unwrap();
+        assert!(r.buffer.is_empty());
+        assert_eq!(r.skipped_runs, 1001);
+        assert_eq!(r.policies.catch_up_window_in_seconds, Some(120));
     }
 
     #[test]

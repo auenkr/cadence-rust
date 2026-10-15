@@ -1,0 +1,65 @@
+{
+  "ids": [
+    {
+      "schedule": "s",
+      "nanos": 7,
+      "trigger": "schedule",
+      "id": "5ecaed56-13d3-5932-ae29-fc7122b1d333"
+    },
+    {
+      "schedule": "s",
+      "nanos": 7,
+      "trigger": "backfill",
+      "id": "a6fd48bb-cd1c-5e3a-8d62-5411ea380b25"
+    },
+    {
+      "schedule": "schedule:unicode-\u03bb",
+      "nanos": 1700000000000000000,
+      "trigger": "schedule",
+      "id": "be4a659c-fe0c-58e0-9029-6eef32592796"
+    },
+    {
+      "schedule": "s",
+      "nanos": -1,
+      "trigger": "backfill",
+      "id": "83719fa9-73ca-5034-9f6f-097be86a8c48"
+    }
+  ],
+  "limits": [
+    {
+      "user": -1,
+      "buffer": 1000,
+      "concurrency": -1
+    },
+    {
+      "user": 0,
+      "buffer": 1000,
+      "concurrency": 0
+    },
+    {
+      "user": 1,
+      "buffer": 1,
+      "concurrency": 1
+    },
+    {
+      "user": 100,
+      "buffer": 100,
+      "concurrency": 100
+    },
+    {
+      "user": 1000,
+      "buffer": 1000,
+      "concurrency": 1000
+    },
+    {
+      "user": 1001,
+      "buffer": 1000,
+      "concurrency": 1000
+    },
+    {
+      "user": 2147483647,
+      "buffer": 1000,
+      "concurrency": 1000
+    }
+  ]
+}

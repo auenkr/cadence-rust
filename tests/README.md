@@ -120,3 +120,8 @@ Backfill fixtures also run through Go's actual `handleBackfill` and
 `processBackfills`: paused queues, pending-ID deduplication, range rejection,
 queue limits, and progress across batches. Rust saves/reloads each paused queue
 before draining it. Completed work disappears from `ongoingBackfills`.
+
+Scheduler identity fixtures compare deterministic request UUIDs with Go's
+`generateRequestID` (including the nested DNS namespace) and enforce the Go
+1000-entry buffer/concurrency ceilings. Engine tests preserve buffered backfill
+origins across snapshots and verify policy changes count dropped queued fires.

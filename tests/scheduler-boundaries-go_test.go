@@ -149,3 +149,36 @@ func TestRustSchedulerBackfillFixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestRustSchedulerIdentityLimitsFixtures(t *testing.T) {
+	var fixture struct {
+		IDs []struct {
+			Schedule    string
+			Nanos       int64
+			Trigger, ID string
+		}
+		Limits []struct {
+			User        int32
+			Buffer      int
+			Concurrency int32
+		}
+	}
+	data, err := os.ReadFile(os.Getenv("CADENCE_SCHEDULER_IDENTITY_FIXTURES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.IDs {
+		if got := generateRequestID(c.Schedule, c.Nanos, TriggerSource(c.Trigger)); got != c.ID {
+			t.Fatalf("id got %s want %s", got, c.ID)
+		}
+	}
+	for _, c := range fixture.Limits {
+		buffer, _ := effectiveBufferLimit(c.User)
+		if buffer != c.Buffer || effectiveConcurrencyLimit(c.User) != c.Concurrency {
+			t.Fatalf("limits user=%d buffer=%d concurrency=%d", c.User, buffer, effectiveConcurrencyLimit(c.User))
+		}
+	}
+}
