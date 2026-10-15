@@ -1,7 +1,32 @@
-# Current resume checkpoint (2026-10-14)
+# Current resume checkpoint (2026-10-15)
 
-Follow root AGENTS.md. Full migration remains incomplete; user requires continued
-implementation and testing. All changes remain uncommitted; preserve them.
+Follow root AGENTS.md. All 164 RPCs across all 13 services now have concrete
+Rust adapters (commit 9ba9938ec, pushed to origin/master). Adapter presence
+does not prove complete engine behavior; many encode honest single-host
+semantics. Read `migration-inventory.md` (107/107 adapters) and `progress.md`
+(tail entries: H2a, H2b, ShardDistributor) for the latest state.
+
+Runtime: native Rust server in tmux `cadence-rust:rust`
+(`CADENCE_ENABLE_SCHEDULER=1 CADENCE_ENABLE_SEMAPHORE=1
+rust/target/debug/cadence-server start --port 8080 --data-dir
+.cadence-data`; HTTP 8080, gRPC 7833 incl. Admin + ShardDistributor,
+TChannel 7933, internal history 7834, matching 7835). Web UI window was
+stopped earlier per user direction; CLI at `/home/ubuntu/.local/bin/cadence`
+remains available. Source changes require rebuilding/restarting before live
+checks; compat drivers: `node tests/internal-grpc-compat.cjs`,
+`node tests/grpc-compat.cjs`, `cd tests/go-sdk && go run .`.
+
+Latest validation: 263 workspace tests pass, strict workspace clippy clean,
+all three compat drivers exit 0 against the deployed binary.
+
+Next engine-depth gaps (no adapter work remains): durable SQL/NoSQL
+persistence (JSON snapshots are dev-only), version branches/history
+versioning, replication event application (ReplicateEventsV2 is a validated
+no-op), distributed ownership/failover and service independence, worker
+background roles (scanners, archival, batch), archival backends, advanced
+visibility query language, dynamic config/quotas/auth. Upstream
+DrainShards/UndrainShards/GetDrainedShards are unimplemented upstream too
+(INTERNAL, mirrored exactly).
 
 User now requests Cadence CLI instead of web UI. Web window was stopped; the
 cadence-web submodule remains available. Native Rust server runs in tmux
