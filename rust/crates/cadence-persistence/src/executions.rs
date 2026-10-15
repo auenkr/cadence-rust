@@ -1992,6 +1992,441 @@ impl InMemoryExecutionStore {
         Ok(())
     }
 
+    /// A snapshot of user-visible mutable state, mirroring Go history
+    /// `GetMutableState` fields that exist without branches/versions.
+    pub fn mutable_state_view(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+    ) -> Result<MutableStateView, EntityNotExistsError> {
+        let inner = self.inner.read().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = if execution.run_id.is_empty() {
+            let runs = inner
+                .by_workflow
+                .get(&(domain.to_string(), execution.workflow_id.clone()))
+                .ok_or_else(|| {
+                    EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+                })?;
+            let latest = runs.last().ok_or_else(|| {
+                EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+            })?;
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                latest.clone(),
+            )
+        } else {
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                execution.run_id.clone(),
+            )
+        };
+        let record = inner.by_run.get(&key).ok_or_else(|| {
+            EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+        })?;
+        Ok(MutableStateView {
+            workflow_id: record.execution.workflow_id.clone(),
+            run_id: record.execution.run_id.clone(),
+            workflow_type_name: record.workflow_type.name.clone(),
+            next_event_id: record.history.len() as i64 + 1,
+            previous_started_event_id: record.prev_started_event_id,
+            task_list_name: record.task_list.name.clone(),
+            sticky_task_list_name: record.sticky_task_list.clone().unwrap_or_default(),
+            sticky_schedule_to_start_timeout_seconds: record
+                .sticky_schedule_to_start_timeout_seconds,
+            close_status: record.close_status,
+            history_size_bytes: serde_json::to_string(&record.history)
+                .map(|s| s.len() as i64)
+                .unwrap_or(0),
+        })
+    }
+
+    /// Record a decision task as started without queue involvement,
+    /// mirroring Go's decision handler for history `RecordDecisionTaskStarted`:
+    /// unknown schedules are `EntityNotExists`, re-records with the same
+    /// request ID return current metadata, and a different request ID on an
+    /// already-started task is an already-started error.
+    pub fn record_decision_started(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        schedule_id: i64,
+        request_id: &str,
+        identity: &str,
+    ) -> Result<RecordedDecision, RecordError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = (
+            domain.to_string(),
+            execution.workflow_id.clone(),
+            execution.run_id.clone(),
+        );
+        let record = inner.by_run.get_mut(&key).ok_or_else(|| {
+            RecordError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        if !record.is_open() {
+            return Err(RecordError::NotFound(EntityNotExistsError::new(
+                "Decision task not found.".to_string(),
+            )));
+        }
+        let mut pending = record.pending_decision.clone().ok_or_else(|| {
+            RecordError::NotFound(EntityNotExistsError::new(
+                "Decision task not found.".to_string(),
+            ))
+        })?;
+        if pending.scheduled_event_id != schedule_id {
+            return Err(RecordError::NotFound(EntityNotExistsError::new(
+                "Decision task not found.".to_string(),
+            )));
+        }
+        if let Some(started) = pending.started_event_id {
+            if pending.request_id == request_id {
+                return Ok(RecordedDecision::from_pending(
+                    record,
+                    &pending,
+                    started,
+                ));
+            }
+            return Err(RecordError::AlreadyStarted(
+                "Decision task already started.".to_string(),
+            ));
+        }
+        pending.started_time_millis = Some(now_millis());
+        pending.identity = identity.to_string();
+        pending.request_id = request_id.to_string();
+        let started_event_id = record.push_event(
+            EventType::DecisionTaskStarted,
+            HistoryEvent {
+                decision_task_started_event_attributes: Some(
+                    DecisionTaskStartedEventAttributes {
+                        scheduled_event_id: pending.scheduled_event_id,
+                        identity: pending.identity.clone(),
+                        request_id: pending.request_id.clone(),
+                    },
+                ),
+                ..Default::default()
+            },
+        );
+        pending.started_event_id = Some(started_event_id);
+        record.pending_decision = Some(pending.clone());
+        Ok(RecordedDecision::from_pending(
+            record,
+            &pending,
+            started_event_id,
+        ))
+    }
+
+    /// Record a child execution as completed on its parent, mirroring Go
+    /// history `RecordChildExecutionCompleted`: the child must be pending
+    /// under the initiated ID with a matching started workflow ID, otherwise
+    /// `EntityNotExists`; stale IDs past the next event ID are stale-state
+    /// errors. The completion event type selects the parent event appended.
+    pub fn record_child_completed(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        initiated_id: i64,
+        completed_execution: &WorkflowExecution,
+        completion_event: &HistoryEvent,
+    ) -> Result<(), RecordError> {
+        use cadence_api::enums::EventType;
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = (
+            domain.to_string(),
+            execution.workflow_id.clone(),
+            execution.run_id.clone(),
+        );
+        let next_event_id = inner
+            .by_run
+            .get(&key)
+            .map(|r| r.history.len() as i64 + 1)
+            .unwrap_or(1);
+        let (is_open, started_event_id) = {
+            let record = inner.by_run.get(&key).ok_or_else(|| {
+                RecordError::NotFound(EntityNotExistsError::new(
+                    "Workflow execution does not exist.".to_string(),
+                ))
+            })?;
+            (
+                record.is_open(),
+                record
+                    .history
+                    .iter()
+                    .filter_map(|e| {
+                        e.child_workflow_execution_started_event_attributes
+                            .as_ref()
+                            .filter(|a| a.initiated_event_id == initiated_id)
+                            .map(|_| e.event_id)
+                    })
+                    .next()
+                    .unwrap_or(0),
+            )
+        };
+        if !is_open {
+            return Err(RecordError::NotFound(EntityNotExistsError::new(
+                "Pending child execution not found.".to_string(),
+            )));
+        }
+        let kids = inner.children.get(&key).cloned().unwrap_or_default();
+        let child = kids.iter().find(|c| c.initiated_event_id == initiated_id);
+        let Some(child) = child.cloned() else {
+            if initiated_id >= next_event_id {
+                return Err(RecordError::Stale(
+                    "Encountered stale mutable state.".to_string(),
+                ));
+            }
+            return Err(RecordError::NotFound(EntityNotExistsError::new(
+                "Pending child execution not found.".to_string(),
+            )));
+        };
+        if child.workflow_id != completed_execution.workflow_id {
+            return Err(RecordError::NotFound(EntityNotExistsError::new(
+                "Pending child execution workflowID mismatch.".to_string(),
+            )));
+        }
+        // Started event ID for the parent event: the actual
+        // ChildWorkflowExecutionStarted event when present.
+        if started_event_id == 0 {
+            return Err(RecordError::Stale(
+                "Encountered stale mutable state.".to_string(),
+            ));
+        }
+        let event_type = completion_event.event_type.unwrap_or(EventType::WorkflowExecutionCompleted);
+        let mut event = completion_event.clone();
+        // Stamp the parent-link IDs like Go's AddChildWorkflowExecution*
+        // event constructors do.
+        match &mut event {
+            HistoryEvent {
+                child_workflow_execution_completed_event_attributes: Some(attrs),
+                ..
+            } => {
+                attrs.initiated_event_id = initiated_id;
+                attrs.started_event_id = started_event_id;
+            }
+            HistoryEvent {
+                child_workflow_execution_failed_event_attributes: Some(attrs),
+                ..
+            } => {
+                attrs.initiated_event_id = initiated_id;
+                attrs.started_event_id = started_event_id;
+            }
+            HistoryEvent {
+                child_workflow_execution_canceled_event_attributes: Some(attrs),
+                ..
+            } => {
+                attrs.initiated_event_id = initiated_id;
+                attrs.started_event_id = started_event_id;
+            }
+            HistoryEvent {
+                child_workflow_execution_terminated_event_attributes: Some(attrs),
+                ..
+            } => {
+                attrs.initiated_event_id = initiated_id;
+                attrs.started_event_id = started_event_id;
+            }
+            HistoryEvent {
+                child_workflow_execution_timed_out_event_attributes: Some(attrs),
+                ..
+            } => {
+                attrs.initiated_event_id = initiated_id;
+                attrs.started_event_id = started_event_id;
+            }
+            _ => {
+                return Err(RecordError::Invalid(
+                    "Completion event must be a child workflow terminal event.".to_string(),
+                ));
+            }
+        }
+        let record = inner.by_run.get_mut(&key).expect("record exists");
+        record.push_event(event_type, event);
+        if let Some(kids) = inner.children.get_mut(&key) {
+            kids.retain(|c| c.initiated_event_id != initiated_id);
+        }
+        Ok(())
+    }
+
+    /// Record an activity task as started without queue involvement,
+    /// mirroring Go history `RecordActivityTaskStarted` outcomes: unknown
+    /// schedules are `EntityNotExists`; already-started tasks return current
+    /// metadata.
+    pub fn record_activity_started(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        schedule_id: i64,
+        identity: &str,
+    ) -> Result<RecordedActivity, RecordError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = (
+            domain.to_string(),
+            execution.workflow_id.clone(),
+            execution.run_id.clone(),
+        );
+        let record = inner.by_run.get_mut(&key).ok_or_else(|| {
+            RecordError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        if !record.is_open() {
+            return Err(RecordError::NotFound(EntityNotExistsError::new(
+                "Activity task not found.".to_string(),
+            )));
+        }
+        let pending = record.pending_activities.get(&schedule_id).cloned().ok_or_else(|| {
+            RecordError::NotFound(EntityNotExistsError::new(
+                "Activity task not found.".to_string(),
+            ))
+        })?;
+        if let Some(started) = pending.started_event_id {
+            return Ok(RecordedActivity::from_pending(record, &pending, started));
+        }
+        let started_time = now_millis();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let started_event_id = record.push_event(
+            EventType::ActivityTaskStarted,
+            HistoryEvent {
+                activity_task_started_event_attributes: Some(
+                    ActivityTaskStartedEventAttributes {
+                        scheduled_event_id: schedule_id,
+                        identity: identity.to_string(),
+                        request_id: request_id.clone(),
+                        attempt: pending.attempt,
+                        last_failure_reason: pending.last_failure_reason.clone(),
+                        last_failure_details: pending.last_failure_details.clone(),
+                        last_failure_options: pending.last_failure_options.clone(),
+                    },
+                ),
+                ..Default::default()
+            },
+        );
+        if let Some(p) = record.pending_activities.get_mut(&schedule_id) {
+            p.started_event_id = Some(started_event_id);
+            p.started_time_millis = Some(started_time);
+            p.started_identity = identity.to_string();
+        }
+        let pending = record.pending_activities.get(&schedule_id).cloned().expect("pending exists");
+        Ok(RecordedActivity::from_pending(record, &pending, started_event_id))
+    }
+
+    /// Schedule a decision task on an open run without duplicating an
+    /// outstanding one, mirroring Go's decision handler for history
+    /// `ScheduleDecisionTask`.
+    pub fn schedule_decision_task(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+    ) -> Result<(), WorkflowMutationError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = if execution.run_id.is_empty() {
+            match self.open_run_id(&inner, domain, &execution.workflow_id) {
+                Some(run_id) => (
+                    domain.to_string(),
+                    execution.workflow_id.clone(),
+                    run_id,
+                ),
+                None => {
+                    return Err(WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                        "Workflow execution does not exist.".to_string(),
+                    )));
+                }
+            }
+        } else {
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                execution.run_id.clone(),
+            )
+        };
+        let record = inner.by_run.get(&key).ok_or_else(|| {
+            WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        if !record.is_open() {
+            return Err(WorkflowMutationError::AlreadyCompleted(
+                WorkflowExecutionAlreadyCompletedError::new(
+                    "Workflow execution already completed.".to_string(),
+                ),
+            ));
+        }
+        if record.pending_decision.is_some() {
+            return Ok(());
+        }
+        let task_list = record.task_list.name.clone();
+        Self::schedule_decision_locked(&mut inner, domain, &key.1, &key.2, &task_list, 0);
+        Ok(())
+    }
+
+    /// Delete a buffered signal request ID, mirroring Go history
+    /// `RemoveSignalMutableState` (`DeleteSignalRequested`). Closed runs
+    /// report not-exists like Go's `ErrNotExists`.
+    pub fn remove_signal(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        request_id: &str,
+    ) -> Result<(), WorkflowMutationError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = (
+            domain.to_string(),
+            execution.workflow_id.clone(),
+            execution.run_id.clone(),
+        );
+        let record = inner.by_run.get_mut(&key).ok_or_else(|| {
+            WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        if !record.is_open() {
+            return Err(WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            )));
+        }
+        record.signal_request_ids.remove(request_id);
+        Ok(())
+    }
+
+    /// Apply a replicated activity heartbeat/details update, mirroring Go NDC
+    /// `SyncActivity` minus version gating (single branch: versions do not
+    /// exist). Unknown runs or activities are a success no-op like Go's
+    /// out-of-order path.
+    pub fn sync_activity(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        scheduled_id: i64,
+        details: Vec<u8>,
+        attempt: i32,
+    ) {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let key = (
+            domain_key,
+            execution.workflow_id.clone(),
+            execution.run_id.clone(),
+        );
+        if let Some(record) = inner.by_run.get_mut(&key) {
+            if let Some(pending) = record.pending_activities.get_mut(&scheduled_id) {
+                pending.heartbeat_details = details;
+                pending.attempt = attempt;
+            }
+        }
+    }
+
     /// Delete a workflow run's data, mirroring Go admin `DeleteWorkflow`
     /// (history + execution + visibility stores are one store here, so all
     /// three report deleted). Unknown runs are `EntityNotExists`, like Go's
@@ -6606,6 +7041,101 @@ pub enum StartError {
     InvalidArgument(String),
 }
 
+/// Metadata for a recorded-as-started decision task.
+#[derive(Debug, Clone)]
+pub struct RecordedDecision {
+    pub workflow_type_name: String,
+    pub scheduled_event_id: i64,
+    pub started_event_id: i64,
+    pub next_event_id: i64,
+    pub attempt: i64,
+    pub previous_started_event_id: Option<i64>,
+    pub task_list_name: String,
+    pub scheduled_time_millis: Option<i64>,
+    pub started_time_millis: Option<i64>,
+}
+
+impl RecordedDecision {
+    fn from_pending(
+        record: &ExecutionRecord,
+        pending: &PendingDecision,
+        started_event_id: i64,
+    ) -> Self {
+        Self {
+            workflow_type_name: record.workflow_type.name.clone(),
+            scheduled_event_id: pending.scheduled_event_id,
+            started_event_id,
+            next_event_id: record.history.len() as i64 + 1,
+            attempt: pending.attempt,
+            previous_started_event_id: record.prev_started_event_id,
+            task_list_name: record.task_list.name.clone(),
+            scheduled_time_millis: pending.scheduled_time_millis,
+            started_time_millis: pending.started_time_millis,
+        }
+    }
+}
+
+/// Metadata for a recorded-as-started activity task.
+#[derive(Debug, Clone)]
+pub struct RecordedActivity {
+    pub scheduled_event: HistoryEvent,
+    pub started_time_millis: i64,
+    pub attempt: i32,
+    pub heartbeat_details: Vec<u8>,
+}
+
+impl RecordedActivity {
+    fn from_pending(
+        record: &ExecutionRecord,
+        pending: &PendingActivity,
+        started_event_id: i64,
+    ) -> Self {
+        let scheduled_event = record
+            .history
+            .iter()
+            .find(|e| e.event_id == pending.scheduled_event_id)
+            .cloned()
+            .unwrap_or_default();
+        let _ = started_event_id;
+        Self {
+            scheduled_event,
+            started_time_millis: pending.started_time_millis.unwrap_or_else(now_millis),
+            attempt: pending.attempt,
+            heartbeat_details: pending.heartbeat_details.clone(),
+        }
+    }
+}
+
+/// Errors for task recording: unknown tasks are `EntityNotExists`,
+/// double-starts with a different request are already-started failures,
+/// stale IDs are retryable stale-state errors.
+#[derive(Debug, thiserror::Error)]
+pub enum RecordError {
+    #[error(transparent)]
+    NotFound(#[from] EntityNotExistsError),
+    #[error("{0}")]
+    AlreadyStarted(String),
+    #[error("{0}")]
+    Stale(String),
+    #[error("{0}")]
+    Invalid(String),
+}
+
+/// User-visible mutable-state snapshot for history/introspection APIs.
+#[derive(Debug, Clone)]
+pub struct MutableStateView {
+    pub workflow_id: String,
+    pub run_id: String,
+    pub workflow_type_name: String,
+    pub next_event_id: i64,
+    pub previous_started_event_id: Option<i64>,
+    pub task_list_name: String,
+    pub sticky_task_list_name: String,
+    pub sticky_schedule_to_start_timeout_seconds: i32,
+    pub close_status: Option<WorkflowExecutionCloseStatus>,
+    pub history_size_bytes: i64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum WorkflowMutationError {
     #[error(transparent)]
@@ -8125,6 +8655,222 @@ mod advanced_tests {
             })
             .count();
         assert_eq!(signals, 2);
+    }
+
+    #[test]
+    fn mutable_state_view_reports_run_facts() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let view = store
+            .mutable_state_view("d", &WorkflowExecution::new("w", started.run_id.clone()))
+            .unwrap();
+        assert_eq!(view.workflow_id, "w");
+        assert_eq!(view.next_event_id, 3);
+        assert_eq!(view.task_list_name, "tl");
+        assert!(store
+            .mutable_state_view("d", &WorkflowExecution::new("w", "nope"))
+            .is_err());
+    }
+
+    #[test]
+    fn schedule_and_remove_signal_round_trip() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        // A pending decision already exists; scheduling is idempotent.
+        store.schedule_decision_task("d", &exec).unwrap();
+        // Buffered signal IDs can be removed; unknown runs fail.
+        {
+            let mut inner = store.inner.write().expect("execution store lock");
+            let domain = store.domain_id(&inner, "d");
+            inner
+                .by_run
+                .get_mut(&(domain, "w".to_string(), started.run_id.clone()))
+                .unwrap()
+                .signal_request_ids
+                .insert("sig-1".to_string());
+        }
+        store.remove_signal("d", &exec, "sig-1").unwrap();
+        // Closed runs report not-exists like Go's ErrNotExists.
+        store
+            .terminate(&TerminateWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(exec.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(store.remove_signal("d", &exec, "sig-1").is_err());
+        assert!(store
+            .schedule_decision_task("d", &WorkflowExecution::new("w", "nope"))
+            .is_err());
+    }
+
+    #[test]
+    fn sync_activity_updates_known_activities() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        // Unknown runs and activities are a success no-op.
+        store.sync_activity("d", &exec, 99, b"hb".to_vec(), 2);
+        store.sync_activity("d", &WorkflowExecution::new("w", "nope"), 1, vec![], 1);
+    }
+
+    #[test]
+    fn record_decision_started_paths() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        // Unknown schedule IDs are not found.
+        assert!(store
+            .record_decision_started("d", &exec, 99, "r1", "worker")
+            .is_err());
+        let recorded = store
+            .record_decision_started("d", &exec, 2, "r1", "worker")
+            .unwrap();
+        assert_eq!(recorded.scheduled_event_id, 2);
+        assert_eq!(recorded.workflow_type_name, "wt");
+        // Same request ID re-records idempotently.
+        let again = store
+            .record_decision_started("d", &exec, 2, "r1", "worker")
+            .unwrap();
+        assert_eq!(again.started_event_id, recorded.started_event_id);
+        // A different request ID on a started task is already-started.
+        assert!(matches!(
+            store.record_decision_started("d", &exec, 2, "r2", "worker"),
+            Err(RecordError::AlreadyStarted(_))
+        ));
+    }
+
+    #[test]
+    fn record_activity_started_paths() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        complete_with(
+            &store,
+            "d",
+            "tl",
+            vec![cadence_api::tasks::Decision {
+                decision_type: Some(cadence_api::enums::DecisionType::ScheduleActivityTask),
+                schedule_activity_task_decision_attributes: Some(
+                    cadence_api::tasks::ScheduleActivityTaskDecisionAttributes {
+                        activity_id: "a1".to_string(),
+                        activity_type: Some(cadence_api::types::ActivityType {
+                            name: "at".to_string(),
+                        }),
+                        ..Default::default()
+                    },
+                ),
+                ..Default::default()
+            }],
+        );
+        let schedule_id = {
+            let inner = store.inner.read().expect("execution store lock");
+            let domain = store.domain_id(&inner, "d");
+            *inner
+                .by_run
+                .get(&(domain, "w".to_string(), started.run_id.clone()))
+                .unwrap()
+                .pending_activities
+                .keys()
+                .next()
+                .unwrap()
+        };
+        let recorded = store
+            .record_activity_started("d", &exec, schedule_id, "worker")
+            .unwrap();
+        assert!(recorded.scheduled_event.event_id > 0);
+        // Re-record returns current metadata.
+        let again = store
+            .record_activity_started("d", &exec, schedule_id, "worker")
+            .unwrap();
+        assert_eq!(again.attempt, recorded.attempt);
+        assert!(store
+            .record_activity_started("d", &exec, 9999, "worker")
+            .is_err());
+    }
+
+    #[test]
+    fn record_child_completed_paths() {
+        use cadence_api::service_types::HistoryEvent;
+        use cadence_api::tasks::ChildWorkflowExecutionCompletedEventAttributes;
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let parent = store.start(&start_req("d", "parent", "req-1")).unwrap();
+        let parent_exec = WorkflowExecution::new("parent", parent.run_id.clone());
+        complete_with(
+            &store,
+            "d",
+            "tl",
+            vec![start_child_decision("d", "child", ParentClosePolicy::Abandon)],
+        );
+        let (initiated, child_exec) = {
+            let inner = store.inner.read().expect("execution store lock");
+            let domain = store.domain_id(&inner, "d");
+            let child = &inner
+                .children
+                .get(&(domain, "parent".to_string(), parent.run_id.clone()))
+                .expect("pending child link")[0];
+            (
+                child.initiated_event_id,
+                WorkflowExecution::new(&child.workflow_id, &child.run_id),
+            )
+        };
+        let completed_event = || HistoryEvent {
+            event_type: Some(EventType::ChildWorkflowExecutionCompleted),
+            child_workflow_execution_completed_event_attributes: Some(
+                ChildWorkflowExecutionCompletedEventAttributes {
+                    domain: "d".to_string(),
+                    workflow_execution: Some(cadence_api::types::WorkflowExecution {
+                        workflow_id: child_exec.workflow_id.clone(),
+                        run_id: child_exec.run_id.clone(),
+                    }),
+                    ..Default::default()
+                },
+            ),
+            ..Default::default()
+        };
+        // A non-terminal event is invalid.
+        assert!(store
+            .record_child_completed(
+                "d",
+                &parent_exec,
+                initiated,
+                &child_exec,
+                &HistoryEvent {
+                    event_type: Some(EventType::WorkflowExecutionSignaled),
+                    ..Default::default()
+                },
+            )
+            .is_err());
+        // Unknown initiated IDs are not found.
+        assert!(store
+            .record_child_completed("d", &parent_exec, 9999, &child_exec, &completed_event())
+            .is_err());
+        // Mismatched child workflow IDs are not found.
+        assert!(store
+            .record_child_completed(
+                "d",
+                &parent_exec,
+                initiated,
+                &WorkflowExecution::new("other", &child_exec.run_id),
+                &completed_event(),
+            )
+            .is_err());
+        store
+            .record_child_completed("d", &parent_exec, initiated, &child_exec, &completed_event())
+            .unwrap();
+        let kinds = event_kinds(&store, "d", &parent_exec);
+        assert!(kinds.contains(&EventType::ChildWorkflowExecutionCompleted));
+        // The link is consumed; a second completion is not found.
+        assert!(store
+            .record_child_completed("d", &parent_exec, initiated, &child_exec, &completed_event())
+            .is_err());
     }
 
     #[test]

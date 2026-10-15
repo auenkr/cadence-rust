@@ -53,6 +53,10 @@ pub struct AppState {
     pub executions: InMemoryExecutionStore,
     pub limits: Limits,
     pub pollers: Arc<std::sync::Mutex<PollerMap>>,
+    /// Shard-distributor namespaces and ownership. Memory-only like Go's
+    /// cached coordination state; namespaces appear on first heartbeat.
+    pub shard_distributor:
+        Arc<std::sync::Mutex<crate::grpc_shard::ShardDistributorState>>,
 }
 
 impl Default for AppState {
@@ -68,6 +72,9 @@ impl Default for AppState {
             executions: InMemoryExecutionStore::new(),
             limits: Limits::cadence_default(),
             pollers: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            shard_distributor: Arc::new(std::sync::Mutex::new(
+                crate::grpc_shard::ShardDistributorState::default(),
+            )),
         }
     }
 }

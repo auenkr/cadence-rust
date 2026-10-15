@@ -1854,6 +1854,9 @@ pub async fn serve(
         .with_service_name("uber.cadence.api.v1.ScheduleAPI")
         .with_service_name("uber.cadence.api.v1.SemaphoreAPI")
         .with_service_name("uber.cadence.admin.v1.AdminAPI")
+        .with_service_name("uber.cadence.sharddistributor.v1.ShardDistributorAPI")
+        .with_service_name("uber.cadence.sharddistributor.v1.ShardDistributorExecutorAPI")
+        .with_service_name("uber.cadence.sharddistributor.v1.ShardDistributorExecutorCanaryAPI")
         .build_v1()?;
     tonic::transport::Server::builder()
         .add_service(reflection)
@@ -1888,6 +1891,30 @@ pub async fn serve(
         .add_service(
             cadence_proto::admin::admin_api_server::AdminApiServer::new(
                 crate::grpc_admin::Admin { frontend: service.clone() },
+            )
+            .max_decoding_message_size(limit),
+        )
+        .add_service(
+            cadence_proto::sharddistributor::shard_distributor_api_server::ShardDistributorApiServer::new(
+                crate::grpc_shard::ShardDistributor {
+                    state: service.state.clone(),
+                },
+            )
+            .max_decoding_message_size(limit),
+        )
+        .add_service(
+            cadence_proto::sharddistributor::shard_distributor_executor_api_server::ShardDistributorExecutorApiServer::new(
+                crate::grpc_shard::ShardExecutor {
+                    state: service.state.clone(),
+                },
+            )
+            .max_decoding_message_size(limit),
+        )
+        .add_service(
+            cadence_proto::sharddistributor::shard_distributor_executor_canary_api_server::ShardDistributorExecutorCanaryApiServer::new(
+                crate::grpc_shard::ShardCanary {
+                    state: service.state.clone(),
+                },
             )
             .max_decoding_message_size(limit),
         )

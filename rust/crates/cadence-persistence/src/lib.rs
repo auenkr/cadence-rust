@@ -13,7 +13,8 @@ pub mod visibility;
 pub use domains::{DomainRecord, FailoverError, InMemoryDomainStore};
 pub use executions::{
     AsyncRequest, AsyncRequestKind, ExecutionRecord, HistoryPageError, InMemoryExecutionStore,
-    QueryError, ResetError, StartError, StoredPartitionConfig, TaskError, WorkflowMutationError,
+    MutableStateView, QueryError, RecordError, RecordedActivity, RecordedDecision, ResetError,
+    StartError, StoredPartitionConfig, TaskError, WorkflowMutationError,
 };
 pub use schedules::{ScheduleError, ScheduleRecord};
 pub use semaphores::{AcquireError, SemaphoreError, SemaphoreHold, SemaphoreMetadata};

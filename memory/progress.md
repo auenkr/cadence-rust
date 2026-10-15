@@ -911,3 +911,82 @@
   ShardDistributor (11); decision-level semaphore grant/release; archival
   backends. Public 57/57 COMPLETE, AdminAPI 39/39 COMPLETE, Matching 13/13
   COMPLETE, internal 67/107.
+
+- History batch H1 (+7 → 23/44, internal total 74/107): GetMutableState,
+  PollMutableState (immediate, no long-poll), DescribeMutableState,
+  history DescribeHistoryHost, ScheduleDecisionTask, RemoveSignalMutableState
+  (open-run signal dedup removal), SyncActivity (version-free heartbeat
+  apply, unknown runs no-op). Mutable-state reads share one engine view
+  (run/type/next-event/previous-started/task-list/sticky/close/size);
+  close-status maps to shared WorkflowState/CLOSE enums.
+- Validation: 258 workspace tests pass, strict clippy clean, deployed;
+  compat drivers all pass (internal:0 with H1 coverage, grpc:0, sdk:0).
+- Next: History H2 (record started ×2, child completed, replication ×6,
+  failover info, ratelimit, history replication/DLQ passthroughs);
+  ShardDistributor (11). Public 57/57 + Admin 39/39 + Matching 13/13
+  COMPLETE, internal 74/107.
+
+- History batch H2a (+3 → 26/44, internal total 78/107):
+  RecordDecisionTaskStarted (idempotent same-request re-record,
+  AlreadyStarted→FAILED_PRECONDITION on conflicting request, NOT_FOUND on
+  schedule mismatch/closed/unknown run), RecordActivityTaskStarted
+  (idempotent re-record returning current metadata, NOT_FOUND on unknown
+  schedule), RecordChildExecutionCompleted (parent-link initiated-ID match,
+  workflow-ID check, stale-state guard, terminal child event selection with
+  parent-link stamping; non-terminal → INVALID_ARGUMENT). Fixed 5
+  `needless_update` clippy errors in the new child-event converter and added
+  a `record_child_completed_paths` engine test (invalid/unknown/mismatch
+  rejections, completed-event append, link consumption).
+- Validation: 261 workspace tests pass, strict clippy clean, build clean,
+  deployed; compat drivers all pass (internal:0 with new record-started
+  idempotency/conflict/NOT_FOUND coverage, grpc:0, sdk:0).
+- Next: History H2b (ReplicateEventsV2, SyncShardStatus, shard/queue ops,
+  replication/DLQ passthroughs, failover markers/info, cross-cluster,
+  RatelimitUpdate); ShardDistributor (11). Public 57/57 + Admin 39/39 +
+  Matching 13/13 COMPLETE, internal 78/107.
+
+- History batch H2b COMPLETE (+18 → 44/44, internal total 96/107).
+  ReplicateEventsV2 (Go-exact domain/workflow validation, validated no-op:
+  no passive replicas or version branches on a single host), SyncShardStatus
+  (Go-exact source-cluster/timestamp validation, no-op), CloseShard/
+  RemoveTask/ResetQueue (shard-range check; transfer/timer/replication and
+  transfer/timer type gates with Go's exact "Invalid task type"), DescribeQueue
+  (live dispatch depths, same shape as admin), GetReplicationMessages (empty
+  map; cluster-name validation), GetDLQReplicationMessages (empty),
+  ReapplyEvents (shared engine signal-reapply path incl. the missing-blob
+  quirk), Count/Read/Purge/MergeDLQMessages (empty/validated no-ops),
+  NotifyFailoverMarkers (accepted no-op, Go validates nothing), cross-cluster
+  fetch/complete (Go-exact deprecated-feature INVALID_ARGUMENT, incl. the
+  with/without trailing period distinction), GetFailoverInfo (known domain →
+  Go-exact coordinator record-not-found; no graceful-failover tracking on a
+  single host), RatelimitUpdate (accepted, empty response; no global
+  aggregation). Fixed an `or_patterns` clippy range lint in the new gates.
+- Validation: 261 workspace tests pass, strict clippy clean, build clean,
+  deployed; compat drivers all pass (internal:0 with full H2b coverage
+  incl. deprecated cross-cluster errors, grpc:0, sdk:0).
+- Next: ShardDistributor (11: Ping, Heartbeat, GetShardOwner, InspectShard,
+  namespace ×5, Drain/Undrain/GetDrained, ForceReset). Public 57/57 + Admin
+  39/39 + Matching 13/13 + History 44/44 COMPLETE, internal 96/107.
+
+- ShardDistributor batch COMPLETE (+11 → 107/107; every RPC in all 13
+  services now has a concrete adapter). New `grpc_shard` module on the
+  frontend port with in-memory namespace/ownership state: Heartbeat
+  auto-creates ephemeral namespaces, validates metadata with Go-exact limits
+  (32 keys / 128-char keys / 512KB values) and echoes reported shards as
+  READY with `MIGRATION_MODE_ONBOARDED`; GetShardOwner auto-assigns missing
+  ephemeral shards to this host while InspectShard stays read-only; unknown
+  namespaces/shards are NOT_FOUND; WatchNamespaceState delivers a snapshot
+  then holds the stream; ListNamespaces reports live namespaces as onboarded;
+  Drain/Undrain/GetDrained mirror upstream exactly (INTERNAL "not yet
+  implemented" — upstream leaves them unimplemented too); ForceResetNamespace
+  clears executor/owner state with a deleted-key count. `tokio-stream` added
+  for the watch stream; fixed the tonic-0.12 `BoxStream` return shape.
+- Validation: 263 workspace tests pass (incl. 2 new shard unit tests),
+  strict clippy clean, build clean, deployed; compat drivers all pass
+  (internal:0 with full shard coverage — heartbeat/owner/inspect/ephemeral/
+  state/watch/list/drain-errors/reset — grpc:0, sdk:0).
+- Next: engine-depth gaps behind the adapter surface (durable SQL/NoSQL
+  persistence, version branches, replication apply, distributed
+  ownership/failover, worker background roles, archival backends, dynamic
+  config/quotas/auth). All 13/164 RPC definitions have concrete adapters;
+  adapter presence does not prove complete engine behavior.

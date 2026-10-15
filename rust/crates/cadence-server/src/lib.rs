@@ -15,6 +15,8 @@ pub mod grpc_internal;
 pub mod grpc_matching;
 #[allow(clippy::result_large_err)]
 pub mod grpc_admin;
+#[allow(clippy::result_large_err)]
+pub mod grpc_shard;
 pub mod handlers;
 pub mod service;
 pub mod tchannel;

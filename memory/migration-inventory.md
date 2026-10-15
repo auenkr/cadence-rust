@@ -2,7 +2,7 @@
 
 Public gRPC adapters: 57 / 57.
 
-Internal/administrative gRPC adapters: 68 / 107.
+Internal/administrative gRPC adapters: 107 / 107.
 
 This audit counts concrete public gRPC adapters, not complete Go behavior.
 An adapter can still depend on incomplete engine behavior. Generated default
@@ -76,13 +76,13 @@ Unported: none.
 
 ## HistoryAPI (internal/administrative)
 
-Adapters present: 16 / 44.
+Adapters present: 44 / 44.
 
 Definitions: go/proto/internal/uber/cadence/history/v1/service.proto.
 
-Present: StartWorkflowExecution, SignalWorkflowExecution, SignalWithStartWorkflowExecution, ResetWorkflowExecution, TerminateWorkflowExecution, DescribeWorkflowExecution, QueryWorkflow, ResetStickyTaskList, RespondDecisionTaskCompleted, RespondDecisionTaskFailed, RespondActivityTaskCompleted, RespondActivityTaskFailed, RespondActivityTaskCanceled, RecordActivityTaskHeartbeat, RequestCancelWorkflowExecution, RefreshWorkflowTasks.
+Present: StartWorkflowExecution, SignalWorkflowExecution, SignalWithStartWorkflowExecution, ResetWorkflowExecution, TerminateWorkflowExecution, DescribeWorkflowExecution, QueryWorkflow, ResetStickyTaskList, GetMutableState, PollMutableState, RecordDecisionTaskStarted, RespondDecisionTaskCompleted, RespondDecisionTaskFailed, RecordActivityTaskStarted, RespondActivityTaskCompleted, RespondActivityTaskFailed, RespondActivityTaskCanceled, RecordActivityTaskHeartbeat, RequestCancelWorkflowExecution, RemoveSignalMutableState, ScheduleDecisionTask, RecordChildExecutionCompleted, ReplicateEventsV2, SyncShardStatus, SyncActivity, DescribeMutableState, DescribeHistoryHost, CloseShard, RemoveTask, ResetQueue, DescribeQueue, GetReplicationMessages, GetDLQReplicationMessages, ReapplyEvents, RefreshWorkflowTasks, CountDLQMessages, ReadDLQMessages, PurgeDLQMessages, MergeDLQMessages, NotifyFailoverMarkers, GetCrossClusterTasks, RespondCrossClusterTasksCompleted, GetFailoverInfo, RatelimitUpdate.
 
-Unported: GetMutableState, PollMutableState, RecordDecisionTaskStarted, RecordActivityTaskStarted, RemoveSignalMutableState, ScheduleDecisionTask, RecordChildExecutionCompleted, ReplicateEventsV2, SyncShardStatus, SyncActivity, DescribeMutableState, DescribeHistoryHost, CloseShard, RemoveTask, ResetQueue, DescribeQueue, GetReplicationMessages, GetDLQReplicationMessages, ReapplyEvents, CountDLQMessages, ReadDLQMessages, PurgeDLQMessages, MergeDLQMessages, NotifyFailoverMarkers, GetCrossClusterTasks, RespondCrossClusterTasksCompleted, GetFailoverInfo, RatelimitUpdate.
+Unported: none.
 
 ## MatchingAPI (internal/administrative)
 
@@ -96,37 +96,40 @@ Unported: none.
 
 ## ShardDistributorExecutorCanaryAPI (internal/administrative)
 
-Adapters present: 0 / 1.
+Adapters present: 1 / 1.
 
 Definitions: rust/proto/shard-manager/uber/cadence/sharddistributor/v1/canary.proto.
 
-Present: none.
+Present: Ping.
 
-Unported: Ping.
+Unported: none.
 
 ## ShardDistributorExecutorAPI (internal/administrative)
 
-Adapters present: 0 / 1.
+Adapters present: 1 / 1.
 
 Definitions: rust/proto/shard-manager/uber/cadence/sharddistributor/v1/executor.proto.
 
-Present: none.
+Present: Heartbeat.
 
-Unported: Heartbeat.
+Unported: none.
 
 ## ShardDistributorAPI (internal/administrative)
 
-Adapters present: 0 / 9.
+Adapters present: 9 / 9.
 
 Definitions: rust/proto/shard-manager/uber/cadence/sharddistributor/v1/service.proto.
 
-Present: none.
+Present: GetShardOwner, InspectShard, GetNamespaceState, WatchNamespaceState, ListNamespaces, DrainShards, UndrainShards, GetDrainedShards, ForceResetNamespace.
 
-Unported: GetShardOwner, InspectShard, GetNamespaceState, WatchNamespaceState, ListNamespaces, DrainShards, UndrainShards, GetDrainedShards, ForceResetNamespace.
+Unported: none.
 
 ## Other required work
 
-- Internal history and matching gRPC APIs, admin APIs, shard distributor, service discovery and membership, ownership/failover, worker service internals.
+- Service discovery and membership, distributed ownership/failover, worker
+  service background roles (scanners, archival, replication, batch), and
+  service lifecycle/independence. All 164 RPC adapters exist, but many encode
+  honest single-host semantics; distributed behavior remains unported.
 - Production SQL and NoSQL persistence backends, Go schema compatibility, transactions, visibility backends, indexing queues, and crash durability. Current JSON snapshots are development persistence.
 - Buffered history events and their event-ID relationships, closing decisions with unhandled events, task and workflow timeout engines, complete workflow retry/cron behavior, reset/restart, sticky task execution, local activity dispatch, and closed-workflow queries.
 - Domain UUID isolation after deletion/recreation, complete global/active-active domain validation and failover, XDC and replication, archival, batch workflows, schedules, semaphores, scanners and repair/diagnostics.
