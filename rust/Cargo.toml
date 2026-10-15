@@ -6,6 +6,7 @@ members = [
     "crates/cadence-persistence",
     "crates/cadence-server",
     "crates/cadence-thrift",
+    "crates/cadence-proto",
 ]
 
 [workspace.package]

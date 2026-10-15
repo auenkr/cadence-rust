@@ -2,8 +2,12 @@
 //! `go/service/frontend/api/handler.go` (`validateStartWorkflowExecutionRequest`),
 //! and `go/common/util.go` (`ValidateRetryPolicy`, `IsValidIDLength`).
 
+use cadence_common::cron;
+
 use crate::errors::BadRequestError;
-use crate::types::{RetryPolicy, StartWorkflowExecutionRequest, WorkflowExecution};
+use crate::types::{
+    FailoverDomainRequest, RetryPolicy, StartWorkflowExecutionRequest, WorkflowExecution,
+};
 
 // ---------------------------------------------------------------------------
 // Sentinel validation errors (messages match Go exactly)
@@ -222,7 +226,45 @@ pub fn validate_start_workflow_execution_request(
         Some(v) if v < 0 => return Err(err_invalid_jitter_start_seconds()),
         _ => {}
     }
+    validate_cron_schedule(r)?;
     Ok(())
+}
+
+/// Go's handler checks: a non-empty cron schedule must parse and have a next
+/// firing time, and jitter must not exceed the schedule interval.
+fn validate_cron_schedule(r: &StartWorkflowExecutionRequest) -> Result<(), BadRequestError> {
+    let jitter = r.jitter_start_seconds.unwrap_or(0);
+    if r.cron_schedule.is_empty() {
+        return Ok(());
+    }
+    let now = now_nanos();
+    cron::validate_schedule(&r.cron_schedule, cron::naive_from_nanos(now))
+        .map_err(BadRequestError::new)?;
+    if jitter > 0 {
+        // Go validates with zero start/end times to get the exact interval.
+        let backoff_seconds = cron::get_backoff_for_next_schedule_in_seconds(
+            &r.cron_schedule,
+            cron::naive_from_nanos(0),
+            cron::naive_from_nanos(0),
+            r.cron_overlap_policy.map(|p| p as i32),
+            cron::naive_from_nanos(now),
+            std::time::Duration::ZERO,
+        )
+        .map_err(BadRequestError::new)?;
+        if jitter > backoff_seconds {
+            return Err(BadRequestError::new(
+                "A valid JitterStartSeconds is not set on request (larger than cron duration).",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn now_nanos() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or_default()
 }
 
 fn err_invalid_delay_start_seconds() -> BadRequestError {
@@ -304,6 +346,175 @@ pub fn validate_poll_request(
         Some(t) if t.name.is_empty() => Err(err_task_list_not_set()),
         _ => Ok(()),
     }
+}
+
+/// Port of Go `ValidateFailoverDomainRequest`: domain name is required,
+/// plus either an active cluster name or active clusters. A set failover
+/// timeout must be positive. (Go's maximum-timeout and lockdown checks read
+/// dynamic config not yet ported; see the remaining-work inventory.)
+pub fn validate_failover_domain_request(
+    req: Option<&FailoverDomainRequest>,
+) -> Result<(), BadRequestError> {
+    let r = match req {
+        None => return Err(err_request_not_set()),
+        Some(r) => r,
+    };
+    if r.domain_name.is_empty() {
+        return Err(err_domain_not_set());
+    }
+    if r.domain_active_cluster_name.is_none() && r.active_clusters.is_none() {
+        return Err(BadRequestError::new(
+            "DomainActiveClusterName or ActiveClusters must be provided to failover the domain",
+        ));
+    }
+    if let Some(timeout) = r.failover_timeout_in_seconds {
+        if timeout <= 0 {
+            return Err(BadRequestError::new(
+                "FailoverTimeoutInSeconds must be positive",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Port of Go `ValidateListArchivedWorkflowExecutionsRequest`: the domain
+/// is required and the effective page size (default 1000 like Go's
+/// `VisibilityMaxPageSize`) must not exceed 10000 (Go's
+/// `VisibilityArchivalQueryMaxPageSize`).
+pub fn validate_list_archived_request(
+    req: Option<&crate::service_types::ListArchivedWorkflowExecutionsRequest>,
+) -> Result<i32, BadRequestError> {
+    let r = match req {
+        None => return Err(err_request_not_set()),
+        Some(r) => r,
+    };
+    if r.domain.is_empty() {
+        return Err(err_domain_not_set());
+    }
+    let size = if r.page_size <= 0 { 1000 } else { r.page_size };
+    if size > 10000 {
+        return Err(BadRequestError::new(
+            "Pagesize is larger than allowed 10000",
+        ));
+    }
+    Ok(size)
+}
+
+/// Port of Go schedule validation (`handler_schedule.go`):
+/// spec time ranges, action completeness, and the SKIP_NEW + CATCH_UP_ALL
+/// incompatibility. Cron expressions are checked with the shared cron port
+/// (same `backoff.ValidateSchedule` role); search-attribute keys starting
+/// with `CadenceSchedule` are reserved.
+pub fn validate_schedule_spec(
+    spec: Option<&crate::schedule::ScheduleSpec>,
+) -> Result<(), BadRequestError> {
+    let Some(spec) = spec else {
+        return Ok(());
+    };
+    match (spec.start_time_nano, spec.end_time_nano) {
+        (Some(start), Some(end)) if end <= start => {
+            return Err(BadRequestError::new("Spec.EndTime must be after Spec.StartTime."))
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Full action validation used at create/update time: the start-workflow
+/// action must be complete on its own. Matches Go's exact messages.
+pub fn validate_schedule_action_complete(
+    action: Option<&crate::schedule::ScheduleAction>,
+) -> Result<(), BadRequestError> {
+    let sw = match action.and_then(|a| a.start_workflow.as_ref()) {
+        Some(sw) => sw,
+        None => {
+            return Err(BadRequestError::new(
+                "Action.StartWorkflow is not set on request.",
+            ));
+        }
+    };
+    if sw.workflow_type.as_ref().is_none_or(|t| t.name.is_empty()) {
+        return Err(BadRequestError::new(
+            "Action.StartWorkflow.WorkflowType.Name is not set on request.",
+        ));
+    }
+    if sw.task_list.as_ref().is_none_or(|t| t.name.is_empty()) {
+        return Err(BadRequestError::new(
+            "Action.StartWorkflow.TaskList.Name is not set on request.",
+        ));
+    }
+    match sw.execution_start_to_close_timeout_seconds {
+        Some(v) if v > 0 => {}
+        _ => return Err(err_invalid_execution_timeout()),
+    }
+    validate_retry_policy(sw.retry_policy.as_ref())
+}
+
+pub fn validate_schedule_policies(
+    policies: Option<&crate::schedule::SchedulePolicies>,
+) -> Result<(), BadRequestError> {
+    use crate::enums::{ScheduleCatchUpPolicy, ScheduleOverlapPolicy};
+    let Some(policies) = policies else {
+        return Ok(());
+    };
+    if policies.overlap_policy == Some(ScheduleOverlapPolicy::SkipNew)
+        && policies.catch_up_policy == Some(ScheduleCatchUpPolicy::All)
+    {
+        return Err(BadRequestError::new(
+            "SKIP_NEW overlap policy with CATCH_UP_ALL catch-up policy is invalid: caught-up fires would be immediately skipped due to overlap with the previous run.",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_schedule_search_attributes(
+    search_attributes: Option<&crate::types::SearchAttributes>,
+) -> Result<(), BadRequestError> {
+    let Some(attrs) = search_attributes
+        .as_ref()
+        .and_then(|a| a.indexed_fields.as_ref())
+    else {
+        return Ok(());
+    };
+    for key in attrs.keys() {
+        if key.starts_with("CadenceSchedule") {
+            return Err(BadRequestError::new(format!(
+                "search attribute key {key:?} is reserved for internal use"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Port of Go `CreateSemaphore` validation: domain and semaphore names
+/// are required, capacity must be positive, and bucket capacity must fit
+/// Go's `[0, 250]` range (`MaxSemaphoreBucketSize`).
+pub fn validate_create_semaphore_request(
+    req: Option<&crate::types::CreateSemaphoreRequest>,
+) -> Result<(), BadRequestError> {
+    let r = match req {
+        None => return Err(err_request_not_set()),
+        Some(r) => r,
+    };
+    if r.domain.is_empty() {
+        return Err(err_domain_not_set());
+    }
+    if r.semaphore_name.is_empty() {
+        return Err(BadRequestError::new("SemaphoreName is not set on request."));
+    }
+    if r.capacity <= 0 {
+        return Err(BadRequestError::new(format!(
+            "Capacity must be positive, got {}.",
+            r.capacity
+        )));
+    }
+    if !(0..=250).contains(&r.bucket_capacity) {
+        return Err(BadRequestError::new(format!(
+            "BucketCapacity must be between 0 and 250, got {}.",
+            r.bucket_capacity
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -408,6 +619,118 @@ mod tests {
             err.message,
             "MaximumAttempts and ExpirationIntervalInSeconds are both 0. At least one of them must be specified."
         );
+    }
+
+    #[test]
+    fn semaphore_validation_matches_go() {
+        use crate::types::CreateSemaphoreRequest;
+        assert_eq!(
+            validate_create_semaphore_request(None).unwrap_err(),
+            err_request_not_set()
+        );
+        assert_eq!(
+            validate_create_semaphore_request(Some(&CreateSemaphoreRequest::default()))
+                .unwrap_err(),
+            err_domain_not_set()
+        );
+        let no_name = CreateSemaphoreRequest {
+            domain: "d".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_create_semaphore_request(Some(&no_name)).unwrap_err().message,
+            "SemaphoreName is not set on request."
+        );
+        let bad_capacity = CreateSemaphoreRequest {
+            domain: "d".to_string(),
+            semaphore_name: "s".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_create_semaphore_request(Some(&bad_capacity)).unwrap_err().message,
+            "Capacity must be positive, got 0."
+        );
+        let bad_bucket = CreateSemaphoreRequest {
+            domain: "d".to_string(),
+            semaphore_name: "s".to_string(),
+            capacity: 4,
+            bucket_capacity: 251,
+        };
+        assert_eq!(
+            validate_create_semaphore_request(Some(&bad_bucket)).unwrap_err().message,
+            "BucketCapacity must be between 0 and 250, got 251."
+        );
+    }
+
+    #[test]
+    fn archived_request_validation_matches_go() {
+        use crate::service_types::ListArchivedWorkflowExecutionsRequest;
+        assert_eq!(
+            validate_list_archived_request(None).unwrap_err(),
+            err_request_not_set()
+        );
+        assert_eq!(
+            validate_list_archived_request(Some(&ListArchivedWorkflowExecutionsRequest::default()))
+                .unwrap_err(),
+            err_domain_not_set()
+        );
+        // Zero page size takes Go's 1000 default and passes.
+        assert_eq!(
+            validate_list_archived_request(Some(&ListArchivedWorkflowExecutionsRequest {
+                domain: "d".to_string(),
+                ..Default::default()
+            }))
+            .unwrap(),
+            1000
+        );
+        let too_big = ListArchivedWorkflowExecutionsRequest {
+            domain: "d".to_string(),
+            page_size: 10001,
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_list_archived_request(Some(&too_big)).unwrap_err().message,
+            "Pagesize is larger than allowed 10000"
+        );
+    }
+
+    #[test]
+    fn failover_request_validation_matches_go() {
+        use crate::types::FailoverDomainRequest;
+        assert_eq!(
+            validate_failover_domain_request(None).unwrap_err(),
+            err_request_not_set()
+        );
+        assert_eq!(
+            validate_failover_domain_request(Some(&FailoverDomainRequest::default())).unwrap_err(),
+            err_domain_not_set()
+        );
+        let missing_target = FailoverDomainRequest {
+            domain_name: "d".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_failover_domain_request(Some(&missing_target))
+                .unwrap_err()
+                .message,
+            "DomainActiveClusterName or ActiveClusters must be provided to failover the domain"
+        );
+        let bad_timeout = FailoverDomainRequest {
+            domain_name: "d".to_string(),
+            domain_active_cluster_name: Some("c".to_string()),
+            failover_timeout_in_seconds: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_failover_domain_request(Some(&bad_timeout)).unwrap_err().message,
+            "FailoverTimeoutInSeconds must be positive"
+        );
+        let ok = FailoverDomainRequest {
+            domain_name: "d".to_string(),
+            domain_active_cluster_name: Some("c".to_string()),
+            ..Default::default()
+        };
+        assert!(validate_failover_domain_request(Some(&ok)).is_ok());
     }
 
     #[test]

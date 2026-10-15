@@ -45,11 +45,7 @@ func main() {
 		Description:                            strptr("samples domain for rust cadence"),
 		OwnerEmail:                             strptr("owner@example.com"),
 		WorkflowExecutionRetentionPeriodInDays: int32ptr(7),
-		ActiveClusterName:                      strptr("active"),
-		Clusters: []*shared.ClusterReplicationConfiguration{
-			{ClusterName: strptr("active")},
-		},
-		EmitMetric: boolptr(true),
+		EmitMetric:                             boolptr(true),
 	})
 	if err != nil {
 		fmt.Println("Register (may already exist):", err)

@@ -1,0 +1,208 @@
+// Copyright (c) 2020 Uber Technologies, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+syntax = "proto3";
+
+package uber.cadence.sharddistributor.v1;
+
+import "google/protobuf/timestamp.proto";
+import "uber/cadence/sharddistributor/v1/executor.proto";
+
+option go_package = "github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1;sharddistributorv1";
+
+// ShardDistributorAPI is used to query shard distributor for the current owner of a shard
+service ShardDistributorAPI {
+
+  // GetShardOwner returns the owner of a specific shard. For ephemeral namespaces, a missing
+  // shard may be created and assigned; use InspectShard for a read-only lookup.
+  rpc GetShardOwner(GetShardOwnerRequest) returns (GetShardOwnerResponse);
+
+  // InspectShard returns the current owner of a shard from storage only. Unlike GetShardOwner,
+  // it never creates or assigns an ephemeral shard when the shard key is absent.
+  rpc InspectShard(InspectShardRequest) returns (InspectShardResponse);
+
+  // GetNamespaceState returns a snapshot of all executors in a namespace and their assigned shards
+  rpc GetNamespaceState(GetNamespaceStateRequest) returns (GetNamespaceStateResponse);
+
+  // WatchNamespaceState streams updates about executors and their assigned shards for a namespace
+  rpc WatchNamespaceState(WatchNamespaceStateRequest) returns (stream WatchNamespaceStateResponse);
+
+  // ListNamespaces returns the static namespace configuration of the shard-manager fleet.
+  // This reflects the server's loaded shardDistribution.namespaces config
+  rpc ListNamespaces(ListNamespacesRequest) returns (ListNamespacesResponse);
+
+  // DrainShards marks the given shards as drained for the namespace.
+  // Drained shards are removed from their current executor on the next
+  // rebalance and are not eligible for assignment until UndrainShards is
+  // called for the same shard keys.
+  rpc DrainShards(DrainShardsRequest) returns (DrainShardsResponse);
+
+  // UndrainShards removes the given shards from the drained list for the
+  // namespace, making them eligible for assignment again.
+  rpc UndrainShards(UndrainShardsRequest) returns (UndrainShardsResponse);
+
+  // GetDrainedShards returns the list of shard keys currently marked as
+  // drained for the namespace.
+  rpc GetDrainedShards(GetDrainedShardsRequest) returns (GetDrainedShardsResponse);
+
+  // ForceResetNamespace deletes all etcd state for a namespace: leader key,
+  // executor heartbeats/status/metadata, shard assignments, and shard
+  // statistics. The namespace itself remains configured; executors will
+  // re-register on their next heartbeat and the new leader will rebuild
+  // assignments
+  rpc ForceResetNamespace(ForceResetNamespaceRequest) returns (ForceResetNamespaceResponse);
+}
+
+message GetShardOwnerRequest {
+  string shard_key = 1;
+  string namespace = 2;
+}
+
+message GetShardOwnerResponse {
+  string owner = 1;
+  string namespace = 2;
+  map<string, string> metadata = 3;
+}
+
+message InspectShardRequest {
+  string shard_key = 1;
+  string namespace = 2;
+}
+
+message InspectShardResponse {
+  string owner = 1;
+  string namespace = 2;
+  map<string, string> metadata = 3;
+}
+
+message NamespaceNotFoundError {
+  string namespace = 1;
+}
+
+message ShardNotFoundError {
+  string namespace = 1;
+  string shard_key = 2;
+}
+
+message ShardDrainedError {
+  string namespace = 1;
+  string shard_key = 2;
+}
+
+message GetNamespaceStateRequest {
+  string namespace = 1;
+}
+
+message GetNamespaceStateResponse {
+  string namespace = 1;
+  repeated NamespaceExecutorState executors = 2;
+}
+
+message NamespaceExecutorState {
+  string executor_id = 1;
+  ExecutorStatus status = 2;
+  google.protobuf.Timestamp last_heartbeat = 3;
+  map<string, string> metadata = 4;
+  repeated AssignedShardState assigned_shards = 5;
+}
+
+message AssignedShardState {
+  string shard_key = 1;
+  AssignmentStatus assignment_status = 2;
+  // Mod revision of the executor's assigned_state etcd key when this snapshot was read.
+  int64 assigned_state_mod_revision = 3;
+}
+
+message WatchNamespaceStateRequest {
+  string namespace = 1;
+}
+
+message WatchNamespaceStateResponse {
+  // Executor information with assigned shards
+  repeated ExecutorInfo executors = 1;
+}
+
+message ExecutorInfo {
+  string executor_id = 1;
+  map<string, string> metadata = 2;
+  repeated Shard shards = 3;
+}
+
+message Shard {
+  string shard_key = 1;
+}
+
+message ListNamespacesRequest {}
+
+message ListNamespacesResponse {
+  repeated NamespaceConfig namespaces = 1;
+}
+
+// NamespaceConfig is the operator-visible static configuration for a namespace,
+// loaded from the server's shardDistribution.namespaces YAML config at startup.
+message NamespaceConfig {
+  // Name is the namespace identifier
+  string name = 1;
+  // Type is "fixed" or "ephemeral".
+  string type = 2;
+  // Mode is the migration mode (e.g. "onboarded", "local_pass", "distributed_pass").
+  string mode = 3;
+  // ShardNum is the configured number of shards. Only for type="fixed".
+  int64 shard_num = 4;
+}
+
+message DrainShardsRequest {
+  string namespace = 1;
+  repeated string shard_keys = 2;
+}
+
+message DrainShardsResponse {
+  // shard_keys that are currently drained for the namespace after this call
+  // (includes shards that were already drained before the call).
+  repeated string drained_shard_keys = 1;
+}
+
+message UndrainShardsRequest {
+  string namespace = 1;
+  repeated string shard_keys = 2;
+}
+
+message UndrainShardsResponse {
+  // shard_keys that were actually removed from the drained list by this call.
+  repeated string undrained_shard_keys = 1;
+}
+
+message GetDrainedShardsRequest {
+  string namespace = 1;
+}
+
+message GetDrainedShardsResponse {
+  string namespace = 1;
+  repeated string shard_keys = 2;
+}
+
+message ForceResetNamespaceRequest {
+  string namespace = 1;
+}
+
+message ForceResetNamespaceResponse {
+  // deleted_keys is the number of etcd keys removed under the namespace prefix
+  int64 deleted_keys = 1;
+}

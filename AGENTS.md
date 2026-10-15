@@ -19,3 +19,5 @@ No program logic change.
 The existing sdk should work for this. 
 
 Use tmux session: cadence-rust for running long process
+
+After each compaction, save the progress in memory and commit and push changes to origin

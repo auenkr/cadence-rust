@@ -13,8 +13,8 @@ use std::sync::{Arc, RwLock};
 use cadence_api::enums::{
     CancelExternalWorkflowExecutionFailedCause, ChildWorkflowExecutionFailedCause,
     DecisionTaskFailedCause, DecisionType, EventType, ParentClosePolicy, PendingActivityState,
-    PendingDecisionState, SignalExternalWorkflowExecutionFailedCause, WorkflowExecutionCloseStatus,
-    WorkflowIDReusePolicy,
+    PendingDecisionState, SignalExternalWorkflowExecutionFailedCause, TimeoutType,
+    WorkflowExecutionCloseStatus, WorkflowIDReusePolicy,
 };
 use cadence_api::errors::{
     BadRequestError, EntityNotExistsError, WorkflowExecutionAlreadyCompletedError,
@@ -53,6 +53,38 @@ use cadence_api::types::{
     TerminateWorkflowExecutionRequest, WorkflowExecution, WorkflowType,
 };
 
+const HISTORY_PAGE_SIZE: usize = 1000;
+#[derive(serde::Serialize, serde::Deserialize)]
+struct HistoryCursor {
+    domain: String,
+    workflow_id: String,
+    run_id: String,
+    next: usize,
+    end: usize,
+    close_only: bool,
+    #[serde(default)]
+    transient_events: Vec<HistoryEvent>,
+}
+fn encode_history_cursor(
+    domain: &str,
+    execution: &WorkflowExecution,
+    next: usize,
+    end: usize,
+    close_only: bool,
+    transient_events: &[HistoryEvent],
+) -> Vec<u8> {
+    serde_json::to_vec(&HistoryCursor {
+        domain: domain.to_string(),
+        workflow_id: execution.workflow_id.clone(),
+        run_id: execution.run_id.clone(),
+        next,
+        end,
+        close_only,
+        transient_events: transient_events.to_vec(),
+    })
+    .expect("history cursor contains only strings and integers")
+}
+
 /// Milliseconds since the Unix epoch.
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
@@ -75,12 +107,46 @@ pub struct ExecutionRecord {
     pub start_time_millis: i64,
     pub close_time_millis: Option<i64>,
     pub history: Vec<HistoryEvent>,
+    #[serde(default)]
+    pub(crate) buffered_events: Vec<HistoryEvent>,
+    #[serde(default)]
+    pub(crate) buffer_event_sequence: i64,
     pub(crate) pending_decision: Option<PendingDecision>,
     pub(crate) pending_activities: HashMap<i64, PendingActivity>,
     pub(crate) pending_timers: HashMap<String, PendingTimer>,
     pub(crate) pending_queries: std::collections::VecDeque<PendingQuery>,
     pub(crate) parent: Option<ParentRef>,
     pub(crate) prev_started_event_id: Option<i64>,
+    #[serde(default)]
+    pub(crate) signal_request_ids: std::collections::HashSet<String>,
+    /// Go execution-info `CreateRequestID`: the request ID that created this
+    /// run (start request ID, reset request ID on reset runs). Used for
+    /// reset-request dedup.
+    #[serde(default)]
+    pub(crate) create_request_id: String,
+    /// Go's `FirstDecisionTaskBackoffSeconds` for this run; the first decision
+    /// task is only scheduled once it elapses.
+    #[serde(default)]
+    pub(crate) first_decision_task_backoff_seconds: i32,
+    /// Go's execution-info `ExpirationTime`, nanoseconds since the epoch.
+    #[serde(default)]
+    pub(crate) expiration_time_nanos: Option<i64>,
+    /// Go's execution-info `Attempt`: 0 for the first run and incremented on
+    /// each retry continue-as-new.
+    #[serde(default)]
+    pub(crate) attempt: i32,
+    /// Wall clock (millis) when the delayed first decision task becomes due.
+    /// Cleared as soon as the decision task is scheduled.
+    #[serde(default)]
+    pub(crate) first_decision_due_millis: Option<i64>,
+    #[serde(default)]
+    pub(crate) jitter_start_seconds: i32,
+    #[serde(default)]
+    pub(crate) sticky_task_list: Option<String>,
+    #[serde(default)]
+    pub(crate) sticky_schedule_to_start_timeout_seconds: i32,
+    #[serde(default)]
+    pub(crate) last_updated_millis: i64,
 }
 
 /// Parent link for a child workflow, mirroring Go's parent execution info.
@@ -90,6 +156,8 @@ pub(crate) struct ParentRef {
     pub(crate) workflow_id: String,
     pub(crate) run_id: String,
     pub(crate) initiated_event_id: i64,
+    #[serde(default)]
+    pub(crate) started_event_id: i64,
 }
 
 /// Child link tracked on the parent, mirroring Go's child execution infos.
@@ -125,11 +193,24 @@ pub(crate) struct PendingDecision {
     pub(crate) scheduled_event_id: i64,
     pub(crate) started_event_id: Option<i64>,
     pub(crate) attempt: i64,
+    #[serde(default)]
+    pub(crate) scheduled_time_millis: Option<i64>,
+    #[serde(default)]
+    pub(crate) started_time_millis: Option<i64>,
+    #[serde(default)]
+    pub(crate) identity: String,
+    #[serde(default)]
+    pub(crate) request_id: String,
+    #[serde(default)]
+    pub(crate) task_list_name: Option<String>,
+    #[serde(default)]
+    pub(crate) sticky: bool,
+    #[serde(default)]
+    pub(crate) schedule_to_start_timeout_seconds: Option<i32>,
 }
 
 /// A scheduled activity, mirroring the pending-activity lifecycle.
-/// Timeout/retry fields are populated for the future timeout engine;
-/// firing is a follow-up.
+/// Activity deadlines and transient retry state follow Go mutable state.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[allow(dead_code)]
 pub(crate) struct PendingActivity {
@@ -145,20 +226,68 @@ pub(crate) struct PendingActivity {
     pub(crate) heartbeat_details: Vec<u8>,
     pub(crate) queued: bool,
     pub(crate) retry_ready_millis: Option<i64>,
+    #[serde(default)]
+    pub(crate) schedule_to_start_timeout_seconds: Option<i32>,
     pub(crate) schedule_to_close_timeout_seconds: Option<i32>,
     pub(crate) start_to_close_timeout_seconds: Option<i32>,
     pub(crate) heartbeat_timeout_seconds: Option<i32>,
     pub(crate) scheduled_time_millis: i64,
+    #[serde(default)]
+    pub(crate) attempt_scheduled_time_millis: Option<i64>,
+    #[serde(default)]
+    pub(crate) started_time_millis: Option<i64>,
+    #[serde(default)]
+    pub(crate) last_heartbeat_time_millis: Option<i64>,
+    #[serde(default)]
+    pub(crate) started_identity: String,
+    #[serde(default)]
+    pub(crate) started_request_id: String,
+    #[serde(default)]
+    pub(crate) last_failure_reason: Option<String>,
+    #[serde(default)]
+    pub(crate) last_failure_details: Vec<u8>,
+    #[serde(default)]
+    pub(crate) last_failure_options: Option<cadence_api::types::FailureOptions>,
     pub(crate) retry_policy: Option<RetryPolicy>,
     pub(crate) header: Option<Header>,
 }
 
 impl ExecutionRecord {
-    fn is_open(&self) -> bool {
+    pub(crate) fn is_open(&self) -> bool {
         self.close_status.is_none()
     }
 
+    /// The started-event attributes of the run's first history event.
+    pub(crate) fn started_attributes(
+        &self,
+    ) -> cadence_api::service_types::WorkflowExecutionStartedEventAttributes {
+        self.history
+            .first()
+            .and_then(|e| e.workflow_execution_started_event_attributes.clone())
+            .unwrap_or_default()
+    }
+
+    /// The run's retry policy, mirroring Go's execution-info fields.
+    pub(crate) fn retry_policy(&self) -> Option<RetryPolicy> {
+        self.started_attributes().retry_policy.clone()
+    }
+
+    /// The cron schedule recorded on the start event, if any.
+    pub(crate) fn cron_schedule(&self) -> String {
+        self.started_attributes().cron_schedule.clone()
+    }
+
+    /// The cron overlap policy recorded on the start event, if any.
+    pub(crate) fn cron_overlap_policy(&self) -> Option<cadence_api::enums::CronOverlapPolicy> {
+        self.started_attributes().cron_overlap_policy
+    }
+
     fn to_info(&self) -> WorkflowExecutionInfo {
+        let started = self
+            .history
+            .first()
+            .and_then(|e| e.workflow_execution_started_event_attributes.as_ref());
+        let cron_schedule = started.map(|s| s.cron_schedule.clone());
         WorkflowExecutionInfo {
             execution: Some(self.execution.clone()),
             workflow_type: Some(self.workflow_type.clone()),
@@ -167,6 +296,30 @@ impl ExecutionRecord {
             close_status: self.close_status,
             history_length: self.history.len() as i64,
             memo: self.memo.clone(),
+            task_list: Some(self.task_list.clone()),
+            search_attributes: self.search_attributes.clone(),
+            parent_domain: started
+                .and_then(|s| s.parent_workflow_domain.clone())
+                .or_else(|| self.parent.as_ref().map(|p| p.domain.clone())),
+            parent_execution: self
+                .parent
+                .as_ref()
+                .map(|p| WorkflowExecution::new(&p.workflow_id, &p.run_id)),
+            parent_initiated_id: self.parent.as_ref().map(|p| p.initiated_event_id),
+            execution_time: Some(self.start_time_millis),
+            is_cron: cron_schedule.as_ref().is_some_and(|s| !s.is_empty()),
+            cron_schedule,
+            cron_overlap_policy: started.and_then(|s| s.cron_overlap_policy),
+            partition_config: started.and_then(|s| s.partition_config.clone()),
+            update_time: self.history.last().and_then(|e| e.timestamp),
+            execution_status: Some(
+                self.close_status
+                    .and_then(|s| {
+                        cadence_api::enums::WorkflowExecutionStatus::from_i32(s as i32 + 2)
+                    })
+                    .unwrap_or(cadence_api::enums::WorkflowExecutionStatus::Started),
+            ),
+            ..Default::default()
         }
     }
 
@@ -188,14 +341,18 @@ impl ExecutionRecord {
                 .map(|p| cadence_api::tasks::PendingActivityInfo {
                     activity_id: p.activity_id.clone(),
                     activity_type: Some(p.activity_type.clone()),
-                    state: Some(if p.started_event_id.is_some() {
+                    state: Some(if p.cancel_requested {
+                        PendingActivityState::CancelRequested
+                    } else if p.started_event_id.is_some() {
                         PendingActivityState::Started
                     } else {
                         PendingActivityState::Scheduled
                     }),
                     attempt: p.attempt,
-                    scheduled_timestamp: Some(p.scheduled_time_millis),
-                    last_started_timestamp: None,
+                    scheduled_timestamp: p
+                        .attempt_scheduled_time_millis
+                        .or(Some(p.scheduled_time_millis)),
+                    last_started_timestamp: p.started_time_millis,
                     heartbeat_details: p.heartbeat_details.clone(),
                     maximum_attempts: p
                         .retry_policy
@@ -203,7 +360,7 @@ impl ExecutionRecord {
                         .map(|r| r.maximum_attempts)
                         .unwrap_or(0),
                     schedule_id: p.scheduled_event_id,
-                    last_failure_reason: None,
+                    last_failure_reason: p.last_failure_reason.clone(),
                 })
                 .collect(),
             pending_children,
@@ -214,8 +371,8 @@ impl ExecutionRecord {
                     } else {
                         PendingDecisionState::Scheduled
                     }),
-                    scheduled_timestamp: None,
-                    started_timestamp: None,
+                    scheduled_timestamp: p.scheduled_time_millis,
+                    started_timestamp: p.started_time_millis,
                     attempt: p.attempt,
                     schedule_id: p.scheduled_event_id,
                     original_scheduled_timestamp: None,
@@ -224,15 +381,142 @@ impl ExecutionRecord {
         }
     }
 
+    fn clear_stickiness(&mut self) {
+        self.sticky_task_list = None;
+        self.sticky_schedule_to_start_timeout_seconds = 0;
+    }
+
+    fn sticky_enabled(&self, now: i64) -> bool {
+        // Go history.stickyTTL default is one year. Dynamic overrides remain
+        // part of the configuration migration.
+        self.sticky_task_list
+            .as_ref()
+            .is_some_and(|name| !name.is_empty())
+            && now
+                <= self
+                    .last_updated_millis
+                    .saturating_add(365 * 24 * 60 * 60 * 1000)
+    }
+
+    fn transient_decision_events(&self) -> Vec<HistoryEvent> {
+        let Some(task) = self
+            .pending_decision
+            .as_ref()
+            .filter(|task| task.attempt > 0 && task.started_event_id.is_some())
+        else {
+            return Vec::new();
+        };
+        vec![
+            HistoryEvent {
+                event_id: task.scheduled_event_id,
+                timestamp: task.scheduled_time_millis,
+                event_type: Some(EventType::DecisionTaskScheduled),
+                decision_task_scheduled_event_attributes: Some(
+                    DecisionTaskScheduledEventAttributes {
+                        task_list: Some(self.task_list.clone()),
+                        start_to_close_timeout_seconds: self.task_start_to_close_timeout_seconds,
+                        attempt: task.attempt,
+                    },
+                ),
+                ..Default::default()
+            },
+            HistoryEvent {
+                event_id: task.started_event_id.unwrap(),
+                timestamp: task.started_time_millis,
+                event_type: Some(EventType::DecisionTaskStarted),
+                decision_task_started_event_attributes: Some(DecisionTaskStartedEventAttributes {
+                    scheduled_event_id: task.scheduled_event_id,
+                    identity: task.identity.clone(),
+                    request_id: task.request_id.clone(),
+                }),
+                ..Default::default()
+            },
+        ]
+    }
+
+    fn materialize_transient_decision(&mut self, identity: &str) {
+        let mut events = self.transient_decision_events();
+        if let Some(started) = events.get_mut(1) {
+            started
+                .decision_task_started_event_attributes
+                .as_mut()
+                .unwrap()
+                .identity = identity.to_owned();
+        }
+        for event in events {
+            debug_assert_eq!(event.event_id, self.next_event_id());
+            self.history.push(event);
+        }
+    }
+
     fn next_event_id(&self) -> i64 {
         self.history.len() as i64 + 1
     }
 
-    fn push_event(&mut self, event_type: EventType, mut event: HistoryEvent) {
-        event.event_id = self.next_event_id();
-        event.timestamp = Some(now_millis());
+    fn push_event(&mut self, event_type: EventType, mut event: HistoryEvent) -> i64 {
+        if event_type == EventType::WorkflowExecutionSignaled {
+            if let Some(id) = event
+                .workflow_execution_signaled_event_attributes
+                .as_ref()
+                .map(|a| &a.request_id)
+                .filter(|id| !id.is_empty())
+            {
+                if !self.signal_request_ids.insert(id.clone()) {
+                    return 0;
+                }
+            }
+        }
+        let buffer = self
+            .pending_decision
+            .as_ref()
+            .is_some_and(|task| task.started_event_id.is_some())
+            && !matches!(
+                event_type,
+                EventType::WorkflowExecutionStarted
+                    | EventType::WorkflowExecutionCompleted
+                    | EventType::WorkflowExecutionFailed
+                    | EventType::WorkflowExecutionTimedOut
+                    | EventType::WorkflowExecutionTerminated
+                    | EventType::WorkflowExecutionContinuedAsNew
+                    | EventType::WorkflowExecutionCanceled
+                    | EventType::DecisionTaskScheduled
+                    | EventType::DecisionTaskStarted
+                    | EventType::DecisionTaskCompleted
+                    | EventType::DecisionTaskFailed
+                    | EventType::DecisionTaskTimedOut
+                    | EventType::ActivityTaskScheduled
+                    | EventType::ActivityTaskCancelRequested
+                    | EventType::TimerStarted
+                    | EventType::TimerCanceled
+                    | EventType::CancelTimerFailed
+                    | EventType::RequestCancelExternalWorkflowExecutionInitiated
+                    | EventType::MarkerRecorded
+                    | EventType::StartChildWorkflowExecutionInitiated
+                    | EventType::SignalExternalWorkflowExecutionInitiated
+                    | EventType::UpsertWorkflowSearchAttributes
+            );
+        // Private aliases let started/completion links remain unambiguous until
+        // Go-style buffered events receive their durable IDs. These never appear
+        // in public history or task tokens.
+        event.event_id = if buffer {
+            {
+                let id = -1_000_000 - self.buffer_event_sequence;
+                self.buffer_event_sequence += 1;
+                id
+            }
+        } else {
+            self.next_event_id()
+        };
+        let now = now_millis();
+        event.timestamp = Some(now);
         event.event_type = Some(event_type);
-        self.history.push(event);
+        let id = event.event_id;
+        if buffer {
+            self.buffered_events.push(event);
+        } else {
+            self.history.push(event);
+        }
+        id
     }
 }
 
@@ -242,6 +526,37 @@ type QueueKey = (String, String);
 type QueuedDecision = (String, String);
 /// Queued activity task: (workflow-id, run-id, scheduled-event-id).
 type QueuedActivity = (String, String, i64);
+
+/// An async workflow request waiting for the background consumer,
+/// mirroring Go's Kafka `AsyncRequestMessage` payloads
+/// (`StartWorkflowExecutionAsyncRequest` /
+/// `SignalWithStartWorkflowExecutionAsyncRequest`). Attempts are bounded so a
+/// poisoned request cannot spin the consumer forever.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AsyncRequest {
+    pub request: AsyncRequestKind,
+    pub attempts: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum AsyncRequestKind {
+    Start(cadence_api::types::StartWorkflowExecutionRequest),
+    SignalWithStart(cadence_api::service_types::SignalWithStartWorkflowExecutionRequest),
+}
+
+impl AsyncRequest {
+    pub const MAX_ATTEMPTS: u32 = 5;
+}
+
+/// Stored task-list partition config, mirroring Go matching's persisted
+/// `TaskListPartitionConfig` (version plus read/write partition maps of
+/// partition ID to isolation groups).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct StoredPartitionConfig {
+    pub version: i64,
+    pub read_partitions: HashMap<i32, Vec<String>>,
+    pub write_partitions: HashMap<i32, Vec<String>>,
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct Inner {
@@ -259,17 +574,61 @@ pub(crate) struct Inner {
     pub(crate) children: HashMap<(String, String, String), Vec<ChildRef>>,
     /// Domain names registered through the server, for decision validation.
     pub(crate) known_domains: std::collections::HashSet<String>,
+    pub(crate) domain_ids: HashMap<String, String>,
+    pub(crate) domain_names: HashMap<String, String>,
+    /// Durable async-request queue (FIFO), drained by the server's worker role.
+    pub(crate) async_requests: std::collections::VecDeque<AsyncRequest>,
+    /// (domain namespace, schedule ID) -> schedule record.
+    pub(crate) schedules: HashMap<(String, String), crate::schedules::ScheduleRecord>,
+    /// (domain namespace, semaphore name) -> metadata.
+    pub(crate) semaphores: HashMap<(String, String), crate::semaphores::SemaphoreMetadata>,
+    /// (domain namespace, semaphore name, bucket) -> granted holds.
+    pub(crate) semaphore_holds: HashMap<(String, String, i32), Vec<crate::semaphores::SemaphoreHold>>,
+    /// (domain namespace, task list, task-list type) -> partition config.
+    pub(crate) partition_configs: HashMap<(String, String, i32), StoredPartitionConfig>,
+}
+
+impl Inner {
+    pub(crate) fn domain_id(&self, value: &str) -> String {
+        self.domain_ids
+            .get(value)
+            .cloned()
+            .unwrap_or_else(|| value.to_owned())
+    }
+    pub(crate) fn domain_name(&self, value: &str) -> String {
+        self.domain_names
+            .get(value)
+            .cloned()
+            .unwrap_or_else(|| value.to_owned())
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryExecutionStore {
-    inner: Arc<RwLock<Inner>>,
+    pub(crate) inner: Arc<RwLock<Inner>>,
+    domain_scope: Option<String>,
 }
 
 impl InMemoryExecutionStore {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Pin a request to the resolved UUID once, including across long polls.
+    pub fn with_domain_id(&self, id: &str) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            domain_scope: Some(id.to_owned()),
+        }
+    }
+    pub fn namespace_id(&self) -> Option<&str> {
+        self.domain_scope.as_deref()
+    }
+    fn domain_id(&self, inner: &Inner, name: &str) -> String {
+        self.domain_scope
+            .clone()
+            .unwrap_or_else(|| inner.domain_id(name))
     }
 
     fn open_run_id(&self, inner: &Inner, domain: &str, workflow_id: &str) -> Option<String> {
@@ -312,6 +671,161 @@ impl InMemoryExecutionStore {
         req: &StartWorkflowExecutionRequest,
     ) -> Result<StartWorkflowExecutionResponse, StartError> {
         let mut inner = self.inner.write().expect("execution store lock");
+        self.start_locked(&mut inner, req)
+    }
+
+    /// Enqueue an async start request, mirroring Go frontend
+    /// `StartWorkflowExecutionAsync` publishing to the async queue. The
+    /// request is validated by the caller before enqueueing and processed by
+    /// the worker-role consumer.
+    pub fn enqueue_async_start(&self, req: StartWorkflowExecutionRequest) {
+        let mut inner = self.inner.write().expect("execution store lock");
+        inner.async_requests.push_back(AsyncRequest {
+            request: AsyncRequestKind::Start(req),
+            attempts: 0,
+        });
+    }
+
+    /// Enqueue an async signal-with-start request, mirroring Go frontend
+    /// `SignalWithStartWorkflowExecutionAsync`.
+    pub fn enqueue_async_signal_with_start(
+        &self,
+        req: cadence_api::service_types::SignalWithStartWorkflowExecutionRequest,
+    ) {
+        let mut inner = self.inner.write().expect("execution store lock");
+        inner.async_requests.push_back(AsyncRequest {
+            request: AsyncRequestKind::SignalWithStart(req),
+            attempts: 0,
+        });
+    }
+
+    /// Drain queued async requests for the worker-role consumer.
+    pub fn drain_async_requests(&self) -> Vec<AsyncRequest> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        inner.async_requests.drain(..).collect()
+    }
+
+    /// Process one async request like Go's async-queue consumer: apply the
+    /// start (idempotent on request ID, so redelivery is safe). Returns
+    /// `true` when the request is consumed and `false` when it must be
+    /// requeued for another attempt.
+    pub fn consume_async_request(&self, request: &AsyncRequest) -> bool {
+        match &request.request {
+            AsyncRequestKind::Start(req) => match self.start(req) {
+                Ok(_) => true,
+                // Idempotent redelivery: the run already exists.
+                Err(StartError::AlreadyStarted(_)) => true,
+                // Invalid requests never succeed; drop them like a poison
+                // message after logging, instead of spinning forever.
+                Err(StartError::InvalidArgument(message)) => {
+                    eprintln!("warning: dropping invalid async start request: {message}");
+                    true
+                }
+            },
+            AsyncRequestKind::SignalWithStart(req) => match self.signal_with_start(req) {
+                Ok(_) => true,
+                Err(StartError::AlreadyStarted(_)) => true,
+                Err(StartError::InvalidArgument(message)) => {
+                    eprintln!("warning: dropping invalid async signal-with-start: {message}");
+                    true
+                }
+            },
+        }
+    }
+
+    /// Requeue a failed async request with bounded attempts, mirroring Go's
+    /// NACK/redelivery with a poison-message limit.
+    pub fn requeue_async_request(&self, mut request: AsyncRequest) {
+        request.attempts += 1;
+        if request.attempts >= AsyncRequest::MAX_ATTEMPTS {
+            eprintln!("warning: dropping async request after {} attempts", request.attempts);
+            return;
+        }
+        let mut inner = self.inner.write().expect("execution store lock");
+        inner.async_requests.push_back(request);
+    }
+
+    /// Restart a workflow execution, mirroring Go frontend
+    /// `RestartWorkflowExecution` + `constructRestartWorkflowRequest`: the new
+    /// run reuses the first history event's started attributes (type, task
+    /// list, input, timeouts, retry policy, cron schedule, header, memo,
+    /// search attributes) with `TerminateIfRunning` reuse policy, so an open
+    /// run is terminated and a closed one starts fresh. The reason is recorded
+    /// nowhere, as in Go.
+    pub fn restart(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        identity: &str,
+    ) -> Result<StartWorkflowExecutionResponse, StartError> {
+        use cadence_api::enums::WorkflowIDReusePolicy;
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        // Resolve the run like history reads do: an empty run ID targets the
+        // latest run, so restarts work on both open and closed executions.
+        let run_id = if execution.run_id.is_empty() {
+            inner
+                .by_workflow
+                .get(&(domain.to_string(), execution.workflow_id.clone()))
+                .and_then(|runs| runs.last().cloned())
+                .ok_or_else(|| {
+                    StartError::InvalidArgument(
+                        "Workflow execution does not exist.".to_string(),
+                    )
+                })?
+        } else {
+            execution.run_id.clone()
+        };
+        let started = inner
+            .by_run
+            .get(&(
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                run_id,
+            ))
+            .and_then(|record| {
+                record
+                    .history
+                    .first()
+                    .and_then(|e| e.workflow_execution_started_event_attributes.clone())
+            })
+            .ok_or_else(|| {
+                StartError::InvalidArgument("Workflow execution does not exist.".to_string())
+            })?;
+        let req = StartWorkflowExecutionRequest {
+            domain: domain.to_string(),
+            workflow_id: execution.workflow_id.clone(),
+            workflow_type: started.workflow_type.clone(),
+            task_list: started.task_list.clone(),
+            input: started.input.clone(),
+            execution_start_to_close_timeout_seconds: started
+                .execution_start_to_close_timeout_seconds,
+            task_start_to_close_timeout_seconds: started.task_start_to_close_timeout_seconds,
+            identity: identity.to_string(),
+            request_id: uuid::Uuid::new_v4().to_string(),
+            workflow_id_reuse_policy: Some(WorkflowIDReusePolicy::TerminateIfRunning),
+            retry_policy: started.retry_policy.clone(),
+            cron_schedule: started.cron_schedule.clone(),
+            memo: started.memo.clone(),
+            search_attributes: started.search_attributes.clone(),
+            header: started.header.clone(),
+            delay_start_seconds: Some(0),
+            jitter_start_seconds: started.jitter_start_seconds,
+            cron_overlap_policy: started.cron_overlap_policy,
+            ..Default::default()
+        };
+        self.start_locked(&mut inner, &req)
+    }
+
+    fn start_locked(
+        &self,
+        inner: &mut Inner,
+        req: &StartWorkflowExecutionRequest,
+    ) -> Result<StartWorkflowExecutionResponse, StartError> {
+        let mut request = req.clone();
+        request.domain = self.domain_id(inner, &request.domain);
+        let req = &request;
         let key = (
             req.domain.clone(),
             req.workflow_id.clone(),
@@ -327,11 +841,11 @@ impl InMemoryExecutionStore {
         }
 
         let policy = req.workflow_id_reuse_policy.unwrap_or_default();
-        if let Some(open_run) = self.open_run_id(&inner, &req.domain, &req.workflow_id) {
+        if let Some(open_run) = self.open_run_id(inner, &req.domain, &req.workflow_id) {
             if policy == WorkflowIDReusePolicy::TerminateIfRunning {
                 // Close the running execution as terminated, like Go does.
                 Self::close_run_locked(
-                    &mut inner,
+                    inner,
                     &req.domain,
                     &req.workflow_id,
                     &open_run,
@@ -369,7 +883,7 @@ impl InMemoryExecutionStore {
                 ));
             }
         } else {
-            let last = self.last_close_status(&inner, &req.domain, &req.workflow_id);
+            let last = self.last_close_status(inner, &req.domain, &req.workflow_id);
             let duplicate_blocked = policy == WorkflowIDReusePolicy::RejectDuplicate
                 && last.is_some()
                 || policy == WorkflowIDReusePolicy::AllowDuplicateFailedOnly
@@ -394,6 +908,7 @@ impl InMemoryExecutionStore {
         let run_id = uuid::Uuid::new_v4().to_string();
         let execution = WorkflowExecution::new(req.workflow_id.clone(), run_id.clone());
         let task_list = req.task_list.clone().unwrap_or_default();
+        let start_millis = now_millis();
         let mut record = ExecutionRecord {
             domain: req.domain.clone(),
             execution: execution.clone(),
@@ -404,16 +919,49 @@ impl InMemoryExecutionStore {
             memo: req.memo.clone(),
             search_attributes: req.search_attributes.clone(),
             close_status: None,
-            start_time_millis: now_millis(),
+            start_time_millis: start_millis,
             close_time_millis: None,
             history: Vec::new(),
+            buffered_events: Vec::new(),
+            buffer_event_sequence: 0,
+            sticky_task_list: None,
+            sticky_schedule_to_start_timeout_seconds: 0,
+            last_updated_millis: now_millis(),
             pending_decision: None,
             pending_activities: HashMap::new(),
             pending_timers: HashMap::new(),
             pending_queries: std::collections::VecDeque::new(),
             parent: None,
             prev_started_event_id: None,
+            signal_request_ids: std::collections::HashSet::new(),
+            create_request_id: String::new(),
+            first_decision_task_backoff_seconds: 0,
+            expiration_time_nanos: None,
+            first_decision_due_millis: None,
+            jitter_start_seconds: req.jitter_start_seconds.unwrap_or(0),
+            attempt: 0,
         };
+        let start_nanos = start_millis.saturating_mul(1_000_000);
+        let jitter = cadence_common::cron::jitter_seconds(
+            req.jitter_start_seconds.unwrap_or(0),
+            &mut rand::thread_rng(),
+        );
+        let history_request = cadence_api::history_request::create_history_start_workflow_request(
+            req,
+            start_nanos,
+            jitter,
+        )
+        .map_err(StartError::InvalidArgument)?;
+        record.first_decision_task_backoff_seconds =
+            history_request.first_decision_task_backoff_seconds;
+        record.expiration_time_nanos = history_request.expiration_timestamp;
+        record.attempt = 0;
+        record.create_request_id = req.request_id.clone();
+        let backoff_millis = i64::from(history_request.first_decision_task_backoff_seconds.max(0))
+            .saturating_mul(1000);
+        if backoff_millis > 0 {
+            record.first_decision_due_millis = Some(start_millis + backoff_millis);
+        }
         let started = HistoryEvent {
             workflow_execution_started_event_attributes: Some(
                 WorkflowExecutionStartedEventAttributes {
@@ -423,8 +971,24 @@ impl InMemoryExecutionStore {
                     execution_start_to_close_timeout_seconds: req
                         .execution_start_to_close_timeout_seconds,
                     task_start_to_close_timeout_seconds: req.task_start_to_close_timeout_seconds,
+                    original_execution_run_id: run_id.clone(),
+                    first_execution_run_id: run_id.clone(),
+                    expiration_timestamp: history_request.expiration_timestamp,
+                    first_scheduled_time_nano: (!req.cron_schedule.is_empty()).then_some(
+                        start_nanos.saturating_add(backoff_millis.saturating_mul(1_000_000)),
+                    ),
                     identity: req.identity.clone(),
                     request_id: req.request_id.clone(),
+                    retry_policy: req.retry_policy.clone(),
+                    cron_schedule: req.cron_schedule.clone(),
+                    cron_overlap_policy: req.cron_overlap_policy,
+                    first_decision_task_backoff_seconds: Some(
+                        history_request.first_decision_task_backoff_seconds,
+                    ),
+                    jitter_start_seconds: req.jitter_start_seconds,
+                    memo: req.memo.clone(),
+                    search_attributes: req.search_attributes.clone(),
+                    header: req.header.clone(),
                     ..Default::default()
                 },
             ),
@@ -444,15 +1008,20 @@ impl InMemoryExecutionStore {
         if !req.request_id.is_empty() {
             inner.by_request_id.insert(key, run_id.clone());
         }
-        // Every new run starts with a decision task, like Go history does.
-        Self::schedule_decision_locked(
-            &mut inner,
-            &req.domain,
-            &req.workflow_id,
-            &run_id,
-            &task_list.name,
-            0,
-        );
+        // A non-zero first decision backoff (delay/jitter/cron/first-run-at)
+        // delays the DecisionTaskScheduled event until it elapses, mirroring
+        // Go's `WorkflowBackoffTimerTask`.
+        if backoff_millis <= 0 {
+            // Every new run starts with a decision task, like Go history does.
+            Self::schedule_decision_locked(
+                inner,
+                &req.domain,
+                &req.workflow_id,
+                &run_id,
+                &task_list.name,
+                0,
+            );
+        }
         Ok(StartWorkflowExecutionResponse { run_id })
     }
 
@@ -473,42 +1042,127 @@ impl InMemoryExecutionStore {
             run_id.to_string(),
         )) {
             Some(r) if r.is_open() && r.pending_decision.is_none() => r,
+            Some(r) if r.is_open() => {
+                r.last_updated_millis = now_millis();
+                return;
+            }
             _ => return,
         };
+        let sticky = record.sticky_enabled(now_millis());
+        if !sticky {
+            record.clear_stickiness();
+        }
+        let queue_name = record
+            .sticky_task_list
+            .clone()
+            .unwrap_or_else(|| task_list.to_owned());
         let event = HistoryEvent {
             decision_task_scheduled_event_attributes: Some(DecisionTaskScheduledEventAttributes {
-                task_list: Some(record.task_list.clone()),
+                task_list: Some(TaskList {
+                    name: queue_name.clone(),
+                    ..Default::default()
+                }),
                 start_to_close_timeout_seconds: record.task_start_to_close_timeout_seconds,
                 attempt,
             }),
             ..Default::default()
         };
-        record.push_event(EventType::DecisionTaskScheduled, event);
-        let scheduled_event_id = record.history.len() as i64;
+        let scheduled_time_millis = now_millis();
+        let scheduled_event_id = record.next_event_id();
+        if attempt == 0 {
+            record.push_event(EventType::DecisionTaskScheduled, event);
+        }
         record.pending_decision = Some(PendingDecision {
             scheduled_event_id,
             started_event_id: None,
             attempt,
+            scheduled_time_millis: if attempt == 0 {
+                record.history.last().and_then(|event| event.timestamp)
+            } else {
+                Some(scheduled_time_millis)
+            },
+            started_time_millis: None,
+            identity: String::new(),
+            request_id: String::new(),
+            task_list_name: Some(queue_name.clone()),
+            sticky,
+            schedule_to_start_timeout_seconds: sticky
+                .then_some(record.sticky_schedule_to_start_timeout_seconds),
         });
+        record.last_updated_millis = now_millis();
         inner
             .decision_queues
-            .entry((domain.to_string(), task_list.to_string()))
+            .entry((domain.to_string(), queue_name))
             .or_default()
             .push_back((workflow_id.to_string(), run_id.to_string()));
     }
 
+    fn flush_buffered_events_locked(inner: &mut Inner, key: &(String, String, String)) {
+        let record = inner.by_run.get_mut(key).expect("record exists");
+        let mut events = std::mem::take(&mut record.buffered_events);
+        let ids: HashMap<_, _> = events
+            .iter()
+            .enumerate()
+            .map(|(index, event)| (event.event_id, record.next_event_id() + index as i64))
+            .collect();
+        for event in &mut events {
+            event.event_id = ids[&event.event_id];
+            macro_rules! remap {
+                ($($field:ident),+ $(,)?) => {$(
+                    if let Some(attributes) = event.$field.as_mut() {
+                        if let Some(id) = ids.get(&attributes.started_event_id) {
+                            attributes.started_event_id = *id;
+                        }
+                    }
+                )+};
+            }
+            remap!(
+                activity_task_completed_event_attributes,
+                activity_task_failed_event_attributes,
+                activity_task_canceled_event_attributes,
+                activity_task_timed_out_event_attributes,
+                child_workflow_execution_completed_event_attributes,
+                child_workflow_execution_failed_event_attributes,
+                child_workflow_execution_canceled_event_attributes,
+                child_workflow_execution_timed_out_event_attributes,
+                child_workflow_execution_terminated_event_attributes
+            );
+        }
+        for activity in record.pending_activities.values_mut() {
+            if let Some(id) = activity.started_event_id.and_then(|id| ids.get(&id)) {
+                activity.started_event_id = Some(*id);
+            }
+        }
+        record.history.extend(events);
+        for child in inner.by_run.values_mut() {
+            if let Some(parent) = child.parent.as_mut() {
+                if (&parent.domain, &parent.workflow_id, &parent.run_id) == (&key.0, &key.1, &key.2)
+                {
+                    if let Some(id) = ids.get(&parent.started_event_id) {
+                        parent.started_event_id = *id;
+                    }
+                }
+            }
+        }
+    }
+
     fn get_open_mut<'a>(
+        &self,
         inner: &'a mut Inner,
         domain: &str,
         execution: &WorkflowExecution,
     ) -> Result<&'a mut ExecutionRecord, WorkflowMutationError> {
+        let domain_key = self.domain_id(inner, domain);
+        let domain = domain_key.as_str();
         if execution.run_id.is_empty() {
             // No run ID: target the open run, mirroring Go's current-execution lookup.
             let runs = inner
                 .by_workflow
                 .get(&(domain.to_string(), execution.workflow_id.clone()))
                 .ok_or_else(|| {
-                    WorkflowMutationError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+                    WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                        "Workflow execution does not exist.".to_string(),
+                    ))
                 })?;
             let run_id = runs
                 .iter()
@@ -535,7 +1189,9 @@ impl InMemoryExecutionStore {
                 .by_run
                 .get_mut(&(domain.to_string(), execution.workflow_id.clone(), run_id))
                 .ok_or_else(|| {
-                    WorkflowMutationError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+                    WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                        "Workflow execution does not exist.".to_string(),
+                    ))
                 });
         }
         let record = inner
@@ -546,7 +1202,9 @@ impl InMemoryExecutionStore {
                 execution.run_id.clone(),
             ))
             .ok_or_else(|| {
-                WorkflowMutationError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+                WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                    "Workflow execution does not exist.".to_string(),
+                ))
             })?;
         if !record.is_open() {
             return Err(WorkflowMutationError::AlreadyCompleted(
@@ -564,7 +1222,10 @@ impl InMemoryExecutionStore {
     ) -> Result<(), WorkflowMutationError> {
         let execution = req.workflow_execution.clone().unwrap_or_default();
         let mut inner = self.inner.write().expect("execution store lock");
-        let record = Self::get_open_mut(&mut inner, &req.domain, &execution)?;
+        let record = self.get_open_mut(&mut inner, &req.domain, &execution)?;
+        if !req.request_id.is_empty() && record.signal_request_ids.contains(&req.request_id) {
+            return Ok(());
+        }
         let event = HistoryEvent {
             workflow_execution_signaled_event_attributes: Some(
                 WorkflowExecutionSignaledEventAttributes {
@@ -577,6 +1238,18 @@ impl InMemoryExecutionStore {
             ..Default::default()
         };
         record.push_event(EventType::WorkflowExecutionSignaled, event);
+        let namespace = record.domain.clone();
+        let workflow_id = record.execution.workflow_id.clone();
+        let run_id = record.execution.run_id.clone();
+        let task_list = record.task_list.name.clone();
+        Self::schedule_decision_locked(
+            &mut inner,
+            &namespace,
+            &workflow_id,
+            &run_id,
+            &task_list,
+            0,
+        );
         Ok(())
     }
 
@@ -586,7 +1259,7 @@ impl InMemoryExecutionStore {
     ) -> Result<(), WorkflowMutationError> {
         let execution = req.workflow_execution.clone().unwrap_or_default();
         let mut inner = self.inner.write().expect("execution store lock");
-        let record = Self::get_open_mut(&mut inner, &req.domain, &execution)?;
+        let record = self.get_open_mut(&mut inner, &req.domain, &execution)?;
         let event = HistoryEvent {
             workflow_execution_cancel_requested_event_attributes: Some(
                 WorkflowExecutionCancelRequestedEventAttributes {
@@ -600,7 +1273,779 @@ impl InMemoryExecutionStore {
             ..Default::default()
         };
         record.push_event(EventType::WorkflowExecutionCancelRequested, event);
+        let namespace = record.domain.clone();
+        let workflow_id = record.execution.workflow_id.clone();
+        let run_id = record.execution.run_id.clone();
+        let task_list = record.task_list.name.clone();
+        Self::schedule_decision_locked(
+            &mut inner,
+            &namespace,
+            &workflow_id,
+            &run_id,
+            &task_list,
+            0,
+        );
         Ok(())
+    }
+
+    pub fn reset_sticky_task_list(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+    ) -> Result<(), WorkflowMutationError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let record = self.get_open_mut(&mut inner, domain, execution)?;
+        record.clear_stickiness();
+        record.last_updated_millis = now_millis();
+        Ok(())
+    }
+
+    /// Reset a workflow execution to a decision-task boundary event,
+    /// mirroring Go history `ResetWorkflowExecution` + `workflowResetter`
+    /// (minus branches/versions, which a single host does not keep):
+    /// validate the reset point, terminate the current run, fork the base
+    /// history prefix into a new run, and reapply later signals unless
+    /// skipped. Duplicate reset request IDs return the current run.
+    pub fn reset(
+        &self,
+        req: &cadence_api::types::ResetWorkflowExecutionRequest,
+    ) -> Result<StartWorkflowExecutionResponse, ResetError> {
+        use cadence_api::enums::EventType;
+        let execution = req.workflow_execution.clone().unwrap_or_default();
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, &req.domain);
+        let domain = domain_key.as_str();
+        // Resolve the base run; an empty run ID targets the latest run.
+        let base_run_id = if execution.run_id.is_empty() {
+            inner
+                .by_workflow
+                .get(&(domain.to_string(), execution.workflow_id.clone()))
+                .and_then(|runs| runs.last().cloned())
+                .ok_or_else(|| {
+                    ResetError::NotFound(EntityNotExistsError::new(
+                        "Workflow execution does not exist.".to_string(),
+                    ))
+                })?
+        } else {
+            execution.run_id.clone()
+        };
+        let base_key = (
+            domain.to_string(),
+            execution.workflow_id.clone(),
+            base_run_id.clone(),
+        );
+        let base = inner.by_run.get(&base_key).ok_or_else(|| {
+            ResetError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        // Go requires at least one scheduled decision task.
+        if !base.history.iter().any(|e| {
+            e.event_type == Some(EventType::DecisionTaskScheduled)
+        }) {
+            return Err(ResetError::Invalid(
+                "Cannot reset workflow without a decision task schedule.".to_string(),
+            ));
+        }
+        let next_event_id = base.history.len() as i64 + 1;
+        if req.decision_finish_event_id <= 1 || req.decision_finish_event_id > next_event_id {
+            return Err(ResetError::Invalid(
+                "Decision finish ID must be > 1 && <= workflow next event ID.".to_string(),
+            ));
+        }
+        // Go `checkResetEventType`: only decision-task boundaries are resettable.
+        let reset_event = &base.history[(req.decision_finish_event_id - 1) as usize];
+        if !matches!(
+            reset_event.event_type,
+            Some(
+                EventType::DecisionTaskStarted
+                    | EventType::DecisionTaskTimedOut
+                    | EventType::DecisionTaskFailed
+                    | EventType::DecisionTaskCompleted
+            )
+        ) {
+            return Err(ResetError::Invalid(format!(
+                "reset event must be of type DecisionTaskStarted, DecisionTaskTimedOut, DecisionTaskFailed, or DecisionTaskCompleted. Attempting to reset on event type: {:?}",
+                reset_event.event_type,
+            )));
+        }
+        // Current run and request-ID dedup, like Go's CreateRequestID check.
+        let current_run_id = inner
+            .by_workflow
+            .get(&(domain.to_string(), execution.workflow_id.clone()))
+            .and_then(|runs| runs.last().cloned())
+            .ok_or_else(|| {
+                ResetError::NotFound(EntityNotExistsError::new(
+                    "Workflow execution does not exist.".to_string(),
+                ))
+            })?;
+        let current_key = (
+            domain.to_string(),
+            execution.workflow_id.clone(),
+            current_run_id.clone(),
+        );
+        if !req.request_id.is_empty() {
+            if let Some(current) = inner.by_run.get(&current_key) {
+                if current.create_request_id == req.request_id {
+                    return Ok(StartWorkflowExecutionResponse {
+                        run_id: current_run_id,
+                    });
+                }
+            }
+        }
+        // Snapshot the replay prefix and later signals before mutating.
+        let prefix: Vec<HistoryEvent> = base.history
+            [..req.decision_finish_event_id as usize]
+            .to_vec();
+        let mut signals: Vec<HistoryEvent> = base.history
+            [req.decision_finish_event_id as usize..]
+            .iter()
+            .filter(|e| e.event_type == Some(EventType::WorkflowExecutionSignaled))
+            .cloned()
+            .collect();
+        if current_run_id != base_run_id {
+            if let Some(current) = inner.by_run.get(&current_key) {
+                signals.extend(
+                    current
+                        .history
+                        .iter()
+                        .filter(|e| e.event_type == Some(EventType::WorkflowExecutionSignaled))
+                        .cloned(),
+                );
+            }
+        }
+        let base_record = inner.by_run.get(&base_key).expect("base exists").clone();
+        // Terminate the current run when open, like the resetter does.
+        if inner
+            .by_run
+            .get(&current_key)
+            .is_some_and(ExecutionRecord::is_open)
+        {
+            Self::close_run_locked(
+                &mut inner,
+                domain,
+                &execution.workflow_id,
+                &current_run_id,
+                WorkflowExecutionCloseStatus::Terminated,
+                None,
+                Vec::new(),
+                HistoryEvent {
+                    workflow_execution_terminated_event_attributes: Some(
+                        WorkflowExecutionTerminatedEventAttributes {
+                            reason: if req.reason.is_empty() {
+                                "reset workflow".to_string()
+                            } else {
+                                req.reason.clone()
+                            },
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                },
+                EventType::WorkflowExecutionTerminated,
+            );
+        }
+        // Fork the prefix into the reset run.
+        let reset_run_id = uuid::Uuid::new_v4().to_string();
+        let mut record = ExecutionRecord {
+            domain: domain.to_string(),
+            execution: WorkflowExecution::new(
+                execution.workflow_id.clone(),
+                reset_run_id.clone(),
+            ),
+            workflow_type: base_record.workflow_type.clone(),
+            task_list: base_record.task_list.clone(),
+            execution_start_to_close_timeout_seconds: base_record
+                .execution_start_to_close_timeout_seconds,
+            task_start_to_close_timeout_seconds: base_record.task_start_to_close_timeout_seconds,
+            memo: base_record.memo.clone(),
+            search_attributes: base_record.search_attributes.clone(),
+            close_status: None,
+            start_time_millis: now_millis(),
+            close_time_millis: None,
+            history: prefix,
+            buffered_events: Vec::new(),
+            buffer_event_sequence: 0,
+            sticky_task_list: None,
+            sticky_schedule_to_start_timeout_seconds: 0,
+            last_updated_millis: now_millis(),
+            pending_decision: None,
+            pending_activities: HashMap::new(),
+            pending_timers: HashMap::new(),
+            pending_queries: std::collections::VecDeque::new(),
+            parent: base_record.parent.clone(),
+            prev_started_event_id: None,
+            signal_request_ids: std::collections::HashSet::new(),
+            create_request_id: req.request_id.clone(),
+            first_decision_task_backoff_seconds: 0,
+            expiration_time_nanos: None,
+            first_decision_due_millis: None,
+            jitter_start_seconds: 0,
+            attempt: 0,
+        };
+        // Rebuild signal dedup state from the forked prefix.
+        for event in record.history.iter() {
+            if let Some(id) = event
+                .workflow_execution_signaled_event_attributes
+                .as_ref()
+                .map(|a| &a.request_id)
+                .filter(|id| !id.is_empty())
+            {
+                record.signal_request_ids.insert(id.clone());
+            }
+        }
+        // Reapply later signals unless skipped, like Go's signal reapply.
+        if !req.skip_signal_reapply {
+            for signal in signals {
+                if let Some(attrs) = signal
+                    .workflow_execution_signaled_event_attributes
+                    .clone()
+                {
+                    let id = attrs.request_id.clone();
+                    if !id.is_empty() && record.signal_request_ids.contains(&id) {
+                        continue;
+                    }
+                    record.push_event(
+                        EventType::WorkflowExecutionSignaled,
+                        HistoryEvent {
+                            workflow_execution_signaled_event_attributes: Some(attrs),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+        inner
+            .by_workflow
+            .entry((domain.to_string(), execution.workflow_id.clone()))
+            .or_default()
+            .push(reset_run_id.clone());
+        inner.by_run.insert(
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                reset_run_id.clone(),
+            ),
+            record,
+        );
+        Self::schedule_decision_locked(
+            &mut inner,
+            domain,
+            &execution.workflow_id,
+            &reset_run_id,
+            &base_record.task_list.name,
+            0,
+        );
+        Ok(StartWorkflowExecutionResponse {
+            run_id: reset_run_id,
+        })
+    }
+
+    /// Regenerate dispatch queue entries for an execution, mirroring Go
+    /// history `RefreshWorkflowTasks` + `mutableStateTaskRefresher`: timer
+    /// state is scanned on the fly by the background loop, so the durable
+    /// work here is requeueing unstarted decision and activity tasks that
+    /// lost their queue entries. Closed runs are a no-op success, like Go
+    /// regenerating (already complete) close tasks.
+    pub fn refresh_tasks(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+    ) -> Result<(), WorkflowMutationError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = if execution.run_id.is_empty() {
+            match self.open_run_id(&inner, domain, &execution.workflow_id) {
+                Some(run_id) => (
+                    domain.to_string(),
+                    execution.workflow_id.clone(),
+                    run_id,
+                ),
+                None => {
+                    // Closed or unknown: Go still refreshes close tasks, which
+                    // are already locked in; report unknown runs as not found.
+                    if inner
+                        .by_workflow
+                        .get(&(domain.to_string(), execution.workflow_id.clone()))
+                        .is_none_or(|runs| runs.is_empty())
+                    {
+                        return Err(WorkflowMutationError::NotFound(
+                            EntityNotExistsError::new(
+                                "Workflow execution does not exist.".to_string(),
+                            ),
+                        ));
+                    }
+                    return Ok(());
+                }
+            }
+        } else {
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                execution.run_id.clone(),
+            )
+        };
+        let record = inner.by_run.get(&key).ok_or_else(|| {
+            WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        if !record.is_open() {
+            return Ok(());
+        }
+        // Requeue the unstarted decision task without duplicating entries.
+        if record
+            .pending_decision
+            .as_ref()
+            .is_some_and(|p| p.started_event_id.is_none())
+        {
+            let task_list = record.task_list.name.clone();
+            let queue = inner
+                .decision_queues
+                .entry((domain.to_string(), task_list))
+                .or_default();
+            if !queue.iter().any(|(w, r)| {
+                w == &execution.workflow_id && r == &key.2
+            }) {
+                queue.push_back((execution.workflow_id.clone(), key.2.clone()));
+            }
+        }
+        // Requeue unstarted activities without duplicating entries.
+        let pendings: Vec<(i64, String)> = inner
+            .by_run
+            .get(&key)
+            .map(|record| {
+                record
+                    .pending_activities
+                    .iter()
+                    .filter(|(_, p)| p.started_event_id.is_none())
+                    .map(|(id, p)| (*id, p.task_list.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (schedule_id, task_list) in pendings {
+            let queue = inner
+                .activity_queues
+                .entry((domain.to_string(), task_list))
+                .or_default();
+            if !queue.iter().any(|(w, r, s)| {
+                w == &execution.workflow_id && r == &key.2 && *s == schedule_id
+            }) {
+                queue.push_back((execution.workflow_id.clone(), key.2.clone(), schedule_id));
+            }
+        }
+        Ok(())
+    }
+
+    /// Admin describe: shard placement plus the run's mutable state as
+    /// JSON, mirroring Go admin `DescribeWorkflowExecution` (shard ID,
+    /// history address, cached and stored state blobs).
+    pub fn describe_admin(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+    ) -> Result<(i32, String, String), EntityNotExistsError> {
+        let inner = self.inner.read().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = if execution.run_id.is_empty() {
+            let runs = inner
+                .by_workflow
+                .get(&(domain.to_string(), execution.workflow_id.clone()))
+                .ok_or_else(|| {
+                    EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+                })?;
+            let latest = runs.last().ok_or_else(|| {
+                EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+            })?;
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                latest.clone(),
+            )
+        } else {
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                execution.run_id.clone(),
+            )
+        };
+        let record = inner.by_run.get(&key).ok_or_else(|| {
+            EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+        })?;
+        let state_json = serde_json::to_string(record).unwrap_or_default();
+        let hostname =
+            std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
+        Ok((0, hostname, state_json))
+    }
+
+    /// Read a raw event range for admin inspection, mirroring Go admin
+    /// `GetWorkflowExecutionRawHistoryV2` minus version branches (single
+    /// branch: versions are ignored and the full ID range is served with an
+    /// opaque offset cursor).
+    pub fn raw_history(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        start_event_id: Option<i64>,
+        end_event_id: Option<i64>,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<HistoryEvent>, Vec<u8>), EntityNotExistsError> {
+        let inner = self.inner.read().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = if execution.run_id.is_empty() {
+            let runs = inner
+                .by_workflow
+                .get(&(domain.to_string(), execution.workflow_id.clone()))
+                .ok_or_else(|| {
+                    EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+                })?;
+            let latest = runs.last().ok_or_else(|| {
+                EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+            })?;
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                latest.clone(),
+            )
+        } else {
+            (
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                execution.run_id.clone(),
+            )
+        };
+        let record = inner.by_run.get(&key).ok_or_else(|| {
+            EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+        })?;
+        let from = start_event_id.unwrap_or(1).max(1) as usize;
+        let to = end_event_id.unwrap_or(i64::MAX).max(0) as usize;
+        let offset: usize = if page_token.is_empty() {
+            0
+        } else {
+            std::str::from_utf8(page_token)
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0)
+        };
+        let events: Vec<HistoryEvent> = record
+            .history
+            .iter()
+            .skip(from.saturating_sub(1))
+            .take(to.saturating_sub(from.saturating_sub(1)))
+            .skip(offset)
+            .take(page_size.max(1))
+            .cloned()
+            .collect();
+        let taken = offset + events.len();
+        let remaining = record.history.len().saturating_sub(from.saturating_sub(1)).saturating_sub(taken);
+        let next_page_token = if remaining > 0 {
+            taken.to_string().into_bytes()
+        } else {
+            Vec::new()
+        };
+        Ok((events, next_page_token))
+    }
+
+    /// Inspect a run for history corruption, mirroring Go admin
+    /// `MaintainCorruptWorkflow`'s query templates: a missing start event, a
+    /// dangling activity reference, or a non-continuous event-ID sequence
+    /// deletes the run and reports all-deleted; otherwise nothing is deleted.
+    /// Uses Go's exact corruption messages.
+    pub fn maintain_corrupt_workflow(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+    ) -> Result<(bool, bool, bool), WorkflowMutationError> {
+        use cadence_api::enums::EventType;
+        let corrupt = {
+            let inner = self.inner.read().expect("execution store lock");
+            let domain_key = self.domain_id(&inner, domain);
+            let domain = domain_key.as_str();
+            let key = if execution.run_id.is_empty() {
+                match self.open_run_id(&inner, domain, &execution.workflow_id) {
+                    Some(run_id) => (
+                        domain.to_string(),
+                        execution.workflow_id.clone(),
+                        run_id,
+                    ),
+                    None => return Err(WorkflowMutationError::NotFound(
+                        EntityNotExistsError::new(
+                            "Workflow execution does not exist.".to_string(),
+                        ),
+                    )),
+                }
+            } else {
+                (
+                    domain.to_string(),
+                    execution.workflow_id.clone(),
+                    execution.run_id.clone(),
+                )
+            };
+            let record = inner.by_run.get(&key).ok_or_else(|| {
+                WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                    "Workflow execution does not exist.".to_string(),
+                ))
+            })?;
+            // "unable to get workflow start event"
+            let missing_start = record.history.first().is_none_or(|e| {
+                e.event_type != Some(EventType::WorkflowExecutionStarted)
+            });
+            // "unable to get activity scheduled event": started/completed
+            // activities referencing unknown schedule IDs.
+            let scheduled: std::collections::HashSet<i64> = record
+                .history
+                .iter()
+                .filter_map(|e| {
+                    e.activity_task_scheduled_event_attributes
+                        .as_ref()
+                        .map(|_| e.event_id)
+                })
+                .collect();
+            let dangling_activity = record.history.iter().any(|e| {
+                let started = e
+                    .activity_task_started_event_attributes
+                    .as_ref()
+                    .map(|a| a.scheduled_event_id);
+                let completed = |id: Option<i64>| id.is_some_and(|id| !scheduled.contains(&id));
+                started.is_some_and(|id| !scheduled.contains(&id))
+                    || e.activity_task_completed_event_attributes
+                        .as_ref()
+                        .is_some_and(|a| completed(Some(a.scheduled_event_id)))
+                    || e.activity_task_failed_event_attributes
+                        .as_ref()
+                        .is_some_and(|a| completed(Some(a.scheduled_event_id)))
+                    || e.activity_task_timed_out_event_attributes
+                        .as_ref()
+                        .is_some_and(|a| completed(Some(a.scheduled_event_id)))
+            });
+            // "corrupted history event batch, eventID is not continuous"
+            let discontinuous = record
+                .history
+                .iter()
+                .enumerate()
+                .any(|(i, e)| e.event_id != i as i64 + 1);
+            if missing_start {
+                Some("unable to get workflow start event")
+            } else if dangling_activity {
+                Some("unable to get activity scheduled event")
+            } else if discontinuous {
+                Some("corrupted history event batch, eventID is not continuous")
+            } else {
+                None
+            }
+        };
+        if corrupt.is_none() {
+            return Ok((false, false, false));
+        }
+        let (history, executions, visibility) = self.delete_run(domain, execution)?;
+        Ok((history, executions, visibility))
+    }
+
+    /// Queue depths for admin `DescribeQueue` states.
+    pub fn queue_depths(&self) -> (usize, usize, usize, usize, usize) {
+        let inner = self.inner.read().expect("execution store lock");
+        let decisions: usize = inner.decision_queues.values().map(|q| q.len()).sum();
+        let activities: usize = inner.activity_queues.values().map(|q| q.len()).sum();
+        let timers: usize = inner.by_run.values().map(|r| r.pending_timers.len()).sum();
+        let backoffs: usize = inner
+            .by_run
+            .values()
+            .filter(|r| r.first_decision_due_millis.is_some())
+            .count();
+        let schedules = inner.schedules.len();
+        (decisions, activities, timers, backoffs, schedules)
+    }
+
+    /// Reapply signal events to the current open run, mirroring Go history
+    /// `ReapplyEvents` for the single-branch case: same-version filtering and
+    /// version branches do not exist here, so every signal not already
+    /// present (by request ID) is appended and a decision is scheduled.
+    /// Closed runs are reset to their last decision boundary first, like Go's
+    /// reset-to-accept path, then receive the signals.
+    pub fn reapply_signals(
+        &self,
+        domain: &str,
+        workflow_id: &str,
+        signals: Vec<HistoryEvent>,
+    ) -> Result<(), WorkflowMutationError> {
+        use cadence_api::enums::EventType;
+        // Resolve the open run; reset a closed latest run to accept events.
+        let open_key = {
+            let inner = self.inner.read().expect("execution store lock");
+            let domain_key = self.domain_id(&inner, domain);
+            let domain = domain_key.as_str();
+            match self.open_run_id(&inner, domain, workflow_id) {
+                Some(run_id) => (
+                    domain.to_string(),
+                    workflow_id.to_string(),
+                    run_id,
+                ),
+                None => {
+                    // Mirror Go: reset the finished run to its last decision
+                    // boundary so it can accept the reapplied signals.
+                    let runs = inner
+                        .by_workflow
+                        .get(&(domain.to_string(), workflow_id.to_string()))
+                        .ok_or_else(|| {
+                            WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                                "Workflow execution does not exist.".to_string(),
+                            ))
+                        })?;
+                    let base_run = runs.last().ok_or_else(|| {
+                        WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                            "Workflow execution does not exist.".to_string(),
+                        ))
+                    })?.clone();
+                    let boundary = inner
+                        .by_run
+                        .get(&(
+                            domain.to_string(),
+                            workflow_id.to_string(),
+                            base_run.clone(),
+                        ))
+                        .and_then(|record| {
+                            record.history.iter().rev().find(|e| {
+                                matches!(
+                                    e.event_type,
+                                    Some(
+                                        EventType::DecisionTaskCompleted
+                                            | EventType::DecisionTaskStarted
+                                            | EventType::DecisionTaskFailed
+                                            | EventType::DecisionTaskTimedOut
+                                    )
+                                )
+                            }).map(|e| e.event_id)
+                        });
+                    match boundary {
+                        Some(id) => {
+                            drop(inner);
+                            let reset = self.reset(
+                                &cadence_api::types::ResetWorkflowExecutionRequest {
+                                    domain: domain.to_string(),
+                                    workflow_execution: Some(WorkflowExecution::new(
+                                        workflow_id.to_string(),
+                                        base_run,
+                                    )),
+                                    reason: "reapply events".to_string(),
+                                    decision_finish_event_id: id,
+                                    request_id: uuid::Uuid::new_v4().to_string(),
+                                    skip_signal_reapply: true,
+                                },
+                            ).map_err(|e| match e {
+                                crate::ResetError::NotFound(inner) => {
+                                    WorkflowMutationError::NotFound(inner)
+                                }
+                                crate::ResetError::Invalid(message) => {
+                                    WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                                        message,
+                                    ))
+                                }
+                            })?;
+                            (
+                                domain.to_string(),
+                                workflow_id.to_string(),
+                                reset.run_id,
+                            )
+                        }
+                        // No decision boundary (e.g. never scheduled): Go
+                        // skips reapply as a no-op in this case.
+                        None => return Ok(()),
+                    }
+                }
+            }
+        };
+        let mut inner = self.inner.write().expect("execution store lock");
+        let record = inner.by_run.get_mut(&open_key).ok_or_else(|| {
+            WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        for signal in signals {
+            let Some(attrs) = signal.workflow_execution_signaled_event_attributes.clone() else {
+                continue;
+            };
+            let id = attrs.request_id.clone();
+            if !id.is_empty() && record.signal_request_ids.contains(&id) {
+                continue;
+            }
+            record.push_event(
+                EventType::WorkflowExecutionSignaled,
+                HistoryEvent {
+                    workflow_execution_signaled_event_attributes: Some(attrs),
+                    ..Default::default()
+                },
+            );
+        }
+        let task_list = record.task_list.name.clone();
+        Self::schedule_decision_locked(
+            &mut inner,
+            &open_key.0,
+            &open_key.1,
+            &open_key.2,
+            &task_list,
+            0,
+        );
+        Ok(())
+    }
+
+    /// Delete a workflow run's data, mirroring Go admin `DeleteWorkflow`
+    /// (history + execution + visibility stores are one store here, so all
+    /// three report deleted). Unknown runs are `EntityNotExists`, like Go's
+    /// describe-first path.
+    pub fn delete_run(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+    ) -> Result<(bool, bool, bool), WorkflowMutationError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let run_id = if execution.run_id.is_empty() {
+            self.open_run_id(&inner, domain, &execution.workflow_id)
+                .ok_or_else(|| {
+                    WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                        "Workflow execution does not exist.".to_string(),
+                    ))
+                })?
+        } else {
+            execution.run_id.clone()
+        };
+        let key = (
+            domain.to_string(),
+            execution.workflow_id.clone(),
+            run_id.clone(),
+        );
+        if !inner.by_run.contains_key(&key) {
+            return Err(WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            )));
+        }
+        inner.by_run.remove(&key);
+        if let Some(runs) = inner
+            .by_workflow
+            .get_mut(&(domain.to_string(), execution.workflow_id.clone()))
+        {
+            runs.retain(|r| r != &run_id);
+        }
+        inner
+            .by_request_id
+            .retain(|_, r| r != &run_id);
+        for queue in inner.decision_queues.values_mut() {
+            queue.retain(|(w, r)| {
+                w != &execution.workflow_id || r != &run_id
+            });
+        }
+        for queue in inner.activity_queues.values_mut() {
+            queue.retain(|(w, r, _)| {
+                w != &execution.workflow_id || r != &run_id
+            });
+        }
+        inner.children.remove(&key);
+        Ok((true, true, true))
     }
 
     pub fn terminate(
@@ -610,16 +2055,17 @@ impl InMemoryExecutionStore {
         let execution = req.workflow_execution.clone().unwrap_or_default();
         let mut inner = self.inner.write().expect("execution store lock");
         // Resolve the open run first (get_open_mut validates openness).
-        let (workflow_id, run_id) = {
-            let record = Self::get_open_mut(&mut inner, &req.domain, &execution)?;
+        let (domain_id, workflow_id, run_id) = {
+            let record = self.get_open_mut(&mut inner, &req.domain, &execution)?;
             (
+                record.domain.clone(),
                 record.execution.workflow_id.clone(),
                 record.execution.run_id.clone(),
             )
         };
         Self::close_run_locked(
             &mut inner,
-            &req.domain,
+            &domain_id,
             &workflow_id,
             &run_id,
             WorkflowExecutionCloseStatus::Terminated,
@@ -646,7 +2092,10 @@ impl InMemoryExecutionStore {
         execution: &WorkflowExecution,
     ) -> Result<DescribeWorkflowExecutionResponse, EntityNotExistsError> {
         let inner = self.inner.read().expect("execution store lock");
-        let missing = || EntityNotExistsError::new("Workflow execution does not exist.".to_string());
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let missing =
+            || EntityNotExistsError::new("Workflow execution does not exist.".to_string());
         let key: (String, String, String) = if execution.run_id.is_empty() {
             let runs = inner
                 .by_workflow
@@ -681,7 +2130,7 @@ impl InMemoryExecutionStore {
                             return None;
                         }
                         Some(cadence_api::tasks::PendingChildExecutionInfo {
-                            domain: c.domain.clone(),
+                            domain: inner.domain_name(&c.domain),
                             workflow_id: c.workflow_id.clone(),
                             run_id: c.run_id.clone(),
                             workflow_type_name: child.workflow_type.name.clone(),
@@ -701,12 +2150,18 @@ impl InMemoryExecutionStore {
         execution: &WorkflowExecution,
     ) -> Result<GetWorkflowExecutionHistoryResponse, EntityNotExistsError> {
         let inner = self.inner.read().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
         let key = if execution.run_id.is_empty() {
             let runs = inner
                 .by_workflow
                 .get(&(domain.to_string(), execution.workflow_id.clone()))
-                .ok_or_else(|| EntityNotExistsError::new("Workflow execution does not exist.".to_string()))?;
-            let latest = runs.last().ok_or_else(|| EntityNotExistsError::new("Workflow execution does not exist.".to_string()))?;
+                .ok_or_else(|| {
+                    EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+                })?;
+            let latest = runs.last().ok_or_else(|| {
+                EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+            })?;
             (
                 domain.to_string(),
                 execution.workflow_id.clone(),
@@ -729,13 +2184,17 @@ impl InMemoryExecutionStore {
                 next_page_token: Vec::new(),
                 archived: false,
             })
-            .ok_or_else(|| EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+            .ok_or_else(|| {
+                EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+            })
     }
 
     /// List executions for a domain; `open_only=true` lists running workflows.
     #[must_use]
     pub fn list(&self, domain: &str, open_only: bool) -> Vec<WorkflowExecutionInfo> {
         let inner = self.inner.read().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
         let mut out: Vec<WorkflowExecutionInfo> = inner
             .by_run
             .values()
@@ -746,12 +2205,67 @@ impl InMemoryExecutionStore {
         out
     }
 
+    pub fn query_visible(
+        &self,
+        domain: &str,
+        query: &str,
+    ) -> Result<Vec<WorkflowExecutionInfo>, BadRequestError> {
+        let mut rows = self.list(domain, true);
+        rows.extend(self.list(domain, false));
+        crate::visibility::apply(&mut rows, query)?;
+        Ok(rows)
+    }
+    pub fn visibility_page(
+        &self,
+        request: &cadence_api::service_types::ListWorkflowExecutionsRequest,
+    ) -> Result<cadence_api::service_types::ListWorkflowExecutionsResponse, BadRequestError> {
+        let rows = self.query_visible(&request.domain, &request.query)?;
+        crate::visibility::page(rows, request.page_size, &request.next_page_token)
+    }
+
     // -----------------------------------------------------------------------
     // Matching: decision tasks
     // -----------------------------------------------------------------------
 
     fn encode_task_token(token: &TaskToken) -> Vec<u8> {
         JsonTaskTokenSerializer::serialize(token).unwrap_or_default()
+    }
+
+    /// Resolve the same pending activity used by token-based APIs. Cadence's
+    /// ByID APIs target the current open run when no run ID is supplied.
+    pub fn activity_token_by_id(
+        &self,
+        domain: &str,
+        execution: &WorkflowExecution,
+        activity_id: &str,
+    ) -> Result<Vec<u8>, TaskError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let record = self
+            .get_open_mut(&mut inner, domain, execution)
+            .map_err(|e| match e {
+                WorkflowMutationError::NotFound(e) => TaskError::NotFound(e),
+                WorkflowMutationError::AlreadyCompleted(e) => TaskError::AlreadyCompleted(e),
+            })?;
+        let pending = record
+            .pending_activities
+            .values()
+            .find(|p| p.activity_id == activity_id)
+            .ok_or_else(|| {
+                TaskError::NotFound(EntityNotExistsError::new("Activity task not found."))
+            })?;
+        let token = TaskToken {
+            domain_id: domain.to_string(),
+            workflow_id: record.execution.workflow_id.clone(),
+            run_id: record.execution.run_id.clone(),
+            workflow_type: record.workflow_type.name.clone(),
+            schedule_id: pending.scheduled_event_id,
+            schedule_attempt: i64::from(pending.attempt),
+            activity_id: pending.activity_id.clone(),
+            activity_type: pending.activity_type.name.clone(),
+        };
+        Ok(Self::encode_task_token(&token))
     }
 
     fn decode_task_token(bytes: &[u8]) -> Result<TaskToken, TaskError> {
@@ -769,87 +2283,254 @@ impl InMemoryExecutionStore {
         identity: &str,
     ) -> Option<PollForDecisionTaskResponse> {
         let mut inner = self.inner.write().expect("execution store lock");
-        let key = (domain.to_string(), task_list.to_string());
+        let domain_key = self.domain_id(&inner, domain);
+        let key = (domain_key.clone(), task_list.to_owned());
         loop {
             let (workflow_id, run_id) = inner.decision_queues.get_mut(&key)?.pop_front()?;
+            if !inner
+                .by_run
+                .get(&(domain_key.clone(), workflow_id.clone(), run_id.clone()))
+                .is_some_and(|record| {
+                    record.pending_decision.as_ref().is_some_and(|task| {
+                        task.task_list_name
+                            .as_deref()
+                            .unwrap_or(&record.task_list.name)
+                            == task_list
+                    })
+                })
+            {
+                continue;
+            }
             let backlog = inner
                 .decision_queues
                 .get(&key)
-                .map(|q| q.len())
-                .unwrap_or(0);
-            // Clone the pending decision first so the response can be built
-            // without holding a borrow across queue access.
-            let (pending, started_event_id) = {
-                let record = inner.by_run.get_mut(&(
-                    domain.to_string(),
-                    workflow_id.clone(),
-                    run_id.clone(),
-                ))?;
-                let pending = record.pending_decision.clone()?;
-                if !record.is_open() || pending.started_event_id.is_some() {
-                    continue; // stale entry
-                }
-                let started_event_id = record.next_event_id();
-                let event = HistoryEvent {
-                    decision_task_started_event_attributes: Some(
-                        DecisionTaskStartedEventAttributes {
-                            scheduled_event_id: pending.scheduled_event_id,
-                            identity: identity.to_string(),
-                            ..Default::default()
-                        },
-                    ),
-                    ..Default::default()
-                };
-                record.push_event(EventType::DecisionTaskStarted, event);
-                if let Some(p) = record.pending_decision.as_mut() {
-                    p.started_event_id = Some(started_event_id);
-                }
-                (pending, started_event_id)
+                .map_or(0, |queue| queue.len());
+            if let Some(task) = Self::start_decision_locked(
+                &mut inner,
+                &domain_key,
+                workflow_id,
+                run_id,
+                identity,
+                backlog,
+                false,
+            ) {
+                return Some(task);
+            }
+        }
+    }
+
+    fn start_decision_locked(
+        inner: &mut Inner,
+        domain: &str,
+        workflow_id: String,
+        run_id: String,
+        identity: &str,
+        backlog: usize,
+        inline: bool,
+    ) -> Option<PollForDecisionTaskResponse> {
+        let (pending, started_event_id) = {
+            let record =
+                inner
+                    .by_run
+                    .get_mut(&(domain.to_owned(), workflow_id.clone(), run_id.clone()))?;
+            let mut pending = record.pending_decision.clone()?;
+            if !record.is_open() || pending.started_event_id.is_some() {
+                return None;
+            }
+            if pending.attempt > 0 && pending.scheduled_event_id != record.next_event_id() {
+                pending.attempt = 0;
+                pending.scheduled_event_id = record.push_event(
+                    EventType::DecisionTaskScheduled,
+                    HistoryEvent {
+                        decision_task_scheduled_event_attributes: Some(
+                            DecisionTaskScheduledEventAttributes {
+                                task_list: Some(record.task_list.clone()),
+                                start_to_close_timeout_seconds: record
+                                    .task_start_to_close_timeout_seconds,
+                                attempt: 0,
+                            },
+                        ),
+                        ..Default::default()
+                    },
+                );
+                pending.scheduled_time_millis =
+                    record.history.last().and_then(|event| event.timestamp);
+            }
+            pending.started_time_millis = Some(now_millis());
+            record.last_updated_millis = now_millis();
+            pending.identity = identity.to_owned();
+            pending.request_id = if inline {
+                "request-from-RespondDecisionTaskCompleted".into()
+            } else {
+                uuid::Uuid::new_v4().to_string()
             };
-            // Gather response data without holding the write borrow.
-            let response_data = {
-                let record =
-                    inner
-                        .by_run
-                        .get(&(domain.to_string(), workflow_id.clone(), run_id.clone()))?;
-                (
-                    record.workflow_type.clone(),
-                    record.task_list.clone(),
-                    record.prev_started_event_id,
-                    record.history.clone(),
-                    Self::head_query(record),
-                    Self::head_query_id(record),
-                    Self::all_queries(record),
+            let started_event_id = if pending.attempt > 0 {
+                pending.scheduled_event_id + 1
+            } else {
+                record.push_event(
+                    EventType::DecisionTaskStarted,
+                    HistoryEvent {
+                        decision_task_started_event_attributes: Some(
+                            DecisionTaskStartedEventAttributes {
+                                scheduled_event_id: pending.scheduled_event_id,
+                                identity: pending.identity.clone(),
+                                request_id: pending.request_id.clone(),
+                            },
+                        ),
+                        ..Default::default()
+                    },
                 )
             };
-            let (workflow_type, task_list, prev_started, history, head_query, head_query_id, queries) =
-                response_data;
-            let token = TaskToken {
-                domain_id: domain.to_string(),
-                workflow_id: workflow_id.clone(),
-                workflow_type: workflow_type.name.clone(),
-                run_id: run_id.clone(),
-                schedule_id: pending.scheduled_event_id,
-                schedule_attempt: pending.attempt,
-                activity_id: String::new(),
-                activity_type: String::new(),
-            };
-            // Attach the head buffered query like Go's embedded legacy query.
-            return Some(PollForDecisionTaskResponse {
-                task_token: Self::encode_task_token(&token),
-                workflow_execution: Some(WorkflowExecution::new(workflow_id, run_id)),
-                workflow_type: Some(workflow_type),
-                previous_started_event_id: prev_started,
-                started_event_id,
-                attempt: pending.attempt,
-                backlog_count_hint: backlog as i64,
-                history: Some(History { events: history }),
-                next_page_token: Vec::new(),
-                workflow_execution_task_list: Some(task_list),
-                query: head_query,
-                query_id: head_query_id,
-                queries,
-            });
+            if pending.attempt == 0 {
+                pending.started_time_millis =
+                    record.history.last().and_then(|event| event.timestamp);
+            }
+            pending.started_event_id = Some(started_event_id);
+            record.pending_decision = Some(pending.clone());
+            (pending, started_event_id)
+        };
+        let history_start = if inline
+            || inner.by_run[&(domain.to_owned(), workflow_id.clone(), run_id.clone())]
+                .sticky_task_list
+                .as_ref()
+                .is_some_and(|name| !name.is_empty())
+        {
+            inner.by_run[&(domain.to_owned(), workflow_id.clone(), run_id.clone())]
+                .prev_started_event_id
+                .unwrap_or(0)
+                .max(0) as usize
+        } else {
+            0
+        };
+        // Gather response data without holding the write borrow.
+        let response_data = {
+            let record =
+                inner
+                    .by_run
+                    .get(&(domain.to_string(), workflow_id.clone(), run_id.clone()))?;
+            (
+                record.workflow_type.clone(),
+                record.task_list.clone(),
+                record.prev_started_event_id,
+                record
+                    .history
+                    .iter()
+                    .skip(history_start)
+                    .take(HISTORY_PAGE_SIZE)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                record.history.len(),
+                pending.scheduled_time_millis,
+                pending.started_time_millis,
+                Self::head_query(record),
+                Self::head_query_id(record),
+                Self::all_queries(record),
+            )
+        };
+        let transient_events = inner.by_run
+            [&(domain.to_owned(), workflow_id.clone(), run_id.clone())]
+            .transient_decision_events();
+        let (
+            workflow_type,
+            task_list,
+            prev_started,
+            mut history,
+            history_len,
+            scheduled_timestamp,
+            started_timestamp,
+            head_query,
+            head_query_id,
+            queries,
+        ) = response_data;
+        let page_end = history_start
+            .saturating_add(HISTORY_PAGE_SIZE)
+            .min(history_len);
+        if page_end == history_len {
+            history.extend(transient_events.clone());
+        }
+        let token = TaskToken {
+            domain_id: domain.to_string(),
+            workflow_id: workflow_id.clone(),
+            workflow_type: workflow_type.name.clone(),
+            run_id: run_id.clone(),
+            schedule_id: pending.scheduled_event_id,
+            schedule_attempt: pending.attempt,
+            activity_id: String::new(),
+            activity_type: String::new(),
+        };
+        // Attach the head buffered query like Go's embedded legacy query.
+        Some(PollForDecisionTaskResponse {
+            task_token: Self::encode_task_token(&token),
+            workflow_execution: Some(WorkflowExecution::new(workflow_id.clone(), run_id.clone())),
+            workflow_type: Some(workflow_type),
+            previous_started_event_id: prev_started,
+            started_event_id,
+            attempt: pending.attempt,
+            backlog_count_hint: backlog as i64,
+            history: Some(History { events: history }),
+            next_page_token: if page_end < history_len {
+                encode_history_cursor(
+                    domain,
+                    &WorkflowExecution::new(&workflow_id, &run_id),
+                    page_end,
+                    history_len,
+                    false,
+                    &transient_events,
+                )
+            } else {
+                Vec::new()
+            },
+            next_event_id: if pending.attempt > 0 {
+                pending.scheduled_event_id
+            } else {
+                started_event_id + 1
+            },
+            scheduled_timestamp,
+            started_timestamp,
+            workflow_execution_task_list: Some(task_list),
+            query: head_query,
+            query_id: head_query_id,
+            queries,
+        })
+    }
+
+    fn inline_decision_response_locked(
+        inner: &mut Inner,
+        key: &(String, String, String),
+        task_list: &str,
+        request: &RespondDecisionTaskCompletedRequest,
+    ) -> RespondDecisionTaskCompletedResponse {
+        if !request.return_new_decision_task
+            || !inner.by_run.get(key).is_some_and(|record| {
+                record.is_open()
+                    && record
+                        .pending_decision
+                        .as_ref()
+                        .is_some_and(|task| task.started_event_id.is_none())
+            })
+        {
+            return RespondDecisionTaskCompletedResponse::default();
+        }
+        // Go skips transfer when it starts an inline task. Remove only this
+        // execution's queue entries; another workflow must still be polled.
+        let queue_name = inner.by_run[key]
+            .pending_decision
+            .as_ref()
+            .and_then(|task| task.task_list_name.clone())
+            .unwrap_or_else(|| task_list.to_owned());
+        if let Some(queue) = inner.decision_queues.get_mut(&(key.0.clone(), queue_name)) {
+            queue.retain(|(workflow, run)| (workflow, run) != (&key.1, &key.2));
+        }
+        RespondDecisionTaskCompletedResponse {
+            decision_task: Self::start_decision_locked(
+                inner,
+                &key.0,
+                key.1.clone(),
+                key.2.clone(),
+                &request.identity,
+                0,
+                true,
+            ),
         }
     }
 
@@ -862,7 +2543,7 @@ impl InMemoryExecutionStore {
         &self,
         req: &RespondDecisionTaskCompletedRequest,
     ) -> Result<RespondDecisionTaskCompletedResponse, TaskError> {
-        let token = Self::decode_task_token(&req.task_token)?;
+        let token = InMemoryExecutionStore::decode_task_token(&req.task_token)?;
         let mut inner = self.inner.write().expect("execution store lock");
         let record_key = (
             token.domain_id.clone(),
@@ -870,7 +2551,9 @@ impl InMemoryExecutionStore {
             token.run_id.clone(),
         );
         let record = inner.by_run.get(&record_key).ok_or_else(|| {
-            TaskError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+            TaskError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
         })?;
         if !record.is_open() {
             return Err(TaskError::AlreadyCompleted(
@@ -879,26 +2562,122 @@ impl InMemoryExecutionStore {
                 },
             ));
         }
-        let pending = record
-            .pending_decision
-            .clone()
-            .ok_or_else(|| TaskError::InvalidToken(BadRequestError::new("Invalid TaskToken.")))?;
-        if pending.started_event_id.is_none() || pending.scheduled_event_id != token.schedule_id {
-            return Err(TaskError::InvalidToken(BadRequestError::new(
-                "Invalid TaskToken.",
+        let pending = record.pending_decision.clone().ok_or_else(|| {
+            TaskError::NotFound(EntityNotExistsError::new("Decision task not found."))
+        })?;
+        if pending.started_event_id.is_none()
+            || pending.scheduled_event_id != token.schedule_id
+            || pending.attempt != token.schedule_attempt
+        {
+            return Err(TaskError::NotFound(EntityNotExistsError::new(
+                "Decision task not found.",
             )));
         }
         Self::validate_decisions(&inner, &record_key, &req.decisions)?;
-        // External events can arrive after this decision was polled but before
-        // its completion is committed. In that case the worker's response
-        // cannot have observed those events, so another replay task is needed.
-        let has_new_events = inner
-            .by_run
-            .get(&record_key)
-            .and_then(|record| record.history.last())
-            .is_some_and(|event| event.event_id > pending.started_event_id.unwrap_or_default());
+
+        let first_close = req.decisions.iter().position(|decision| {
+            matches!(
+                decision.decision_type,
+                Some(
+                    DecisionType::CompleteWorkflowExecution
+                        | DecisionType::FailWorkflowExecution
+                        | DecisionType::CancelWorkflowExecution
+                        | DecisionType::ContinueAsNewWorkflowExecution
+                )
+            )
+        });
+        let canceled_before_close: std::collections::HashSet<_> = req
+            .decisions
+            .iter()
+            .take(first_close.unwrap_or(req.decisions.len()))
+            .filter(|decision| decision.decision_type == Some(DecisionType::CancelTimer))
+            .filter_map(|decision| {
+                decision
+                    .cancel_timer_decision_attributes
+                    .as_ref()
+                    .map(|attrs| attrs.timer_id.as_str())
+            })
+            .collect();
+        let has_unhandled_before_close =
+            inner.by_run[&record_key]
+                .buffered_events
+                .iter()
+                .any(|event| {
+                    !event
+                        .timer_fired_event_attributes
+                        .as_ref()
+                        .is_some_and(|fired| {
+                            canceled_before_close.contains(fired.timer_id.as_str())
+                        })
+                });
+        if has_unhandled_before_close
+            && req.decisions.iter().any(|decision| {
+                matches!(
+                    decision.decision_type,
+                    Some(
+                        DecisionType::CompleteWorkflowExecution
+                            | DecisionType::FailWorkflowExecution
+                            | DecisionType::CancelWorkflowExecution
+                            | DecisionType::ContinueAsNewWorkflowExecution
+                    )
+                )
+            })
+        {
+            let record = inner.by_run.get_mut(&record_key).unwrap();
+            if pending.attempt == 0 {
+                record.push_event(
+                    EventType::DecisionTaskFailed,
+                    HistoryEvent {
+                        decision_task_failed_event_attributes: Some(
+                            cadence_api::tasks::DecisionTaskFailedEventAttributes {
+                                scheduled_event_id: pending.scheduled_event_id,
+                                started_event_id: pending.started_event_id.unwrap(),
+                                cause: Some(DecisionTaskFailedCause::UnhandledDecision),
+                                identity: req.identity.clone(),
+                                ..Default::default()
+                            },
+                        ),
+                        ..Default::default()
+                    },
+                );
+            }
+            record.clear_stickiness();
+            record.pending_decision = None;
+            let task_list = record.task_list.name.clone();
+            Self::flush_buffered_events_locked(&mut inner, &record_key);
+            Self::schedule_decision_locked(
+                &mut inner,
+                &token.domain_id,
+                &token.workflow_id,
+                &token.run_id,
+                &task_list,
+                0,
+            );
+            return Ok(Self::inline_decision_response_locked(
+                &mut inner,
+                &record_key,
+                &task_list,
+                req,
+            ));
+        }
         // All valid: record completion.
         let record = inner.by_run.get_mut(&record_key).expect("record exists");
+        record.materialize_transient_decision(&req.identity);
+        if let Some(attributes) = req
+            .sticky_attributes
+            .as_ref()
+            .filter(|attributes| attributes.worker_task_list.is_some())
+        {
+            record.sticky_task_list = attributes
+                .worker_task_list
+                .as_ref()
+                .map(|task_list| task_list.name.clone());
+            record.sticky_schedule_to_start_timeout_seconds =
+                attributes.schedule_to_start_timeout_seconds.unwrap_or(0);
+        } else {
+            record.clear_stickiness();
+        }
+
         let started_event_id = pending.started_event_id.expect("verified started");
         let completed = HistoryEvent {
             decision_task_completed_event_attributes: Some(DecisionTaskCompletedEventAttributes {
@@ -927,7 +2706,6 @@ impl InMemoryExecutionStore {
         let workflow_id = record.execution.workflow_id.clone();
         let run_id = record.execution.run_id.clone();
         let task_list = record.task_list.name.clone();
-        let has_decisions = !req.decisions.is_empty();
         Self::apply_decisions_locked(
             &mut inner,
             &domain,
@@ -937,11 +2715,30 @@ impl InMemoryExecutionStore {
             completed_event_id,
             &req.identity,
         )?;
-        // A non-empty command batch gets one follow-up task so the worker can
-        // observe the recorded decision events on replay. An empty replay
-        // means the workflow is blocked on a timer/activity/signal; enqueueing
-        // another task there would spin indefinitely.
-        if (has_decisions || has_new_events)
+        let has_new_events = !inner.by_run[&record_key].buffered_events.is_empty();
+        Self::flush_buffered_events_locked(&mut inner, &record_key);
+        // Go creates another decision only for unhandled external events,
+        // an explicit heartbeat/force request, or an immediate asynchronous
+        // result produced by the local child/external-workflow engine.
+        let has_immediate_result = inner.by_run[&record_key]
+            .history
+            .iter()
+            .filter(|event| event.event_id > completed_event_id)
+            .any(|event| {
+                matches!(
+                    event.event_type,
+                    Some(
+                        EventType::ChildWorkflowExecutionStarted
+                            | EventType::StartChildWorkflowExecutionFailed
+                            | EventType::ExternalWorkflowExecutionSignaled
+                            | EventType::SignalExternalWorkflowExecutionFailed
+                            | EventType::ExternalWorkflowExecutionCancelRequested
+                            | EventType::RequestCancelExternalWorkflowExecutionFailed
+                            | EventType::ActivityTaskCanceled
+                    )
+                )
+            });
+        if (has_new_events || has_immediate_result || req.force_create_new_decision_task)
             && inner
                 .by_run
                 .get(&record_key)
@@ -956,9 +2753,17 @@ impl InMemoryExecutionStore {
                 0,
             );
         }
-        Ok(RespondDecisionTaskCompletedResponse {
-            decision_task: None,
-        })
+        inner
+            .by_run
+            .get_mut(&record_key)
+            .unwrap()
+            .last_updated_millis = now_millis();
+        Ok(Self::inline_decision_response_locked(
+            &mut inner,
+            &record_key,
+            &task_list,
+            req,
+        ))
     }
 
     /// Validate a decision batch against the execution state.
@@ -997,6 +2802,8 @@ impl InMemoryExecutionStore {
                             "Bad schedule activity attributes: activityType is not set.",
                         )));
                     }
+                    cadence_api::validation::validate_retry_policy(a.retry_policy.as_ref())
+                        .map_err(TaskError::BadDecision)?;
                     if !seen_activity_ids.insert(a.activity_id.clone()) {
                         return Err(TaskError::BadDecision(BadRequestError::new(format!(
                             "Bad schedule activity attributes: duplicate activityId {:?} in decision batch.",
@@ -1104,6 +2911,8 @@ impl InMemoryExecutionStore {
                                 "Bad start child attributes: attributes not set.",
                             ))
                         })?;
+                    cadence_api::validation::validate_retry_policy(c.retry_policy.as_ref())
+                        .map_err(TaskError::BadDecision)?;
                     if c.domain.is_empty() {
                         return Err(TaskError::BadDecision(BadRequestError::new(
                             "Bad start child attributes: domain is not set.",
@@ -1216,6 +3025,7 @@ impl InMemoryExecutionStore {
         completed_event_id: i64,
         identity: &str,
     ) -> Result<(), TaskError> {
+        let domain_name = inner.domain_name(domain);
         for d in decisions {
             let record = inner
                 .by_run
@@ -1240,7 +3050,7 @@ impl InMemoryExecutionStore {
                                 activity_id: a.activity_id.clone(),
                                 activity_type: a.activity_type.clone(),
                                 domain: Some(if a.domain.is_empty() {
-                                    domain.to_string()
+                                    domain_name.clone()
                                 } else {
                                     a.domain.clone()
                                 }),
@@ -1285,10 +3095,19 @@ impl InMemoryExecutionStore {
                             heartbeat_details: Vec::new(),
                             queued: true,
                             retry_ready_millis: None,
+                            schedule_to_start_timeout_seconds: a.schedule_to_start_timeout_seconds,
                             schedule_to_close_timeout_seconds: a.schedule_to_close_timeout_seconds,
                             start_to_close_timeout_seconds: a.start_to_close_timeout_seconds,
                             heartbeat_timeout_seconds: a.heartbeat_timeout_seconds,
                             scheduled_time_millis: now_millis(),
+                            attempt_scheduled_time_millis: None,
+                            started_time_millis: None,
+                            last_heartbeat_time_millis: None,
+                            started_identity: String::new(),
+                            started_request_id: String::new(),
+                            last_failure_reason: None,
+                            last_failure_details: Vec::new(),
+                            last_failure_options: None,
                             retry_policy: a.retry_policy.clone(),
                             header: a.header.clone(),
                         },
@@ -1309,6 +3128,19 @@ impl InMemoryExecutionStore {
                         .as_ref()
                         .map(|a| a.result.clone())
                         .unwrap_or_default();
+                    if Self::retry_or_cron_locked(
+                        inner,
+                        domain,
+                        workflow_id,
+                        run_id,
+                        now_millis(),
+                        completed_event_id,
+                        None,
+                        &[],
+                        Some(&result),
+                    ) {
+                        continue;
+                    }
                     Self::close_run_locked(
                         inner,
                         domain,
@@ -1335,6 +3167,43 @@ impl InMemoryExecutionStore {
                         .as_ref()
                         .map(|f| (f.reason.clone(), f.details.clone()))
                         .unwrap_or((None, Vec::new()));
+                    if record.history.iter().any(|event| {
+                        event.event_type == Some(EventType::WorkflowExecutionCancelRequested)
+                    }) {
+                        Self::close_run_locked(
+                            inner,
+                            domain,
+                            workflow_id,
+                            run_id,
+                            WorkflowExecutionCloseStatus::Canceled,
+                            None,
+                            details.clone(),
+                            HistoryEvent {
+                                workflow_execution_canceled_event_attributes: Some(
+                                    WorkflowExecutionCanceledEventAttributes {
+                                        details,
+                                        decision_task_completed_event_id: completed_event_id,
+                                    },
+                                ),
+                                ..Default::default()
+                            },
+                            EventType::WorkflowExecutionCanceled,
+                        );
+                        continue;
+                    }
+                    if Self::retry_or_cron_locked(
+                        inner,
+                        domain,
+                        workflow_id,
+                        run_id,
+                        now_millis(),
+                        completed_event_id,
+                        reason.as_deref(),
+                        &details,
+                        None,
+                    ) {
+                        continue;
+                    }
                     Self::close_run_locked(
                         inner,
                         domain,
@@ -1409,28 +3278,58 @@ impl InMemoryExecutionStore {
                     );
                 }
                 Some(DecisionType::CancelTimer) => {
-                    let t = d
+                    let attrs = d
                         .cancel_timer_decision_attributes
                         .as_ref()
                         .expect("validated");
                     let started_event_id = record
                         .pending_timers
-                        .get(&t.timer_id)
-                        .map(|t| t.started_event_id)
-                        .unwrap_or(0);
-                    record.pending_timers.remove(&t.timer_id);
-                    record.push_event(
-                        EventType::TimerCanceled,
-                        HistoryEvent {
-                            timer_canceled_event_attributes: Some(TimerCanceledEventAttributes {
-                                timer_id: t.timer_id.clone(),
-                                started_event_id,
-                                decision_task_completed_event_id: completed_event_id,
-                                identity: identity.to_string(),
-                            }),
-                            ..Default::default()
-                        },
-                    );
+                        .remove(&attrs.timer_id)
+                        .map(|timer| timer.started_event_id)
+                        .or_else(|| {
+                            let index = record.buffered_events.iter().position(|event| {
+                                event
+                                    .timer_fired_event_attributes
+                                    .as_ref()
+                                    .is_some_and(|fired| fired.timer_id == attrs.timer_id)
+                            })?;
+                            record
+                                .buffered_events
+                                .remove(index)
+                                .timer_fired_event_attributes
+                                .map(|fired| fired.started_event_id)
+                        });
+                    if let Some(started_event_id) = started_event_id {
+                        record.push_event(
+                            EventType::TimerCanceled,
+                            HistoryEvent {
+                                timer_canceled_event_attributes: Some(
+                                    TimerCanceledEventAttributes {
+                                        timer_id: attrs.timer_id.clone(),
+                                        started_event_id,
+                                        decision_task_completed_event_id: completed_event_id,
+                                        identity: identity.to_owned(),
+                                    },
+                                ),
+                                ..Default::default()
+                            },
+                        );
+                    } else {
+                        record.push_event(
+                            EventType::CancelTimerFailed,
+                            HistoryEvent {
+                                cancel_timer_failed_event_attributes: Some(
+                                    cadence_api::tasks::CancelTimerFailedEventAttributes {
+                                        timer_id: attrs.timer_id.clone(),
+                                        cause: "TIMER_ID_UNKNOWN".into(),
+                                        decision_task_completed_event_id: completed_event_id,
+                                        identity: identity.to_owned(),
+                                    },
+                                ),
+                                ..Default::default()
+                            },
+                        );
+                    }
                 }
                 Some(DecisionType::RecordMarker) => {
                     let m = d
@@ -1494,6 +3393,8 @@ impl InMemoryExecutionStore {
                         run_id,
                         &attrs,
                         completed_event_id,
+                        attrs.backoff_start_interval_in_seconds,
+                        None,
                     );
                 }
                 Some(DecisionType::StartChildWorkflowExecution) => {
@@ -1584,6 +3485,7 @@ impl InMemoryExecutionStore {
     /// Apply a continue-as-new decision: close the current run and spawn
     /// its successor, mirroring Go history. Children stay attached by
     /// repointing them at the new run.
+    #[allow(clippy::too_many_arguments)]
     fn continue_as_new_locked(
         inner: &mut Inner,
         domain: &str,
@@ -1591,10 +3493,12 @@ impl InMemoryExecutionStore {
         run_id: &str,
         attrs: &cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes,
         completed_event_id: i64,
+        first_decision_backoff_seconds: Option<i32>,
+        expiration_timestamp: Option<i64>,
     ) {
         use cadence_api::tasks::WorkflowExecutionContinuedAsNewEventAttributes;
         let new_run_id = uuid::Uuid::new_v4().to_string();
-        let (workflow_type, task_list, timeouts, memo, search_attributes, parent) = {
+        let (workflow_type, task_list, timeouts, memo, search_attributes, parent, attempt) = {
             let old = inner
                 .by_run
                 .get(&(
@@ -1623,8 +3527,23 @@ impl InMemoryExecutionStore {
                 old.memo.clone(),
                 old.search_attributes.clone(),
                 old.parent.clone(),
+                old.attempt,
             )
         };
+        let previous_start = inner.by_run
+            [&(domain.to_owned(), workflow_id.to_owned(), run_id.to_owned())]
+            .started_attributes()
+            .clone();
+        let first_run_id = if previous_start.first_execution_run_id.is_empty() {
+            run_id.to_owned()
+        } else {
+            previous_start.first_execution_run_id.clone()
+        };
+        let initiator = Some(
+            attrs
+                .initiator
+                .unwrap_or(cadence_api::enums::ContinueAsNewInitiator::Decider),
+        );
         // Close the old run first.
         Self::close_run_locked(
             inner,
@@ -1644,8 +3563,17 @@ impl InMemoryExecutionStore {
                         execution_start_to_close_timeout_seconds: timeouts.0,
                         task_start_to_close_timeout_seconds: timeouts.1,
                         decision_task_completed_event_id: completed_event_id,
-                        initiator: None,
-                        ..Default::default()
+                        initiator,
+                        backoff_start_interval_in_seconds: Some(
+                            attrs.backoff_start_interval_in_seconds.unwrap_or(0),
+                        ),
+                        failure_reason: attrs.failure_reason.clone(),
+                        failure_details: attrs.failure_details.clone(),
+                        last_completion_result: attrs.last_completion_result.clone(),
+                        header: attrs.header.clone(),
+                        memo: attrs.memo.clone(),
+                        search_attributes: attrs.search_attributes.clone(),
+                        cron_overlap_policy: attrs.cron_overlap_policy,
                     },
                 ),
                 ..Default::default()
@@ -1691,19 +3619,57 @@ impl InMemoryExecutionStore {
             start_time_millis: now_millis(),
             close_time_millis: None,
             history: Vec::new(),
+            buffered_events: Vec::new(),
+            buffer_event_sequence: 0,
+            sticky_task_list: None,
+            sticky_schedule_to_start_timeout_seconds: 0,
+            last_updated_millis: now_millis(),
             pending_decision: None,
             pending_activities: HashMap::new(),
             pending_timers: HashMap::new(),
             pending_queries: std::collections::VecDeque::new(),
             parent,
             prev_started_event_id: None,
+            signal_request_ids: std::collections::HashSet::new(),
+            create_request_id: String::new(),
+            first_decision_task_backoff_seconds: first_decision_backoff_seconds.unwrap_or(0),
+            expiration_time_nanos: expiration_timestamp,
+            first_decision_due_millis: None,
+            jitter_start_seconds: attrs.jitter_start_seconds.unwrap_or(0),
+            attempt,
         };
+        let backoff_seconds = first_decision_backoff_seconds;
+        let backoff_millis = i64::from(backoff_seconds.unwrap_or(0).max(0)).saturating_mul(1000);
+        if backoff_millis > 0 {
+            record.first_decision_due_millis = Some(record.start_time_millis + backoff_millis);
+        }
         record.push_event(
             EventType::WorkflowExecutionStarted,
             HistoryEvent {
                 workflow_execution_started_event_attributes: Some(
                     WorkflowExecutionStartedEventAttributes {
+                        workflow_type: Some(record.workflow_type.clone()),
+                        task_list: Some(record.task_list.clone()),
                         input: attrs.input.clone(),
+                        execution_start_to_close_timeout_seconds: timeouts.0,
+                        task_start_to_close_timeout_seconds: timeouts.1,
+                        retry_policy: attrs.retry_policy.clone(),
+                        cron_schedule: attrs.cron_schedule.clone(),
+                        cron_overlap_policy: attrs.cron_overlap_policy,
+                        first_decision_task_backoff_seconds: backoff_seconds,
+                        memo: attrs.memo.clone(),
+                        search_attributes: attrs.search_attributes.clone(),
+                        header: attrs.header.clone(),
+                        continued_execution_run_id: run_id.to_owned(),
+                        original_execution_run_id: new_run_id.clone(),
+                        first_execution_run_id: first_run_id,
+                        first_scheduled_time_nano: previous_start.first_scheduled_time_nano,
+                        expiration_timestamp,
+                        initiator,
+                        continued_failure_reason: attrs.failure_reason.clone().unwrap_or_default(),
+                        continued_failure_details: attrs.failure_details.clone(),
+                        last_completion_result: attrs.last_completion_result.clone(),
+                        attempt,
                         ..Default::default()
                     },
                 ),
@@ -1716,7 +3682,16 @@ impl InMemoryExecutionStore {
             .or_default()
             .push(new_run_id.clone());
         inner.by_run.insert(new_key.clone(), record);
-        Self::schedule_decision_locked(inner, domain, workflow_id, &new_run_id, &task_list.name, 0);
+        if backoff_millis <= 0 {
+            Self::schedule_decision_locked(
+                inner,
+                domain,
+                workflow_id,
+                &new_run_id,
+                &task_list.name,
+                0,
+            );
+        }
     }
 
     /// Apply a start-child decision: append Initiated to the parent and
@@ -1735,6 +3710,8 @@ impl InMemoryExecutionStore {
             StartChildWorkflowExecutionFailedEventAttributes,
             StartChildWorkflowExecutionInitiatedEventAttributes,
         };
+        let child_domain = inner.domain_id(&attrs.domain);
+        let parent_domain_name = inner.domain_name(domain);
         let parent_key = (
             domain.to_string(),
             workflow_id.to_string(),
@@ -1773,12 +3750,12 @@ impl InMemoryExecutionStore {
         // Duplicate open child: record the Failed event like Go does.
         let duplicate = inner
             .by_workflow
-            .get(&(attrs.domain.clone(), attrs.workflow_id.clone()))
+            .get(&(child_domain.clone(), attrs.workflow_id.clone()))
             .is_some_and(|runs| {
                 runs.iter().any(|r| {
                     inner
                         .by_run
-                        .get(&(attrs.domain.clone(), attrs.workflow_id.clone(), r.clone()))
+                        .get(&(child_domain.clone(), attrs.workflow_id.clone(), r.clone()))
                         .is_some_and(ExecutionRecord::is_open)
                 })
             });
@@ -1818,7 +3795,7 @@ impl InMemoryExecutionStore {
                     .unwrap_or_default()
             });
         let mut child = ExecutionRecord {
-            domain: attrs.domain.clone(),
+            domain: child_domain.clone(),
             execution: WorkflowExecution::new(attrs.workflow_id.clone(), child_run_id.clone()),
             workflow_type: attrs.workflow_type.clone().unwrap_or_default(),
             task_list: child_task_list.clone(),
@@ -1831,17 +3808,30 @@ impl InMemoryExecutionStore {
             start_time_millis: now_millis(),
             close_time_millis: None,
             history: Vec::new(),
+            buffered_events: Vec::new(),
+            buffer_event_sequence: 0,
+            sticky_task_list: None,
+            sticky_schedule_to_start_timeout_seconds: 0,
+            last_updated_millis: now_millis(),
             pending_decision: None,
             pending_activities: HashMap::new(),
             pending_timers: HashMap::new(),
             pending_queries: std::collections::VecDeque::new(),
             parent: Some(ParentRef {
+                started_event_id: 0,
                 domain: domain.to_string(),
                 workflow_id: workflow_id.to_string(),
                 run_id: run_id.to_string(),
                 initiated_event_id,
             }),
             prev_started_event_id: None,
+            signal_request_ids: std::collections::HashSet::new(),
+            create_request_id: String::new(),
+            first_decision_task_backoff_seconds: 0,
+            expiration_time_nanos: None,
+            first_decision_due_millis: None,
+            jitter_start_seconds: 0,
+            attempt: 0,
         };
         child.push_event(
             EventType::WorkflowExecutionStarted,
@@ -1849,7 +3839,7 @@ impl InMemoryExecutionStore {
                 workflow_execution_started_event_attributes: Some(
                     WorkflowExecutionStartedEventAttributes {
                         workflow_type: attrs.workflow_type.clone(),
-                        parent_workflow_domain: Some(domain.to_string()),
+                        parent_workflow_domain: Some(parent_domain_name),
                         parent_workflow_execution: Some(WorkflowExecution::new(
                             workflow_id.to_string(),
                             run_id.to_string(),
@@ -1869,12 +3859,12 @@ impl InMemoryExecutionStore {
         );
         inner
             .by_workflow
-            .entry((attrs.domain.clone(), attrs.workflow_id.clone()))
+            .entry((child_domain.clone(), attrs.workflow_id.clone()))
             .or_default()
             .push(child_run_id.clone());
         inner.by_run.insert(
             (
-                attrs.domain.clone(),
+                child_domain.clone(),
                 attrs.workflow_id.clone(),
                 child_run_id.clone(),
             ),
@@ -1885,7 +3875,7 @@ impl InMemoryExecutionStore {
             .entry(parent_key)
             .or_default()
             .push(ChildRef {
-                domain: attrs.domain.clone(),
+                domain: child_domain.clone(),
                 workflow_id: attrs.workflow_id.clone(),
                 run_id: child_run_id.clone(),
                 initiated_event_id,
@@ -1920,9 +3910,21 @@ impl InMemoryExecutionStore {
                 ..Default::default()
             },
         );
+        let child_started_event_id = parent.history.len() as i64;
+        if let Some(link) = inner
+            .by_run
+            .get_mut(&(
+                child_domain.clone(),
+                attrs.workflow_id.clone(),
+                child_run_id.clone(),
+            ))
+            .and_then(|child| child.parent.as_mut())
+        {
+            link.started_event_id = child_started_event_id;
+        }
         Self::schedule_decision_locked(
             inner,
-            &attrs.domain,
+            &child_domain,
             &attrs.workflow_id,
             &child_run_id,
             &child_task_list.name,
@@ -1940,6 +3942,8 @@ impl InMemoryExecutionStore {
         run_id: &str,
         child_only: bool,
     ) -> Result<(String, String, String), ExternalTargetError> {
+        let domain_key = inner.domain_id(domain);
+        let domain = domain_key.as_str();
         if child_only {
             let kids = inner.children.get(source_key).cloned().unwrap_or_default();
             let hit = kids.into_iter().find(|c| {
@@ -2045,16 +4049,13 @@ impl InMemoryExecutionStore {
             attrs.child_workflow_only,
         ) {
             Ok(target_key) => {
-                let is_child = inner
-                    .children
-                    .get(&source_key)
-                    .is_some_and(|kids| {
-                        kids.iter().any(|c| {
-                            c.domain == target_key.0
-                                && c.workflow_id == target_key.1
-                                && c.run_id == target_key.2
-                        })
-                    });
+                let is_child = inner.children.get(&source_key).is_some_and(|kids| {
+                    kids.iter().any(|c| {
+                        c.domain == target_key.0
+                            && c.workflow_id == target_key.1
+                            && c.run_id == target_key.2
+                    })
+                });
                 let target = inner.by_run.get_mut(&target_key).expect("target open");
                 target.push_event(
                     EventType::WorkflowExecutionSignaled,
@@ -2258,7 +4259,7 @@ impl InMemoryExecutionStore {
     /// `ContinuedAsNew` closes notify nobody but still apply policy to
     /// children, matching Go's `RecordChildExecutionCompleted` switch.
     #[allow(clippy::too_many_arguments)]
-    fn close_run_locked(
+    pub(crate) fn close_run_locked(
         inner: &mut Inner,
         domain: &str,
         workflow_id: &str,
@@ -2269,6 +4270,14 @@ impl InMemoryExecutionStore {
         event: HistoryEvent,
         event_type: EventType,
     ) {
+        // Go trims buffered events after an external close event. Their
+        // unhandled payloads must not be published before termination/timeout.
+        inner
+            .by_run
+            .get_mut(&(domain.to_owned(), workflow_id.to_owned(), run_id.to_owned()))
+            .expect("record exists")
+            .buffered_events
+            .clear();
         let (parent, workflow_type_name) = {
             let record = inner
                 .by_run
@@ -2281,6 +4290,7 @@ impl InMemoryExecutionStore {
             record.push_event(event_type, event);
             record.close_status = Some(status);
             record.close_time_millis = Some(now_millis());
+            record.last_updated_millis = record.close_time_millis.unwrap();
             (record.parent.clone(), record.workflow_type.name.clone())
         };
         // 1. Notify the parent with the terminal child event.
@@ -2390,6 +4400,7 @@ impl InMemoryExecutionStore {
         reason: Option<String>,
         payload: Vec<u8>,
     ) -> bool {
+        let child_domain_name = inner.domain_name(child_domain);
         let parent_key = (
             parent.domain.clone(),
             parent.workflow_id.clone(),
@@ -2410,6 +4421,27 @@ impl InMemoryExecutionStore {
         if !open {
             return false;
         }
+        let started_event_id = if parent.started_event_id > 0 {
+            parent.started_event_id
+        } else {
+            // Older snapshots did not persist the parent start link.
+            inner
+                .by_run
+                .get(&parent_key)
+                .and_then(|record| {
+                    record
+                        .history
+                        .iter()
+                        .find(|event| {
+                            event
+                                .child_workflow_execution_started_event_attributes
+                                .as_ref()
+                                .is_some_and(|a| a.initiated_event_id == parent.initiated_event_id)
+                        })
+                        .map(|event| event.event_id)
+                })
+                .unwrap_or(0)
+        };
         let child_execution =
             WorkflowExecution::new(child_workflow_id.to_string(), child_run_id.to_string());
         let child_type = WorkflowType {
@@ -2421,11 +4453,11 @@ impl InMemoryExecutionStore {
                     child_workflow_execution_completed_event_attributes: Some(
                         ChildWorkflowExecutionCompletedEventAttributes {
                             result: payload,
-                            domain: child_domain.to_string(),
+                            domain: child_domain_name.clone(),
                             workflow_execution: Some(child_execution),
                             workflow_type: Some(child_type),
                             initiated_event_id: parent.initiated_event_id,
-                            started_event_id: 1,
+                            started_event_id,
                         },
                     ),
                     ..Default::default()
@@ -2438,11 +4470,11 @@ impl InMemoryExecutionStore {
                         ChildWorkflowExecutionFailedEventAttributes {
                             reason,
                             details: payload,
-                            domain: child_domain.to_string(),
+                            domain: child_domain_name.clone(),
                             workflow_execution: Some(child_execution),
                             workflow_type: Some(child_type),
                             initiated_event_id: parent.initiated_event_id,
-                            started_event_id: 1,
+                            started_event_id,
                         },
                     ),
                     ..Default::default()
@@ -2454,11 +4486,11 @@ impl InMemoryExecutionStore {
                     child_workflow_execution_canceled_event_attributes: Some(
                         ChildWorkflowExecutionCanceledEventAttributes {
                             details: payload,
-                            domain: child_domain.to_string(),
+                            domain: child_domain_name.clone(),
                             workflow_execution: Some(child_execution),
                             workflow_type: Some(child_type),
                             initiated_event_id: parent.initiated_event_id,
-                            started_event_id: 1,
+                            started_event_id,
                         },
                     ),
                     ..Default::default()
@@ -2469,37 +4501,33 @@ impl InMemoryExecutionStore {
                 HistoryEvent {
                     child_workflow_execution_terminated_event_attributes: Some(
                         ChildWorkflowExecutionTerminatedEventAttributes {
-                            domain: child_domain.to_string(),
+                            domain: child_domain_name.clone(),
                             workflow_execution: Some(child_execution),
                             workflow_type: Some(child_type),
                             initiated_event_id: parent.initiated_event_id,
-                            started_event_id: 1,
+                            started_event_id,
                         },
                     ),
                     ..Default::default()
                 },
                 EventType::ChildWorkflowExecutionTerminated,
             ),
-            WorkflowExecutionCloseStatus::TimedOut => {
-                // No TimedOut child event type is ported yet; report as failed.
-                (
-                    HistoryEvent {
-                        child_workflow_execution_failed_event_attributes: Some(
-                            ChildWorkflowExecutionFailedEventAttributes {
-                                reason: Some("TIMEOUT".to_string()),
-                                details: payload,
-                                domain: child_domain.to_string(),
-                                workflow_execution: Some(child_execution),
-                                workflow_type: Some(child_type),
-                                initiated_event_id: parent.initiated_event_id,
-                                started_event_id: 1,
-                            },
-                        ),
-                        ..Default::default()
-                    },
-                    EventType::ChildWorkflowExecutionFailed,
-                )
-            }
+            WorkflowExecutionCloseStatus::TimedOut => (
+                HistoryEvent {
+                    child_workflow_execution_timed_out_event_attributes: Some(
+                        cadence_api::tasks::ChildWorkflowExecutionTimedOutEventAttributes {
+                            timeout_type: Some(TimeoutType::StartToClose),
+                            domain: child_domain_name.clone(),
+                            workflow_execution: Some(child_execution),
+                            workflow_type: Some(child_type),
+                            initiated_event_id: parent.initiated_event_id,
+                            started_event_id,
+                        },
+                    ),
+                    ..Default::default()
+                },
+                EventType::ChildWorkflowExecutionTimedOut,
+            ),
             WorkflowExecutionCloseStatus::ContinuedAsNew => return true,
             _ => return true,
         };
@@ -2527,7 +4555,7 @@ impl InMemoryExecutionStore {
         identity: &str,
         binary_checksum: &str,
     ) -> Result<(), TaskError> {
-        let token = Self::decode_task_token(task_token)?;
+        let token = InMemoryExecutionStore::decode_task_token(task_token)?;
         let mut inner = self.inner.write().expect("execution store lock");
         let record_key = (
             token.domain_id.clone(),
@@ -2535,7 +4563,9 @@ impl InMemoryExecutionStore {
             token.run_id.clone(),
         );
         let record = inner.by_run.get(&record_key).ok_or_else(|| {
-            TaskError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+            TaskError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
         })?;
         if !record.is_open() {
             return Err(TaskError::AlreadyCompleted(
@@ -2544,40 +4574,56 @@ impl InMemoryExecutionStore {
                 },
             ));
         }
-        let pending = record
-            .pending_decision
-            .clone()
-            .ok_or_else(|| TaskError::InvalidToken(BadRequestError::new("Invalid TaskToken.")))?;
-        let started_event_id = pending
-            .started_event_id
-            .ok_or_else(|| TaskError::InvalidToken(BadRequestError::new("Invalid TaskToken.")))?;
-        if pending.scheduled_event_id != token.schedule_id {
-            return Err(TaskError::InvalidToken(BadRequestError::new(
-                "Invalid TaskToken.",
+        let pending = record.pending_decision.clone().ok_or_else(|| {
+            TaskError::NotFound(EntityNotExistsError::new("Decision task not found."))
+        })?;
+        let started_event_id = pending.started_event_id.ok_or_else(|| {
+            TaskError::NotFound(EntityNotExistsError::new("Decision task not found."))
+        })?;
+        if pending.scheduled_event_id != token.schedule_id
+            || pending.attempt != token.schedule_attempt
+        {
+            return Err(TaskError::NotFound(EntityNotExistsError::new(
+                "Decision task not found.",
             )));
         }
-        let attempt = pending.attempt + 1;
+        let attempt = if record.buffered_events.is_empty()
+            && !matches!(
+                cause,
+                Some(
+                    DecisionTaskFailedCause::ResetWorkflow
+                        | DecisionTaskFailedCause::FailoverCloseDecision
+                )
+            ) {
+            pending.attempt + 1
+        } else {
+            0
+        };
         let record = inner.by_run.get_mut(&record_key).expect("record exists");
-        record.push_event(
-            EventType::DecisionTaskFailed,
-            HistoryEvent {
-                decision_task_failed_event_attributes: Some(
-                    cadence_api::tasks::DecisionTaskFailedEventAttributes {
-                        scheduled_event_id: pending.scheduled_event_id,
-                        started_event_id,
-                        cause,
-                        details,
-                        identity: identity.to_string(),
-                        binary_checksum: binary_checksum.to_string(),
-                        ..Default::default()
-                    },
-                ),
-                ..Default::default()
-            },
-        );
-        record.prev_started_event_id = Some(started_event_id);
+        if pending.attempt == 0 {
+            record.push_event(
+                EventType::DecisionTaskFailed,
+                HistoryEvent {
+                    decision_task_failed_event_attributes: Some(
+                        cadence_api::tasks::DecisionTaskFailedEventAttributes {
+                            scheduled_event_id: pending.scheduled_event_id,
+                            started_event_id,
+                            cause,
+                            details,
+                            identity: identity.to_string(),
+                            binary_checksum: binary_checksum.to_string(),
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                },
+            );
+        }
+        record.clear_stickiness();
+        record.last_updated_millis = now_millis();
         record.pending_decision = None;
         let task_list = record.task_list.name.clone();
+        Self::flush_buffered_events_locked(&mut inner, &record_key);
         Self::schedule_decision_locked(
             &mut inner,
             &token.domain_id,
@@ -2601,6 +4647,9 @@ impl InMemoryExecutionStore {
         identity: &str,
     ) -> Option<PollForActivityTaskResponse> {
         let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let workflow_domain = inner.domain_name(domain);
         let key = (domain.to_string(), task_list.to_string());
         loop {
             let (workflow_id, run_id, scheduled_event_id) =
@@ -2612,23 +4661,47 @@ impl InMemoryExecutionStore {
             if !record.is_open() {
                 continue;
             }
-            let pending = record.pending_activities.get(&scheduled_event_id)?.clone();
+            let Some(pending) = record.pending_activities.get(&scheduled_event_id).cloned() else {
+                continue;
+            };
+            if !pending.queued || pending.retry_ready_millis.is_some() {
+                continue;
+            }
             if pending.started_event_id.is_some() {
                 continue; // already dispatched
             }
-            let started_event_id = record.next_event_id();
-            let event = HistoryEvent {
-                activity_task_started_event_attributes: Some(ActivityTaskStartedEventAttributes {
-                    scheduled_event_id,
-                    identity: identity.to_string(),
-                    attempt: pending.attempt,
-                    ..Default::default()
-                }),
-                ..Default::default()
+            let started_time = now_millis();
+            let request_id = uuid::Uuid::new_v4().to_string();
+            // Go records retry-policy starts transiently; only the final
+            // attempt's Started event belongs in workflow history.
+            let started_event_id = if pending.retry_policy.is_some() {
+                -124
+            } else {
+                record.push_event(
+                    EventType::ActivityTaskStarted,
+                    HistoryEvent {
+                        activity_task_started_event_attributes: Some(
+                            ActivityTaskStartedEventAttributes {
+                                scheduled_event_id,
+                                identity: identity.to_string(),
+                                request_id: request_id.clone(),
+                                attempt: pending.attempt,
+                                last_failure_reason: pending.last_failure_reason.clone(),
+                                last_failure_details: pending.last_failure_details.clone(),
+                                last_failure_options: pending.last_failure_options.clone(),
+                            },
+                        ),
+                        ..Default::default()
+                    },
+                )
             };
-            record.push_event(EventType::ActivityTaskStarted, event);
+            record.last_updated_millis = started_time;
             if let Some(p) = record.pending_activities.get_mut(&scheduled_event_id) {
                 p.started_event_id = Some(started_event_id);
+                p.started_time_millis = Some(started_time);
+                p.last_heartbeat_time_millis = None;
+                p.started_identity = identity.to_string();
+                p.started_request_id = request_id;
                 p.queued = false;
             }
             let token = TaskToken {
@@ -2649,14 +4722,16 @@ impl InMemoryExecutionStore {
                 input: pending.input,
                 scheduled_timestamp: Some(pending.scheduled_time_millis),
                 schedule_to_close_timeout_seconds: pending.schedule_to_close_timeout_seconds,
-                started_timestamp: Some(now_millis()),
+                started_timestamp: Some(started_time),
                 start_to_close_timeout_seconds: pending.start_to_close_timeout_seconds,
                 heartbeat_timeout_seconds: pending.heartbeat_timeout_seconds,
                 attempt: pending.attempt,
-                scheduled_timestamp_of_this_attempt: Some(now_millis()),
-                heartbeat_details: Vec::new(),
+                scheduled_timestamp_of_this_attempt: pending
+                    .attempt_scheduled_time_millis
+                    .or(Some(pending.scheduled_time_millis)),
+                heartbeat_details: pending.heartbeat_details,
                 workflow_type: Some(record.workflow_type.clone()),
-                workflow_domain: domain.to_string(),
+                workflow_domain: workflow_domain.clone(),
                 header: pending.header,
             });
         }
@@ -2679,7 +4754,9 @@ impl InMemoryExecutionStore {
                 token.run_id.clone(),
             ))
             .ok_or_else(|| {
-                TaskError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+                TaskError::NotFound(EntityNotExistsError::new(
+                    "Workflow execution does not exist.".to_string(),
+                ))
             })?;
         if !record.is_open() {
             return Err(TaskError::AlreadyCompleted(
@@ -2692,7 +4769,9 @@ impl InMemoryExecutionStore {
             .pending_activities
             .get_mut(&token.schedule_id)
             .ok_or_else(|| TaskError::InvalidToken(BadRequestError::new("Invalid TaskToken.")))?;
-        if pending.activity_id != token.activity_id {
+        if pending.activity_id != token.activity_id
+            || i64::from(pending.attempt) != token.schedule_attempt
+        {
             return Err(TaskError::InvalidToken(BadRequestError::new(
                 "Invalid TaskToken.",
             )));
@@ -2709,7 +4788,7 @@ impl InMemoryExecutionStore {
         &self,
         req: &RespondActivityTaskCompletedRequest,
     ) -> Result<(), TaskError> {
-        let token = Self::decode_task_token(&req.task_token)?;
+        let token = InMemoryExecutionStore::decode_task_token(&req.task_token)?;
         let mut inner = self.inner.write().expect("execution store lock");
         let record_key = (
             token.domain_id.clone(),
@@ -2717,11 +4796,9 @@ impl InMemoryExecutionStore {
             token.run_id.clone(),
         );
         let scheduled_event_id = token.schedule_id;
-        let started_event_id = {
-            let pending = Self::resolve_activity_mut(&mut inner, &token)?;
-            pending.started_event_id.expect("verified started")
-        };
+        Self::resolve_activity_mut(&mut inner, &token)?;
         let record = inner.by_run.get_mut(&record_key).expect("record exists");
+        let started_event_id = Self::materialize_activity_started(record, scheduled_event_id);
         record.push_event(
             EventType::ActivityTaskCompleted,
             HistoryEvent {
@@ -2750,7 +4827,7 @@ impl InMemoryExecutionStore {
     }
 
     pub fn fail_activity(&self, req: &RespondActivityTaskFailedRequest) -> Result<(), TaskError> {
-        let token = Self::decode_task_token(&req.task_token)?;
+        let token = InMemoryExecutionStore::decode_task_token(&req.task_token)?;
         let mut inner = self.inner.write().expect("execution store lock");
         let record_key = (
             token.domain_id.clone(),
@@ -2758,70 +4835,36 @@ impl InMemoryExecutionStore {
             token.run_id.clone(),
         );
         let scheduled_event_id = token.schedule_id;
-        let (started_event_id, attempt, retry_policy, activity_snapshot) = {
+        let (attempt, activity_snapshot) = {
             let pending = Self::resolve_activity_mut(&mut inner, &token)?;
-            (
-                pending.started_event_id.expect("verified started"),
-                pending.attempt,
-                pending.retry_policy.clone(),
-                pending.clone(),
-            )
+            (pending.attempt, pending.clone())
         };
-        if Self::is_retryable_activity_failure(req, attempt, retry_policy.as_ref()) {
-            // Schedule the next attempt like Go: a fresh Scheduled event,
-            // requeued after backoff. No Failed event until exhausted.
-            let policy = retry_policy.unwrap_or_default();
-            let initial = policy.initial_interval_in_seconds.max(1) as i64;
-            let coeff = policy.backoff_coefficient.max(1.0);
-            let max_interval = if policy.maximum_interval_in_seconds > 0 {
-                policy.maximum_interval_in_seconds as i64
-            } else {
-                i64::MAX / 2
-            };
-            let delay_secs =
-                ((initial as f64) * coeff.powi(attempt)).min(max_interval as f64) as i64;
+        if let Some(ready) = Self::activity_retry_time(req, &activity_snapshot, now_millis()) {
             let record = inner.by_run.get_mut(&record_key).expect("record exists");
-            record.push_event(
-                EventType::ActivityTaskScheduled,
-                HistoryEvent {
-                    activity_task_scheduled_event_attributes: Some(
-                        ActivityTaskScheduledEventAttributes {
-                            activity_id: activity_snapshot.activity_id.clone(),
-                            activity_type: Some(activity_snapshot.activity_type.clone()),
-                            domain: None,
-                            task_list: Some(activity_snapshot.task_list.clone()),
-                            input: activity_snapshot.input.clone(),
-                            schedule_to_close_timeout_seconds: activity_snapshot
-                                .schedule_to_close_timeout_seconds,
-                            schedule_to_start_timeout_seconds: None,
-                            start_to_close_timeout_seconds: activity_snapshot
-                                .start_to_close_timeout_seconds,
-                            heartbeat_timeout_seconds: activity_snapshot.heartbeat_timeout_seconds,
-                            decision_task_completed_event_id: 0,
-                            retry_policy: activity_snapshot.retry_policy.clone(),
-                            header: activity_snapshot.header.clone(),
-                        },
-                    ),
-                    ..Default::default()
-                },
-            );
-            let new_scheduled_id = record.history.len() as i64;
-            record.pending_activities.remove(&scheduled_event_id);
-            record.pending_activities.insert(
-                new_scheduled_id,
-                PendingActivity {
-                    scheduled_event_id: new_scheduled_id,
-                    started_event_id: None,
-                    attempt: attempt + 1,
-                    queued: false,
-                    retry_ready_millis: Some(now_millis() + delay_secs * 1000),
-                    heartbeat_details: req.heartbeat_details.clone(),
-                    ..activity_snapshot
-                },
-            );
+            record.last_updated_millis = now_millis();
+            let pending = record
+                .pending_activities
+                .get_mut(&scheduled_event_id)
+                .expect("activity exists");
+            pending.started_event_id = None;
+            pending.started_time_millis = None;
+            pending.last_heartbeat_time_millis = None;
+            pending.started_identity.clear();
+            pending.started_request_id.clear();
+            pending.attempt = attempt + 1;
+            pending.queued = false;
+            pending.retry_ready_millis = Some(ready);
+            pending.attempt_scheduled_time_millis = Some(ready);
+            if !req.heartbeat_details.is_empty() {
+                pending.heartbeat_details = req.heartbeat_details.clone();
+            }
+            pending.last_failure_reason = req.reason.clone();
+            pending.last_failure_details = req.details.clone();
+            pending.last_failure_options = req.failure_options.clone();
             return Ok(());
         }
         let record = inner.by_run.get_mut(&record_key).expect("record exists");
+        let started_event_id = Self::materialize_activity_started(record, scheduled_event_id);
         record.push_event(
             EventType::ActivityTaskFailed,
             HistoryEvent {
@@ -2849,34 +4892,297 @@ impl InMemoryExecutionStore {
         Ok(())
     }
 
-    /// Whether a failed activity attempt should retry, mirroring Go's
-    /// retry-policy evaluation (fatal category and non-retriable reasons
-    /// stop retries; `maximumAttempts` bounds the count).
-    fn is_retryable_activity_failure(
+    /// Go execution/retry.go and mutable_state_builder_methods_activity.go:
+    /// preserve the ScheduleID, honor fatal/cancel/non-retryable failures,
+    /// attempt and expiration limits, jitter and the caller's backoff override.
+    fn activity_retry_time(
         req: &RespondActivityTaskFailedRequest,
-        attempt: i32,
-        policy: Option<&RetryPolicy>,
-    ) -> bool {
+        pending: &PendingActivity,
+        now: i64,
+    ) -> Option<i64> {
         use cadence_api::enums::FailureCategory;
+        let policy = pending.retry_policy.as_ref()?;
+        if pending.cancel_requested {
+            return None;
+        }
         let category = req
             .failure_options
             .as_ref()
             .map(|o| o.failure_category_or_default())
             .unwrap_or(FailureCategory::Standard);
         if category == FailureCategory::Fatal {
-            return false;
+            return None;
         }
-        if let Some(policy) = policy {
-            if let Some(reason) = req.reason.as_deref() {
-                if !policy.is_retriable_reason(reason) {
-                    return false;
+        if policy.maximum_attempts == 0 && policy.expiration_interval_in_seconds == 0 {
+            return None;
+        }
+        if policy.maximum_attempts > 0 && pending.attempt >= policy.maximum_attempts - 1 {
+            return None;
+        }
+        if let Some(reason) = req.reason.as_deref() {
+            if !policy.is_retriable_reason(reason)
+                || matches!(
+                    reason,
+                    "CANCEL_DETAILS_EXCEEDS_LIMIT"
+                        | "COMPLETE_RESULT_EXCEEDS_LIMIT"
+                        | "HEARTBEAT_EXCEEDS_LIMIT"
+                        | "DECISION_BLOB_SIZE_EXCEEDS_LIMIT"
+                )
+            {
+                return None;
+            }
+        }
+        let maximum = i64::MAX / 1_000_000_000;
+        let value = f64::from(policy.initial_interval_in_seconds)
+            * policy.backoff_coefficient.powi(pending.attempt);
+        let mut seconds = if !value.is_finite() || value <= 0.0 || value > maximum as f64 {
+            if policy.maximum_interval_in_seconds > 0 {
+                i64::from(policy.maximum_interval_in_seconds)
+            } else {
+                return None;
+            }
+        } else {
+            value as i64
+        };
+        if policy.maximum_interval_in_seconds > 0 {
+            seconds = seconds.min(i64::from(policy.maximum_interval_in_seconds));
+        }
+        let mut delay = seconds as f64 * 1000.0;
+        if policy.jitter_coefficient > 0.0 && policy.jitter_coefficient <= 1.0 {
+            delay *= 1.0 - policy.jitter_coefficient * rand::random::<f64>();
+        }
+        if let Some(override_seconds) = req
+            .failure_options
+            .as_ref()
+            .and_then(|o| o.next_retry_interval_seconds)
+            .filter(|s| *s > 0)
+        {
+            delay = f64::from(override_seconds) * 1000.0;
+        }
+        let ready = now.checked_add(delay as i64)?;
+        if policy.expiration_interval_in_seconds > 0
+            && ready
+                > pending
+                    .scheduled_time_millis
+                    .saturating_add(i64::from(policy.expiration_interval_in_seconds) * 1000)
+        {
+            return None;
+        }
+        Some(ready)
+    }
+
+    fn materialize_activity_started(record: &mut ExecutionRecord, scheduled_id: i64) -> i64 {
+        let pending = record
+            .pending_activities
+            .get(&scheduled_id)
+            .expect("activity exists")
+            .clone();
+        if pending.started_event_id != Some(-124) {
+            return pending.started_event_id.unwrap_or(0);
+        }
+        let id = record.push_event(
+            EventType::ActivityTaskStarted,
+            HistoryEvent {
+                activity_task_started_event_attributes: Some(ActivityTaskStartedEventAttributes {
+                    scheduled_event_id: scheduled_id,
+                    identity: pending.started_identity,
+                    request_id: pending.started_request_id,
+                    attempt: pending.attempt,
+                    last_failure_reason: pending.last_failure_reason,
+                    last_failure_details: pending.last_failure_details,
+                    last_failure_options: pending.last_failure_options,
+                }),
+                ..Default::default()
+            },
+        );
+        if let Some(time) = pending.started_time_millis {
+            record
+                .history
+                .iter_mut()
+                .chain(record.buffered_events.iter_mut())
+                .find(|event| event.event_id == id)
+                .expect("started event")
+                .timestamp = Some(time);
+        }
+        record
+            .pending_activities
+            .get_mut(&scheduled_id)
+            .expect("activity exists")
+            .started_event_id = Some(id);
+        id
+    }
+
+    pub fn expire_due_decisions(&self, now: i64) -> usize {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let due: Vec<_> = inner
+            .by_run
+            .iter()
+            .filter_map(|(key, record)| {
+                if !record.is_open() {
+                    return None;
+                }
+                let task = record.pending_decision.as_ref()?;
+                let (deadline, kind) = if task.started_event_id.is_some() {
+                    let timeout = record
+                        .task_start_to_close_timeout_seconds
+                        .filter(|seconds| *seconds > 0)?;
+                    (
+                        task.started_time_millis?
+                            .saturating_add(i64::from(timeout) * 1000),
+                        TimeoutType::StartToClose,
+                    )
+                } else if task.sticky {
+                    (
+                        task.scheduled_time_millis?.saturating_add(
+                            i64::from(task.schedule_to_start_timeout_seconds?) * 1000,
+                        ),
+                        TimeoutType::ScheduleToStart,
+                    )
+                } else {
+                    return None;
+                };
+                (deadline <= now).then(|| (key.clone(), kind))
+            })
+            .collect();
+        for (key, kind) in &due {
+            let record = inner.by_run.get_mut(key).unwrap();
+            let task = record.pending_decision.clone().unwrap();
+            if task.attempt == 0 {
+                record.push_event(
+                    EventType::DecisionTaskTimedOut,
+                    HistoryEvent {
+                        decision_task_timed_out_event_attributes: Some(
+                            cadence_api::tasks::DecisionTaskTimedOutEventAttributes {
+                                scheduled_event_id: task.scheduled_event_id,
+                                started_event_id: task.started_event_id.unwrap_or(0),
+                                timeout_type: Some(*kind),
+                                cause: Some(cadence_api::enums::DecisionTaskTimedOutCause::Timeout),
+                                ..Default::default()
+                            },
+                        ),
+                        ..Default::default()
+                    },
+                );
+            }
+            let attempt = if *kind == TimeoutType::StartToClose && record.buffered_events.is_empty()
+            {
+                task.attempt + 1
+            } else {
+                0
+            };
+            record.clear_stickiness();
+            record.pending_decision = None;
+            record.last_updated_millis = now;
+            let task_list = record.task_list.name.clone();
+            Self::flush_buffered_events_locked(&mut inner, key);
+            Self::schedule_decision_locked(&mut inner, &key.0, &key.1, &key.2, &task_list, attempt);
+        }
+        due.len()
+    }
+
+    /// Expire activity deadlines in chronological order, following Go's
+    /// timer sequence and RetryActivity path. Intermediate retry timeouts are
+    /// transient; only the final attempt contributes a timeout history event.
+    pub fn expire_due_activities(&self, now: i64) -> usize {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let mut due = Vec::new();
+        for (key, record) in &inner.by_run {
+            if !record.is_open() {
+                continue;
+            }
+            for (id, activity) in &record.pending_activities {
+                let scheduled = activity
+                    .attempt_scheduled_time_millis
+                    .unwrap_or(activity.scheduled_time_millis);
+                let mut deadlines = Vec::new();
+                let mut add = |base: i64, seconds: Option<i32>, kind| {
+                    if let Some(seconds) = seconds.filter(|seconds| *seconds > 0) {
+                        deadlines.push((base.saturating_add(i64::from(seconds) * 1000), kind));
+                    }
+                };
+                add(
+                    scheduled,
+                    activity.schedule_to_close_timeout_seconds,
+                    TimeoutType::ScheduleToClose,
+                );
+                if let Some(started) = activity.started_time_millis {
+                    add(
+                        started,
+                        activity.start_to_close_timeout_seconds,
+                        TimeoutType::StartToClose,
+                    );
+                    add(
+                        activity.last_heartbeat_time_millis.unwrap_or(started),
+                        activity.heartbeat_timeout_seconds,
+                        TimeoutType::Heartbeat,
+                    );
+                } else {
+                    add(
+                        scheduled,
+                        activity.schedule_to_start_timeout_seconds,
+                        TimeoutType::ScheduleToStart,
+                    );
+                }
+                if let Some((deadline, kind)) = deadlines
+                    .into_iter()
+                    .min_by_key(|(deadline, kind)| (*deadline, *kind as i32))
+                {
+                    if deadline <= now {
+                        due.push((deadline, key.clone(), *id, kind));
+                    }
                 }
             }
-            if policy.maximum_attempts > 0 && attempt + 1 >= policy.maximum_attempts {
-                return false;
-            }
         }
-        true
+        due.sort_by(|left, right| (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2)));
+        let count = due.len();
+        for (_, key, id, kind) in due {
+            let snapshot = inner.by_run[&key].pending_activities[&id].clone();
+            let failure = RespondActivityTaskFailedRequest {
+                reason: Some(format!("cadenceInternal:Timeout {kind}")),
+                ..Default::default()
+            };
+            if let Some(ready) = Self::activity_retry_time(&failure, &snapshot, now) {
+                let record = inner.by_run.get_mut(&key).unwrap();
+                record.last_updated_millis = now;
+                let pending = record.pending_activities.get_mut(&id).unwrap();
+                pending.attempt += 1;
+                pending.started_event_id = None;
+                pending.started_time_millis = None;
+                pending.last_heartbeat_time_millis = None;
+                pending.started_identity.clear();
+                pending.started_request_id.clear();
+                pending.queued = false;
+                pending.retry_ready_millis = Some(ready);
+                pending.attempt_scheduled_time_millis = Some(ready);
+                pending.last_failure_reason = failure.reason;
+                pending.last_failure_details.clear();
+                pending.last_failure_options = None;
+                continue;
+            }
+            let record = inner.by_run.get_mut(&key).unwrap();
+            let started_event_id = Self::materialize_activity_started(record, id);
+            record.push_event(
+                EventType::ActivityTaskTimedOut,
+                HistoryEvent {
+                    activity_task_timed_out_event_attributes: Some(
+                        cadence_api::tasks::ActivityTaskTimedOutEventAttributes {
+                            scheduled_event_id: id,
+                            started_event_id,
+                            timeout_type: Some(kind),
+                            details: snapshot.heartbeat_details,
+                            last_failure_reason: snapshot.last_failure_reason,
+                            last_failure_details: snapshot.last_failure_details,
+                            last_failure_options: snapshot.last_failure_options,
+                        },
+                    ),
+                    ..Default::default()
+                },
+            );
+            record.pending_activities.remove(&id);
+            let task_list = record.task_list.name.clone();
+            Self::schedule_decision_locked(&mut inner, &key.0, &key.1, &key.2, &task_list, 0);
+        }
+        count
     }
 
     /// Requeue activity retries whose backoff has elapsed. Called by the
@@ -2934,11 +5240,18 @@ impl InMemoryExecutionStore {
     /// Record an activity heartbeat, mirroring Go: heartbeat details are
     /// stored and the worker learns whether cancellation was requested.
     pub fn record_heartbeat(&self, task_token: &[u8], details: Vec<u8>) -> Result<bool, TaskError> {
-        let token = Self::decode_task_token(task_token)?;
+        let token = InMemoryExecutionStore::decode_task_token(task_token)?;
         let mut inner = self.inner.write().expect("execution store lock");
         let pending = Self::resolve_activity_mut(&mut inner, &token)?;
         pending.heartbeat_details = details;
-        Ok(pending.cancel_requested)
+        pending.last_heartbeat_time_millis = Some(now_millis());
+        let canceled = pending.cancel_requested;
+        inner
+            .by_run
+            .get_mut(&(token.domain_id, token.workflow_id, token.run_id))
+            .unwrap()
+            .last_updated_millis = now_millis();
+        Ok(canceled)
     }
 
     /// Respond to an activity task as canceled, mirroring Go history.
@@ -2946,7 +5259,7 @@ impl InMemoryExecutionStore {
         &self,
         req: &cadence_api::tasks::RespondActivityTaskCanceledRequest,
     ) -> Result<(), TaskError> {
-        let token = Self::decode_task_token(&req.task_token)?;
+        let token = InMemoryExecutionStore::decode_task_token(&req.task_token)?;
         let mut inner = self.inner.write().expect("execution store lock");
         let record_key = (
             token.domain_id.clone(),
@@ -2954,14 +5267,12 @@ impl InMemoryExecutionStore {
             token.run_id.clone(),
         );
         let scheduled_event_id = token.schedule_id;
-        let (started_event_id, cancel_requested_event_id) = {
+        let cancel_requested_event_id = {
             let pending = Self::resolve_activity_mut(&mut inner, &token)?;
-            (
-                pending.started_event_id.expect("verified started"),
-                pending.cancel_requested_event_id.unwrap_or(0),
-            )
+            pending.cancel_requested_event_id.unwrap_or(0)
         };
         let record = inner.by_run.get_mut(&record_key).expect("record exists");
+        let started_event_id = Self::materialize_activity_started(record, scheduled_event_id);
         record.push_event(
             EventType::ActivityTaskCanceled,
             HistoryEvent {
@@ -2990,10 +5301,9 @@ impl InMemoryExecutionStore {
         Ok(())
     }
 
-    /// Read one page of history. `next_page_token` is an opaque offset
-    /// cursor (`""` starts at the beginning); `max_page_size <= 0` returns
-    /// everything, mirroring Go's default paging behavior. A `CloseEvent`
-    /// filter returns only the close event of a closed execution, like Go.
+    /// Read a bounded history snapshot. The cursor freezes the run and end
+    /// event so signals arriving during a worker replay cannot leak into it.
+    /// Numeric legacy cursors remain readable for existing callers.
     pub fn history_page(
         &self,
         domain: &str,
@@ -3002,61 +5312,122 @@ impl InMemoryExecutionStore {
         next_page_token: &[u8],
         filter: Option<cadence_api::enums::HistoryEventFilterType>,
     ) -> Result<GetWorkflowExecutionHistoryResponse, HistoryPageError> {
-        let offset: usize = if next_page_token.is_empty() {
-            0
+        let inner = self.inner.read().expect("execution store lock");
+        let supplied_domain = domain;
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let invalid =
+            || HistoryPageError::InvalidToken(BadRequestError::new("Invalid NextPageToken."));
+        let close_only = filter == Some(cadence_api::enums::HistoryEventFilterType::CloseEvent);
+        let cursor = if next_page_token.is_empty() {
+            None
         } else {
-            std::str::from_utf8(next_page_token)
-                .ok()
-                .and_then(|s| s.parse().ok())
+            serde_json::from_slice::<HistoryCursor>(next_page_token).ok()
+        };
+        let legacy = if !next_page_token.is_empty() && cursor.is_none() {
+            Some(
+                std::str::from_utf8(next_page_token)
+                    .ok()
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .ok_or_else(invalid)?,
+            )
+        } else {
+            None
+        };
+        if let Some(c) = &cursor {
+            if (c.domain != domain && c.domain != supplied_domain)
+                || c.workflow_id != execution.workflow_id
+                || (!execution.run_id.is_empty() && c.run_id != execution.run_id)
+                || c.close_only != close_only
+            {
+                return Err(invalid());
+            }
+        }
+        let run = if let Some(c) = &cursor {
+            c.run_id.clone()
+        } else if !execution.run_id.is_empty() {
+            execution.run_id.clone()
+        } else {
+            inner
+                .by_workflow
+                .get(&(domain.to_string(), execution.workflow_id.clone()))
+                .and_then(|runs| runs.last())
+                .cloned()
                 .ok_or_else(|| {
-                    HistoryPageError::InvalidToken(BadRequestError::new("Invalid NextPageToken."))
+                    HistoryPageError::NotFound(EntityNotExistsError::new(
+                        "Workflow execution does not exist.",
+                    ))
                 })?
         };
-        let full = self
-            .history(domain, execution)
-            .map_err(HistoryPageError::NotFound)?;
-        let mut events = full.history.unwrap_or_default().events;
-        // Close-event filter: only the terminal event of a closed execution.
-        if filter == Some(cadence_api::enums::HistoryEventFilterType::CloseEvent) {
-            let closed = !events.is_empty()
-                && matches!(
-                    events.last().and_then(|e| e.event_type),
-                    Some(
-                        cadence_api::enums::EventType::WorkflowExecutionCompleted
-                            | cadence_api::enums::EventType::WorkflowExecutionFailed
-                            | cadence_api::enums::EventType::WorkflowExecutionTimedOut
-                            | cadence_api::enums::EventType::WorkflowExecutionCanceled
-                            | cadence_api::enums::EventType::WorkflowExecutionTerminated
-                            | cadence_api::enums::EventType::WorkflowExecutionContinuedAsNew
-                    )
-                );
-            events = if closed {
-                vec![events.pop().expect("nonempty")]
+        let record = inner
+            .by_run
+            .get(&(
+                domain.to_string(),
+                execution.workflow_id.clone(),
+                run.clone(),
+            ))
+            .ok_or_else(|| {
+                HistoryPageError::NotFound(EntityNotExistsError::new(
+                    "Workflow execution does not exist.",
+                ))
+            })?;
+        let events = if close_only {
+            if record.close_status.is_some() {
+                record
+                    .history
+                    .last()
+                    .map(std::slice::from_ref)
+                    .unwrap_or(&[])
             } else {
-                Vec::new()
-            };
-        }
-        if offset > events.len() {
-            return Err(HistoryPageError::InvalidToken(BadRequestError::new(
-                "Invalid NextPageToken.",
-            )));
+                &[]
+            }
+        } else {
+            record.history.as_slice()
+        };
+        let offset = cursor.as_ref().map(|c| c.next).or(legacy).unwrap_or(0);
+        let bound = cursor.as_ref().map_or(events.len(), |c| c.end);
+        if offset > bound || bound > events.len() {
+            return Err(invalid());
         }
         let limit = if max_page_size <= 0 {
-            events.len()
+            HISTORY_PAGE_SIZE
         } else {
-            max_page_size as usize
+            (max_page_size as usize).min(HISTORY_PAGE_SIZE)
         };
-        let end = (offset + limit).min(events.len());
-        let next_page_token = if end < events.len() {
-            end.to_string().into_bytes()
+        let transient = cursor
+            .as_ref()
+            .map(|cursor| cursor.transient_events.as_slice())
+            .unwrap_or(&[]);
+        if !transient.is_empty()
+            && (close_only
+                || transient.len() != 2
+                || transient[0].event_id != bound as i64 + 1
+                || transient[1].event_id != bound as i64 + 2
+                || transient[0].event_type != Some(EventType::DecisionTaskScheduled)
+                || transient[1].event_type != Some(EventType::DecisionTaskStarted))
+        {
+            return Err(invalid());
+        }
+        let end = offset.saturating_add(limit).min(bound);
+        let token = if end < bound {
+            encode_history_cursor(
+                domain,
+                &WorkflowExecution::new(&execution.workflow_id, run),
+                end,
+                bound,
+                close_only,
+                transient,
+            )
         } else {
             Vec::new()
         };
+        let mut page = events[offset..end].to_vec();
+        if end == bound {
+            page.extend_from_slice(transient);
+        }
         Ok(GetWorkflowExecutionHistoryResponse {
-            history: Some(History {
-                events: events[offset..end].to_vec(),
-            }),
-            next_page_token,
+            history: Some(History { events: page }),
+            next_page_token: token,
             archived: false,
         })
     }
@@ -3071,16 +5442,17 @@ impl InMemoryExecutionStore {
         &self,
         req: &cadence_api::service_types::SignalWithStartWorkflowExecutionRequest,
     ) -> Result<StartWorkflowExecutionResponse, StartError> {
-        let open_run = {
-            let inner = self.inner.read().expect("execution store lock");
-            self.open_run_id(&inner, &req.domain, &req.workflow_id)
-        };
+        let mut inner = self.inner.write().expect("execution store lock");
+        let namespace = self.domain_id(&inner, &req.domain);
+        let open_run = self.open_run_id(&inner, &namespace, &req.workflow_id);
         if let Some(run_id) = open_run {
-            let mut inner = self.inner.write().expect("execution store lock");
             let record = inner
                 .by_run
-                .get_mut(&(req.domain.clone(), req.workflow_id.clone(), run_id.clone()))
+                .get_mut(&(namespace.clone(), req.workflow_id.clone(), run_id.clone()))
                 .expect("open run exists");
+            if !req.request_id.is_empty() && record.signal_request_ids.contains(&req.request_id) {
+                return Ok(StartWorkflowExecutionResponse { run_id });
+            }
             record.push_event(
                 EventType::WorkflowExecutionSignaled,
                 HistoryEvent {
@@ -3094,6 +5466,15 @@ impl InMemoryExecutionStore {
                     ),
                     ..Default::default()
                 },
+            );
+            let task_list = record.task_list.name.clone();
+            Self::schedule_decision_locked(
+                &mut inner,
+                &namespace,
+                &req.workflow_id,
+                &run_id,
+                &task_list,
+                0,
             );
             return Ok(StartWorkflowExecutionResponse { run_id });
         }
@@ -3118,17 +5499,19 @@ impl InMemoryExecutionStore {
             jitter_start_seconds: req.jitter_start_seconds,
             first_run_at_timestamp: req.first_run_at_timestamp,
         };
-        let resp = self.start(&start_req)?;
+        let resp = self.start_locked(&mut inner, &start_req)?;
         {
-            let mut inner = self.inner.write().expect("execution store lock");
             let record = inner
                 .by_run
                 .get_mut(&(
-                    req.domain.clone(),
+                    namespace.clone(),
                     req.workflow_id.clone(),
                     resp.run_id.clone(),
                 ))
                 .expect("new run exists");
+            if !record.is_open() {
+                return Ok(resp);
+            }
             record.push_event(
                 EventType::WorkflowExecutionSignaled,
                 HistoryEvent {
@@ -3147,14 +5530,104 @@ impl InMemoryExecutionStore {
         Ok(resp)
     }
 
-    /// Register a domain name so decision validation can resolve
-    /// cross-domain references. Called by the server on domain register.
+    /// Legacy standalone-store helper. Server code supplies the real UUID.
     pub fn register_domain_name(&self, name: &str) {
-        self.inner
-            .write()
-            .expect("execution store lock")
-            .known_domains
-            .insert(name.to_string());
+        self.register_domain(name, name);
+    }
+
+    pub fn register_domain(&self, name: &str, id: &str) {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let migrate_legacy = inner
+            .domain_names
+            .get(name)
+            .is_none_or(|display| display == name);
+        inner.domain_ids.insert(name.to_owned(), id.to_owned());
+        inner.domain_names.insert(id.to_owned(), name.to_owned());
+        inner.known_domains.insert(name.to_owned());
+        inner.known_domains.insert(id.to_owned());
+        if name == id || !migrate_legacy || !inner.by_run.keys().any(|k| k.0 == name) {
+            return;
+        }
+        // Upgrade development snapshots produced before UUID namespacing.
+        // Recreating a domain never moves records from an OLD UUID to a NEW UUID.
+        let map2 = |(mut d, w): (String, String)| {
+            if d == name {
+                d = id.to_owned();
+            }
+            (d, w)
+        };
+        let map3 = |(mut d, w, r): (String, String, String)| {
+            if d == name {
+                d = id.to_owned();
+            }
+            (d, w, r)
+        };
+        inner.by_run = inner
+            .by_run
+            .drain()
+            .map(|(key, mut record)| {
+                if record.domain == name {
+                    record.domain = id.to_owned();
+                }
+                if let Some(parent) = record.parent.as_mut() {
+                    if parent.domain == name {
+                        parent.domain = id.to_owned();
+                    }
+                }
+                (map3(key), record)
+            })
+            .collect();
+        inner.by_workflow = inner
+            .by_workflow
+            .drain()
+            .map(|(key, v)| (map2(key), v))
+            .collect();
+        inner.by_request_id = inner
+            .by_request_id
+            .drain()
+            .map(|(key, v)| (map3(key), v))
+            .collect();
+        inner.decision_queues = inner
+            .decision_queues
+            .drain()
+            .map(|(key, v)| (map2(key), v))
+            .collect();
+        inner.activity_queues = inner
+            .activity_queues
+            .drain()
+            .map(|(key, v)| (map2(key), v))
+            .collect();
+        inner.children = inner
+            .children
+            .drain()
+            .map(|(key, mut children)| {
+                for child in &mut children {
+                    if child.domain == name {
+                        child.domain = id.to_owned();
+                    }
+                }
+                (map3(key), children)
+            })
+            .collect();
+    }
+
+    pub fn sync_domains(&self, domains: &[(String, String)]) {
+        {
+            let mut inner = self.inner.write().expect("execution store lock");
+            inner.domain_ids.clear();
+            inner.known_domains.clear();
+        }
+        for (name, id) in domains {
+            self.register_domain(name, id);
+        }
+    }
+
+    pub fn unregister_domain(&self, name: &str) {
+        let mut inner = self.inner.write().expect("execution store lock");
+        if let Some(id) = inner.domain_ids.remove(name) {
+            inner.known_domains.remove(&id);
+        }
+        inner.known_domains.remove(name);
     }
 
     // -----------------------------------------------------------------------
@@ -3175,15 +5648,21 @@ impl InMemoryExecutionStore {
     ) -> Result<String, QueryError> {
         use cadence_api::enums::QueryRejectCondition;
         let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
         let key = if execution.run_id.is_empty() {
             let runs = inner
                 .by_workflow
                 .get(&(domain.to_string(), execution.workflow_id.clone()))
                 .ok_or_else(|| {
-                    QueryError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+                    QueryError::NotFound(EntityNotExistsError::new(
+                        "Workflow execution does not exist.".to_string(),
+                    ))
                 })?;
             let latest = runs.last().ok_or_else(|| {
-                QueryError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+                QueryError::NotFound(EntityNotExistsError::new(
+                    "Workflow execution does not exist.".to_string(),
+                ))
             })?;
             (
                 domain.to_string(),
@@ -3198,7 +5677,9 @@ impl InMemoryExecutionStore {
             )
         };
         let record = inner.by_run.get_mut(&key).ok_or_else(|| {
-            QueryError::NotFound(EntityNotExistsError::new("Workflow execution does not exist.".to_string()))
+            QueryError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
         })?;
         if !record.is_open() {
             let status = record.close_status;
@@ -3249,6 +5730,85 @@ impl InMemoryExecutionStore {
         })
     }
 
+    /// Answer a directly-dispatched query task, mirroring Go matching
+    /// `RespondQueryTaskCompleted` → `deliverQueryResult`. The task token is
+    /// a `QueryTaskToken` whose `taskId` is the buffered query ID. Unknown
+    /// IDs return `EntityNotExists` ("query task not found, or already
+    /// expired"); malformed tokens return `BadRequest`.
+    pub fn answer_query_task(
+        &self,
+        req: &cadence_api::tasks::RespondQueryTaskCompletedRequest,
+    ) -> Result<(), QueryError> {
+        use cadence_api::enums::{QueryResultType, QueryTaskCompletedType};
+        let token = JsonTaskTokenSerializer::deserialize_query_token(&req.task_token)
+            .map_err(|_| {
+                QueryError::Invalid(BadRequestError::new("Invalid TaskToken.".to_string()))
+            })?;
+        if token.domain_id.is_empty() || token.task_list.is_empty() || token.task_id.is_empty() {
+            return Err(QueryError::Invalid(BadRequestError::new(
+                "Invalid TaskToken.".to_string(),
+            )));
+        }
+        // The token domain must be a known namespace, like Go's domain cache
+        // lookup by UUID.
+        {
+            let inner = self.inner.read().expect("execution store lock");
+            if !inner.domain_ids.values().any(|id| id == &token.domain_id)
+                && !inner.domain_names.contains_key(&token.domain_id)
+            {
+                return Err(QueryError::NotFound(EntityNotExistsError::new(
+                    "query task not found, or already expired".to_string(),
+                )));
+            }
+        }
+        let mut inner = self.inner.write().expect("execution store lock");
+        let query = inner
+            .by_run
+            .values_mut()
+            .flat_map(|r| r.pending_queries.iter_mut())
+            .find(|q| q.query_id == token.task_id);
+        let query = match query {
+            Some(q) => q,
+            None => {
+                return Err(QueryError::NotFound(EntityNotExistsError::new(
+                    "query task not found, or already expired".to_string(),
+                )));
+            }
+        };
+        if query.answered.is_some() {
+            return Err(QueryError::NotFound(EntityNotExistsError::new(
+                "query task not found, or already expired".to_string(),
+            )));
+        }
+        match req.completed_type.unwrap_or(QueryTaskCompletedType::Completed) {
+            QueryTaskCompletedType::Completed => {
+                query.answered = Some(WorkflowQueryResult {
+                    result_type: Some(QueryResultType::Answered),
+                    answer: req.query_result.clone(),
+                    error_message: String::new(),
+                });
+            }
+            QueryTaskCompletedType::Failed => {
+                let message = if req.error_message.is_empty() {
+                    "Query failed.".to_string()
+                } else {
+                    req.error_message.clone()
+                };
+                query.answered = Some(WorkflowQueryResult {
+                    result_type: Some(QueryResultType::Failed),
+                    answer: Vec::new(),
+                    error_message: message,
+                });
+            }
+            _ => {
+                return Err(QueryError::Invalid(BadRequestError::new(
+                    "Unknown query completed type.".to_string(),
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// The head buffered (unanswered) query on an execution, attached to
     /// polled decision tasks like Go's embedded legacy query.
     fn head_query(record: &ExecutionRecord) -> Option<cadence_api::tasks::WorkflowQuery> {
@@ -3281,7 +5841,11 @@ impl InMemoryExecutionStore {
                 )
             })
             .collect();
-        if map.is_empty() { None } else { Some(map) }
+        if map.is_empty() {
+            None
+        } else {
+            Some(map)
+        }
     }
 
     /// Query ID of the head buffered query, echoed to workers so answers
@@ -3350,9 +5914,440 @@ impl InMemoryExecutionStore {
         count
     }
 
+    /// Schedule the first decision task for runs whose
+    /// `FirstDecisionTaskBackoffSeconds` has elapsed, mirroring Go's
+    /// `WorkflowBackoffTimerTask` (retry and cron backoff types).
+    pub fn fire_due_backoffs(&self, now: i64) -> usize {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let due: Vec<(String, String, String, String)> = inner
+            .by_run
+            .iter()
+            .filter_map(|(key, record)| {
+                let is_open = record.is_open();
+                let no_decision = record.pending_decision.is_none();
+                let due = record.first_decision_due_millis.is_some_and(|d| d <= now);
+                (is_open && no_decision && due).then(|| {
+                    (
+                        key.0.clone(),
+                        key.1.clone(),
+                        key.2.clone(),
+                        record.task_list.name.clone(),
+                    )
+                })
+            })
+            .collect();
+        let mut count = 0;
+        for (domain, workflow, run, task_list) in due {
+            {
+                let record =
+                    match inner
+                        .by_run
+                        .get_mut(&(domain.clone(), workflow.clone(), run.clone()))
+                    {
+                        Some(r) if r.is_open() && r.pending_decision.is_none() => r,
+                        _ => continue,
+                    };
+                if !record.first_decision_due_millis.is_some_and(|d| d <= now) {
+                    continue;
+                }
+                record.first_decision_due_millis = None;
+            }
+            Self::schedule_decision_locked(&mut inner, &domain, &workflow, &run, &task_list, 0);
+            count += 1;
+        }
+        count
+    }
+
+    /// Go's workflow start timer: `start + execution timeout + first decision
+    /// backoff`. Runs with a retry policy or a cron schedule are continued as
+    /// new instead of being closed, mirroring Go's
+    /// `processWorkflowTimeout` → `retryWorkflow`.
+    pub fn expire_due_workflows(&self, now: i64) -> usize {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let due: Vec<(String, String, String)> = inner
+            .by_run
+            .iter()
+            .filter_map(|(key, record)| {
+                if !record.is_open() {
+                    return None;
+                }
+                let start = record
+                    .history
+                    .first()?
+                    .workflow_execution_started_event_attributes
+                    .as_ref()?;
+                let timeout = i64::from(
+                    record
+                        .execution_start_to_close_timeout_seconds
+                        .filter(|v| *v > 0)?,
+                );
+                let backoff = i64::from(record.first_decision_task_backoff_seconds.max(0));
+                let mut deadline = record
+                    .start_time_millis
+                    .saturating_add(timeout.saturating_add(backoff).saturating_mul(1000));
+                // Go: a retried attempt must not outlive the retry expiration.
+                if record.attempt > 0 {
+                    if let Some(expiration_nanos) = record.expiration_time_nanos {
+                        let expiration_millis = expiration_nanos / 1_000_000;
+                        deadline = deadline.min(expiration_millis);
+                    }
+                }
+                let _ = start;
+                (deadline <= now).then(|| key.clone())
+            })
+            .collect();
+        let mut count = 0;
+        for (domain, workflow, run) in due {
+            // An earlier parent's timeout may have already closed this child.
+            if !inner
+                .by_run
+                .get(&(domain.clone(), workflow.clone(), run.clone()))
+                .is_some_and(ExecutionRecord::is_open)
+            {
+                continue;
+            }
+            if Self::retry_or_cron_locked(
+                &mut inner,
+                &domain,
+                &workflow,
+                &run,
+                now,
+                -1,
+                Some("cadenceInternal:Timeout START_TO_CLOSE"),
+                &[],
+                None,
+            ) {
+                count += 1;
+                continue;
+            }
+            Self::close_run_locked(
+                &mut inner,
+                &domain,
+                &workflow,
+                &run,
+                WorkflowExecutionCloseStatus::TimedOut,
+                None,
+                Vec::new(),
+                HistoryEvent {
+                    workflow_execution_timed_out_event_attributes: Some(
+                        cadence_api::tasks::WorkflowExecutionTimedOutEventAttributes {
+                            timeout_type: Some(TimeoutType::StartToClose),
+                        },
+                    ),
+                    ..Default::default()
+                },
+                EventType::WorkflowExecutionTimedOut,
+            );
+            count += 1;
+        }
+        count
+    }
+
+    /// Continue a failed/timed-out run through retry then cron, or a successful
+    /// run through cron. Return false when the caller should close it normally.
+    ///
+    /// Mirrors Go's `GetRetryBackoffDuration` then `GetCronBackoffDuration`
+    /// fallback in `processWorkflowTimeout`.
+    #[allow(clippy::too_many_arguments)]
+    fn retry_or_cron_locked(
+        inner: &mut Inner,
+        domain: &str,
+        workflow_id: &str,
+        run_id: &str,
+        now: i64,
+        completed_event_id: i64,
+        failure_reason: Option<&str>,
+        failure_details: &[u8],
+        completion_result: Option<&[u8]>,
+    ) -> bool {
+        use cadence_api::enums::ContinueAsNewInitiator;
+        let mut attrs = match inner.by_run.get(&(
+            domain.to_string(),
+            workflow_id.to_string(),
+            run_id.to_string(),
+        )) {
+            Some(record) => Self::start_attributes(record),
+            None => return false,
+        };
+        if inner.by_run[&(domain.to_owned(), workflow_id.to_owned(), run_id.to_owned())]
+            .history
+            .iter()
+            .chain(
+                &inner.by_run[&(domain.to_owned(), workflow_id.to_owned(), run_id.to_owned())]
+                    .buffered_events,
+            )
+            .any(|event| event.event_type == Some(EventType::WorkflowExecutionCancelRequested))
+        {
+            return false;
+        }
+        // Successful completion only recurs through cron; failure retries first.
+        let mut backoff_seconds = None;
+        let mut initiator = ContinueAsNewInitiator::RetryPolicy;
+        if let Some(retry) = attrs
+            .retry_policy
+            .clone()
+            .filter(|_| completion_result.is_none())
+        {
+            if let Some(backoff) = Self::retry_backoff_duration(
+                inner,
+                domain,
+                workflow_id,
+                run_id,
+                now,
+                &retry,
+                failure_reason.unwrap_or_default(),
+            ) {
+                backoff_seconds = Some(backoff);
+                initiator = ContinueAsNewInitiator::RetryPolicy;
+            }
+        }
+        if backoff_seconds.is_none() && !attrs.cron_schedule.is_empty() {
+            match Self::cron_backoff_duration(inner, domain, workflow_id, run_id, now) {
+                Ok(Some(backoff)) => {
+                    backoff_seconds = Some(backoff);
+                    initiator = ContinueAsNewInitiator::CronSchedule;
+                }
+                Ok(None) => {}
+                // An unparseable schedule closes the run, as in Go.
+                Err(_) => return false,
+            }
+        }
+        let backoff_seconds = match backoff_seconds {
+            Some(v) => v,
+            None => return false,
+        };
+        let mut expired_expiration = None;
+        {
+            let record = inner
+                .by_run
+                .get_mut(&(
+                    domain.to_string(),
+                    workflow_id.to_string(),
+                    run_id.to_string(),
+                ))
+                .expect("record exists");
+            // Retry continue-as-new increments the attempt and keeps the
+            // original expiration timestamp.
+            if initiator == ContinueAsNewInitiator::RetryPolicy {
+                record.attempt += 1;
+                expired_expiration = record.expiration_time_nanos;
+            } else {
+                record.attempt = 0;
+                if let Some(policy) = record.retry_policy() {
+                    if policy.expiration_interval_in_seconds > 0 {
+                        expired_expiration = Some(
+                            now.saturating_mul(1_000_000).saturating_add(
+                                (i64::from(policy.expiration_interval_in_seconds)
+                                    + i64::from(backoff_seconds))
+                                .saturating_mul(1_000_000_000),
+                            ),
+                        );
+                    }
+                }
+            }
+            attrs.last_completion_result = completion_result
+                .map(Vec::from)
+                .unwrap_or_else(|| record.started_attributes().last_completion_result.clone());
+            attrs.retry_policy = record.retry_policy();
+        }
+        attrs.backoff_start_interval_in_seconds = Some(backoff_seconds);
+        attrs.initiator = Some(initiator);
+        attrs.failure_reason = failure_reason.map(str::to_owned);
+        attrs.failure_details = failure_details.to_vec();
+        Self::continue_as_new_locked(
+            inner,
+            domain,
+            workflow_id,
+            run_id,
+            &attrs,
+            completed_event_id,
+            Some(backoff_seconds),
+            expired_expiration,
+        );
+        true
+    }
+
+    /// The started-event attributes of a run's first history event.
+    fn start_attributes(
+        record: &ExecutionRecord,
+    ) -> cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes {
+        let start = record
+            .history
+            .first()
+            .and_then(|e| e.workflow_execution_started_event_attributes.clone())
+            .unwrap_or_default();
+        cadence_api::tasks::ContinueAsNewWorkflowExecutionDecisionAttributes {
+            workflow_type: start.workflow_type.clone(),
+            task_list: start.task_list.clone(),
+            input: start.input.clone(),
+            execution_start_to_close_timeout_seconds: start
+                .execution_start_to_close_timeout_seconds,
+            task_start_to_close_timeout_seconds: start.task_start_to_close_timeout_seconds,
+            retry_policy: start.retry_policy.clone(),
+            cron_schedule: start.cron_schedule.clone(),
+            cron_overlap_policy: start.cron_overlap_policy,
+            memo: start.memo.clone(),
+            search_attributes: start.search_attributes.clone(),
+            header: start.header.clone(),
+            jitter_start_seconds: Some(record.jitter_start_seconds),
+            ..Default::default()
+        }
+    }
+
+    /// Port of `getBackoffInterval` + `shouldRetry` from
+    /// `go/service/history/execution/retry.go`.
+    fn retry_backoff_duration(
+        inner: &Inner,
+        domain: &str,
+        workflow_id: &str,
+        run_id: &str,
+        now: i64,
+        retry: &cadence_api::types::RetryPolicy,
+        failure_reason: &str,
+    ) -> Option<i32> {
+        let coefficient = retry.backoff_coefficient;
+        let attempt = inner
+            .by_run
+            .get(&(
+                domain.to_string(),
+                workflow_id.to_string(),
+                run_id.to_string(),
+            ))
+            .map_or(0, |r| r.attempt);
+        let expiration_nanos = inner
+            .by_run
+            .get(&(
+                domain.to_string(),
+                workflow_id.to_string(),
+                run_id.to_string(),
+            ))
+            .and_then(|r| r.expiration_time_nanos);
+        Self::retry_backoff_seconds(
+            attempt,
+            retry.initial_interval_in_seconds,
+            retry.maximum_interval_in_seconds,
+            coefficient,
+            retry.jitter_coefficient,
+            retry.maximum_attempts,
+            retry.expiration_interval_in_seconds,
+            expiration_nanos,
+            now,
+            &retry.non_retriable_error_reasons,
+            failure_reason,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn retry_backoff_seconds(
+        attempt: i32,
+        initial_interval: i32,
+        maximum_interval: i32,
+        backoff_coefficient: f64,
+        jitter_coefficient: f64,
+        maximum_attempts: i32,
+        expiration_interval: i32,
+        expiration_nanos: Option<i64>,
+        now: i64,
+        non_retriable_reasons: &[String],
+        failure_reason: &str,
+    ) -> Option<i32> {
+        const MAX_BACKOFF_INTERVAL_SECONDS: i64 = i64::MAX / 1_000_000_000;
+        // getBackoffInterval
+        let next_interval =
+            (f64::from(initial_interval) * backoff_coefficient.powi(attempt)) as i64;
+        let mut next_interval =
+            if next_interval <= 0 || next_interval > MAX_BACKOFF_INTERVAL_SECONDS {
+                if maximum_interval > 0 {
+                    i64::from(maximum_interval)
+                } else {
+                    return None;
+                }
+            } else {
+                next_interval
+            };
+        if maximum_interval > 0 && next_interval > i64::from(maximum_interval) {
+            next_interval = i64::from(maximum_interval);
+        }
+        let mut next_seconds = next_interval as f64;
+        if jitter_coefficient > 0.0 && jitter_coefficient <= 1.0 {
+            next_seconds *= 1.0 - jitter_coefficient * rand::random::<f64>();
+        }
+        // Go rounds up so a sub-second jittered interval is not an immediate retry.
+        let backoff_seconds = (next_seconds.ceil() as i64).max(0);
+        // shouldRetry: a retry policy needs either attempts or an expiration.
+        if maximum_attempts == 0 && expiration_interval == 0 && expiration_nanos.is_none() {
+            return None;
+        }
+        if maximum_attempts > 0 && attempt >= maximum_attempts - 1 {
+            return None;
+        }
+        if let Some(expiration_nanos) = expiration_nanos {
+            let next_scheduled_nanos = now
+                .saturating_mul(1_000_000)
+                .saturating_add(backoff_seconds.saturating_mul(1_000_000_000));
+            if next_scheduled_nanos > expiration_nanos {
+                return None;
+            }
+        }
+        if matches!(
+            failure_reason,
+            "CANCEL_DETAILS_EXCEEDS_LIMIT"
+                | "COMPLETE_RESULT_EXCEEDS_LIMIT"
+                | "HEARTBEAT_EXCEEDS_LIMIT"
+                | "DECISION_BLOB_SIZE_EXCEEDS_LIMIT"
+        ) || non_retriable_reasons.iter().any(|r| r == failure_reason)
+        {
+            return None;
+        }
+        i32::try_from(backoff_seconds).ok()
+    }
+
+    /// Port of Go's `GetCronBackoffDuration`.
+    fn cron_backoff_duration(
+        inner: &Inner,
+        domain: &str,
+        workflow_id: &str,
+        run_id: &str,
+        now: i64,
+    ) -> Result<Option<i32>, String> {
+        let key = (
+            domain.to_string(),
+            workflow_id.to_string(),
+            run_id.to_string(),
+        );
+        let record = match inner.by_run.get(&key) {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+        if record.cron_schedule().is_empty() {
+            return Ok(None);
+        }
+        let schedule = record.cron_schedule();
+        let overlap = record.cron_overlap_policy().map(|p| p as i32);
+        // Go uses the run start time plus the first decision backoff.
+        let execution_nanos = record
+            .start_time_millis
+            .saturating_mul(1_000_000)
+            .saturating_add(i64::from(record.first_decision_task_backoff_seconds) * 1_000_000_000);
+        let backoff = cadence_common::cron::get_backoff_for_next_schedule_in_seconds(
+            &schedule,
+            cadence_common::cron::naive_from_nanos(execution_nanos),
+            cadence_common::cron::naive_from_nanos(now.saturating_mul(1_000_000)),
+            overlap,
+            cadence_common::cron::naive_from_nanos(now.saturating_mul(1_000_000)),
+            cadence_common::cron::jitter_seconds(
+                record.jitter_start_seconds,
+                &mut rand::thread_rng(),
+            ),
+        )?;
+        Ok(Some(backoff))
+    }
+
     /// Backlog sizes per task list for `DescribeTaskList`.
     pub fn task_list_backlog(&self, domain: &str, task_list: &str) -> (usize, usize) {
         let inner = self.inner.read().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
         let key = (domain.to_string(), task_list.to_string());
         (
             inner
@@ -3368,6 +6363,210 @@ impl InMemoryExecutionStore {
         )
     }
 
+    /// Task-list names with queued or recently-seen tasks for a domain,
+    /// mirroring Go matching's task-list registry scan for
+    /// `GetTaskListsByDomain`. Returns `(decision_lists, activity_lists)`.
+    pub fn task_lists(&self, domain: &str) -> (Vec<String>, Vec<String>) {
+        let inner = self.inner.read().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let mut decisions: Vec<String> = inner
+            .decision_queues
+            .keys()
+            .filter(|(d, _)| d == domain)
+            .map(|(_, tl)| tl.clone())
+            .collect();
+        decisions.sort();
+        decisions.dedup();
+        let mut activities: Vec<String> = inner
+            .activity_queues
+            .keys()
+            .filter(|(d, _)| d == domain)
+            .map(|(_, tl)| tl.clone())
+            .collect();
+        activities.sort();
+        activities.dedup();
+        (decisions, activities)
+    }
+
+    /// Store a task-list partition config, mirroring Go matching
+    /// `UpdateTaskListPartitionConfig` persistence. Only normal task lists
+    /// accept updates; the config must be present. Single host: the stored
+    /// config is served back verbatim by describe/list calls.
+    pub fn update_partition_config(
+        &self,
+        domain: &str,
+        task_list: &str,
+        task_list_type: i32,
+        kind_is_normal: bool,
+        config: StoredPartitionConfig,
+    ) -> Result<(), TaskError> {
+        if !kind_is_normal {
+            return Err(TaskError::InvalidToken(
+                cadence_api::errors::BadRequestError::new(
+                    "Only normal tasklist's partition config can be updated.".to_string(),
+                ),
+            ));
+        }
+        let mut inner = self.inner.write().expect("execution store lock");
+        let namespace = inner.domain_id(domain);
+        inner.partition_configs.insert(
+            (namespace, task_list.to_string(), task_list_type),
+            config,
+        );
+        Ok(())
+    }
+
+    /// Refresh a cached partition config, mirroring Go matching
+    /// `RefreshTaskListPartitionConfig`. Single process shares state, so this
+    /// verifies the domain and stored entry exist.
+    pub fn refresh_partition_config(
+        &self,
+        domain: &str,
+        task_list: &str,
+        task_list_type: i32,
+    ) -> Result<(), TaskError> {
+        let inner = self.inner.read().expect("execution store lock");
+        let namespace = inner.domain_id(domain);
+        if !inner
+            .domain_ids
+            .values()
+            .any(|id| id == &namespace)
+            && !inner.domain_names.contains_key(&namespace)
+        {
+            return Err(TaskError::InvalidToken(
+                cadence_api::errors::BadRequestError::new("Domain does not exist.".to_string()),
+            ));
+        }
+        let _ = (task_list, task_list_type);
+        Ok(())
+    }
+
+    /// Stored partition config for describe/list responses, if any.
+    pub fn partition_config(
+        &self,
+        domain: &str,
+        task_list: &str,
+        task_list_type: i32,
+    ) -> Option<StoredPartitionConfig> {
+        let inner = self.inner.read().expect("execution store lock");
+        let namespace = inner.domain_id(domain);
+        inner
+            .partition_configs
+            .get(&(namespace, task_list.to_string(), task_list_type))
+            .cloned()
+    }
+
+    /// Requeue a scheduled-but-unstarted decision task, mirroring Go
+    /// matching `AddDecisionTask`: the run and its pending decision with the
+    /// given schedule ID must exist, otherwise `EntityNotExists` is returned.
+    /// An already-queued entry is not duplicated.
+    pub fn requeue_decision_task(
+        &self,
+        domain: &str,
+        workflow_id: &str,
+        run_id: &str,
+        schedule_id: i64,
+    ) -> Result<(), TaskError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = (
+            domain.to_string(),
+            workflow_id.to_string(),
+            run_id.to_string(),
+        );
+        let record = inner.by_run.get(&key).ok_or_else(|| {
+            TaskError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        if !record.is_open() {
+            return Err(TaskError::AlreadyCompleted(
+                WorkflowExecutionAlreadyCompletedError::new(
+                    "Workflow execution already completed.".to_string(),
+                ),
+            ));
+        }
+        let pending = record.pending_decision.clone().ok_or_else(|| {
+            TaskError::NotFound(EntityNotExistsError::new(
+                "Decision task not found.".to_string(),
+            ))
+        })?;
+        if pending.scheduled_event_id != schedule_id || pending.started_event_id.is_some() {
+            return Err(TaskError::NotFound(EntityNotExistsError::new(
+                "Decision task not found.".to_string(),
+            )));
+        }
+        let task_list = record.task_list.name.clone();
+        let queue = inner
+            .decision_queues
+            .entry((domain.to_string(), task_list))
+            .or_default();
+        if !queue
+            .iter()
+            .any(|(w, r)| w == workflow_id && r == run_id)
+        {
+            queue.push_back((workflow_id.to_string(), run_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Requeue a scheduled activity task, mirroring Go matching
+    /// `AddActivityTask`. Unknown runs or schedule IDs return
+    /// `EntityNotExists`; an already-queued entry is not duplicated.
+    pub fn requeue_activity_task(
+        &self,
+        domain: &str,
+        workflow_id: &str,
+        run_id: &str,
+        schedule_id: i64,
+    ) -> Result<(), TaskError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
+        let key = (
+            domain.to_string(),
+            workflow_id.to_string(),
+            run_id.to_string(),
+        );
+        let record = inner.by_run.get(&key).ok_or_else(|| {
+            TaskError::NotFound(EntityNotExistsError::new(
+                "Workflow execution does not exist.".to_string(),
+            ))
+        })?;
+        if !record.is_open() {
+            return Err(TaskError::AlreadyCompleted(
+                WorkflowExecutionAlreadyCompletedError::new(
+                    "Workflow execution already completed.".to_string(),
+                ),
+            ));
+        }
+        let pending = record.pending_activities.get(&schedule_id).ok_or_else(|| {
+            TaskError::NotFound(EntityNotExistsError::new(
+                "Activity task not found.".to_string(),
+            ))
+        })?;
+        // Already-dispatched tasks are not requeued, like started decisions.
+        if pending.started_event_id.is_some() {
+            return Err(TaskError::NotFound(EntityNotExistsError::new(
+                "Activity task not found.".to_string(),
+            )));
+        }
+        let task_list = pending.task_list.name.clone();
+        let queue = inner
+            .activity_queues
+            .entry((domain.to_string(), task_list))
+            .or_default();
+        if !queue
+            .iter()
+            .any(|(w, r, s)| w == workflow_id && r == run_id && *s == schedule_id)
+        {
+            queue.push_back((workflow_id.to_string(), run_id.to_string(), schedule_id));
+        }
+        Ok(())
+    }
+
     /// List executions with optional workflow-ID / type / close-status
     /// filters, mirroring the list-filter behavior of the Go visibility
     /// path for the in-memory store.
@@ -3381,6 +6580,8 @@ impl InMemoryExecutionStore {
         close_status: Option<WorkflowExecutionCloseStatus>,
     ) -> Vec<WorkflowExecutionInfo> {
         let inner = self.inner.read().expect("execution store lock");
+        let domain_key = self.domain_id(&inner, domain);
+        let domain = domain_key.as_str();
         let mut out: Vec<WorkflowExecutionInfo> = inner
             .by_run
             .values()
@@ -3399,6 +6600,10 @@ impl InMemoryExecutionStore {
 pub enum StartError {
     #[error(transparent)]
     AlreadyStarted(#[from] WorkflowExecutionAlreadyStartedError),
+    /// The request cannot be started at all (for example an invalid cron
+    /// schedule), mirroring Go's BadRequestError from the frontend.
+    #[error("{0}")]
+    InvalidArgument(String),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -3433,6 +6638,16 @@ pub enum TaskError {
     AlreadyCompleted(#[from] WorkflowExecutionAlreadyCompletedError),
 }
 
+/// Errors for workflow reset, mirroring Go's history reset mapping:
+/// unknown runs are `EntityNotExists`, invalid reset points are `BadRequest`.
+#[derive(Debug, thiserror::Error)]
+pub enum ResetError {
+    #[error(transparent)]
+    NotFound(#[from] EntityNotExistsError),
+    #[error("{0}")]
+    Invalid(String),
+}
+
 /// Errors for direct queries, mirroring Go's query reject/fail mapping.
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
@@ -3455,15 +6670,41 @@ struct ExecutionSnapshot {
     activity_queues: Vec<(QueueKey, Vec<QueuedActivity>)>,
     children: Vec<((String, String, String), Vec<ChildRef>)>,
     known_domains: Vec<String>,
+    #[serde(default)]
+    domain_ids: HashMap<String, String>,
+    #[serde(default)]
+    domain_names: HashMap<String, String>,
+    #[serde(default)]
+    async_requests: Vec<AsyncRequest>,
+    #[serde(default)]
+    schedules: Vec<((String, String), crate::schedules::ScheduleRecord)>,
+    #[serde(default)]
+    semaphores: Vec<((String, String), crate::semaphores::SemaphoreMetadata)>,
+    #[serde(default)]
+    semaphore_holds: Vec<((String, String, i32), Vec<crate::semaphores::SemaphoreHold>)>,
+    #[serde(default)]
+    partition_configs: Vec<((String, String, i32), StoredPartitionConfig)>,
 }
 
 impl InMemoryExecutionStore {
     fn snapshot(&self) -> ExecutionSnapshot {
         let inner = self.inner.read().expect("execution store lock");
         ExecutionSnapshot {
-            runs: inner.by_run.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-            by_workflow: inner.by_workflow.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-            by_request_id: inner.by_request_id.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            runs: inner
+                .by_run
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            by_workflow: inner
+                .by_workflow
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            by_request_id: inner
+                .by_request_id
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             decision_queues: inner
                 .decision_queues
                 .iter()
@@ -3474,14 +6715,84 @@ impl InMemoryExecutionStore {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
                 .collect(),
-            children: inner.children.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            children: inner
+                .children
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             known_domains: inner.known_domains.iter().cloned().collect(),
+            domain_ids: inner.domain_ids.clone(),
+            domain_names: inner.domain_names.clone(),
+            async_requests: inner.async_requests.iter().cloned().collect(),
+            schedules: inner
+                .schedules
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            semaphores: inner
+                .semaphores
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            semaphore_holds: inner
+                .semaphore_holds
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            partition_configs: inner
+                .partition_configs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
         }
     }
 
     fn restore(snapshot: ExecutionSnapshot) -> Self {
+        let mut runs = snapshot.runs;
+        for (_, record) in &mut runs {
+            if let Some(task) = record.pending_decision.as_mut() {
+                if task.task_list_name.is_none() {
+                    task.task_list_name = record
+                        .history
+                        .get(task.scheduled_event_id.saturating_sub(1) as usize)
+                        .and_then(|event| event.decision_task_scheduled_event_attributes.as_ref())
+                        .and_then(|attributes| attributes.task_list.as_ref())
+                        .map(|task_list| task_list.name.clone())
+                        .or_else(|| Some(record.task_list.name.clone()));
+                }
+                task.scheduled_time_millis = task.scheduled_time_millis.or_else(|| {
+                    record
+                        .history
+                        .get(task.scheduled_event_id.saturating_sub(1) as usize)
+                        .and_then(|event| event.timestamp)
+                });
+                task.started_time_millis = task.started_time_millis.or_else(|| {
+                    task.started_event_id
+                        .and_then(|id| record.history.get(id.saturating_sub(1) as usize))
+                        .and_then(|event| event.timestamp)
+                });
+            }
+            record.buffer_event_sequence = record.buffer_event_sequence.max(
+                record
+                    .buffered_events
+                    .iter()
+                    .map(|event| (-event.event_id - 1_000_000 + 1).max(0))
+                    .max()
+                    .unwrap_or(0),
+            );
+            for event in record.history.iter().chain(&record.buffered_events) {
+                if let Some(id) = event
+                    .workflow_execution_signaled_event_attributes
+                    .as_ref()
+                    .map(|a| &a.request_id)
+                    .filter(|id| !id.is_empty())
+                {
+                    record.signal_request_ids.insert(id.clone());
+                }
+            }
+        }
         let inner = Inner {
-            by_run: snapshot.runs.into_iter().collect(),
+            by_run: runs.into_iter().collect(),
             by_workflow: snapshot.by_workflow.into_iter().collect(),
             by_request_id: snapshot.by_request_id.into_iter().collect(),
             decision_queues: snapshot
@@ -3496,9 +6807,17 @@ impl InMemoryExecutionStore {
                 .collect(),
             children: snapshot.children.into_iter().collect(),
             known_domains: snapshot.known_domains.into_iter().collect(),
+            domain_ids: snapshot.domain_ids,
+            domain_names: snapshot.domain_names,
+            async_requests: snapshot.async_requests.into_iter().collect(),
+            schedules: snapshot.schedules.into_iter().collect(),
+            semaphores: snapshot.semaphores.into_iter().collect(),
+            semaphore_holds: snapshot.semaphore_holds.into_iter().collect(),
+            partition_configs: snapshot.partition_configs.into_iter().collect(),
         };
         Self {
             inner: std::sync::Arc::new(std::sync::RwLock::new(inner)),
+            domain_scope: None,
         }
     }
 
@@ -3839,7 +7158,7 @@ mod tests {
             .unwrap();
         let retry = store.poll_decision("d", "tl", "worker").unwrap();
         assert_eq!(retry.attempt, 1);
-        assert_eq!(retry.previous_started_event_id, Some(task.started_event_id));
+        assert_eq!(retry.previous_started_event_id, None);
     }
 
     #[test]
@@ -3871,7 +7190,7 @@ mod tests {
             .unwrap()
             .history
             .unwrap();
-        assert_eq!(hist.events.len(), 4); // started, scheduled, signaled x2
+        assert_eq!(hist.events.len(), 3); // one signal for an idempotent request ID
     }
 }
 
@@ -3886,7 +7205,9 @@ mod advanced_tests {
         StartChildWorkflowExecutionDecisionAttributes, StartTimerDecisionAttributes,
         UpsertWorkflowSearchAttributesDecisionAttributes,
     };
-    use cadence_api::types::{SearchAttributes, TaskList, WorkflowType};
+    use cadence_api::types::{
+        ResetWorkflowExecutionRequest, SearchAttributes, TaskList, WorkflowType,
+    };
 
     fn start_req(domain: &str, wf: &str, request_id: &str) -> StartWorkflowExecutionRequest {
         StartWorkflowExecutionRequest {
@@ -4211,8 +7532,117 @@ mod advanced_tests {
     }
 
     #[test]
-    fn query_on_closed_execution_rejects() {
+    fn query_task_completed_answers_by_token() {
+        use cadence_api::enums::QueryTaskCompletedType;
+        use cadence_api::tasktoken::{JsonTaskTokenSerializer, QueryTaskToken};
         let store = InMemoryExecutionStore::new();
+        store.register_domain("d", &uuid::Uuid::new_v4().to_string());
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        let qid = store
+            .buffer_query("d", &exec, "state", Vec::new(), None)
+            .unwrap();
+        let inner = store.inner.read().expect("execution store lock");
+        let domain_id = store.domain_id(&inner, "d");
+        drop(inner);
+        // A directly-dispatched query task carries a QueryTaskToken whose
+        // taskId is the buffered query ID, as Go matching generates.
+        let token = QueryTaskToken {
+            domain_id,
+            workflow_id: "w".to_string(),
+            run_id: started.run_id.clone(),
+            task_list: "tl".to_string(),
+            task_id: qid.clone(),
+        };
+        let token_bytes = JsonTaskTokenSerializer::serialize_query_token(&token).unwrap();
+        store
+            .answer_query_task(&cadence_api::tasks::RespondQueryTaskCompletedRequest {
+                task_token: token_bytes,
+                completed_type: Some(QueryTaskCompletedType::Completed),
+                query_result: b"42".to_vec(),
+                ..Default::default()
+            })
+            .unwrap();
+        let answer = store.take_query_result(&qid).unwrap();
+        assert_eq!(answer.answer, b"42");
+        // Answering twice reports the query as expired, like Go's
+        // deliverQueryResult on an already-removed channel.
+        let token2 = QueryTaskToken {
+            domain_id: token.domain_id.clone(),
+            workflow_id: "w".to_string(),
+            run_id: started.run_id.clone(),
+            task_list: "tl".to_string(),
+            task_id: qid.clone(),
+        };
+        let token2_bytes = JsonTaskTokenSerializer::serialize_query_token(&token2).unwrap();
+        let err = store
+            .answer_query_task(&cadence_api::tasks::RespondQueryTaskCompletedRequest {
+                task_token: token2_bytes,
+                completed_type: Some(QueryTaskCompletedType::Completed),
+                query_result: b"43".to_vec(),
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert!(matches!(err, QueryError::NotFound(_)));
+    }
+
+    #[test]
+    fn query_task_completed_failure_and_unknown_tokens() {
+        use cadence_api::enums::QueryTaskCompletedType;
+        use cadence_api::tasktoken::{JsonTaskTokenSerializer, QueryTaskToken};
+        let store = InMemoryExecutionStore::new();
+        let domain_id = uuid::Uuid::new_v4().to_string();
+        store.register_domain("d", &domain_id);
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        let qid = store
+            .buffer_query("d", &exec, "state", Vec::new(), None)
+            .unwrap();
+        // Failed completions surface QueryFailedError to the waiter.
+        let token = QueryTaskToken {
+            domain_id: domain_id.clone(),
+            workflow_id: "w".to_string(),
+            run_id: started.run_id.clone(),
+            task_list: "tl".to_string(),
+            task_id: qid.clone(),
+        };
+        store
+            .answer_query_task(&cadence_api::tasks::RespondQueryTaskCompletedRequest {
+                task_token: JsonTaskTokenSerializer::serialize_query_token(&token).unwrap(),
+                completed_type: Some(QueryTaskCompletedType::Failed),
+                error_message: "boom".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        let answer = store.take_query_result(&qid).unwrap();
+        assert_eq!(answer.error_message, "boom");
+        // Unknown query IDs are EntityNotExists, not BadRequest.
+        let ghost = QueryTaskToken {
+            domain_id,
+            workflow_id: "w".to_string(),
+            run_id: started.run_id,
+            task_list: "tl".to_string(),
+            task_id: "no-such-query".to_string(),
+        };
+        let err = store
+            .answer_query_task(&cadence_api::tasks::RespondQueryTaskCompletedRequest {
+                task_token: JsonTaskTokenSerializer::serialize_query_token(&ghost).unwrap(),
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert!(matches!(err, QueryError::NotFound(_)));
+        // Malformed tokens are BadRequest.
+        let err = store
+            .answer_query_task(&cadence_api::tasks::RespondQueryTaskCompletedRequest {
+                task_token: b"not-json".to_vec(),
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert!(matches!(err, QueryError::Invalid(_)));
+    }
+
+    #[test]
+    fn query_on_closed_execution_rejects() {        let store = InMemoryExecutionStore::new();
         let started = store.start(&start_req("d", "w", "req-1")).unwrap();
         let exec = WorkflowExecution::new("w", started.run_id);
         store
@@ -4226,6 +7656,475 @@ mod advanced_tests {
             .buffer_query("d", &exec, "state", Vec::new(), None)
             .unwrap_err();
         assert!(matches!(err, QueryError::Rejected(_)));
+    }
+
+    #[test]
+    fn requeue_decision_task_restores_queue_entry() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        // Drain the queue without starting the task.
+        {
+            let mut inner = store.inner.write().expect("execution store lock");
+            let domain = store.domain_id(&inner, "d");
+            inner
+                .decision_queues
+                .get_mut(&(domain, "tl".to_string()))
+                .unwrap()
+                .pop_front();
+        }
+        assert!(store.poll_decision("d", "tl", "worker").is_none());
+        // The pending decision still exists with schedule ID 2.
+        store
+            .requeue_decision_task("d", "w", &started.run_id, 2)
+            .unwrap();
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        assert_eq!(task.workflow_execution.unwrap().run_id, started.run_id);
+        // Unknown schedule IDs and runs are EntityNotExists.
+        assert!(store.requeue_decision_task("d", "w", &started.run_id, 99).is_err());
+        assert!(store.requeue_decision_task("d", "w", "nope", 2).is_err());
+        // Started tasks cannot be requeued.
+        assert!(store.requeue_decision_task("d", "w", &started.run_id, 2).is_err());
+    }
+
+    #[test]
+    fn requeue_activity_task_restores_queue_entry() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        complete_with(
+            &store,
+            "d",
+            "tl",
+            vec![Decision {
+                decision_type: Some(DecisionType::ScheduleActivityTask),
+                schedule_activity_task_decision_attributes: Some(
+                    cadence_api::tasks::ScheduleActivityTaskDecisionAttributes {
+                        activity_id: "a1".to_string(),
+                        activity_type: Some(cadence_api::types::ActivityType {
+                            name: "at".to_string(),
+                        }),
+                        task_list: Some(cadence_api::types::TaskList {
+                            name: "tl".to_string(),
+                            ..Default::default()
+                        }),
+                        schedule_to_close_timeout_seconds: Some(60),
+                        schedule_to_start_timeout_seconds: Some(60),
+                        start_to_close_timeout_seconds: Some(60),
+                        ..Default::default()
+                    },
+                ),
+                ..Default::default()
+            }],
+        );
+        // Find the activity schedule ID, drain its queue entry, requeue it.
+        let schedule_id = {
+            let inner = store.inner.read().expect("execution store lock");
+            let domain = store.domain_id(&inner, "d");
+            let record = inner
+                .by_run
+                .get(&(domain, "w".to_string(), started.run_id.clone()))
+                .unwrap();
+            *record.pending_activities.keys().next().unwrap()
+        };
+        {
+            let mut inner = store.inner.write().expect("execution store lock");
+            let domain = store.domain_id(&inner, "d");
+            inner
+                .activity_queues
+                .get_mut(&(domain, "tl".to_string()))
+                .unwrap()
+                .pop_front();
+        }
+        store
+            .requeue_activity_task("d", "w", &started.run_id, schedule_id)
+            .unwrap();
+        assert!(store.poll_activity("d", "tl", "worker").is_some());
+        assert!(store
+            .requeue_activity_task("d", "w", &started.run_id, 9999)
+            .is_err());
+    }
+
+    #[test]
+    fn task_lists_reports_known_queues() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        store.start(&start_req("d", "w", "req-1")).unwrap();
+        let (decisions, activities) = store.task_lists("d");
+        assert_eq!(decisions, vec!["tl".to_string()]);
+        assert!(activities.is_empty());
+    }
+
+    #[test]
+    fn restart_terminates_open_run_and_starts_new() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let first = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", first.run_id.clone());
+        let restarted = store.restart("d", &exec, "tester").unwrap();
+        assert_ne!(restarted.run_id, first.run_id);
+        // The open run was terminated by the TerminateIfRunning reuse policy.
+        let kinds = event_kinds(&store, "d", &exec);
+        assert!(kinds.contains(&EventType::WorkflowExecutionTerminated));
+        // The new run carries the original type and a fresh decision.
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        assert_eq!(task.workflow_execution.unwrap().run_id, restarted.run_id);
+    }
+
+    #[test]
+    fn restart_closed_run_starts_fresh() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let first = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", first.run_id.clone());
+        store
+            .terminate(&TerminateWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(exec.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+        let restarted = store.restart("d", &exec, "tester").unwrap();
+        assert_ne!(restarted.run_id, first.run_id);
+        let inner = store.inner.read().expect("execution store lock");
+        let domain = store.domain_id(&inner, "d");
+        let record = inner
+            .by_run
+            .get(&(domain, "w".to_string(), restarted.run_id.clone()))
+            .unwrap();
+        let started = record.started_attributes();
+        assert_eq!(started.workflow_type.unwrap().name, "wt");
+        assert_eq!(started.identity, "tester");
+    }
+
+    #[test]
+    fn restart_unknown_execution_is_invalid() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let err = store
+            .restart("d", &WorkflowExecution::new("w", "nope"), "tester")
+            .unwrap_err();
+        assert!(matches!(err, StartError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn async_requests_are_consumed_into_runs() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        store.enqueue_async_start(start_req("d", "w", "req-async"));
+        let drained = store.drain_async_requests();
+        assert_eq!(drained.len(), 1);
+        assert!(store.consume_async_request(&drained[0]));
+        // The run exists and has a pollable decision.
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        assert_eq!(task.workflow_execution.unwrap().workflow_id, "w");
+        // Redelivery is idempotent through request-ID dedup.
+        assert!(store.consume_async_request(&drained[0]));
+        // Invalid requests are dropped, never requeued.
+        let bad = AsyncRequest {
+            request: AsyncRequestKind::Start(StartWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                ..Default::default()
+            }),
+            attempts: 0,
+        };
+        assert!(store.consume_async_request(&bad));
+        // Requeue bounds attempts like a poison-message limit.
+        let mut req = drained[0].clone();
+        req.attempts = AsyncRequest::MAX_ATTEMPTS - 1;
+        store.requeue_async_request(req);
+        assert!(store.drain_async_requests().is_empty());
+    }
+
+    #[test]
+    fn reset_forks_history_at_decision_boundary() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let first = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", first.run_id.clone());
+        // Drive one decision with a signal in between: history is
+        // Started(1), DecisionScheduled(2), DecisionStarted(3), Signaled(4).
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(exec.clone()),
+                signal_name: "ping".to_string(),
+                request_id: "sig-1".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        // Reset to the DecisionTaskStarted boundary (event 3).
+        let reset = store
+            .reset(&ResetWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(exec.clone()),
+                reason: "test".to_string(),
+                decision_finish_event_id: 3,
+                request_id: "reset-1".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_ne!(reset.run_id, first.run_id);
+        // Old run terminated; reset run replays the 3-event prefix and
+        // reapplies the later signal.
+        let inner = store.inner.read().expect("execution store lock");
+        let domain = store.domain_id(&inner, "d");
+        let old = inner
+            .by_run
+            .get(&(domain.clone(), "w".to_string(), first.run_id.clone()))
+            .unwrap();
+        assert_eq!(
+            old.close_status,
+            Some(WorkflowExecutionCloseStatus::Terminated)
+        );
+        let new = inner
+            .by_run
+            .get(&(domain, "w".to_string(), reset.run_id.clone()))
+            .unwrap();
+        // Prefix (3) + reapplied signal (1) + freshly scheduled decision (1).
+        assert_eq!(new.history.len(), 5);
+        assert_eq!(
+            new.history[3].event_type,
+            Some(EventType::WorkflowExecutionSignaled)
+        );
+        assert!(new.pending_decision.is_some());
+        drop(inner);
+        // Duplicate request IDs return the reset run without forking again.
+        let again = store
+            .reset(&ResetWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(exec.clone()),
+                decision_finish_event_id: 3,
+                request_id: "reset-1".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(again.run_id, reset.run_id);
+    }
+
+    #[test]
+    fn reset_rejects_bad_points_and_runs() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let req = ResetWorkflowExecutionRequest {
+            domain: "d".to_string(),
+            workflow_execution: Some(WorkflowExecution::new("w", "nope")),
+            decision_finish_event_id: 2,
+            request_id: "r".to_string(),
+            ..Default::default()
+        };
+        assert!(matches!(store.reset(&req), Err(ResetError::NotFound(_))));
+        let first = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", first.run_id.clone());
+        // Event 1 is WorkflowExecutionStarted: not a reset boundary.
+        let bad_type = ResetWorkflowExecutionRequest {
+            domain: "d".to_string(),
+            workflow_execution: Some(exec.clone()),
+            decision_finish_event_id: 1,
+            request_id: "r".to_string(),
+            ..Default::default()
+        };
+        assert!(matches!(store.reset(&bad_type), Err(ResetError::Invalid(_))));
+        // Out of range.
+        let bad_range = ResetWorkflowExecutionRequest {
+            domain: "d".to_string(),
+            workflow_execution: Some(exec),
+            decision_finish_event_id: 99,
+            request_id: "r".to_string(),
+            ..Default::default()
+        };
+        assert!(matches!(store.reset(&bad_range), Err(ResetError::Invalid(_))));
+    }
+
+    #[test]
+    fn reset_can_skip_signal_reapply() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let first = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", first.run_id.clone());
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(exec.clone()),
+                signal_name: "ping".to_string(),
+                request_id: "sig-1".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        let reset = store
+            .reset(&ResetWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(exec),
+                decision_finish_event_id: 3,
+                request_id: "reset-1".to_string(),
+                skip_signal_reapply: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let inner = store.inner.read().expect("execution store lock");
+        let domain = store.domain_id(&inner, "d");
+        let new = inner
+            .by_run
+            .get(&(domain, "w".to_string(), reset.run_id))
+            .unwrap();
+        // Prefix (3) + freshly scheduled decision (1); the signal was skipped.
+        assert_eq!(new.history.len(), 4);
+    }
+
+    #[test]
+    fn refresh_tasks_requeues_lost_queue_entries() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        // Drop the decision queue entry; refresh restores it.
+        {
+            let mut inner = store.inner.write().expect("execution store lock");
+            let domain = store.domain_id(&inner, "d");
+            inner
+                .decision_queues
+                .get_mut(&(domain, "tl".to_string()))
+                .unwrap()
+                .pop_front();
+        }
+        assert!(store.poll_decision("d", "tl", "worker").is_none());
+        store.refresh_tasks("d", &exec).unwrap();
+        assert!(store.poll_decision("d", "tl", "worker").is_some());
+        // Unknown runs are not found; closed runs are a no-op success.
+        assert!(store
+            .refresh_tasks("d", &WorkflowExecution::new("w", "nope"))
+            .is_err());
+        store
+            .terminate(&TerminateWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_execution: Some(exec.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+        store.refresh_tasks("d", &exec).unwrap();
+    }
+
+    #[test]
+    fn partition_config_round_trips_through_store() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let config = StoredPartitionConfig {
+            version: 3,
+            read_partitions: [(0, vec!["a".to_string()])].into_iter().collect(),
+            write_partitions: HashMap::new(),
+        };
+        store
+            .update_partition_config("d", "tl", 1, true, config)
+            .unwrap();
+        let got = store.partition_config("d", "tl", 1).unwrap();
+        assert_eq!(got.version, 3);
+        assert_eq!(got.read_partitions[&0], vec!["a".to_string()]);
+        store.refresh_partition_config("d", "tl", 1).unwrap();
+        // Non-normal kinds are rejected like Go.
+        assert!(store
+            .update_partition_config(
+                "d",
+                "tl",
+                1,
+                false,
+                StoredPartitionConfig::default()
+            )
+            .is_err());
+        // Unknown lists simply have no stored config.
+        assert!(store.partition_config("d", "other", 1).is_none());
+    }
+
+    #[test]
+    fn maintain_healthy_run_deletes_nothing() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        assert_eq!(
+            store.maintain_corrupt_workflow("d", &exec).unwrap(),
+            (false, false, false)
+        );
+        // Unknown runs are not found.
+        assert!(store
+            .maintain_corrupt_workflow("d", &WorkflowExecution::new("w", "nope"))
+            .is_err());
+    }
+
+    #[test]
+    fn raw_history_pages_by_event_id() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let exec = WorkflowExecution::new("w", started.run_id.clone());
+        let (events, token) = store.raw_history("d", &exec, None, None, 10, &[]).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(token.is_empty());
+        let (page, token) = store.raw_history("d", &exec, None, None, 1, &[]).unwrap();
+        assert_eq!(page.len(), 1);
+        assert!(!token.is_empty());
+        let (rest, token2) = store.raw_history("d", &exec, None, None, 10, &token).unwrap();
+        assert_eq!(rest.len(), 1);
+        assert!(token2.is_empty());
+        // Start/end bounds select the decision-scheduled event only.
+        let (bounded, _) = store
+            .raw_history("d", &exec, Some(2), Some(2), 10, &[])
+            .unwrap();
+        assert_eq!(bounded.len(), 1);
+        assert!(store
+            .raw_history("d", &WorkflowExecution::new("w", "nope"), None, None, 10, &[])
+            .is_err());
+    }
+
+    #[test]
+    fn reapply_signals_appends_and_dedups() {
+        use cadence_api::service_types::HistoryEvent;
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("d");
+        let started = store.start(&start_req("d", "w", "req-1")).unwrap();
+        let signal = |id: &str| HistoryEvent {
+            workflow_execution_signaled_event_attributes: Some(
+                cadence_api::service_types::WorkflowExecutionSignaledEventAttributes {
+                    signal_name: "ping".to_string(),
+                    request_id: id.to_string(),
+                    ..Default::default()
+                },
+            ),
+            ..Default::default()
+        };
+        store
+            .reapply_signals("d", "w", vec![signal("s-1"), signal("s-2")])
+            .unwrap();
+        store
+            .reapply_signals("d", "w", vec![signal("s-1")])
+            .unwrap();
+        let inner = store.inner.read().expect("execution store lock");
+        let domain = store.domain_id(&inner, "d");
+        let record = inner
+            .by_run
+            .get(&(domain, "w".to_string(), started.run_id))
+            .unwrap();
+        let signals = record
+            .history
+            .iter()
+            .filter(|e| {
+                e.event_type == Some(cadence_api::enums::EventType::WorkflowExecutionSignaled)
+            })
+            .count();
+        assert_eq!(signals, 2);
     }
 
     #[test]
@@ -4264,13 +8163,109 @@ mod advanced_tests {
     }
 
     #[test]
+    fn cancel_timer_consumes_buffered_fire_and_can_complete_workflow() {
+        for close in [false, true] {
+            let store = InMemoryExecutionStore::new();
+            let started = store.start(&start_req("d", "w", "timer-cancel")).unwrap();
+            let task = store.poll_decision("d", "tl", "worker").unwrap();
+            store
+                .complete_decision(&RespondDecisionTaskCompletedRequest {
+                    task_token: task.task_token,
+                    decisions: vec![Decision {
+                        decision_type: Some(DecisionType::StartTimer),
+                        start_timer_decision_attributes: Some(StartTimerDecisionAttributes {
+                            timer_id: "timer".into(),
+                            start_to_fire_timeout_seconds: Some(1),
+                        }),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })
+                .unwrap();
+            store
+                .signal(&SignalWorkflowExecutionRequest {
+                    domain: "d".into(),
+                    workflow_execution: Some(WorkflowExecution::new("w", &started.run_id)),
+                    signal_name: "cancel".into(),
+                    ..Default::default()
+                })
+                .unwrap();
+            let task = store.poll_decision("d", "tl", "worker").unwrap();
+            assert_eq!(store.fire_due_timers(i64::MAX / 2), 1);
+            let mut decisions = vec![Decision {
+                decision_type: Some(DecisionType::CancelTimer),
+                cancel_timer_decision_attributes: Some(
+                    cadence_api::tasks::CancelTimerDecisionAttributes {
+                        timer_id: "timer".into(),
+                    },
+                ),
+                ..Default::default()
+            }];
+            if close {
+                decisions.push(Decision {
+                    decision_type: Some(DecisionType::CompleteWorkflowExecution),
+                    complete_workflow_execution_decision_attributes: Some(Default::default()),
+                    ..Default::default()
+                });
+            }
+            store
+                .complete_decision(&RespondDecisionTaskCompletedRequest {
+                    task_token: task.task_token,
+                    decisions,
+                    ..Default::default()
+                })
+                .unwrap();
+            let kinds = event_kinds(&store, "d", &WorkflowExecution::new("w", &started.run_id));
+            assert!(kinds.contains(&EventType::TimerCanceled));
+            assert!(!kinds.contains(&EventType::TimerFired));
+            assert!(!kinds.contains(&EventType::DecisionTaskFailed));
+            assert_eq!(
+                kinds.contains(&EventType::WorkflowExecutionCompleted),
+                close
+            );
+            assert!(store.poll_decision("d", "tl", "worker").is_none());
+        }
+    }
+
+    #[test]
+    fn cancel_unknown_timer_records_typed_failure() {
+        let store = InMemoryExecutionStore::new();
+        let started = store.start(&start_req("d", "w", "unknown-timer")).unwrap();
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                decisions: vec![Decision {
+                    decision_type: Some(DecisionType::CancelTimer),
+                    cancel_timer_decision_attributes: Some(
+                        cadence_api::tasks::CancelTimerDecisionAttributes {
+                            timer_id: "missing".into(),
+                        },
+                    ),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let response = store
+            .history("d", &WorkflowExecution::new("w", started.run_id))
+            .unwrap();
+        let event = response.history.unwrap().events.last().unwrap().clone();
+        assert_eq!(event.event_type, Some(EventType::CancelTimerFailed));
+        assert_eq!(
+            event.cancel_timer_failed_event_attributes.unwrap().cause,
+            "TIMER_ID_UNKNOWN"
+        );
+    }
+
+    #[test]
     fn request_cancel_external_delivers() {
         let store = InMemoryExecutionStore::new();
         store.register_domain_name("d");
         let target = store.start(&start_req("d", "t", "req-t")).unwrap();
         store.start(&start_req("d", "s", "req-s")).unwrap();
         // Drain target's initial decision so the source decision is polled.
-        let _ = store.poll_decision("d", "tl", "w");
+        let target_task = store.poll_decision("d", "tl", "w").unwrap();
         let task = store.poll_decision("d", "tl", "w").unwrap();
         store
             .complete_decision(&RespondDecisionTaskCompletedRequest {
@@ -4287,6 +8282,12 @@ mod advanced_tests {
                     ..Default::default()
                 }],
                 identity: "w".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: target_task.task_token,
                 ..Default::default()
             })
             .unwrap();
@@ -4361,11 +8362,250 @@ mod activity_ext_tests {
     }
 
     #[test]
+    fn external_termination_drops_unhandled_buffered_events() {
+        let store = InMemoryExecutionStore::new();
+        let run = store
+            .start(&start_req("d", "w", "buffered-terminate"))
+            .unwrap();
+        store.poll_decision("d", "tl", "worker").unwrap();
+        let execution = WorkflowExecution::new("w", run.run_id);
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_execution: Some(execution.clone()),
+                signal_name: "unhandled".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        store
+            .terminate(&TerminateWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_execution: Some(execution.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+        let history = store.history("d", &execution).unwrap().history.unwrap();
+        assert_eq!(history.events.len(), 4);
+        assert_eq!(
+            history.events.last().unwrap().event_type,
+            Some(EventType::WorkflowExecutionTerminated)
+        );
+        assert!(!history
+            .events
+            .iter()
+            .any(|event| event.event_type == Some(EventType::WorkflowExecutionSignaled)));
+    }
+
+    #[test]
+    fn buffered_signal_snapshot_restores_dedup_and_private_id_sequence() {
+        let store = InMemoryExecutionStore::new();
+        let run = store
+            .start(&start_req("d", "w", "buffered-restore"))
+            .unwrap();
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        let signal = SignalWorkflowExecutionRequest {
+            domain: "d".into(),
+            workflow_execution: Some(WorkflowExecution::new("w", &run.run_id)),
+            signal_name: "buffered".into(),
+            request_id: "same".into(),
+            ..Default::default()
+        };
+        store.signal(&signal).unwrap();
+        let mut snapshot = store.snapshot();
+        snapshot.runs[0].1.signal_request_ids.clear();
+        snapshot.runs[0].1.buffer_event_sequence = 0;
+        let restored = InMemoryExecutionStore::restore(snapshot);
+        restored.signal(&signal).unwrap();
+        restored
+            .signal(&SignalWorkflowExecutionRequest {
+                request_id: "new".into(),
+                ..signal
+            })
+            .unwrap();
+        {
+            let inner = restored.inner.read().unwrap();
+            let record = &inner.by_run[&("d".to_owned(), "w".to_owned(), run.run_id.clone())];
+            assert_eq!(record.buffered_events.len(), 2);
+            assert_ne!(
+                record.buffered_events[0].event_id,
+                record.buffered_events[1].event_id
+            );
+        }
+        restored
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        let history = restored
+            .history("d", &WorkflowExecution::new("w", run.run_id))
+            .unwrap()
+            .history
+            .unwrap();
+        assert_eq!(
+            history
+                .events
+                .iter()
+                .filter(|event| event.event_type == Some(EventType::WorkflowExecutionSignaled))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn buffered_signal_prevents_workflow_completion_until_replayed() {
+        let store = InMemoryExecutionStore::new();
+        let run = store.start(&start_req("d", "w", "buffered-close")).unwrap();
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_execution: Some(WorkflowExecution::new("w", &run.run_id)),
+                signal_name: "late".into(),
+                request_id: "late-request".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                decisions: vec![cadence_api::tasks::Decision {
+                    decision_type: Some(DecisionType::CompleteWorkflowExecution),
+                    complete_workflow_execution_decision_attributes: Some(Default::default()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let key = ("d".to_owned(), "w".to_owned(), run.run_id);
+        let inner = store.inner.read().unwrap();
+        let record = &inner.by_run[&key];
+        assert!(record.is_open());
+        assert_eq!(
+            record.history[3].event_type,
+            Some(EventType::DecisionTaskFailed)
+        );
+        assert_eq!(
+            record.history[3]
+                .decision_task_failed_event_attributes
+                .as_ref()
+                .unwrap()
+                .cause,
+            Some(DecisionTaskFailedCause::UnhandledDecision)
+        );
+        assert_eq!(
+            record.history[4].event_type,
+            Some(EventType::WorkflowExecutionSignaled)
+        );
+        assert_eq!(
+            record.history[5].event_type,
+            Some(EventType::DecisionTaskScheduled)
+        );
+        assert!(record.buffered_events.is_empty());
+    }
+
+    #[test]
+    fn activity_start_and_completion_buffer_and_receive_linked_durable_ids() {
+        let store = InMemoryExecutionStore::new();
+        let run = store
+            .start(&start_req("d", "w", "buffered-activity"))
+            .unwrap();
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                decisions: vec![schedule_activity("a")],
+                ..Default::default()
+            })
+            .unwrap();
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_execution: Some(WorkflowExecution::new("w", &run.run_id)),
+                signal_name: "wake".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let decision = store.poll_decision("d", "tl", "worker").unwrap();
+        let activity = store.poll_activity("d", "tl", "worker").unwrap();
+        store
+            .complete_activity(&RespondActivityTaskCompletedRequest {
+                task_token: activity.task_token,
+                result: b"done".to_vec(),
+                ..Default::default()
+            })
+            .unwrap();
+        let key = ("d".to_owned(), "w".to_owned(), run.run_id);
+        {
+            let inner = store.inner.read().unwrap();
+            let record = &inner.by_run[&key];
+            assert_eq!(record.buffered_events.len(), 2);
+            assert!(!record
+                .history
+                .iter()
+                .any(|event| event.event_type == Some(EventType::ActivityTaskStarted)));
+        }
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: decision.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        let inner = store.inner.read().unwrap();
+        let record = &inner.by_run[&key];
+        let started = record
+            .history
+            .iter()
+            .find(|event| event.event_type == Some(EventType::ActivityTaskStarted))
+            .unwrap();
+        let completed = record
+            .history
+            .iter()
+            .find_map(|event| event.activity_task_completed_event_attributes.as_ref())
+            .unwrap();
+        assert!(started.event_id > decision.started_event_id);
+        assert_eq!(completed.started_event_id, started.event_id);
+        assert!(record.history.iter().all(|event| event.event_id > 0));
+    }
+
+    #[test]
+    fn scheduling_activity_does_not_create_an_extra_decision() {
+        let store = InMemoryExecutionStore::new();
+        setup_activity(&store);
+        assert!(store.poll_decision("d", "tl", "worker").is_none());
+    }
+
+    #[test]
+    fn force_request_creates_another_decision() {
+        let store = InMemoryExecutionStore::new();
+        store.start(&start_req("d", "w", "forced-task")).unwrap();
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                force_create_new_decision_task: true,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(store.poll_decision("d", "tl", "worker").is_some());
+    }
+
+    #[test]
     fn heartbeat_reports_cancel_requested() {
         let store = InMemoryExecutionStore::new();
         let token = setup_activity(&store);
         // No cancel requested yet.
         assert!(!store.record_heartbeat(&token, b"p1".to_vec()).unwrap());
+        // An external signal wakes the workflow so it can request activity cancellation.
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_execution: Some(WorkflowExecution::new("w", "")),
+                signal_name: "cancel-activity".into(),
+                request_id: "wake-cancel".into(),
+                ..Default::default()
+            })
+            .unwrap();
         // Request cancel via a fresh decision, then heartbeat sees it.
         let task = store.poll_decision("d", "tl", "worker").unwrap();
         store
@@ -4493,6 +8733,296 @@ mod retry_tests {
         }
     }
 
+    fn pending_for_retry(
+        policy: Option<RetryPolicy>,
+        attempt: i32,
+        scheduled: i64,
+    ) -> PendingActivity {
+        PendingActivity {
+            activity_id: "a".into(),
+            activity_type: cadence_api::types::ActivityType {
+                name: "activity".into(),
+            },
+            input: Vec::new(),
+            task_list: TaskList {
+                name: "tl".into(),
+                kind: None,
+                base_name: String::new(),
+            },
+            scheduled_event_id: 1,
+            started_event_id: Some(2),
+            attempt,
+            cancel_requested: false,
+            cancel_requested_event_id: None,
+            heartbeat_details: Vec::new(),
+            queued: false,
+            retry_ready_millis: None,
+            schedule_to_start_timeout_seconds: None,
+            schedule_to_close_timeout_seconds: None,
+            start_to_close_timeout_seconds: None,
+            heartbeat_timeout_seconds: None,
+            scheduled_time_millis: scheduled,
+            attempt_scheduled_time_millis: None,
+            started_time_millis: None,
+            last_heartbeat_time_millis: None,
+            started_identity: String::new(),
+            started_request_id: String::new(),
+            last_failure_reason: None,
+            last_failure_details: Vec::new(),
+            last_failure_options: None,
+            retry_policy: policy,
+            header: None,
+        }
+    }
+
+    #[test]
+    fn activity_retry_policy_is_validated_before_history_mutation() {
+        let store = InMemoryExecutionStore::new();
+        store.start(&start_req("d", "w", "invalid-retry")).unwrap();
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        let policy = RetryPolicy {
+            initial_interval_in_seconds: 1,
+            maximum_attempts: 3,
+            ..Default::default()
+        };
+        let request = RespondDecisionTaskCompletedRequest {
+            task_token: task.task_token,
+            decisions: vec![schedule_with_retry(policy)],
+            ..Default::default()
+        };
+        let key = (
+            "d".to_owned(),
+            "w".to_owned(),
+            task.workflow_execution.unwrap().run_id,
+        );
+        let before = store.inner.read().unwrap().by_run[&key].history.len();
+        let error = store.complete_decision(&request).unwrap_err();
+        assert!(format!("{error:?}").contains("BackoffCoefficient cannot be less than 1"));
+        assert_eq!(
+            store.inner.read().unwrap().by_run[&key].history.len(),
+            before
+        );
+        let mut corrected = request;
+        corrected.decisions[0]
+            .schedule_activity_task_decision_attributes
+            .as_mut()
+            .unwrap()
+            .retry_policy
+            .as_mut()
+            .unwrap()
+            .backoff_coefficient = 2.0;
+        store.complete_decision(&corrected).unwrap();
+        assert!(store.poll_activity("d", "tl", "worker").is_some());
+    }
+
+    fn timeout_activity(
+        store: &InMemoryExecutionStore,
+        attrs: cadence_api::tasks::ScheduleActivityTaskDecisionAttributes,
+    ) -> String {
+        let run = store
+            .start(&start_req("d", "w", "timeout-test"))
+            .unwrap()
+            .run_id;
+        let task = store.poll_decision("d", "tl", "worker").unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                decisions: vec![cadence_api::tasks::Decision {
+                    decision_type: Some(DecisionType::ScheduleActivityTask),
+                    schedule_activity_task_decision_attributes: Some(
+                        cadence_api::tasks::ScheduleActivityTaskDecisionAttributes {
+                            activity_id: "a".into(),
+                            activity_type: Some(ActivityType {
+                                name: "activity".into(),
+                            }),
+                            ..attrs
+                        },
+                    ),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        run
+    }
+
+    #[test]
+    fn queued_activity_timeouts_have_no_started_event_and_skip_stale_queue_entries() {
+        for kind in [TimeoutType::ScheduleToStart, TimeoutType::ScheduleToClose] {
+            let store = InMemoryExecutionStore::new();
+            let run = timeout_activity(
+                &store,
+                cadence_api::tasks::ScheduleActivityTaskDecisionAttributes {
+                    schedule_to_start_timeout_seconds: (kind == TimeoutType::ScheduleToStart)
+                        .then_some(1),
+                    schedule_to_close_timeout_seconds: (kind == TimeoutType::ScheduleToClose)
+                        .then_some(1),
+                    ..Default::default()
+                },
+            );
+            let key = ("d".to_owned(), "w".to_owned(), run);
+            let scheduled = store.inner.read().unwrap().by_run[&key]
+                .pending_activities
+                .values()
+                .next()
+                .unwrap()
+                .scheduled_time_millis;
+            assert_eq!(store.expire_due_activities(scheduled + 999), 0);
+            assert_eq!(store.expire_due_activities(scheduled + 1000), 1);
+            assert_eq!(store.expire_due_activities(scheduled + 2000), 0);
+            assert!(store.poll_activity("d", "tl", "worker").is_none());
+            let inner = store.inner.read().unwrap();
+            let event = inner.by_run[&key]
+                .history
+                .iter()
+                .find_map(|event| event.activity_task_timed_out_event_attributes.as_ref())
+                .unwrap();
+            assert_eq!(event.started_event_id, 0);
+            assert_eq!(event.timeout_type, Some(kind));
+        }
+    }
+
+    #[test]
+    fn heartbeat_deadline_moves_and_preserves_details() {
+        let store = InMemoryExecutionStore::new();
+        let run = timeout_activity(
+            &store,
+            cadence_api::tasks::ScheduleActivityTaskDecisionAttributes {
+                heartbeat_timeout_seconds: Some(1),
+                start_to_close_timeout_seconds: Some(30),
+                ..Default::default()
+            },
+        );
+        let task = store.poll_activity("d", "tl", "worker").unwrap();
+        store
+            .record_heartbeat(&task.task_token, b"checkpoint".to_vec())
+            .unwrap();
+        let key = ("d".to_owned(), "w".to_owned(), run);
+        let heartbeat = store.inner.read().unwrap().by_run[&key]
+            .pending_activities
+            .values()
+            .next()
+            .unwrap()
+            .last_heartbeat_time_millis
+            .unwrap();
+        assert_eq!(store.expire_due_activities(heartbeat + 999), 0);
+        assert_eq!(store.expire_due_activities(heartbeat + 1000), 1);
+        assert!(store.record_heartbeat(&task.task_token, vec![]).is_err());
+        let inner = store.inner.read().unwrap();
+        let event = inner.by_run[&key]
+            .history
+            .iter()
+            .find_map(|event| event.activity_task_timed_out_event_attributes.as_ref())
+            .unwrap();
+        assert_eq!(event.timeout_type, Some(TimeoutType::Heartbeat));
+        assert_eq!(event.details, b"checkpoint");
+    }
+
+    #[test]
+    fn activity_timeout_retries_are_transient_and_old_tokens_expire() {
+        let store = InMemoryExecutionStore::new();
+        let run = timeout_activity(
+            &store,
+            cadence_api::tasks::ScheduleActivityTaskDecisionAttributes {
+                start_to_close_timeout_seconds: Some(1),
+                retry_policy: Some(retry_policy(2)),
+                ..Default::default()
+            },
+        );
+        let task = store.poll_activity("d", "tl", "worker").unwrap();
+        let key = ("d".to_owned(), "w".to_owned(), run);
+        assert_eq!(
+            store.expire_due_activities(task.started_timestamp.unwrap() + 1000),
+            1
+        );
+        assert!(store.record_heartbeat(&task.task_token, vec![]).is_err());
+        let ready = store.inner.read().unwrap().by_run[&key]
+            .pending_activities
+            .values()
+            .next()
+            .unwrap()
+            .retry_ready_millis
+            .unwrap();
+        assert_eq!(store.requeue_due_activities(ready - 1), 0);
+        assert_eq!(store.requeue_due_activities(ready), 1);
+        let retry = store.poll_activity("d", "tl", "worker").unwrap();
+        assert_eq!(retry.attempt, 1);
+        assert_eq!(
+            store.expire_due_activities(retry.started_timestamp.unwrap() + 1000),
+            1
+        );
+        let inner = store.inner.read().unwrap();
+        let record = &inner.by_run[&key];
+        assert_eq!(
+            record
+                .history
+                .iter()
+                .filter(|event| event.event_type == Some(EventType::ActivityTaskStarted))
+                .count(),
+            1
+        );
+        let timeouts: Vec<_> = record
+            .history
+            .iter()
+            .filter_map(|event| event.activity_task_timed_out_event_attributes.as_ref())
+            .collect();
+        assert_eq!(timeouts.len(), 1);
+        assert_eq!(
+            timeouts[0].last_failure_reason.as_deref(),
+            Some("cadenceInternal:Timeout START_TO_CLOSE")
+        );
+        assert_eq!(timeouts[0].timeout_type, Some(TimeoutType::StartToClose));
+        assert!(timeouts[0].started_event_id > timeouts[0].scheduled_event_id);
+    }
+
+    #[test]
+    fn retry_backoff_and_overrides_match_go_policy() {
+        let policy = RetryPolicy {
+            initial_interval_in_seconds: 3,
+            backoff_coefficient: 2.0,
+            maximum_attempts: 5,
+            expiration_interval_in_seconds: 60,
+            ..Default::default()
+        };
+        // The SDK sends its default coefficient explicitly; the server does not default it.
+        let pending = pending_for_retry(Some(policy.clone()), 1, 10_000);
+        assert_eq!(
+            InMemoryExecutionStore::activity_retry_time(
+                &fail(Vec::new(), Some("boom")),
+                &pending,
+                20_000
+            ),
+            Some(26_000)
+        );
+        let override_req = RespondActivityTaskFailedRequest {
+            failure_options: Some(FailureOptions {
+                next_retry_interval_seconds: Some(7),
+                ..Default::default()
+            }),
+            ..fail(Vec::new(), Some("boom"))
+        };
+        assert_eq!(
+            InMemoryExecutionStore::activity_retry_time(&override_req, &pending, 20_000),
+            Some(27_000)
+        );
+        assert_eq!(
+            InMemoryExecutionStore::activity_retry_time(
+                &fail(Vec::new(), Some("boom")),
+                &pending_for_retry(None, 0, 10_000),
+                20_000
+            ),
+            None
+        );
+        assert_eq!(
+            InMemoryExecutionStore::activity_retry_time(
+                &fail(Vec::new(), Some("boom")),
+                &pending_for_retry(Some(policy), 0, -60_000),
+                20_000
+            ),
+            None
+        );
+    }
+
     #[test]
     fn retryable_failure_reschedules_without_failed_event() {
         let store = InMemoryExecutionStore::new();
@@ -4507,8 +9037,13 @@ mod retry_tests {
             })
             .unwrap();
         let token = store.poll_activity("d", "tl", "w").unwrap().task_token;
-        store.fail_activity(&fail(token, Some("boom"))).unwrap();
-        // No Failed event; a fresh Scheduled event with attempt 1 exists.
+        let scheduled_id = InMemoryExecutionStore::decode_task_token(&token)
+            .unwrap()
+            .schedule_id;
+        store
+            .fail_activity(&fail(token.clone(), Some("boom")))
+            .unwrap();
+        // Go keeps one Scheduled event and buffers retry starts until terminal.
         let hist = store
             .history("d", &WorkflowExecution::new("w", String::new()))
             .unwrap()
@@ -4523,13 +9058,62 @@ mod retry_tests {
                 .iter()
                 .filter(|e| e.event_type == Some(EventType::ActivityTaskScheduled))
                 .count(),
-            2
+            1
         );
+        assert!(!hist
+            .events
+            .iter()
+            .any(|e| e.event_type == Some(EventType::ActivityTaskStarted)));
         // Not immediately repollable (backoff); due-loop requeues it.
         assert!(store.poll_activity("d", "tl", "w").is_none());
         assert_eq!(store.requeue_due_activities(i64::MAX / 2), 1);
+        // Tokens from the previous attempt cannot complete a retried activity.
+        assert!(store
+            .complete_activity(&RespondActivityTaskCompletedRequest {
+                task_token: token,
+                identity: "worker".into(),
+                ..Default::default()
+            })
+            .is_err());
         let retry = store.poll_activity("d", "tl", "w").unwrap();
         assert_eq!(retry.attempt, 1);
+        let retry_token = retry.task_token.clone();
+        assert_eq!(
+            InMemoryExecutionStore::decode_task_token(&retry_token)
+                .unwrap()
+                .schedule_id,
+            scheduled_id
+        );
+        assert!(
+            retry.scheduled_timestamp_of_this_attempt.unwrap() > retry.scheduled_timestamp.unwrap()
+        );
+        store
+            .complete_activity(&RespondActivityTaskCompletedRequest {
+                task_token: retry_token,
+                identity: "worker".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let hist = store
+            .history("d", &WorkflowExecution::new("w", String::new()))
+            .unwrap()
+            .history
+            .unwrap();
+        let started: Vec<_> = hist
+            .events
+            .iter()
+            .filter_map(|e| e.activity_task_started_event_attributes.as_ref())
+            .collect();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].attempt, 1);
+        assert_eq!(started[0].scheduled_event_id, scheduled_id);
+        assert_eq!(
+            hist.events
+                .iter()
+                .filter(|e| e.event_type == Some(EventType::ActivityTaskScheduled))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -4629,7 +9213,9 @@ mod snapshot_tests {
         let req = StartWorkflowExecutionRequest {
             domain: "d".to_string(),
             workflow_id: "w".to_string(),
-            workflow_type: Some(WorkflowType { name: "wt".to_string() }),
+            workflow_type: Some(WorkflowType {
+                name: "wt".to_string(),
+            }),
             task_list: Some(TaskList {
                 name: "tl".to_string(),
                 kind: None,
@@ -4649,15 +9235,1504 @@ mod snapshot_tests {
         let desc = loaded
             .describe("d", &WorkflowExecution::new("w", started.run_id.clone()))
             .unwrap();
-        assert_eq!(
-            desc.workflow_execution_info
-                .unwrap()
-                .history_length,
-            2
-        );
+        assert_eq!(desc.workflow_execution_info.unwrap().history_length, 2);
         assert!(loaded.poll_decision("d", "tl", "w").is_some());
         // Request-ID idempotency survived too.
         let again = loaded.start(&req).unwrap();
         assert_eq!(again.run_id, started.run_id);
+    }
+}
+
+#[cfg(test)]
+mod history_cursor_tests {
+    use super::*;
+    fn request(id: &str, rid: &str) -> StartWorkflowExecutionRequest {
+        StartWorkflowExecutionRequest {
+            domain: "d".into(),
+            workflow_id: id.into(),
+            request_id: rid.into(),
+            workflow_type: Some(WorkflowType {
+                name: "type".into(),
+            }),
+            task_list: Some(TaskList {
+                name: "tasks".into(),
+                ..Default::default()
+            }),
+            execution_start_to_close_timeout_seconds: Some(60),
+            task_start_to_close_timeout_seconds: Some(10),
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn worker_history_pages_freeze_before_signals_arriving_during_replay() {
+        let store = InMemoryExecutionStore::new();
+        let run = store.start(&request("workflow", "start")).unwrap();
+        let execution = WorkflowExecution::new("workflow", &run.run_id);
+        for n in 0..1001 {
+            store
+                .signal(&SignalWorkflowExecutionRequest {
+                    domain: "d".into(),
+                    workflow_execution: Some(execution.clone()),
+                    signal_name: "before-poll".into(),
+                    request_id: format!("signal-{n}"),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let task = store.poll_decision("d", "tasks", "worker").unwrap();
+        assert_eq!(task.history.as_ref().unwrap().events.len(), 1000);
+        assert_eq!(task.next_event_id, task.started_event_id + 1);
+        assert!(task.scheduled_timestamp.is_some());
+        assert!(task.started_timestamp.is_some());
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_execution: Some(execution.clone()),
+                signal_name: "after-poll".into(),
+                request_id: "late".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let rest = store
+            .history_page("d", &execution, 5000, &task.next_page_token, None)
+            .unwrap();
+        let rest = rest.history.unwrap().events;
+        assert_eq!(rest.last().unwrap().event_id, task.started_event_id);
+        assert_eq!(
+            rest.last().unwrap().event_type,
+            Some(EventType::DecisionTaskStarted)
+        );
+        assert_eq!(rest.len(), 4);
+        assert!(store
+            .history_page("other", &execution, 1000, &task.next_page_token, None)
+            .is_err());
+        let fresh = store.history_page("d", &execution, 0, &[], None).unwrap();
+        assert_eq!(fresh.history.unwrap().events.len(), 1000);
+        let rest = store
+            .history_page("d", &execution, 0, &fresh.next_page_token, None)
+            .unwrap();
+        assert_eq!(
+            rest.history.unwrap().events.last().unwrap().event_type,
+            Some(EventType::DecisionTaskStarted)
+        );
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        let inner = store.inner.read().unwrap();
+        let record = &inner.by_run[&("d".to_owned(), "workflow".to_owned(), run.run_id)];
+        let signal = record
+            .history
+            .iter()
+            .find(|event| {
+                event
+                    .workflow_execution_signaled_event_attributes
+                    .as_ref()
+                    .is_some_and(|attrs| attrs.request_id == "late")
+            })
+            .unwrap();
+        assert_eq!(signal.event_id, task.started_event_id + 2);
+        assert!(record.buffered_events.is_empty());
+    }
+    #[test]
+    fn continuation_without_run_id_keeps_original_run_after_reuse() {
+        let store = InMemoryExecutionStore::new();
+        let run = store.start(&request("workflow", "first")).unwrap();
+        let execution = WorkflowExecution::new("workflow", &run.run_id);
+        let first = store
+            .history_page("d", &WorkflowExecution::new("workflow", ""), 1, &[], None)
+            .unwrap();
+        store
+            .terminate(&TerminateWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_execution: Some(execution),
+                ..Default::default()
+            })
+            .unwrap();
+        let mut second = request("workflow", "second");
+        second.workflow_id_reuse_policy = Some(WorkflowIDReusePolicy::AllowDuplicate);
+        let next_run = store.start(&second).unwrap();
+        assert_ne!(next_run.run_id, run.run_id);
+        let rest = store
+            .history_page(
+                "d",
+                &WorkflowExecution::new("workflow", ""),
+                1000,
+                &first.next_page_token,
+                None,
+            )
+            .unwrap();
+        assert_eq!(rest.history.unwrap().events.len(), 1);
+        assert!(rest.next_page_token.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod workflow_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn workflow_timeout_closes_once_and_rejects_stale_task_completion() {
+        let store = InMemoryExecutionStore::new();
+        let response = store
+            .start(&StartWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_id: "timeout".into(),
+                request_id: "request".into(),
+                workflow_type: Some(WorkflowType {
+                    name: "workflow".into(),
+                }),
+                task_list: Some(TaskList {
+                    name: "tasks".into(),
+                    ..Default::default()
+                }),
+                execution_start_to_close_timeout_seconds: Some(2),
+                task_start_to_close_timeout_seconds: Some(1),
+                ..Default::default()
+            })
+            .unwrap();
+        let execution = WorkflowExecution::new("timeout", response.run_id);
+        let task = store.poll_decision("d", "tasks", "worker").unwrap();
+        let start = store
+            .describe("d", &execution)
+            .unwrap()
+            .workflow_execution_info
+            .unwrap()
+            .start_time
+            .unwrap();
+        assert_eq!(store.expire_due_workflows(start + 1999), 0);
+        assert_eq!(store.expire_due_workflows(start + 2000), 1);
+        assert_eq!(store.expire_due_workflows(start + 3000), 0);
+        assert_eq!(
+            store
+                .describe("d", &execution)
+                .unwrap()
+                .workflow_execution_info
+                .unwrap()
+                .close_status,
+            Some(WorkflowExecutionCloseStatus::TimedOut)
+        );
+        assert!(store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                ..Default::default()
+            })
+            .is_err());
+        let history = store.history("d", &execution).unwrap().history.unwrap();
+        let terminal = history.events.last().unwrap();
+        assert_eq!(
+            terminal.event_type,
+            Some(EventType::WorkflowExecutionTimedOut)
+        );
+        assert_eq!(
+            terminal
+                .workflow_execution_timed_out_event_attributes
+                .as_ref()
+                .unwrap()
+                .timeout_type,
+            Some(TimeoutType::StartToClose)
+        );
+    }
+}
+
+#[cfg(test)]
+mod namespace_tests {
+    use super::*;
+    fn start_request(domain: &str) -> StartWorkflowExecutionRequest {
+        StartWorkflowExecutionRequest {
+            domain: domain.into(),
+            workflow_id: "workflow".into(),
+            request_id: "start-request".into(),
+            workflow_type: Some(WorkflowType {
+                name: "workflow-type".into(),
+            }),
+            task_list: Some(TaskList {
+                name: "tasks".into(),
+                ..Default::default()
+            }),
+            execution_start_to_close_timeout_seconds: Some(60),
+            task_start_to_close_timeout_seconds: Some(10),
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn delayed_start_defers_the_first_decision_task() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain("domain", &uuid::Uuid::new_v4().to_string());
+        let mut request = start_request("domain");
+        request.workflow_id = "delayed".into();
+        request.request_id = "delayed-request".into();
+        // Staggered request IDs keep the idempotency keys separate.
+        request.delay_start_seconds = Some(120);
+        let started = store.start(&request).unwrap();
+        // Go creates a WorkflowBackoffTimerTask instead of the decision task.
+        assert!(store.list("domain", true).len() == 1);
+        let inner = store.inner.read().unwrap();
+        let domain = store.domain_id(&inner, "domain");
+        let record = inner
+            .by_run
+            .get(&(domain, "delayed".to_owned(), started.run_id.clone()))
+            .unwrap()
+            .clone();
+        drop(inner);
+        assert_eq!(record.first_decision_task_backoff_seconds, 120);
+        assert!(record.pending_decision.is_none());
+        assert!(store.poll_decision("domain", "tasks", "worker").is_none());
+        assert_eq!(
+            store.fire_due_backoffs(record.start_time_millis + 119_000),
+            0
+        );
+        assert!(store.poll_decision("domain", "tasks", "worker").is_none());
+        assert_eq!(
+            store.fire_due_backoffs(record.start_time_millis + 121_000),
+            1
+        );
+        let task = store.poll_decision("domain", "tasks", "worker").unwrap();
+        assert_eq!(
+            task.workflow_execution.as_ref().unwrap().run_id,
+            started.run_id
+        );
+    }
+
+    #[test]
+    fn cron_schedule_records_the_computed_backoff() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain("domain", &uuid::Uuid::new_v4().to_string());
+        let mut request = start_request("domain");
+        request.workflow_id = "cron".into();
+        request.request_id = "cron-request".into();
+        request.cron_schedule = "0 * * * *".into();
+        request.cron_overlap_policy = Some(cadence_api::enums::CronOverlapPolicy::Skipped);
+        let started = store.start(&request).unwrap();
+        let inner = store.inner.read().unwrap();
+        let domain = store.domain_id(&inner, "domain");
+        let record = inner
+            .by_run
+            .get(&(domain, "cron".to_owned(), started.run_id.clone()))
+            .unwrap();
+        let attr = record
+            .history
+            .first()
+            .unwrap()
+            .workflow_execution_started_event_attributes
+            .as_ref()
+            .unwrap();
+        // The backoff is the seconds until the next hour boundary.
+        let backoff = attr.first_decision_task_backoff_seconds.unwrap();
+        assert!(backoff > 0 && backoff <= 3600, "backoff was {backoff}");
+        assert!(record.pending_decision.is_none());
+        assert_eq!(attr.cron_schedule, "0 * * * *");
+        assert_eq!(record.first_decision_task_backoff_seconds, backoff);
+    }
+
+    #[test]
+    fn zero_backoff_still_schedules_immediately() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain("domain", &uuid::Uuid::new_v4().to_string());
+        let started = store.start(&start_request("domain")).unwrap();
+        let task = store.poll_decision("domain", "tasks", "worker").unwrap();
+        assert_eq!(
+            task.workflow_execution.as_ref().unwrap().run_id,
+            started.run_id
+        );
+    }
+
+    #[test]
+    fn timed_out_cron_run_continues_as_new() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain("domain", &uuid::Uuid::new_v4().to_string());
+        let mut request = start_request("domain");
+        request.workflow_id = "cron-timeout".into();
+        request.request_id = "cron-timeout-request".into();
+        request.cron_schedule = "* * * * *".into();
+        request.cron_overlap_policy = Some(cadence_api::enums::CronOverlapPolicy::Skipped);
+        request.execution_start_to_close_timeout_seconds = Some(1);
+        let started = store.start(&request).unwrap();
+        // The cron backoff defers the first decision task.
+        let inner = store.inner.read().unwrap();
+        let domain = store.domain_id(&inner, "domain");
+        assert!(inner
+            .by_run
+            .get(&(
+                domain.clone(),
+                "cron-timeout".to_owned(),
+                started.run_id.clone()
+            ))
+            .unwrap()
+            .pending_decision
+            .is_none());
+        drop(inner);
+        // Past the execution timeout, the run is continued as new rather than
+        // closed as timed out.
+        let start_millis = store
+            .inner
+            .read()
+            .unwrap()
+            .by_run
+            .get(&(
+                domain.clone(),
+                "cron-timeout".to_owned(),
+                started.run_id.clone(),
+            ))
+            .unwrap()
+            .start_time_millis;
+        let closed = store.expire_due_workflows(start_millis + 61_000);
+        assert_eq!(closed, 1);
+        let inner = store.inner.read().unwrap();
+        let runs = inner
+            .by_workflow
+            .get(&(domain, "cron-timeout".to_owned()))
+            .unwrap();
+        assert_eq!(runs.len(), 2, "expected a new continue-as-new run");
+        let new_run = runs.last().unwrap();
+        let new_record = inner
+            .by_run
+            .get(&(
+                store.domain_id(&store.inner.read().unwrap(), "domain"),
+                "cron-timeout".to_owned(),
+                new_run.clone(),
+            ))
+            .unwrap();
+        assert!(new_record.is_open());
+        // The old run is closed as continued-as-new, not timed out.
+        let old = inner
+            .by_run
+            .get(&(
+                store.domain_id(&store.inner.read().unwrap(), "domain"),
+                "cron-timeout".to_owned(),
+                started.run_id.clone(),
+            ))
+            .unwrap();
+        assert_eq!(
+            old.close_status,
+            Some(WorkflowExecutionCloseStatus::ContinuedAsNew)
+        );
+        assert_eq!(new_record.cron_schedule(), "* * * * *");
+    }
+
+    #[test]
+    fn timed_out_run_without_retry_or_cron_closes_as_timed_out() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain("domain", &uuid::Uuid::new_v4().to_string());
+        let mut request = start_request("domain");
+        request.workflow_id = "plain-timeout".into();
+        request.request_id = "plain-timeout-request".into();
+        request.execution_start_to_close_timeout_seconds = Some(1);
+        let started = store.start(&request).unwrap();
+        let start_millis = store
+            .inner
+            .read()
+            .unwrap()
+            .by_run
+            .get(&(
+                store.domain_id(&store.inner.read().unwrap(), "domain"),
+                "plain-timeout".to_owned(),
+                started.run_id.clone(),
+            ))
+            .unwrap()
+            .start_time_millis;
+        assert_eq!(store.expire_due_workflows(start_millis + 61_000), 1);
+        let inner = store.inner.read().unwrap();
+        let record = inner
+            .by_run
+            .get(&(
+                store.domain_id(&inner, "domain"),
+                "plain-timeout".to_owned(),
+                started.run_id,
+            ))
+            .unwrap();
+        assert_eq!(
+            record.close_status,
+            Some(WorkflowExecutionCloseStatus::TimedOut)
+        );
+    }
+
+    #[test]
+    fn workflow_retry_can_back_off_longer_than_one_day() {
+        assert_eq!(
+            InMemoryExecutionStore::retry_backoff_seconds(
+                0,
+                172_800,
+                0,
+                2.0,
+                0.0,
+                3,
+                0,
+                None,
+                0,
+                &[],
+                "boom",
+            ),
+            Some(172_800)
+        );
+    }
+
+    #[test]
+    fn failed_workflow_retries_and_preserves_failure_metadata() {
+        use cadence_api::tasks::{Decision, FailWorkflowExecutionDecisionAttributes};
+        let store = InMemoryExecutionStore::new();
+        let mut request = start_request("domain");
+        request.retry_policy = Some(RetryPolicy {
+            initial_interval_in_seconds: 1,
+            backoff_coefficient: 2.0,
+            maximum_attempts: 2,
+            ..Default::default()
+        });
+        let started = store.start(&request).unwrap();
+        let task = store.poll_decision("domain", "tasks", "worker").unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                decisions: vec![Decision {
+                    decision_type: Some(DecisionType::FailWorkflowExecution),
+                    fail_workflow_execution_decision_attributes: Some(
+                        FailWorkflowExecutionDecisionAttributes {
+                            reason: Some("boom".into()),
+                            details: b"failure".to_vec(),
+                        },
+                    ),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let inner = store.inner.read().unwrap();
+        let runs = &inner.by_workflow[&("domain".to_owned(), request.workflow_id.clone())];
+        assert_eq!(runs.len(), 2);
+        let successor = &inner.by_run[&(
+            "domain".to_owned(),
+            request.workflow_id.clone(),
+            runs[1].clone(),
+        )];
+        assert_eq!(successor.attempt, 1);
+        let attrs = successor.started_attributes();
+        assert_eq!(attrs.continued_execution_run_id, started.run_id);
+        assert_eq!(attrs.continued_failure_reason, "boom");
+        assert_eq!(attrs.continued_failure_details, b"failure");
+        assert_eq!(
+            attrs.initiator,
+            Some(cadence_api::enums::ContinueAsNewInitiator::RetryPolicy)
+        );
+    }
+
+    #[test]
+    fn completed_cron_workflow_continues_with_last_completion_result() {
+        use cadence_api::tasks::{CompleteWorkflowExecutionDecisionAttributes, Decision};
+        let store = InMemoryExecutionStore::new();
+        let mut request = start_request("domain");
+        request.cron_schedule = "@every 1s".into();
+        store.start(&request).unwrap();
+        store.fire_due_backoffs(now_millis() + 2_000);
+        let task = store.poll_decision("domain", "tasks", "worker").unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                decisions: vec![Decision {
+                    decision_type: Some(DecisionType::CompleteWorkflowExecution),
+                    complete_workflow_execution_decision_attributes: Some(
+                        CompleteWorkflowExecutionDecisionAttributes {
+                            result: b"cron-result".to_vec(),
+                        },
+                    ),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let inner = store.inner.read().unwrap();
+        let runs = &inner.by_workflow[&("domain".to_owned(), request.workflow_id.clone())];
+        assert_eq!(runs.len(), 2);
+        let successor = &inner.by_run[&(
+            "domain".to_owned(),
+            request.workflow_id.clone(),
+            runs[1].clone(),
+        )];
+        assert_eq!(successor.attempt, 0);
+        assert_eq!(
+            successor.started_attributes().last_completion_result,
+            b"cron-result"
+        );
+        assert_eq!(
+            successor.started_attributes().initiator,
+            Some(cadence_api::enums::ContinueAsNewInitiator::CronSchedule)
+        );
+    }
+
+    #[test]
+    fn cron_recurrence_preserves_internal_jitter_metadata() {
+        let store = InMemoryExecutionStore::new();
+        let mut request = start_request("domain");
+        request.cron_schedule = "@every 1s".into();
+        request.jitter_start_seconds = Some(7);
+        let started = store.start(&request).unwrap();
+        let key = (
+            "domain".to_owned(),
+            request.workflow_id.clone(),
+            started.run_id,
+        );
+        let started_at = store.inner.read().unwrap().by_run[&key].start_time_millis;
+        assert_eq!(store.expire_due_workflows(started_at + 100_000), 1);
+        let inner = store.inner.read().unwrap();
+        let runs = &inner.by_workflow[&("domain".to_owned(), request.workflow_id.clone())];
+        let next = &inner.by_run[&(
+            "domain".to_owned(),
+            request.workflow_id.clone(),
+            runs[1].clone(),
+        )];
+        assert_eq!(next.jitter_start_seconds, 7);
+        assert_eq!(
+            InMemoryExecutionStore::start_attributes(next).jitter_start_seconds,
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn retry_policy_continues_as_new_attempts() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain("domain", &uuid::Uuid::new_v4().to_string());
+        let mut request = start_request("domain");
+        request.workflow_id = "retry-timeout".into();
+        request.request_id = "retry-timeout-request".into();
+        request.execution_start_to_close_timeout_seconds = Some(1);
+        request.retry_policy = Some(cadence_api::types::RetryPolicy {
+            initial_interval_in_seconds: 1,
+            backoff_coefficient: 2.0,
+            maximum_interval_in_seconds: 60,
+            maximum_attempts: 5,
+            expiration_interval_in_seconds: 3600,
+            ..Default::default()
+        });
+        let started = store.start(&request).unwrap();
+        let start_millis = store
+            .inner
+            .read()
+            .unwrap()
+            .by_run
+            .get(&(
+                store.domain_id(&store.inner.read().unwrap(), "domain"),
+                "retry-timeout".to_owned(),
+                started.run_id.clone(),
+            ))
+            .unwrap()
+            .start_time_millis;
+        assert_eq!(store.expire_due_workflows(start_millis + 61_000), 1);
+        let inner = store.inner.read().unwrap();
+        let domain = store.domain_id(&inner, "domain");
+        let runs = inner
+            .by_workflow
+            .get(&(domain.clone(), "retry-timeout".to_owned()))
+            .unwrap();
+        assert_eq!(runs.len(), 2);
+        let new_record = inner
+            .by_run
+            .get(&(domain, "retry-timeout".to_owned(), runs[1].clone()))
+            .unwrap();
+        let next_start = new_record.started_attributes();
+        assert_eq!(next_start.continued_execution_run_id, started.run_id);
+        assert_eq!(next_start.first_execution_run_id, started.run_id);
+        assert_eq!(
+            next_start.original_execution_run_id,
+            new_record.execution.run_id
+        );
+        assert_eq!(
+            next_start.initiator,
+            Some(cadence_api::enums::ContinueAsNewInitiator::RetryPolicy)
+        );
+        assert_eq!(
+            next_start.continued_failure_reason,
+            "cadenceInternal:Timeout START_TO_CLOSE"
+        );
+        assert_eq!(
+            next_start.expiration_timestamp,
+            new_record.expiration_time_nanos
+        );
+        let old = &inner.by_run[&(
+            store.domain_id(&inner, "domain"),
+            "retry-timeout".to_owned(),
+            started.run_id.clone(),
+        )];
+        let continued = old
+            .history
+            .last()
+            .unwrap()
+            .workflow_execution_continued_as_new_event_attributes
+            .as_ref()
+            .unwrap();
+        assert_eq!(continued.initiator, next_start.initiator);
+        assert_eq!(
+            continued.failure_reason.as_deref(),
+            Some("cadenceInternal:Timeout START_TO_CLOSE")
+        );
+        assert_eq!(continued.backoff_start_interval_in_seconds, Some(1));
+        assert_eq!(new_record.attempt, 1);
+        assert!(new_record.retry_policy().is_some());
+        // The retry expiration timestamp is carried over to the retry run.
+        assert!(new_record.expiration_time_nanos.is_some());
+    }
+
+    #[test]
+    fn recreating_domain_isolates_runs_idempotency_and_task_tokens() {
+        let store = InMemoryExecutionStore::new();
+        let old = uuid::Uuid::new_v4().to_string();
+        let new = uuid::Uuid::new_v4().to_string();
+        store.register_domain("domain", &old);
+        let first = store.start(&start_request("domain")).unwrap();
+        let task = store.poll_decision("domain", "tasks", "worker").unwrap();
+        assert_eq!(
+            JsonTaskTokenSerializer::deserialize(&task.task_token)
+                .unwrap()
+                .domain_id,
+            old
+        );
+        store.unregister_domain("domain");
+        store.register_domain("domain", &new);
+        assert!(store.list("domain", true).is_empty());
+        assert!(store
+            .describe("domain", &WorkflowExecution::new("workflow", &first.run_id))
+            .is_err());
+        let second = store.start(&start_request("domain")).unwrap();
+        assert_ne!(first.run_id, second.run_id);
+        let task = store.poll_decision("domain", "tasks", "worker").unwrap();
+        assert_eq!(
+            JsonTaskTokenSerializer::deserialize(&task.task_token)
+                .unwrap()
+                .domain_id,
+            new
+        );
+    }
+    #[test]
+    fn uuid_shaped_domain_name_cannot_alias_another_domain_namespace() {
+        let store = InMemoryExecutionStore::new();
+        let first_id = uuid::Uuid::new_v4().to_string();
+        let second_id = uuid::Uuid::new_v4().to_string();
+        store.register_domain("first", &first_id);
+        let first = store.start(&start_request("first")).unwrap();
+        store.register_domain(&first_id, &second_id);
+        let second = store.start(&start_request(&first_id)).unwrap();
+        assert_eq!(store.list("first", true).len(), 1);
+        assert_eq!(store.list(&first_id, true).len(), 1);
+        let mut other_request = start_request("first");
+        other_request.request_id = "another-request".into();
+        match store.start(&other_request).unwrap_err() {
+            StartError::AlreadyStarted(error) => assert_eq!(error.run_id, first.run_id),
+            other => panic!("expected already-started, got {other:?}"),
+        }
+        store
+            .terminate(&TerminateWorkflowExecutionRequest {
+                domain: "first".into(),
+                workflow_execution: Some(WorkflowExecution::new("workflow", first.run_id)),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .describe(
+                    &first_id,
+                    &WorkflowExecution::new("workflow", second.run_id)
+                )
+                .unwrap()
+                .workflow_execution_info
+                .unwrap()
+                .close_status,
+            None
+        );
+    }
+    #[test]
+    fn legacy_snapshot_namespace_and_signal_dedup_are_restored() {
+        let store = InMemoryExecutionStore::new();
+        store.register_domain_name("legacy");
+        let run = store.start(&start_request("legacy")).unwrap();
+        let execution = WorkflowExecution::new("workflow", run.run_id);
+        let signal = SignalWorkflowExecutionRequest {
+            domain: "legacy".into(),
+            workflow_execution: Some(execution.clone()),
+            signal_name: "signal".into(),
+            request_id: "signal-request".into(),
+            ..Default::default()
+        };
+        store.signal(&signal).unwrap();
+        let mut snapshot = serde_json::to_value(store.snapshot()).unwrap();
+        snapshot.as_object_mut().unwrap().remove("domain_ids");
+        snapshot.as_object_mut().unwrap().remove("domain_names");
+        for entry in snapshot["runs"].as_array_mut().unwrap() {
+            entry[1]
+                .as_object_mut()
+                .unwrap()
+                .remove("signal_request_ids");
+        }
+        let restored = InMemoryExecutionStore::restore(serde_json::from_value(snapshot).unwrap());
+        let id = uuid::Uuid::new_v4().to_string();
+        restored.sync_domains(&[("legacy".into(), id.clone())]);
+        let task = restored.poll_decision("legacy", "tasks", "worker").unwrap();
+        assert_eq!(
+            JsonTaskTokenSerializer::deserialize(&task.task_token)
+                .unwrap()
+                .domain_id,
+            id
+        );
+        let before = restored
+            .history("legacy", &execution)
+            .unwrap()
+            .history
+            .unwrap()
+            .events
+            .len();
+        restored.signal(&signal).unwrap();
+        assert_eq!(
+            restored
+                .history("legacy", &execution)
+                .unwrap()
+                .history
+                .unwrap()
+                .events
+                .len(),
+            before
+        );
+        assert_eq!(
+            restored.start(&start_request("legacy")).unwrap().run_id,
+            execution.run_id
+        );
+    }
+    #[test]
+    fn child_references_use_uuid_keys_and_domain_names_in_history() {
+        let store = InMemoryExecutionStore::new();
+        let parent_id = uuid::Uuid::new_v4().to_string();
+        let child_id = uuid::Uuid::new_v4().to_string();
+        store.register_domain("parent", &parent_id);
+        store.register_domain("child", &child_id);
+        let parent = store.start(&start_request("parent")).unwrap();
+        let task = store.poll_decision("parent", "tasks", "worker").unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                decisions: vec![cadence_api::tasks::Decision {
+                    decision_type: Some(DecisionType::StartChildWorkflowExecution),
+                    start_child_workflow_execution_decision_attributes: Some(
+                        cadence_api::tasks::StartChildWorkflowExecutionDecisionAttributes {
+                            domain: "child".into(),
+                            workflow_id: "child-workflow".into(),
+                            workflow_type: Some(WorkflowType {
+                                name: "child-type".into(),
+                            }),
+                            task_list: Some(TaskList {
+                                name: "child-tasks".into(),
+                                ..Default::default()
+                            }),
+                            execution_start_to_close_timeout_seconds: Some(60),
+                            task_start_to_close_timeout_seconds: Some(10),
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let child = store
+            .describe("child", &WorkflowExecution::new("child-workflow", ""))
+            .unwrap();
+        assert_eq!(
+            child
+                .workflow_execution_info
+                .as_ref()
+                .unwrap()
+                .parent_domain
+                .as_deref(),
+            Some("parent")
+        );
+        assert_eq!(
+            store
+                .describe(
+                    "parent",
+                    &WorkflowExecution::new("workflow", &parent.run_id)
+                )
+                .unwrap()
+                .pending_children[0]
+                .domain,
+            "child"
+        );
+        let task = store
+            .poll_decision("child", "child-tasks", "worker")
+            .unwrap();
+        assert_eq!(
+            JsonTaskTokenSerializer::deserialize(&task.task_token)
+                .unwrap()
+                .domain_id,
+            child_id
+        );
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                decisions: vec![cadence_api::tasks::Decision {
+                    decision_type: Some(DecisionType::CompleteWorkflowExecution),
+                    complete_workflow_execution_decision_attributes: Some(
+                        cadence_api::tasks::CompleteWorkflowExecutionDecisionAttributes::default(),
+                    ),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let history = store
+            .history("parent", &WorkflowExecution::new("workflow", parent.run_id))
+            .unwrap()
+            .history
+            .unwrap();
+        assert_eq!(
+            history
+                .events
+                .iter()
+                .find_map(|e| e
+                    .child_workflow_execution_completed_event_attributes
+                    .as_ref())
+                .unwrap()
+                .domain,
+            "child"
+        );
+        let started = history
+            .events
+            .iter()
+            .find(|e| e.event_type == Some(EventType::ChildWorkflowExecutionStarted))
+            .unwrap();
+        let completed = history
+            .events
+            .iter()
+            .find_map(|e| {
+                e.child_workflow_execution_completed_event_attributes
+                    .as_ref()
+            })
+            .unwrap();
+        assert_eq!(completed.started_event_id, started.event_id);
+    }
+    #[test]
+    fn signal_wakes_idle_workflow_and_duplicate_request_does_not_add_history() {
+        let store = InMemoryExecutionStore::new();
+        let run = store.start(&start_request("domain")).unwrap();
+        let task = store.poll_decision("domain", "tasks", "worker").unwrap();
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: task.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(store.poll_decision("domain", "tasks", "worker").is_none());
+        let signal = SignalWorkflowExecutionRequest {
+            domain: "domain".into(),
+            workflow_execution: Some(WorkflowExecution::new("workflow", run.run_id)),
+            signal_name: "wake".into(),
+            request_id: "same-request".into(),
+            ..Default::default()
+        };
+        store.signal(&signal).unwrap();
+        store.signal(&signal).unwrap();
+        let task = store.poll_decision("domain", "tasks", "worker").unwrap();
+        assert_eq!(
+            task.history
+                .unwrap()
+                .events
+                .iter()
+                .filter(|e| e.event_type == Some(EventType::WorkflowExecutionSignaled))
+                .count(),
+            1
+        );
+    }
+}
+
+#[cfg(test)]
+mod scoped_namespace_tests {
+    use super::*;
+    #[test]
+    fn resolved_namespace_stays_pinned_across_recreation_and_uuid_shaped_alias() {
+        let store = InMemoryExecutionStore::new();
+        let old = uuid::Uuid::new_v4().to_string();
+        let new = uuid::Uuid::new_v4().to_string();
+        let alias = uuid::Uuid::new_v4().to_string();
+        store.register_domain("name", &old);
+        let scoped_old = store.with_domain_id(&old);
+        let request = StartWorkflowExecutionRequest {
+            domain: "name".into(),
+            workflow_id: "workflow".into(),
+            request_id: "request".into(),
+            workflow_type: Some(WorkflowType {
+                name: "type".into(),
+            }),
+            task_list: Some(TaskList {
+                name: "tasks".into(),
+                ..Default::default()
+            }),
+            execution_start_to_close_timeout_seconds: Some(60),
+            task_start_to_close_timeout_seconds: Some(10),
+            ..Default::default()
+        };
+        let first = scoped_old.start(&request).unwrap();
+        store.unregister_domain("name");
+        store.register_domain("name", &new);
+        let scoped_new = store.with_domain_id(&new);
+        let second = scoped_new.start(&request).unwrap();
+        store.register_domain(&old, &alias);
+        let old_task = scoped_old.poll_decision("name", "tasks", "worker").unwrap();
+        assert_eq!(old_task.workflow_execution.unwrap().run_id, first.run_id);
+        assert_eq!(
+            JsonTaskTokenSerializer::deserialize(&old_task.task_token)
+                .unwrap()
+                .domain_id,
+            old
+        );
+        assert!(scoped_old
+            .poll_decision("name", "tasks", "worker")
+            .is_none());
+        let new_task = scoped_new.poll_decision("name", "tasks", "worker").unwrap();
+        assert_eq!(new_task.workflow_execution.unwrap().run_id, second.run_id);
+        assert_eq!(
+            JsonTaskTokenSerializer::deserialize(&new_task.task_token)
+                .unwrap()
+                .domain_id,
+            new
+        );
+    }
+}
+
+#[cfg(test)]
+mod transient_decision_tests {
+    use super::*;
+
+    fn setup() -> (InMemoryExecutionStore, WorkflowExecution) {
+        let store = InMemoryExecutionStore::new();
+        let run = store
+            .start(&StartWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_id: "workflow".into(),
+                request_id: "start".into(),
+                workflow_type: Some(WorkflowType {
+                    name: "type".into(),
+                }),
+                task_list: Some(TaskList {
+                    name: "tasks".into(),
+                    ..Default::default()
+                }),
+                execution_start_to_close_timeout_seconds: Some(60),
+                task_start_to_close_timeout_seconds: Some(1),
+                ..Default::default()
+            })
+            .unwrap();
+        (store, WorkflowExecution::new("workflow", run.run_id))
+    }
+    fn poll(store: &InMemoryExecutionStore) -> PollForDecisionTaskResponse {
+        store.poll_decision("d", "tasks", "worker").unwrap()
+    }
+    fn fail(store: &InMemoryExecutionStore, task: &PollForDecisionTaskResponse) {
+        store
+            .fail_decision(&task.task_token, None, vec![], "worker", "")
+            .unwrap();
+    }
+    fn events(store: &InMemoryExecutionStore, execution: &WorkflowExecution) -> Vec<HistoryEvent> {
+        store
+            .history("d", execution)
+            .unwrap()
+            .history
+            .unwrap()
+            .events
+    }
+    fn signal(store: &InMemoryExecutionStore, execution: &WorkflowExecution) {
+        store
+            .signal(&SignalWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_execution: Some(execution.clone()),
+                signal_name: "wake".into(),
+                request_id: "signal".into(),
+                ..Default::default()
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn repeated_failures_materialize_only_the_successful_retry() {
+        let (store, execution) = setup();
+        let first = poll(&store);
+        fail(&store, &first);
+        let second = poll(&store);
+        assert_eq!(second.attempt, 1);
+        assert_eq!(events(&store, &execution).len(), 4);
+        assert_eq!(second.history.as_ref().unwrap().events.len(), 6);
+        assert_eq!(second.next_event_id, 5);
+        fail(&store, &second);
+        let third = poll(&store);
+        assert_eq!(third.attempt, 2);
+        assert_eq!(third.started_event_id, second.started_event_id);
+        assert!(matches!(
+            store.complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: second.task_token.clone(),
+                ..Default::default()
+            }),
+            Err(TaskError::NotFound(_))
+        ));
+        assert!(matches!(
+            store.fail_decision(&second.task_token, None, vec![], "worker", ""),
+            Err(TaskError::NotFound(_))
+        ));
+        assert_eq!(events(&store, &execution).len(), 4);
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: third.task_token,
+                identity: "worker".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let history = events(&store, &execution);
+        assert_eq!(history.len(), 7);
+        assert_eq!(
+            history[4].event_type,
+            Some(EventType::DecisionTaskScheduled)
+        );
+        assert_eq!(
+            history[4]
+                .decision_task_scheduled_event_attributes
+                .as_ref()
+                .unwrap()
+                .attempt,
+            2
+        );
+        assert_eq!(history[4].timestamp, third.scheduled_timestamp);
+        assert_eq!(history[5].timestamp, third.started_timestamp);
+        assert_eq!(
+            history[6]
+                .decision_task_completed_event_attributes
+                .as_ref()
+                .unwrap()
+                .started_event_id,
+            6
+        );
+        assert!(store.poll_decision("d", "tasks", "worker").is_none());
+    }
+
+    #[test]
+    fn new_events_before_transient_poll_reset_attempt() {
+        let (store, execution) = setup();
+        fail(&store, &poll(&store));
+        signal(&store, &execution);
+        let next = poll(&store);
+        assert_eq!(next.attempt, 0);
+        assert_eq!(next.started_event_id, 7);
+        assert_eq!(
+            events(&store, &execution)[4].event_type,
+            Some(EventType::WorkflowExecutionSignaled)
+        );
+        assert_eq!(events(&store, &execution).len(), 7);
+    }
+
+    #[test]
+    fn buffered_events_during_transient_failure_reset_attempt() {
+        let (store, execution) = setup();
+        fail(&store, &poll(&store));
+        let retry = poll(&store);
+        signal(&store, &execution);
+        fail(&store, &retry);
+        let next = poll(&store);
+        assert_eq!(next.attempt, 0);
+        let history = events(&store, &execution);
+        assert_eq!(history.len(), 7);
+        assert_eq!(
+            history
+                .iter()
+                .filter(|event| event.event_type == Some(EventType::DecisionTaskFailed))
+                .count(),
+            1
+        );
+        assert_eq!(
+            history[4].event_type,
+            Some(EventType::WorkflowExecutionSignaled)
+        );
+    }
+
+    #[test]
+    fn repeated_timeouts_are_transient_and_stale_tokens_are_not_found() {
+        let (store, execution) = setup();
+        let first = poll(&store);
+        assert_eq!(
+            store.expire_due_decisions(first.started_timestamp.unwrap() + 999),
+            0
+        );
+        assert_eq!(
+            store.expire_due_decisions(first.started_timestamp.unwrap() + 1000),
+            1
+        );
+        assert!(matches!(
+            store.complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: first.task_token,
+                ..Default::default()
+            }),
+            Err(TaskError::NotFound(_))
+        ));
+        let retry = poll(&store);
+        assert_eq!(retry.attempt, 1);
+        assert_eq!(
+            store.expire_due_decisions(retry.started_timestamp.unwrap() + 1000),
+            1
+        );
+        assert_eq!(events(&store, &execution).len(), 4);
+        let next = poll(&store);
+        assert_eq!(next.attempt, 2);
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: next.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        let history = events(&store, &execution);
+        assert_eq!(
+            history
+                .iter()
+                .filter(|event| event.event_type == Some(EventType::DecisionTaskTimedOut))
+                .count(),
+            1
+        );
+        assert_eq!(history.len(), 7);
+    }
+
+    #[test]
+    fn paged_worker_history_appends_frozen_transient_events_on_final_page() {
+        let (store, execution) = setup();
+        for index in 0..1001 {
+            store
+                .signal(&SignalWorkflowExecutionRequest {
+                    domain: "d".into(),
+                    workflow_execution: Some(execution.clone()),
+                    signal_name: "history".into(),
+                    request_id: format!("signal-{index}"),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        fail(&store, &poll(&store));
+        let retry = poll(&store);
+        assert_eq!(retry.history.as_ref().unwrap().events.len(), 1000);
+        assert!(!retry.next_page_token.is_empty());
+        fail(&store, &retry);
+        let replacement = poll(&store);
+        assert_eq!(replacement.attempt, 2);
+        let page = store
+            .history_page("d", &execution, 1000, &retry.next_page_token, None)
+            .unwrap();
+        let history = page.history.unwrap().events;
+        assert_eq!(history.last().unwrap().event_id, retry.started_event_id);
+        assert_eq!(
+            history[history.len() - 2]
+                .decision_task_scheduled_event_attributes
+                .as_ref()
+                .unwrap()
+                .attempt,
+            1
+        );
+        assert!(page.next_page_token.is_empty());
+        assert_eq!(events(&store, &execution).len(), 1005);
+    }
+
+    #[test]
+    fn transient_snapshot_restores_retry_and_timestamps() {
+        let (store, execution) = setup();
+        fail(&store, &poll(&store));
+        let retry = poll(&store);
+        let restored = InMemoryExecutionStore::restore(store.snapshot());
+        restored
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: retry.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        let history = events(&restored, &execution);
+        assert_eq!(history[4].timestamp, retry.scheduled_timestamp);
+        assert_eq!(history[5].timestamp, retry.started_timestamp);
+        assert_eq!(history.len(), 7);
+    }
+    #[test]
+    fn inline_force_task_is_atomic_and_does_not_consume_another_workflow() {
+        let (store, execution) = setup();
+        store
+            .start(&StartWorkflowExecutionRequest {
+                domain: "d".into(),
+                workflow_id: "other".into(),
+                request_id: "other".into(),
+                workflow_type: Some(WorkflowType {
+                    name: "type".into(),
+                }),
+                task_list: Some(TaskList {
+                    name: "tasks".into(),
+                    ..Default::default()
+                }),
+                execution_start_to_close_timeout_seconds: Some(60),
+                task_start_to_close_timeout_seconds: Some(1),
+                ..Default::default()
+            })
+            .unwrap();
+        let first = poll(&store);
+        let response = store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: first.task_token,
+                identity: "worker".into(),
+                return_new_decision_task: true,
+                force_create_new_decision_task: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let inline = response.decision_task.unwrap();
+        assert_eq!(inline.workflow_execution.as_ref(), Some(&execution));
+        assert_eq!(
+            inline.previous_started_event_id,
+            Some(first.started_event_id)
+        );
+        let history = &inline.history.as_ref().unwrap().events;
+        assert_eq!(
+            history.first().unwrap().event_id,
+            first.started_event_id + 1
+        );
+        assert_eq!(
+            history
+                .last()
+                .unwrap()
+                .decision_task_started_event_attributes
+                .as_ref()
+                .unwrap()
+                .request_id,
+            "request-from-RespondDecisionTaskCompleted"
+        );
+        let other = poll(&store);
+        assert_eq!(other.workflow_execution.unwrap().workflow_id, "other");
+        assert!(store.poll_decision("d", "tasks", "worker").is_none());
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: inline.task_token,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(events(&store, &execution).len(), 7);
+    }
+
+    #[test]
+    fn return_new_task_flag_alone_does_not_schedule_an_idle_task() {
+        let (store, _) = setup();
+        let first = poll(&store);
+        let response = store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: first.task_token,
+                return_new_decision_task: true,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(response.decision_task.is_none());
+        assert!(store.poll_decision("d", "tasks", "worker").is_none());
+    }
+
+    #[test]
+    fn unhandled_closing_command_can_return_the_replay_task_inline() {
+        let (store, execution) = setup();
+        let first = poll(&store);
+        signal(&store, &execution);
+        let response = store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: first.task_token,
+                return_new_decision_task: true,
+                decisions: vec![cadence_api::tasks::Decision {
+                    decision_type: Some(DecisionType::CompleteWorkflowExecution),
+                    complete_workflow_execution_decision_attributes: Some(Default::default()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let next = response.decision_task.unwrap();
+        assert_eq!(next.started_event_id, 7);
+        assert_eq!(next.history.unwrap().events.len(), 7);
+        assert!(events(&store, &execution)
+            .iter()
+            .any(|event| event.event_type == Some(EventType::WorkflowExecutionSignaled)));
+    }
+
+    #[test]
+    fn inline_history_pages_begin_after_the_previous_started_event() {
+        let (store, execution) = setup();
+        let first = poll(&store);
+        for index in 0..1001 {
+            store
+                .signal(&SignalWorkflowExecutionRequest {
+                    domain: "d".into(),
+                    workflow_execution: Some(execution.clone()),
+                    signal_name: "history".into(),
+                    request_id: format!("buffer-{index}"),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let response = store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: first.task_token,
+                return_new_decision_task: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let inline = response.decision_task.unwrap();
+        let first_page = &inline.history.as_ref().unwrap().events;
+        assert_eq!(first_page.len(), HISTORY_PAGE_SIZE);
+        assert_eq!(
+            first_page.first().unwrap().event_id,
+            first.started_event_id + 1
+        );
+        let last_page = store
+            .history_page("d", &execution, 1000, &inline.next_page_token, None)
+            .unwrap();
+        assert_eq!(
+            last_page.history.unwrap().events.last().unwrap().event_id,
+            inline.started_event_id
+        );
+        assert!(last_page.next_page_token.is_empty());
+    }
+    fn sticky_attributes() -> cadence_api::types::StickyExecutionAttributes {
+        cadence_api::types::StickyExecutionAttributes {
+            worker_task_list: Some(TaskList {
+                name: "sticky-worker".into(),
+                ..Default::default()
+            }),
+            schedule_to_start_timeout_seconds: Some(1),
+        }
+    }
+    fn enable_sticky(store: &InMemoryExecutionStore) -> PollForDecisionTaskResponse {
+        let first = poll(store);
+        store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: first.task_token.clone(),
+                sticky_attributes: Some(sticky_attributes()),
+                ..Default::default()
+            })
+            .unwrap();
+        first
+    }
+
+    #[test]
+    fn sticky_poll_routes_to_owner_and_returns_incremental_history() {
+        let (store, execution) = setup();
+        let first = enable_sticky(&store);
+        signal(&store, &execution);
+        assert!(store.poll_decision("d", "tasks", "worker").is_none());
+        let sticky = store.poll_decision("d", "sticky-worker", "worker").unwrap();
+        assert_eq!(
+            sticky.previous_started_event_id,
+            Some(first.started_event_id)
+        );
+        assert_eq!(
+            sticky.history.unwrap().events.first().unwrap().event_id,
+            first.started_event_id + 1
+        );
+        assert_eq!(sticky.workflow_execution_task_list.unwrap().name, "tasks");
+    }
+
+    #[test]
+    fn unpolled_sticky_task_times_out_and_falls_back_to_normal_queue() {
+        let (store, execution) = setup();
+        enable_sticky(&store);
+        signal(&store, &execution);
+        let key = (
+            "d".to_owned(),
+            "workflow".to_owned(),
+            execution.run_id.clone(),
+        );
+        let scheduled = store.inner.read().unwrap().by_run[&key]
+            .pending_decision
+            .as_ref()
+            .unwrap()
+            .scheduled_time_millis
+            .unwrap();
+        assert_eq!(store.expire_due_decisions(scheduled + 999), 0);
+        assert_eq!(store.expire_due_decisions(scheduled + 1000), 1);
+        assert!(store
+            .poll_decision("d", "sticky-worker", "worker")
+            .is_none());
+        let normal = poll(&store);
+        assert_eq!(normal.attempt, 0);
+        assert_eq!(normal.history.unwrap().events.first().unwrap().event_id, 1);
+        let timeout = events(&store, &execution)
+            .iter()
+            .find_map(|event| event.decision_task_timed_out_event_attributes.clone())
+            .unwrap();
+        assert_eq!(timeout.timeout_type, Some(TimeoutType::ScheduleToStart));
+        assert_eq!(timeout.started_event_id, 0);
+    }
+
+    #[test]
+    fn failed_sticky_task_retries_on_normal_queue_with_full_history() {
+        let (store, execution) = setup();
+        enable_sticky(&store);
+        signal(&store, &execution);
+        let task = store.poll_decision("d", "sticky-worker", "worker").unwrap();
+        fail(&store, &task);
+        assert!(store
+            .poll_decision("d", "sticky-worker", "worker")
+            .is_none());
+        let retry = poll(&store);
+        assert_eq!(retry.attempt, 1);
+        assert_eq!(retry.history.unwrap().events.first().unwrap().event_id, 1);
+    }
+
+    #[test]
+    fn reset_sticky_preserves_pending_transfer_but_restores_full_history() {
+        let (store, execution) = setup();
+        enable_sticky(&store);
+        signal(&store, &execution);
+        store.reset_sticky_task_list("d", &execution).unwrap();
+        let task = store.poll_decision("d", "sticky-worker", "worker").unwrap();
+        assert_eq!(task.history.unwrap().events.first().unwrap().event_id, 1);
+    }
+
+    #[test]
+    fn inline_sticky_task_removes_its_actual_sticky_queue_entry() {
+        let (store, _) = setup();
+        let first = poll(&store);
+        let response = store
+            .complete_decision(&RespondDecisionTaskCompletedRequest {
+                task_token: first.task_token,
+                sticky_attributes: Some(sticky_attributes()),
+                return_new_decision_task: true,
+                force_create_new_decision_task: true,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(response.decision_task.is_some());
+        assert!(store
+            .poll_decision("d", "sticky-worker", "worker")
+            .is_none());
+        assert!(store.poll_decision("d", "tasks", "worker").is_none());
+    }
+
+    #[test]
+    fn expired_sticky_ttl_is_checked_before_new_event_refreshes_last_update() {
+        let (store, execution) = setup();
+        enable_sticky(&store);
+        let key = (
+            "d".to_owned(),
+            "workflow".to_owned(),
+            execution.run_id.clone(),
+        );
+        store
+            .inner
+            .write()
+            .unwrap()
+            .by_run
+            .get_mut(&key)
+            .unwrap()
+            .last_updated_millis = now_millis() - 365 * 24 * 60 * 60 * 1000 - 1;
+        signal(&store, &execution);
+        assert!(store
+            .poll_decision("d", "sticky-worker", "worker")
+            .is_none());
+        assert_eq!(
+            poll(&store)
+                .history
+                .unwrap()
+                .events
+                .first()
+                .unwrap()
+                .event_id,
+            1
+        );
     }
 }

@@ -56,9 +56,17 @@ pub struct EntityNotExistsError {
         skip_serializing_if = "String::is_empty"
     )]
     pub current_cluster: String,
-    #[serde(rename = "activeCluster", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "activeCluster",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub active_cluster: String,
-    #[serde(rename = "activeClusters", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "activeClusters",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub active_clusters: Vec<String>,
 }
 
@@ -78,7 +86,11 @@ impl EntityNotExistsError {
 pub struct DomainNotActiveError {
     #[serde(rename = "message", default)]
     pub message: String,
-    #[serde(rename = "domainName", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "domainName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub domain_name: String,
     #[serde(
         rename = "currentCluster",
@@ -86,9 +98,17 @@ pub struct DomainNotActiveError {
         skip_serializing_if = "String::is_empty"
     )]
     pub current_cluster: String,
-    #[serde(rename = "activeCluster", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "activeCluster",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub active_cluster: String,
-    #[serde(rename = "activeClusters", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "activeClusters",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub active_clusters: Vec<String>,
 }
 

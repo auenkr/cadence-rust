@@ -9,7 +9,7 @@
 use cadence_api::enums::*;
 use cadence_api::types::*;
 use cadence_thrift::protocol::{MessageType, Reader, Writer};
-use cadence_thrift::value::{FromThrift, Struct, ToThrift, read_struct, write_struct};
+use cadence_thrift::value::{read_struct, write_struct, FromThrift, Struct, ToThrift};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -37,9 +37,7 @@ fn go_start_args_decode() {
     assert_eq!(seq, 42);
     let args = body.get(1).expect("args field 1");
     let req = match args {
-        cadence_thrift::Value::Struct(s) => {
-            StartWorkflowExecutionRequest::from_thrift(s).unwrap()
-        }
+        cadence_thrift::Value::Struct(s) => StartWorkflowExecutionRequest::from_thrift(s).unwrap(),
         _ => panic!("args not a struct"),
     };
     assert_eq!(req.domain, "samples-domain");
@@ -73,10 +71,7 @@ fn go_start_args_decode() {
     write_struct(
         &mut w,
         &Struct {
-            fields: vec![(
-                1,
-                cadence_thrift::Value::Struct(req.to_thrift()),
-            )],
+            fields: vec![(1, cadence_thrift::Value::Struct(req.to_thrift()))],
         },
     );
     let ours = w.into_bytes();
@@ -94,9 +89,7 @@ fn go_start_reply_decode() {
     assert_eq!(name, "StartWorkflowExecution");
     assert_eq!(ty, MessageType::Reply);
     let resp = match body.get(0).expect("result field 0") {
-        cadence_thrift::Value::Struct(s) => {
-            StartWorkflowExecutionResponse::from_thrift(s).unwrap()
-        }
+        cadence_thrift::Value::Struct(s) => StartWorkflowExecutionResponse::from_thrift(s).unwrap(),
         _ => panic!("result not a struct"),
     };
     assert_eq!(resp.run_id, "4D1E4058-6FCF-4BA8-BF16-8FA8B02F9651");
@@ -105,10 +98,7 @@ fn go_start_reply_decode() {
     write_struct(
         &mut w,
         &Struct {
-            fields: vec![(
-                0,
-                cadence_thrift::Value::Struct(resp.to_thrift()),
-            )],
+            fields: vec![(0, cadence_thrift::Value::Struct(resp.to_thrift()))],
         },
     );
     let mut r = Reader::new(&bytes);
@@ -160,15 +150,15 @@ fn go_poll_response_decode() {
     assert_eq!(e1.event_id, 1);
     assert_eq!(e1.event_type, Some(EventType::WorkflowExecutionStarted));
     assert_eq!(e1.version, 5);
-    let started = e1.workflow_execution_started_event_attributes.as_ref().unwrap();
+    let started = e1
+        .workflow_execution_started_event_attributes
+        .as_ref()
+        .unwrap();
     assert_eq!(started.identity, "sdk");
     assert_eq!(started.request_id, "req-1");
     assert_eq!(started.attempt, 2);
     assert_eq!(started.cron_schedule, "0 6 * * *");
-    assert_eq!(
-        started.retry_policy.as_ref().unwrap().maximum_attempts,
-        5
-    );
+    assert_eq!(started.retry_policy.as_ref().unwrap().maximum_attempts, 5);
     assert_eq!(
         started.memo.as_ref().unwrap().fields.as_ref().unwrap()["key"],
         b"value".to_vec()
@@ -190,19 +180,22 @@ fn go_poll_response_decode() {
 
     // Event 2: decision scheduled, attempt 0.
     let e2 = &history.events[1];
+    assert_eq!(e2.event_type, Some(EventType::DecisionTaskScheduled));
     assert_eq!(
-        e2.event_type,
-        Some(EventType::DecisionTaskScheduled)
-    );
-    assert_eq!(
-        e2.decision_task_scheduled_event_attributes.as_ref().unwrap().attempt,
+        e2.decision_task_scheduled_event_attributes
+            .as_ref()
+            .unwrap()
+            .attempt,
         0
     );
 
     // Event 3: activity scheduled with retry policy + header.
     let e3 = &history.events[2];
     assert_eq!(e3.event_type, Some(EventType::ActivityTaskScheduled));
-    let sched = e3.activity_task_scheduled_event_attributes.as_ref().unwrap();
+    let sched = e3
+        .activity_task_scheduled_event_attributes
+        .as_ref()
+        .unwrap();
     assert_eq!(sched.activity_id, "a1");
     assert_eq!(sched.decision_task_completed_event_id, 4);
     let retry = sched.retry_policy.as_ref().unwrap();
@@ -239,9 +232,7 @@ fn go_signal_args_decode() {
     assert_eq!(name, "SignalWorkflowExecution");
     assert_eq!(ty, MessageType::Call);
     let req = match body.get(1).expect("args field 1") {
-        cadence_thrift::Value::Struct(s) => {
-            SignalWorkflowExecutionRequest::from_thrift(s).unwrap()
-        }
+        cadence_thrift::Value::Struct(s) => SignalWorkflowExecutionRequest::from_thrift(s).unwrap(),
         _ => panic!("args not a struct"),
     };
     assert_eq!(req.domain, "d");

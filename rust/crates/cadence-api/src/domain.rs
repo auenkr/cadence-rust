@@ -54,7 +54,10 @@ impl ActiveClusters {
             scope_type: scope_type.to_string(),
             attribute_name: attribute_name.to_string(),
         };
-        let scopes = self.active_clusters_by_cluster_attribute.as_ref().ok_or_else(not_found)?;
+        let scopes = self
+            .active_clusters_by_cluster_attribute
+            .as_ref()
+            .ok_or_else(not_found)?;
         let scope = scopes.get(scope_type).ok_or_else(not_found)?;
         let attrs = scope.cluster_attributes.as_ref().ok_or_else(not_found)?;
         attrs

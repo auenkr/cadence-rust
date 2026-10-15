@@ -202,16 +202,6 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    /// Mirrors Go validation defaults used by the server when fields are unset.
-    #[must_use]
-    pub fn effective_backoff_coefficient(&self) -> f64 {
-        if self.backoff_coefficient == 0.0 {
-            2.0
-        } else {
-            self.backoff_coefficient
-        }
-    }
-
     #[must_use]
     pub fn is_retriable_reason(&self, reason: &str) -> bool {
         !self.non_retriable_error_reasons.iter().any(|r| r == reason)
@@ -351,6 +341,182 @@ pub struct ActiveClusters {
     )]
     pub active_clusters_by_cluster_attribute:
         Option<std::collections::HashMap<String, ClusterAttributeScope>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IsolationGroupPartition {
+    #[serde(rename = "name", default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(rename = "state", default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<crate::enums::IsolationGroupState>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IsolationGroupConfiguration {
+    #[serde(
+        rename = "isolationGroups",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub isolation_groups: Vec<IsolationGroupPartition>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AsyncWorkflowConfiguration {
+    #[serde(rename = "enabled", default)]
+    pub enabled: bool,
+    #[serde(
+        rename = "predefinedQueueName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub predefined_queue_name: String,
+    #[serde(
+        rename = "queueType",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub queue_type: String,
+    #[serde(
+        rename = "queueConfig",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub queue_config: Option<DataBlob>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterAttribute {
+    #[serde(rename = "scope", default, skip_serializing_if = "String::is_empty")]
+    pub scope: String,
+    #[serde(rename = "name", default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailoverDomainRequest {
+    #[serde(rename = "domainName", default, skip_serializing_if = "String::is_empty")]
+    pub domain_name: String,
+    #[serde(
+        rename = "domainActiveClusterName",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub domain_active_cluster_name: Option<String>,
+    #[serde(
+        rename = "activeClusters",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_clusters: Option<ActiveClusters>,
+    #[serde(rename = "reason", default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(
+        rename = "failoverTimeoutInSeconds",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub failover_timeout_in_seconds: Option<i32>,
+    #[serde(rename = "skipDestinationClusterCheck", default)]
+    pub skip_destination_cluster_check: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailoverDomainResponse {
+    #[serde(rename = "domainInfo", default, skip_serializing_if = "Option::is_none")]
+    pub domain_info: Option<DomainInfo>,
+    #[serde(
+        rename = "configuration",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub configuration: Option<DomainConfiguration>,
+    #[serde(
+        rename = "replicationConfiguration",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub replication_configuration: Option<DomainReplicationConfiguration>,
+    #[serde(rename = "failoverVersion", default)]
+    pub failover_version: i64,
+    #[serde(rename = "isGlobalDomain", default)]
+    pub is_global_domain: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterFailover {
+    #[serde(rename = "fromCluster", default, skip_serializing_if = "Option::is_none")]
+    pub from_cluster: Option<ActiveClusterInfo>,
+    #[serde(rename = "toCluster", default, skip_serializing_if = "Option::is_none")]
+    pub to_cluster: Option<ActiveClusterInfo>,
+    #[serde(
+        rename = "clusterAttribute",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cluster_attribute: Option<ClusterAttribute>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailoverEvent {
+    #[serde(rename = "id", default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(rename = "createdTime", default, skip_serializing_if = "Option::is_none")]
+    pub created_time: Option<i64>,
+    #[serde(rename = "failoverType", default, skip_serializing_if = "Option::is_none")]
+    pub failover_type: Option<crate::enums::FailoverType>,
+    #[serde(
+        rename = "clusterFailovers",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub cluster_failovers: Vec<ClusterFailover>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaginationOptions {
+    #[serde(rename = "pageSize", default, skip_serializing_if = "Option::is_none")]
+    pub page_size: Option<i32>,
+    #[serde(
+        rename = "nextPageToken",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub next_page_token: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListFailoverHistoryRequestFilters {
+    #[serde(rename = "domainId", default, skip_serializing_if = "String::is_empty")]
+    pub domain_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListFailoverHistoryRequest {
+    #[serde(rename = "filters", default, skip_serializing_if = "Option::is_none")]
+    pub filters: Option<ListFailoverHistoryRequestFilters>,
+    #[serde(rename = "pagination", default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<PaginationOptions>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListFailoverHistoryResponse {
+    #[serde(
+        rename = "failoverEvents",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub failover_events: Vec<FailoverEvent>,
+    #[serde(
+        rename = "nextPageToken",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub next_page_token: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -613,6 +779,15 @@ pub struct StartWorkflowExecutionResponse {
     pub run_id: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StartWorkflowExecutionAsyncRequest {
+    #[serde(rename = "request", default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<StartWorkflowExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartWorkflowExecutionAsyncResponse {}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalWorkflowExecutionRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
@@ -653,6 +828,128 @@ pub struct SignalWorkflowExecutionRequest {
         deserialize_with = "crate::b64::deserialize_bytes"
     )]
     pub control: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestartWorkflowExecutionRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "workflowExecution",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workflow_execution: Option<WorkflowExecution>,
+    #[serde(rename = "reason", default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
+    pub identity: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestartWorkflowExecutionResponse {
+    #[serde(rename = "runId", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Semaphore {
+    #[serde(
+        rename = "semaphoreName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub semaphore_name: String,
+    #[serde(rename = "capacity", default)]
+    pub capacity: i32,
+    #[serde(rename = "bucketCapacity", default)]
+    pub bucket_capacity: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateSemaphoreRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "semaphoreName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub semaphore_name: String,
+    #[serde(rename = "capacity", default)]
+    pub capacity: i32,
+    #[serde(rename = "bucketCapacity", default)]
+    pub bucket_capacity: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateSemaphoreResponse {
+    #[serde(rename = "semaphore", default, skip_serializing_if = "Option::is_none")]
+    pub semaphore: Option<Semaphore>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefreshWorkflowTasksRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "execution",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub execution: Option<WorkflowExecution>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiagnoseWorkflowExecutionRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "workflowExecution",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workflow_execution: Option<WorkflowExecution>,
+    #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
+    pub identity: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiagnoseWorkflowExecutionResponse {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "diagnosticWorkflowExecution",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub diagnostic_workflow_execution: Option<WorkflowExecution>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetWorkflowExecutionRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "workflowExecution",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workflow_execution: Option<WorkflowExecution>,
+    #[serde(rename = "reason", default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    #[serde(rename = "decisionFinishEventId", default)]
+    pub decision_finish_event_id: i64,
+    #[serde(rename = "requestId", default, skip_serializing_if = "String::is_empty")]
+    pub request_id: String,
+    #[serde(rename = "skipSignalReapply", default)]
+    pub skip_signal_reapply: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetWorkflowExecutionResponse {
+    #[serde(rename = "runId", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

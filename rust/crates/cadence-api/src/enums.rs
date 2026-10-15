@@ -248,6 +248,48 @@ cadence_enum!(QueryResultType {
     Failed = 1 => "FAILED",
 });
 
+cadence_enum!(ScheduleOverlapPolicy {
+    Invalid = 0 => "INVALID",
+    SkipNew = 1 => "SKIP_NEW",
+    Buffer = 2 => "BUFFER",
+    Concurrent = 3 => "CONCURRENT",
+    CancelPrevious = 4 => "CANCEL_PREVIOUS",
+    TerminatePrevious = 5 => "TERMINATE_PREVIOUS",
+});
+
+cadence_enum!(SemaphoreAcquireOutcome {
+    Invalid = 0 => "INVALID",
+    Acquired = 1 => "ACQUIRED",
+    NoSlot = 2 => "NO_SLOT",
+});
+
+cadence_enum!(IsolationGroupState {
+    Invalid = 0 => "INVALID",
+    Healthy = 1 => "HEALTHY",
+    Drained = 2 => "DRAINED",
+});
+
+cadence_enum!(DLQType {
+    Invalid = 0 => "INVALID",
+    Replication = 1 => "REPLICATION",
+    Domain = 2 => "DOMAIN",
+});
+
+cadence_enum!(TaskType {
+    Invalid = 0 => "INVALID",
+    Transfer = 1 => "TRANSFER",
+    Timer = 2 => "TIMER",
+    Replication = 3 => "REPLICATION",
+    CrossCluster = 4 => "CROSS_CLUSTER",
+});
+
+cadence_enum!(ScheduleCatchUpPolicy {
+    Invalid = 0 => "INVALID",
+    Skip = 1 => "SKIP",
+    One = 2 => "ONE",
+    All = 3 => "ALL",
+});
+
 cadence_enum!(QueryTaskCompletedType {
     Completed = 0 => "COMPLETED",
     Failed = 1 => "FAILED",

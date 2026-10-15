@@ -13,13 +13,21 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
+    /// Mirrors Go dynamic config `worker.enableScheduler` (default false):
+    /// schedule APIs are rejected until the operator enables them.
+    #[serde(default, rename = "enableScheduler")]
+    pub enable_scheduler: bool,
+    /// Mirrors Go dynamic config `system.enableDistributedSemaphore`
+    /// (default false).
+    #[serde(default, rename = "enableDistributedSemaphore")]
+    pub enable_distributed_semaphore: bool,
     #[serde(default)]
     pub persistence: PersistenceConfig,
     #[serde(default)]
     pub log: LogConfig,
     #[serde(default)]
     pub services: HashMap<String, ServiceConfig>,
-    #[serde(default, rename = "clusterMetadata")]
+    #[serde(default, rename = "clusterMetadata", alias = "clusterGroupMetadata")]
     pub cluster_metadata: ClusterMetadata,
 }
 
@@ -115,6 +123,10 @@ pub struct ServiceConfig {
 pub struct RpcConfig {
     #[serde(default, deserialize_with = "de_flex_u16")]
     pub port: u16,
+    #[serde(default, rename = "grpcPort", deserialize_with = "de_flex_u16")]
+    pub grpc_port: u16,
+    #[serde(default, rename = "grpcMaxMsgSize")]
+    pub grpc_max_msg_size: usize,
     #[serde(default)]
     pub host: String,
     #[serde(default, rename = "bindOnLocalHost")]

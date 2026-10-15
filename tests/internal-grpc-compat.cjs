@@ -1,0 +1,196 @@
+// Independent clients load the original Go service IDLs, not Rust generated code.
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { randomUUID } = require('node:crypto');
+const { createRequire } = require('node:module');
+const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
+const grpc = webRequire('@grpc/grpc-js');
+const loader = webRequire('@grpc/proto-loader');
+const publicRoot = path.resolve(__dirname, '../go/idls/proto');
+const internalRoot = path.resolve(__dirname, '../go/proto/internal');
+const files = ['domain', 'workflow', 'worker'].map(name => path.join(publicRoot, `uber/cadence/api/v1/service_${name}.proto`));
+files.push(path.join(internalRoot, 'uber/cadence/history/v1/service.proto'), path.join(internalRoot, 'uber/cadence/matching/v1/service.proto'));
+const adminRoot = path.resolve(__dirname, '../go/idls/proto');
+const adminFiles = [path.join(adminRoot, 'uber/cadence/admin/v1/service.proto')];
+const adminPkg = grpc.loadPackageDefinition(loader.loadSync(adminFiles, { includeDirs: [publicRoot, internalRoot, adminRoot], enums: String, longs: String, bytes: Buffer, defaults: true, oneofs: true })).uber.cadence;
+const schema = grpc.loadPackageDefinition(loader.loadSync(files, { includeDirs: [publicRoot, internalRoot], enums: String, longs: String, bytes: Buffer, defaults: true, oneofs: true })).uber.cadence;
+const frontendPeer = process.env.CADENCE_GRPC_PEER || '127.0.0.1:7833';
+const historyPeer = process.env.CADENCE_HISTORY_GRPC_PEER || '127.0.0.1:7834';
+const matchingPeer = process.env.CADENCE_MATCHING_GRPC_PEER || '127.0.0.1:7835';
+const clients = { Domain: new schema.api.v1.DomainAPI(frontendPeer, grpc.credentials.createInsecure()), Workflow: new schema.api.v1.WorkflowAPI(frontendPeer, grpc.credentials.createInsecure()), Worker: new schema.api.v1.WorkerAPI(frontendPeer, grpc.credentials.createInsecure()), History: new schema.history.v1.HistoryAPI(historyPeer, grpc.credentials.createInsecure()), Matching: new schema.matching.v1.MatchingAPI(matchingPeer, grpc.credentials.createInsecure()) };
+function call(service, method, request) {
+  return new Promise((resolve, reject) => clients[service][method](request, { deadline: Date.now() + 5000 }, (error, result) => error ? reject(error) : resolve(result)));
+}
+async function run() {
+  await Promise.all(Object.values(clients).map(client => new Promise((resolve, reject) => client.waitForReady(Date.now() + 30000, error => error ? reject(error) : resolve()))));
+  const id = randomUUID(), domain = `rust-internal-history-${id}`, other = `${domain}-other`;
+  for (const name of [domain, other]) await call('Domain', 'RegisterDomain', { name, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+  const domainId = (await call('Domain', 'DescribeDomain', { name: domain })).domain.id;
+  const otherId = (await call('Domain', 'DescribeDomain', { name: other })).domain.id;
+  const workflowId = `internal-${id}`, taskList = { name: workflowId };
+  const start = { domainId, request: { domain, workflowId, workflowType: { name: 'InternalHistoryCompatibility' }, taskList, requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '60' }, taskStartToCloseTimeout: { seconds: '10' } } };
+  await assert.rejects(call('History', 'StartWorkflowExecution', { ...start, domainId: 'not-a-uuid' }), error => error.code === grpc.status.INVALID_ARGUMENT);
+  const started = await call('History', 'StartWorkflowExecution', start);
+  assert.equal((await call('History', 'StartWorkflowExecution', start)).runId, started.runId);
+  const execution = { workflowId, runId: started.runId };
+  const polled = await call('Matching', 'PollForDecisionTask', { domainId, pollerId: randomUUID(), request: { domain, taskList, identity: 'internal-history-client' } });
+  assert(Number(polled.nextEventId) > Number(polled.startedEventId));
+  assert.equal(JSON.parse(polled.taskToken.toString()).domainId, domainId);
+  await assert.rejects(call('History', 'RespondDecisionTaskCompleted', { domainId: otherId, request: { taskToken: polled.taskToken } }), error => error.code === grpc.status.INVALID_ARGUMENT);
+  await call('History', 'RespondDecisionTaskCompleted', { domainId, request: { taskToken: polled.taskToken, identity: 'internal-history-client', decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: { data: Buffer.from('internal-result') } } }] } });
+  const described = await call('History', 'DescribeWorkflowExecution', { domainId, request: { workflowExecution: execution } });
+  assert.equal(described.workflowExecutionInfo.closeStatus, 'WORKFLOW_EXECUTION_CLOSE_STATUS_COMPLETED');
+  const history = await call('Workflow', 'GetWorkflowExecutionHistory', { domain, workflowExecution: execution });
+  assert.equal(history.history.events.at(-1).workflowExecutionCompletedEventAttributes.result.data.toString(), 'internal-result');
+  const stickyWorkflow = `sticky-${id}`, stickyList = { name: stickyWorkflow }, stickyOwner = { name: `owner-${id}`, kind: 'TASK_LIST_KIND_STICKY' };
+  const stickyStart = await call('History', 'StartWorkflowExecution', { domainId, request: { ...start.request, workflowId: stickyWorkflow, taskList: stickyList, requestId: randomUUID() } });
+  const stickyExecution = { workflowId: stickyWorkflow, runId: stickyStart.runId };
+  const initialSticky = await call('Matching', 'PollForDecisionTask', { domainId, pollerId: randomUUID(), request: { domain, taskList: stickyList } });
+  await call('History', 'RespondDecisionTaskCompleted', { domainId, request: { taskToken: initialSticky.taskToken, stickyAttributes: { workerTaskList: stickyOwner, scheduleToStartTimeout: { seconds: '1' } } } });
+  await call('History', 'SignalWorkflowExecution', { domainId, request: { workflowExecution: stickyExecution, signalName: 'wake', requestId: randomUUID() } });
+  const cached = await call('Matching', 'PollForDecisionTask', { domainId, pollerId: randomUUID(), request: { domain, taskList: stickyOwner } });
+  assert.equal(cached.stickyExecutionEnabled, true);
+  assert.equal(cached.workflowExecutionTaskList.name, stickyList.name);
+  await call('History', 'ResetStickyTaskList', { domainId, request: { domain: 'ignored-inner-name', workflowExecution: stickyExecution } });
+  await call('History', 'RespondDecisionTaskCompleted', { domainId, request: { taskToken: cached.taskToken } });
+  await call('History', 'SignalWorkflowExecution', { domainId, request: { workflowExecution: stickyExecution, signalName: 'wake-again', requestId: randomUUID() } });
+  const afterReset = await call('Matching', 'PollForDecisionTask', { domainId, pollerId: randomUUID(), request: { domain, taskList: stickyList } });
+  assert.equal(afterReset.stickyExecutionEnabled, false);
+  await call('Worker', 'ResetStickyTaskList', { domain, workflowExecution: stickyExecution });
+  await call('History', 'RespondDecisionTaskCompleted', { domainId, request: { taskToken: afterReset.taskToken, decisions: [{ completeWorkflowExecutionDecisionAttributes: {} }] } });
+  const idleList = { name: `idle-${id}` }, pollerId = randomUUID();
+  const pending = call('Matching', 'PollForActivityTask', { domainId, pollerId, request: { domain, taskList: idleList, identity: 'cancel-test' } });
+  const cancelled = assert.rejects(pending, error => error.code === grpc.status.CANCELLED);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  await call('Matching', 'CancelOutstandingPoll', { domainId, pollerId, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY' });
+  await cancelled;
+  // NOTE: empty message map values (partition 0 with no isolation groups)
+  // expose a prost-0.13/protobufjs interop gap (prost omits the entry value
+  // where Go emits an explicit empty message and protobufjs crashes on the
+  // omission). Go/Java SDKs parse either shape. The driver uses a
+  // non-degenerate shape; see memory/progress.md.
+  await call('Matching', 'UpdateTaskListPartitionConfig', { domainId, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', partitionConfig: { version: '7', readPartitions: { 0: { isolationGroups: ['a'] } }, writePartitions: { 1: { isolationGroups: ['b'] } } } });
+  await call('Matching', 'RefreshTaskListPartitionConfig', { domainId, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY' });
+  const taskListInfo = await call('Matching', 'DescribeTaskList', { domainId, request: { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY' } });
+  assert.equal(taskListInfo.partitionConfig.version, '7');
+  assert(taskListInfo.pollers.some(poller => poller.identity === 'cancel-test'));
+  // Matching task injection: unknown schedule IDs are NOT_FOUND; a fresh
+  // run accepts AddDecisionTask and the task is then pollable.
+  const injectWorkflow = `inject-${id}`, injectList = { name: injectWorkflow };
+  const injectStart = await call('History', 'StartWorkflowExecution', { domainId, request: { ...start.request, workflowId: injectWorkflow, taskList: injectList, requestId: randomUUID() } });
+  const injectExecution = { workflowId: injectWorkflow, runId: injectStart.runId };
+  await assert.rejects(call('Matching', 'AddDecisionTask', { domainId, workflowExecution: injectExecution, taskList: injectList, scheduleId: '99' }), error => error.code === grpc.status.NOT_FOUND);
+  await call('Matching', 'AddDecisionTask', { domainId, workflowExecution: injectExecution, taskList: injectList, scheduleId: '2' });
+  const injected = await call('Matching', 'PollForDecisionTask', { domainId, pollerId: randomUUID(), request: { domain, taskList: injectList } });
+  assert.equal(injected.workflowExecution.workflowId, injectWorkflow);
+  // Schedule an activity, drop it from the queue via poll, re-add it.
+  await call('History', 'RespondDecisionTaskCompleted', { domainId, request: { taskToken: injected.taskToken, decisions: [{ scheduleActivityTaskDecisionAttributes: { activityId: 'a1', activityType: { name: 'act' }, taskList: injectList, scheduleToCloseTimeout: { seconds: '60' }, scheduleToStartTimeout: { seconds: '60' }, startToCloseTimeout: { seconds: '60' } } }] } });
+  const injectHistory = await call('Workflow', 'GetWorkflowExecutionHistory', { domain, workflowExecution: injectExecution });
+  const scheduled = injectHistory.history.events.find(e => e.activityTaskScheduledEventAttributes);
+  assert(scheduled, 'expected an ActivityTaskScheduled event');
+  const actScheduleId = scheduled.eventId;
+  // Re-adding before dispatch is idempotent; the task stays dispatchable once.
+  await call('Matching', 'AddActivityTask', { domainId, workflowExecution: injectExecution, taskList: injectList, scheduleId: actScheduleId });
+  const actPolled = await call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), request: { domain, taskList: injectList } });
+  assert.equal(actPolled.activityId, 'a1');
+  // After dispatch the task is started, so re-adding reports NOT_FOUND, as
+  // does an unknown schedule ID.
+  await assert.rejects(call('Matching', 'AddActivityTask', { domainId, workflowExecution: injectExecution, taskList: injectList, scheduleId: actScheduleId }), error => error.code === grpc.status.NOT_FOUND);
+  await assert.rejects(call('Matching', 'AddActivityTask', { domainId, workflowExecution: injectExecution, taskList: injectList, scheduleId: '9999' }), error => error.code === grpc.status.NOT_FOUND);
+  // Direct matching query: ask in the background, answer via the query task
+  // completion path, then confirm the result.
+  const queryPromise = call('Matching', 'QueryWorkflow', { domainId, request: { domain, workflowExecution: injectExecution, query: { queryType: 'state' } } });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  const qTask = await call('Matching', 'PollForDecisionTask', { domainId, pollerId: randomUUID(), request: { domain, taskList: injectList } });
+  assert(qTask.queries && Object.keys(qTask.queries).length > 0);
+  const qid = Object.keys(qTask.queries)[0];
+  const qToken = Buffer.from(JSON.stringify({ domainId, workflowId: injectWorkflow, runId: injectStart.runId, taskList: injectList.name, taskId: qid }));
+  await call('Matching', 'RespondQueryTaskCompleted', { domainId, taskList: injectList, taskId: qid, request: { taskToken: qToken, result: { resultType: 'QUERY_RESULT_TYPE_ANSWERED', answer: { data: Buffer.from('direct-answer') } } } });
+  await call('History', 'RespondDecisionTaskCompleted', { domainId, request: { taskToken: qTask.taskToken } });
+  const qResult = await queryPromise;
+  assert.equal(qResult.queryResult.data.toString(), 'direct-answer');
+  // Task-list discovery sees the injected lists; partitions report the root.
+  const byDomain = await call('Matching', 'GetTaskListsByDomain', { domain });
+  assert(byDomain.decisionTaskListMap[injectWorkflow]);
+  assert(byDomain.activityTaskListMap[injectWorkflow]);
+  const partitions = await call('Matching', 'ListTaskListPartitions', { domain, taskList: injectList });
+  assert.equal(partitions.decisionTaskListPartitions[0].key, injectWorkflow);
+  assert.equal(partitions.activityTaskListPartitions[0].key, injectWorkflow);
+  await call('Domain', 'DeleteDomain', { name: domain });
+  await call('Domain', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+  const recreatedId = (await call('Domain', 'DescribeDomain', { name: domain })).domain.id;
+  assert.notEqual(recreatedId, domainId);
+  await assert.rejects(call('Workflow', 'GetWorkflowExecutionHistory', { domain, workflowExecution: execution }), error => error.code === grpc.status.NOT_FOUND);
+  await assert.rejects(call('Worker', 'RespondDecisionTaskCompleted', { taskToken: polled.taskToken }), error => error.code === grpc.status.NOT_FOUND);
+  const recreatedPollers = await call('Matching', 'DescribeTaskList', { domainId: recreatedId, request: { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_ACTIVITY' } });
+  assert.equal(recreatedPollers.pollers.length, 0);
+  const Admin = new adminPkg.admin.v1.AdminAPI(`127.0.0.1:${process.env.CADENCE_ADMIN_GRPC_PORT || '7833'}`, grpc.credentials.createInsecure());
+  const adminCall = (method, request) => new Promise((resolve, reject) => Admin[method](request, { deadline: Date.now() + 5000 }, (error, result) => error ? reject(error) : resolve(result)));
+  const cluster = await adminCall('DescribeCluster', {});
+  assert.equal(cluster.membershipInfo.rings.length, 4);
+  const host = await adminCall('DescribeHistoryHost', {});
+  assert(host.numberOfShards >= 1 && host.shardIds.length === Number(host.numberOfShards));
+  const dist = await adminCall('DescribeShardDistribution', {});
+  assert.equal(dist.numberOfShards, Number(host.numberOfShards));
+  await adminCall('CloseShard', { shardId: 0 });
+  await assert.rejects(adminCall('CloseShard', { shardId: 9999 }), error => error.code === grpc.status.INVALID_ARGUMENT);
+  const queue = await adminCall('DescribeQueue', { shardId: 0, taskType: 'TASK_TYPE_TRANSFER' });
+  assert(queue.processingQueueStates.length > 0);
+  await adminCall('RemoveTask', { shardId: 0, taskType: 'TASK_TYPE_TIMER', taskId: '7' });
+  await adminCall('ResetQueue', { shardId: 0, taskType: 'TASK_TYPE_REPLICATION' });
+  assert.equal(cluster.membershipInfo.rings.length, 4);
+  await adminCall('UpdateDynamicConfig', { configName: 'compat.key', configValues: [{ value: { encodingType: 'JSON', data: Buffer.from('null') } }] });
+  const dcValue = await adminCall('GetDynamicConfig', { configName: 'compat.key' });
+  assert(dcValue.value);
+  const dcList = await adminCall('ListDynamicConfig', {});
+  assert(dcList.entries.some(e => e.name === 'compat.key'));
+  await adminCall('RestoreDynamicConfig', { configName: 'compat.key' });
+  await assert.rejects(adminCall('GetDynamicConfig', { configName: 'compat.key' }), error => error.code === grpc.status.NOT_FOUND);
+  await adminCall('AddSearchAttribute', { searchAttribute: { CompatField: 'INDEXED_VALUE_TYPE_KEYWORD' } });
+  await adminCall('UpdateGlobalIsolationGroups', { isolationGroups: { isolationGroups: [{ name: 'a', state: 'ISOLATION_GROUP_STATE_HEALTHY' }] } });
+  const globalGroups = await adminCall('GetGlobalIsolationGroups', {});
+  assert.equal(globalGroups.isolationGroups.isolationGroups[0].name, 'a');
+  await adminCall('UpdateDomainIsolationGroups', { domain, isolationGroups: { isolationGroups: [{ name: 'b', state: 'ISOLATION_GROUP_STATE_DRAINED' }] } });
+  const domainGroups = await adminCall('GetDomainIsolationGroups', { domain });
+  assert.equal(domainGroups.isolationGroups.isolationGroups[0].name, 'b');
+  await adminCall('UpdateDomainAsyncWorkflowConfiguraton', { domain, configuration: { enabled: true, predefinedQueueName: 'q' } });
+  const asyncCfg = await adminCall('GetDomainAsyncWorkflowConfiguraton', { domain });
+  assert.equal(asyncCfg.configuration.enabled, true);
+  await adminCall('UpdateTaskListPartitionConfig', { domain, taskList: { name: 'admin-tl' }, taskListType: 'TASK_LIST_TYPE_DECISION', partitionConfig: { version: '3' } });
+  await assert.rejects(adminCall('AddSearchAttribute', { searchAttribute: { DomainID: 'INDEXED_VALUE_TYPE_KEYWORD' } }), error => error.code === grpc.status.INVALID_ARGUMENT);
+  const adminWf = `admin-${id}`;
+  const adminStart = await call('History', 'StartWorkflowExecution', { domainId: recreatedId, request: { ...start.request, workflowId: adminWf, requestId: randomUUID() } });
+  const adminExec = { workflowId: adminWf, runId: adminStart.runId };
+  await adminCall('RefreshWorkflowTasks', { domain, workflowExecution: adminExec });
+  const raw = await adminCall('GetWorkflowExecutionRawHistoryV2', { domain, workflowExecution: adminExec, pageSize: 10 });
+  assert.equal(raw.historyBatches.length, 1);
+  const adminDesc = await adminCall('DescribeWorkflowExecution', { domain, workflowExecution: adminExec });
+  assert(adminDesc.mutableStateInDatabase.length > 0);
+  const maintained = await adminCall('MaintainCorruptWorkflow', { domain, workflowExecution: adminExec });
+  assert.equal(maintained.historyDeleted, false);
+  await adminCall('ReapplyEvents', { domain, workflowExecution: adminExec, events: { data: Buffer.from('[]') } });
+  const repl = await adminCall('GetReplicationMessages', { clusterName: 'cluster0' });
+  assert.deepEqual(repl.shardMessages, {});
+  const dlqCount = await adminCall('CountDLQMessages', {});
+  assert.equal(dlqCount.domain, '0');
+  const dlqRead = await adminCall('ReadDLQMessages', { type: 'DLQ_TYPE_REPLICATION' });
+  assert.equal(dlqRead.replicationTasks.length, 0);
+  await adminCall('PurgeDLQMessages', { type: 'DLQ_TYPE_DOMAIN' });
+  await adminCall('MergeDLQMessages', { type: 'DLQ_TYPE_REPLICATION' });
+  await assert.rejects(adminCall('GetDomainReplicationMessages', {}), error => error.code === grpc.status.INTERNAL);
+  await adminCall('ResendReplicationTasks', { domainId: recreatedId, workflowExecution: adminExec, remoteCluster: 'cluster0' });
+  const xc = await adminCall('GetCrossClusterTasks', { targetCluster: 'cluster0' });
+  assert.deepEqual(xc.tasksByShard, {});
+  await adminCall('RespondCrossClusterTasksCompleted', { targetCluster: 'cluster0' });
+  const deleted = await adminCall('DeleteWorkflow', { domain, workflowExecution: adminExec });
+  assert.equal(deleted.historyDeleted, true);
+  await assert.rejects(call('Workflow', 'GetWorkflowExecutionHistory', { domain, workflowExecution: adminExec }), error => error.code === grpc.status.NOT_FOUND);
+  Admin.close();
+  const recreated = await call('History', 'StartWorkflowExecution', { ...start, domainId: recreatedId });
+  assert.notEqual(recreated.runId, started.runId);
+  const newTask = await call('Matching', 'PollForDecisionTask', { domainId: recreatedId, pollerId: randomUUID(), request: { domain, taskList, identity: 'recreated-worker' } });
+  assert.equal(JSON.parse(newTask.taskToken.toString()).domainId, recreatedId);
+  await call('History', 'RespondDecisionTaskCompleted', { domainId: recreatedId, request: { taskToken: newTask.taskToken, decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: { data: Buffer.from('recreated-result') } } }] } });
+  console.log(JSON.stringify({ result: 'passed', historyPeer, matchingPeer, domain, domainId, recreatedId, workflowId, runId: started.runId, historyEvents: history.history.events.length }));
+}
+run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => { Object.values(clients).forEach(client => client.close()); });

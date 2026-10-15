@@ -1,0 +1,87 @@
+{
+  "go/common/backoff/retrypolicy.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/backoff.rs"
+    ],
+    "evidence": [
+      "Rust backoff unit checks; full Go parity review remains required"
+    ]
+  },
+  "go/common/backoff/jitter.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/jitter.rs"
+    ],
+    "evidence": [
+      "Rust jitter unit checks; full Go parity review remains required"
+    ]
+  },
+  "go/common/backoff/retry.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/retry.rs"
+    ],
+    "evidence": [
+      "Rust retry unit checks; full Go parity review remains required"
+    ]
+  },
+  "go/common/types/mapper/proto/api.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-server/src/grpc_convert.rs",
+      "rust/crates/cadence-server/src/grpc_history.rs",
+      "rust/crates/cadence-server/src/grpc_decisions.rs"
+    ],
+    "evidence": [
+      "Node gRPC workflow/activity wire checks; missing types/methods remain in service inventory"
+    ]
+  },
+  "go/common/backoff/cron.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/cron.rs"
+    ],
+    "evidence": [
+      "Rust UTC cron table/overlap checks and SDK cron workflow completion; non-UTC TZ/DST and complete parser parity remain unported"
+    ]
+  },
+  "go/common/util.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-api/src/validation.rs",
+      "rust/crates/cadence-api/src/history_request.rs"
+    ],
+    "evidence": [
+      "Retry policy validation and start delay/cron/expiration checks; most unrelated utility functions not ported"
+    ]
+  },
+  "go/service/history/execution/retry.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/executions.rs"
+    ],
+    "evidence": [
+      "Activity/workflow backoff and retry checks; SDK retries; further edge cases and storage integration require review"
+    ]
+  },
+  "go/service/history/decision/task_handler.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/executions.rs"
+    ],
+    "evidence": [
+      "SDK workflow failure retry and successful cron last-result propagation; incomplete decisions/buffered histories/limits remain"
+    ]
+  },
+  "go/service/history/task/timer_active_task_executor.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/executions.rs",
+      "rust/crates/cadence-server/src/main.rs"
+    ],
+    "evidence": [
+      "Workflow retry/cron timeout and four activity timeout types have unit checks; workflow-task timers, distributed task queues and recovery not ported"
+    ]
+  }
+}

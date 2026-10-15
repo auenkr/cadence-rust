@@ -11,5 +11,5 @@ pub mod service;
 pub mod value;
 
 pub use protocol::{Error, MessageType, Reader, Result, TType, Writer};
-pub use service::{MethodDef, find_method};
+pub use service::{find_method, MethodDef};
 pub use value::{FromI32, FromThrift, FromValue, Struct, ToThrift, ToValue, Value};

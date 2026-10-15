@@ -103,6 +103,74 @@ pub struct CountWorkflowExecutionsResponse {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListWorkflowExecutionsRequest {
+    #[serde(default)]
+    pub domain: String,
+    #[serde(rename = "pageSize", default)]
+    pub page_size: i32,
+    #[serde(
+        rename = "nextPageToken",
+        default,
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub next_page_token: Vec<u8>,
+    #[serde(default)]
+    pub query: String,
+}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListArchivedWorkflowExecutionsRequest {
+    #[serde(default)]
+    pub domain: String,
+    #[serde(rename = "pageSize", default)]
+    pub page_size: i32,
+    #[serde(
+        rename = "nextPageToken",
+        default,
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub next_page_token: Vec<u8>,
+    #[serde(default)]
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListArchivedWorkflowExecutionsResponse {
+    #[serde(default)]
+    pub executions: Vec<WorkflowExecutionInfo>,
+    #[serde(
+        rename = "nextPageToken",
+        default,
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub next_page_token: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListWorkflowExecutionsResponse {
+    #[serde(default)]
+    pub executions: Vec<WorkflowExecutionInfo>,
+    #[serde(
+        rename = "nextPageToken",
+        default,
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub next_page_token: Vec<u8>,
+}
+pub type ScanWorkflowExecutionsRequest = ListWorkflowExecutionsRequest;
+pub type ScanWorkflowExecutionsResponse = ListWorkflowExecutionsResponse;
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CountWorkflowExecutionsRequest {
+    #[serde(default)]
+    pub domain: String,
+    #[serde(default)]
+    pub query: String,
+}
+
 /// Wire shape of the Thrift `UpdateDomainRequest` (field IDs 10-70).
 /// The config-update predicate lives on a lighter struct in [`crate::domain`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,9 +237,17 @@ pub struct UpdateDomainRequest {
 /// Wire shape of the Thrift `UpdateDomainResponse`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateDomainResponse {
-    #[serde(rename = "domainInfo", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "domainInfo",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub domain_info: Option<DomainInfo>,
-    #[serde(rename = "configuration", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "configuration",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub configuration: Option<DomainConfiguration>,
     #[serde(
         rename = "replicationConfiguration",
@@ -227,6 +303,76 @@ pub struct WorkflowExecutionInfo {
     pub history_length: i64,
     #[serde(rename = "memo", default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<Memo>,
+    #[serde(
+        rename = "parentDomain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parent_domain: Option<String>,
+    #[serde(
+        rename = "parentExecution",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parent_execution: Option<WorkflowExecution>,
+    #[serde(
+        rename = "parentInitiatedID",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parent_initiated_id: Option<i64>,
+    #[serde(
+        rename = "executionTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub execution_time: Option<i64>,
+    #[serde(
+        rename = "searchAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub search_attributes: Option<SearchAttributes>,
+    #[serde(rename = "taskList", default, skip_serializing_if = "Option::is_none")]
+    pub task_list: Option<TaskList>,
+    #[serde(rename = "isCron", default)]
+    pub is_cron: bool,
+    #[serde(
+        rename = "cronSchedule",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cron_schedule: Option<String>,
+    #[serde(
+        rename = "cronOverlapPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cron_overlap_policy: Option<CronOverlapPolicy>,
+    #[serde(
+        rename = "updateTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub update_time: Option<i64>,
+    #[serde(
+        rename = "partitionConfig",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub partition_config: Option<std::collections::HashMap<String, String>>,
+    #[serde(
+        rename = "executionStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub execution_status: Option<WorkflowExecutionStatus>,
+    #[serde(
+        rename = "scheduledExecutionTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub scheduled_execution_time: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -450,6 +596,15 @@ pub struct RequestCancelWorkflowExecutionRequest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SignalWithStartWorkflowExecutionAsyncRequest {
+    #[serde(rename = "request", default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<SignalWithStartWorkflowExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalWithStartWorkflowExecutionAsyncResponse {}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SignalWithStartWorkflowExecutionRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
@@ -501,7 +656,11 @@ pub struct SignalWithStartWorkflowExecutionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub workflow_id_reuse_policy: Option<WorkflowIDReusePolicy>,
-    #[serde(rename = "retryPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "retryPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub retry_policy: Option<RetryPolicy>,
     #[serde(
         rename = "control",
@@ -525,11 +684,19 @@ pub struct SignalWithStartWorkflowExecutionRequest {
         deserialize_with = "crate::b64::deserialize_bytes"
     )]
     pub signal_input: Vec<u8>,
-    #[serde(rename = "cronSchedule", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "cronSchedule",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub cron_schedule: String,
     #[serde(rename = "memo", default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<Memo>,
-    #[serde(rename = "searchAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "searchAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub search_attributes: Option<SearchAttributes>,
     #[serde(rename = "header", default, skip_serializing_if = "Option::is_none")]
     pub header: Option<Header>,
@@ -551,7 +718,11 @@ pub struct SignalWithStartWorkflowExecutionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub first_run_at_timestamp: Option<i64>,
-    #[serde(rename = "cronOverlapPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cronOverlapPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
 }
 
@@ -657,7 +828,11 @@ pub struct WorkflowExecutionStartedEventAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub first_scheduled_time_nano: Option<i64>,
-    #[serde(rename = "retryPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "retryPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub retry_policy: Option<RetryPolicy>,
     #[serde(rename = "attempt", default)]
     pub attempt: i32,
@@ -667,7 +842,11 @@ pub struct WorkflowExecutionStartedEventAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub expiration_timestamp: Option<i64>,
-    #[serde(rename = "cronSchedule", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "cronSchedule",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub cron_schedule: String,
     #[serde(
         rename = "firstDecisionTaskBackoffSeconds",
@@ -677,7 +856,11 @@ pub struct WorkflowExecutionStartedEventAttributes {
     pub first_decision_task_backoff_seconds: Option<i32>,
     #[serde(rename = "memo", default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<Memo>,
-    #[serde(rename = "searchAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "searchAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub search_attributes: Option<SearchAttributes>,
     #[serde(rename = "header", default, skip_serializing_if = "Option::is_none")]
     pub header: Option<Header>,
@@ -693,8 +876,21 @@ pub struct WorkflowExecutionStartedEventAttributes {
         skip_serializing_if = "String::is_empty"
     )]
     pub request_id: String,
-    #[serde(rename = "cronOverlapPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cronOverlapPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
+    // Present in Go `common/types` but absent from the Thrift wire IDL, so
+    // this never appears in Thrift conversions. Kept for restart/cron
+    // fidelity in JSON snapshots and the gRPC path.
+    #[serde(
+        rename = "jitterStartSeconds",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub jitter_start_seconds: Option<i32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -909,6 +1105,13 @@ pub struct HistoryEvent {
     )]
     pub timer_canceled_event_attributes: Option<crate::tasks::TimerCanceledEventAttributes>,
     #[serde(
+        rename = "cancelTimerFailedEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cancel_timer_failed_event_attributes:
+        Option<crate::tasks::CancelTimerFailedEventAttributes>,
+    #[serde(
         rename = "markerRecordedEventAttributes",
         default,
         skip_serializing_if = "Option::is_none"
@@ -1025,6 +1228,37 @@ pub struct HistoryEvent {
     )]
     pub external_workflow_execution_cancel_requested_event_attributes:
         Option<crate::tasks::ExternalWorkflowExecutionCancelRequestedEventAttributes>,
+    #[serde(
+        rename = "workflowExecutionTimedOutEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workflow_execution_timed_out_event_attributes:
+        Option<crate::tasks::WorkflowExecutionTimedOutEventAttributes>,
+
+    #[serde(
+        rename = "decisionTaskTimedOutEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub decision_task_timed_out_event_attributes:
+        Option<crate::tasks::DecisionTaskTimedOutEventAttributes>,
+
+    #[serde(
+        rename = "activityTaskTimedOutEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub activity_task_timed_out_event_attributes:
+        Option<crate::tasks::ActivityTaskTimedOutEventAttributes>,
+
+    #[serde(
+        rename = "childWorkflowExecutionTimedOutEventAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub child_workflow_execution_timed_out_event_attributes:
+        Option<crate::tasks::ChildWorkflowExecutionTimedOutEventAttributes>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -1120,3 +1354,13 @@ mod tests {
         assert_eq!(v["type"]["name"], "wt");
     }
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetStickyTaskListRequest {
+    #[serde(default)]
+    pub domain: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<WorkflowExecution>,
+}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetStickyTaskListResponse {}

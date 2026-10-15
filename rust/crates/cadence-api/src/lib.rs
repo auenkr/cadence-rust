@@ -10,13 +10,19 @@
 //! - [`errors`] — service error shapes.
 //! - [`tasktoken`] — task-token JSON serialization (SDK-compatible).
 //! - [`domain`] — domain helpers (`IsActiveActive`, failover lookup, ...).
+//! - [`history_request`] — history start request (first decision backoff,
+//!   retry expiration) mirroring `go/common/util.go`.
 //! - [`validation`] — frontend request validation.
 
+pub mod admin;
 pub mod b64;
 pub mod domain;
 pub mod enums;
 pub mod errors;
+pub mod history_request;
+pub mod search_attributes;
 pub mod service_types;
+pub mod schedule;
 pub mod tasks;
 pub mod tasktoken;
 pub mod types;
@@ -38,7 +44,6 @@ pub use types::{
     DataBlob, RetryPolicy, StartWorkflowExecutionRequest, StartWorkflowExecutionResponse, TaskList,
     WorkflowExecution, WorkflowType,
 };
-
 #[cfg(test)]
 mod tests {
     use super::*;

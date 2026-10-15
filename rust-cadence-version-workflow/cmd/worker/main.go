@@ -47,11 +47,7 @@ func main() {
 		Description:                            strptr("samples domain for rust cadence"),
 		OwnerEmail:                             strptr("owner@example.com"),
 		WorkflowExecutionRetentionPeriodInDays: int32ptr(7),
-		ActiveClusterName:                      strptr("active"),
-		Clusters: []*shared.ClusterReplicationConfiguration{
-			{ClusterName: strptr("active")},
-		},
-		EmitMetric: boolptr(true),
+		EmitMetric:                             boolptr(true),
 	})
 
 	w := worker.New(rpcClient, domain, taskList, worker.Options{})

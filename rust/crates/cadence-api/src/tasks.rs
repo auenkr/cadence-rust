@@ -309,6 +309,20 @@ pub struct PollForDecisionTaskResponse {
     pub attempt: i64,
     #[serde(rename = "backlogCountHint", default)]
     pub backlog_count_hint: i64,
+    #[serde(rename = "nextEventId", default)]
+    pub next_event_id: i64,
+    #[serde(
+        rename = "scheduledTimestamp",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub scheduled_timestamp: Option<i64>,
+    #[serde(
+        rename = "startedTimestamp",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub started_timestamp: Option<i64>,
     #[serde(rename = "history", default, skip_serializing_if = "Option::is_none")]
     pub history: Option<crate::service_types::History>,
     #[serde(
@@ -369,7 +383,11 @@ pub struct RespondDecisionTaskCompletedRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub query_results: Option<std::collections::HashMap<String, WorkflowQueryResult>>,
-    #[serde(rename = "stickyAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "stickyAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sticky_attributes: Option<StickyExecutionAttributes>,
     #[serde(rename = "returnNewDecisionTask", default)]
     pub return_new_decision_task: bool,
@@ -429,7 +447,11 @@ pub struct PollForActivityTaskRequest {
     pub task_list: Option<TaskList>,
     #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
     pub identity: String,
-    #[serde(rename = "taskListMetadata", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "taskListMetadata",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub task_list_metadata: Option<TaskListMetadata>,
 }
 
@@ -721,7 +743,11 @@ pub struct ActivityTaskStartedEventAttributes {
     pub request_id: String,
     #[serde(rename = "attempt", default)]
     pub attempt: i32,
-    #[serde(rename = "lastFailureReason", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "lastFailureReason",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_failure_reason: Option<String>,
     #[serde(
         rename = "lastFailureDetails",
@@ -731,7 +757,11 @@ pub struct ActivityTaskStartedEventAttributes {
         deserialize_with = "crate::b64::deserialize_bytes"
     )]
     pub last_failure_details: Vec<u8>,
-    #[serde(rename = "lastFailureOptions", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "lastFailureOptions",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_failure_options: Option<FailureOptions>,
 }
 
@@ -765,7 +795,11 @@ pub struct ActivityTaskFailedEventAttributes {
         deserialize_with = "crate::b64::deserialize_bytes"
     )]
     pub details: Vec<u8>,
-    #[serde(rename = "failureOptions", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "failureOptions",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub failure_options: Option<FailureOptions>,
     #[serde(rename = "scheduledEventId", default)]
     pub scheduled_event_id: i64,
@@ -843,6 +877,18 @@ pub struct TimerStartedEventAttributes {
     pub start_to_fire_timeout_seconds: Option<i64>,
     #[serde(rename = "decisionTaskCompletedEventId", default)]
     pub decision_task_completed_event_id: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelTimerFailedEventAttributes {
+    #[serde(rename = "timerId", default)]
+    pub timer_id: String,
+    #[serde(default)]
+    pub cause: String,
+    #[serde(rename = "decisionTaskCompletedEventId", default)]
+    pub decision_task_completed_event_id: i64,
+    #[serde(default)]
+    pub identity: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -986,11 +1032,19 @@ pub struct ContinueAsNewWorkflowExecutionDecisionAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub backoff_start_interval_in_seconds: Option<i32>,
-    #[serde(rename = "retryPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "retryPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub retry_policy: Option<RetryPolicy>,
     #[serde(rename = "initiator", default, skip_serializing_if = "Option::is_none")]
     pub initiator: Option<ContinueAsNewInitiator>,
-    #[serde(rename = "failureReason", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "failureReason",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub failure_reason: Option<String>,
     #[serde(
         rename = "failureDetails",
@@ -1008,13 +1062,21 @@ pub struct ContinueAsNewWorkflowExecutionDecisionAttributes {
         deserialize_with = "crate::b64::deserialize_bytes"
     )]
     pub last_completion_result: Vec<u8>,
-    #[serde(rename = "cronSchedule", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "cronSchedule",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub cron_schedule: String,
     #[serde(rename = "header", default, skip_serializing_if = "Option::is_none")]
     pub header: Option<Header>,
     #[serde(rename = "memo", default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<Memo>,
-    #[serde(rename = "searchAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "searchAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub search_attributes: Option<SearchAttributes>,
     #[serde(
         rename = "jitterStartSeconds",
@@ -1022,7 +1084,11 @@ pub struct ContinueAsNewWorkflowExecutionDecisionAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub jitter_start_seconds: Option<i32>,
-    #[serde(rename = "cronOverlapPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cronOverlapPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
 }
 
@@ -1100,9 +1166,17 @@ pub struct StartChildWorkflowExecutionDecisionAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub search_attributes: Option<SearchAttributes>,
-    #[serde(rename = "cronSchedule", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "cronSchedule",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub cron_schedule: String,
-    #[serde(rename = "cronOverlapPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cronOverlapPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
 }
 
@@ -1218,7 +1292,11 @@ pub struct WorkflowExecutionContinuedAsNewEventAttributes {
     pub backoff_start_interval_in_seconds: Option<i32>,
     #[serde(rename = "initiator", default, skip_serializing_if = "Option::is_none")]
     pub initiator: Option<ContinueAsNewInitiator>,
-    #[serde(rename = "failureReason", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "failureReason",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub failure_reason: Option<String>,
     #[serde(
         rename = "failureDetails",
@@ -1240,9 +1318,17 @@ pub struct WorkflowExecutionContinuedAsNewEventAttributes {
     pub header: Option<Header>,
     #[serde(rename = "memo", default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<Memo>,
-    #[serde(rename = "searchAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "searchAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub search_attributes: Option<SearchAttributes>,
-    #[serde(rename = "cronOverlapPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cronOverlapPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
 }
 
@@ -1308,13 +1394,25 @@ pub struct StartChildWorkflowExecutionInitiatedEventAttributes {
     pub workflow_id_reuse_policy: Option<WorkflowIDReusePolicy>,
     #[serde(rename = "header", default, skip_serializing_if = "Option::is_none")]
     pub header: Option<Header>,
-    #[serde(rename = "retryPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "retryPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub retry_policy: Option<RetryPolicy>,
-    #[serde(rename = "cronSchedule", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "cronSchedule",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub cron_schedule: String,
     #[serde(rename = "memo", default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<Memo>,
-    #[serde(rename = "searchAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "searchAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub search_attributes: Option<SearchAttributes>,
     #[serde(
         rename = "delayStartSeconds",
@@ -1334,7 +1432,11 @@ pub struct StartChildWorkflowExecutionInitiatedEventAttributes {
         skip_serializing_if = "Option::is_none"
     )]
     pub first_run_at_timestamp: Option<i64>,
-    #[serde(rename = "cronOverlapPolicy", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cronOverlapPolicy",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cron_overlap_policy: Option<CronOverlapPolicy>,
 }
 
@@ -1764,6 +1866,50 @@ pub struct QueryWorkflowResponse {
     pub query_rejected: Option<crate::errors::QueryRejected>,
 }
 
+/// Mirrors Go `types.RespondQueryTaskCompletedRequest` (`shared.thrift`
+/// field IDs 10/20/30/40/50). Workers answer a directly-dispatched query
+/// task with this; it unblocks the matching `QueryWorkflow` wait.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RespondQueryTaskCompletedRequest {
+    #[serde(
+        rename = "taskToken",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub task_token: Vec<u8>,
+    #[serde(
+        rename = "completedType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub completed_type: Option<QueryTaskCompletedType>,
+    #[serde(
+        rename = "queryResult",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub query_result: Vec<u8>,
+    #[serde(
+        rename = "errorMessage",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub error_message: String,
+    #[serde(
+        rename = "workerVersionInfo",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub worker_version_info: Option<crate::types::WorkerVersionInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RespondQueryTaskCompletedResponse {}
+
 // ---------------------------------------------------------------------------
 // Pending info (describe responses)
 // ---------------------------------------------------------------------------
@@ -1914,6 +2060,64 @@ pub struct GetSearchAttributesResponse {
     pub keys: Option<std::collections::HashMap<String, IndexedValueType>>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct GetTaskListsByDomainRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct GetTaskListsByDomainResponse {
+    #[serde(
+        rename = "decisionTaskListMap",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub decision_task_list_map: Option<std::collections::HashMap<String, DescribeTaskListResponse>>,
+    #[serde(
+        rename = "activityTaskListMap",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub activity_task_list_map: Option<std::collections::HashMap<String, DescribeTaskListResponse>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ListTaskListPartitionsRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(rename = "taskList", default, skip_serializing_if = "Option::is_none")]
+    pub task_list: Option<TaskList>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskListPartitionMetadata {
+    #[serde(rename = "key", default, skip_serializing_if = "String::is_empty")]
+    pub key: String,
+    #[serde(
+        rename = "ownerHostName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub owner_host_name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListTaskListPartitionsResponse {
+    #[serde(
+        rename = "activityTaskListPartitions",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub activity_task_list_partitions: Vec<TaskListPartitionMetadata>,
+    #[serde(
+        rename = "decisionTaskListPartitions",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub decision_task_list_partitions: Vec<TaskListPartitionMetadata>,
+}
+
 // ---------------------------------------------------------------------------
 // Activity heartbeat / cancel
 // ---------------------------------------------------------------------------
@@ -1986,4 +2190,118 @@ pub struct ActivityTaskCanceledEventAttributes {
     pub started_event_id: i64,
     #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
     pub identity: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowExecutionTimedOutEventAttributes {
+    #[serde(
+        rename = "timeoutType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timeout_type: Option<TimeoutType>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionTaskTimedOutEventAttributes {
+    #[serde(rename = "scheduledEventId", default)]
+    pub scheduled_event_id: i64,
+    #[serde(rename = "startedEventId", default)]
+    pub started_event_id: i64,
+    #[serde(
+        rename = "timeoutType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timeout_type: Option<TimeoutType>,
+    #[serde(
+        rename = "baseRunId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub base_run_id: String,
+    #[serde(rename = "newRunId", default, skip_serializing_if = "String::is_empty")]
+    pub new_run_id: String,
+    #[serde(rename = "forkEventVersion", default)]
+    pub fork_event_version: i64,
+    #[serde(rename = "reason", default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    #[serde(rename = "cause", default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<DecisionTaskTimedOutCause>,
+    #[serde(
+        rename = "requestId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub request_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityTaskTimedOutEventAttributes {
+    #[serde(
+        rename = "details",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub details: Vec<u8>,
+    #[serde(rename = "scheduledEventId", default)]
+    pub scheduled_event_id: i64,
+    #[serde(rename = "startedEventId", default)]
+    pub started_event_id: i64,
+    #[serde(
+        rename = "timeoutType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timeout_type: Option<TimeoutType>,
+    #[serde(
+        rename = "lastFailureReason",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_failure_reason: Option<String>,
+    #[serde(
+        rename = "lastFailureDetails",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub last_failure_details: Vec<u8>,
+    #[serde(
+        rename = "lastFailureOptions",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_failure_options: Option<FailureOptions>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildWorkflowExecutionTimedOutEventAttributes {
+    #[serde(
+        rename = "timeoutType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timeout_type: Option<TimeoutType>,
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "workflowExecution",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workflow_execution: Option<WorkflowExecution>,
+    #[serde(
+        rename = "workflowType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workflow_type: Option<WorkflowType>,
+    #[serde(rename = "initiatedEventId", default)]
+    pub initiated_event_id: i64,
+    #[serde(rename = "startedEventId", default)]
+    pub started_event_id: i64,
 }

@@ -5,6 +5,7 @@
 
 use cadence_api::enums::*;
 use cadence_api::errors::*;
+use cadence_api::schedule::*;
 use cadence_api::service_types::*;
 use cadence_api::tasks::*;
 use cadence_api::types::*;
@@ -77,6 +78,8 @@ wrap_enum!(
     QueryRejectCondition,
     QueryResultType,
     QueryTaskCompletedType,
+    ScheduleCatchUpPolicy,
+    ScheduleOverlapPolicy,
     SignalExternalWorkflowExecutionFailedCause,
     TaskListKind,
     TaskListType,
@@ -249,9 +252,7 @@ impl FromThrift for RetryPolicy {
             backoff_coefficient: s.opt_f64(20)?.unwrap_or(0.0),
             maximum_interval_in_seconds: s.opt_i32(30)?.unwrap_or(0),
             maximum_attempts: s.opt_i32(40)?.unwrap_or(0),
-            non_retriable_error_reasons: s
-                .opt_list::<String>(50)?
-                .unwrap_or_default(),
+            non_retriable_error_reasons: s.opt_list::<String>(50)?.unwrap_or_default(),
             expiration_interval_in_seconds: s.opt_i32(60)?.unwrap_or(0),
             jitter_coefficient: s.opt_f64(70)?.unwrap_or(0.0),
         })
@@ -262,13 +263,15 @@ impl ToThrift for RetryPolicy {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         if self.initial_interval_in_seconds != 0 {
-            f.fields.push((10, Value::I32(self.initial_interval_in_seconds)));
+            f.fields
+                .push((10, Value::I32(self.initial_interval_in_seconds)));
         }
         if self.backoff_coefficient != 0.0 {
             f.fields.push((20, Value::F64(self.backoff_coefficient)));
         }
         if self.maximum_interval_in_seconds != 0 {
-            f.fields.push((30, Value::I32(self.maximum_interval_in_seconds)));
+            f.fields
+                .push((30, Value::I32(self.maximum_interval_in_seconds)));
         }
         if self.maximum_attempts != 0 {
             f.fields.push((40, Value::I32(self.maximum_attempts)));
@@ -285,7 +288,8 @@ impl ToThrift for RetryPolicy {
             ));
         }
         if self.expiration_interval_in_seconds != 0 {
-            f.fields.push((60, Value::I32(self.expiration_interval_in_seconds)));
+            f.fields
+                .push((60, Value::I32(self.expiration_interval_in_seconds)));
         }
         if self.jitter_coefficient != 0.0 {
             f.fields.push((70, Value::F64(self.jitter_coefficient)));
@@ -562,11 +566,14 @@ impl ToThrift for RegisterDomainRequest {
         f.sstr(20, &self.description);
         f.sstr(30, &self.owner_email);
         if self.workflow_execution_retention_period_in_days != 0 {
-            f.fields
-                .push((40, Value::I32(self.workflow_execution_retention_period_in_days)));
+            f.fields.push((
+                40,
+                Value::I32(self.workflow_execution_retention_period_in_days),
+            ));
         }
         // IDL default `emitMetric = true`: always write to preserve explicit false.
-        f.fields.push((50, Value::Bool(self.emit_metric.unwrap_or(true))));
+        f.fields
+            .push((50, Value::Bool(self.emit_metric.unwrap_or(true))));
         f.olist(60, &self.clusters);
         f.sstr(70, &self.active_cluster_name);
         f.ostruct(76, self.active_clusters.as_ref());
@@ -648,7 +655,9 @@ impl ToThrift for ListDomainsRequest {
 impl FromThrift for ListDomainsResponse {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
-            domains: s.opt_list::<DescribeDomainResponse>(10)?.unwrap_or_default(),
+            domains: s
+                .opt_list::<DescribeDomainResponse>(10)?
+                .unwrap_or_default(),
             next_page_token: s.bytes_or_empty(20)?,
         })
     }
@@ -859,11 +868,29 @@ impl FromThrift for WorkflowExecutionInfo {
         Ok(Self {
             execution: s.opt_struct(10)?,
             workflow_type: s.opt_struct(20)?,
-            start_time: s.opt_i64(30)?,
-            close_time: s.opt_i64(40)?,
+            start_time: s.opt_i64(30)?.map(|n| n / 1_000_000),
+            close_time: s.opt_i64(40)?.map(|n| n / 1_000_000),
             close_status: s.opt_enum(50)?,
             history_length: s.opt_i64(60)?.unwrap_or(0),
             memo: s.opt_struct(100)?,
+            parent_domain: s.opt_string(71)?,
+            parent_initiated_id: s.opt_i64(72)?,
+            parent_execution: s.opt_struct(80)?,
+            execution_time: s.opt_i64(90)?.map(|n| n / 1_000_000),
+            search_attributes: s.opt_struct(101)?,
+            task_list: s.opt_struct(121)?.or_else(|| {
+                s.opt_string(120).ok().flatten().map(|name| TaskList {
+                    name,
+                    ..Default::default()
+                })
+            }),
+            is_cron: s.opt_bool(130)?.unwrap_or_default(),
+            update_time: s.opt_i64(140)?.map(|n| n / 1_000_000),
+            partition_config: s.opt_map_str(150)?,
+            cron_overlap_policy: s.opt_enum(160)?,
+            cron_schedule: s.opt_string(180)?,
+            execution_status: s.opt_enum(190)?,
+            scheduled_execution_time: s.opt_i64(200)?.map(|n| n / 1_000_000),
         })
     }
 }
@@ -873,13 +900,27 @@ impl ToThrift for WorkflowExecutionInfo {
         let mut f = Fields::new();
         f.ostruct(10, self.execution.as_ref());
         f.ostruct(20, self.workflow_type.as_ref());
-        f.oi64(30, self.start_time);
-        f.oi64(40, self.close_time);
+        f.oi64(30, millis_to_nanos(self.start_time));
+        f.oi64(40, millis_to_nanos(self.close_time));
         f.oenum(50, self.close_status);
         if self.history_length != 0 {
             f.fields.push((60, Value::I64(self.history_length)));
         }
         f.ostruct(100, self.memo.as_ref());
+        f.ostr(71, &self.parent_domain);
+        f.oi64(72, self.parent_initiated_id);
+        f.ostruct(80, self.parent_execution.as_ref());
+        f.oi64(90, millis_to_nanos(self.execution_time));
+        f.ostruct(101, self.search_attributes.as_ref());
+        f.ostr(120, &self.task_list.as_ref().map(|t| t.name.clone()));
+        f.ostruct(121, self.task_list.as_ref());
+        f.obool(130, self.is_cron);
+        f.oi64(140, millis_to_nanos(self.update_time));
+        f.omap_str_str(150, &self.partition_config);
+        f.oenum(160, self.cron_overlap_policy);
+        f.ostr(180, &self.cron_schedule);
+        f.oenum(190, self.execution_status);
+        f.oi64(200, millis_to_nanos(self.scheduled_execution_time));
         f.finish()
     }
 }
@@ -910,7 +951,9 @@ impl FromThrift for DescribeWorkflowExecutionResponse {
             execution_configuration: s.opt_struct(10)?,
             workflow_execution_info: s.opt_struct(20)?,
             pending_activities: s.opt_list::<PendingActivityInfo>(30)?.unwrap_or_default(),
-            pending_children: s.opt_list::<PendingChildExecutionInfo>(40)?.unwrap_or_default(),
+            pending_children: s
+                .opt_list::<PendingChildExecutionInfo>(40)?
+                .unwrap_or_default(),
             pending_decision: s.opt_struct(50)?,
         })
     }
@@ -1214,11 +1257,1203 @@ impl ToThrift for QueryWorkflowResponse {
     }
 }
 
+impl FromThrift for DescribeTaskListRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            task_list: s.opt_struct(20)?,
+            task_list_type: s.opt_enum(30)?,
+            include_task_list_status: s.bool_or_false(40)?,
+        })
+    }
+}
+
+impl ToThrift for DescribeTaskListRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.task_list.as_ref());
+        f.oenum(30, self.task_list_type);
+        f.obool(40, self.include_task_list_status);
+        f.finish()
+    }
+}
+
+impl FromThrift for DescribeTaskListResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            pollers: s.opt_list(10)?.unwrap_or_default(),
+            task_list_status: s.opt_struct(20)?,
+            task_list: s.opt_struct(30)?,
+        })
+    }
+}
+
+impl ToThrift for DescribeTaskListResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.pollers);
+        f.ostruct(20, self.task_list_status.as_ref());
+        f.ostruct(30, self.task_list.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for GetTaskListsByDomainRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for GetTaskListsByDomainRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.finish()
+    }
+}
+
+impl FromThrift for GetTaskListsByDomainResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            decision_task_list_map: s.opt_map_str(10)?,
+            activity_task_list_map: s.opt_map_str(20)?,
+        })
+    }
+}
+
+impl ToThrift for GetTaskListsByDomainResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.omap_str_struct(10, &self.decision_task_list_map);
+        f.omap_str_struct(20, &self.activity_task_list_map);
+        f.finish()
+    }
+}
+
+impl FromThrift for ListTaskListPartitionsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            task_list: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for ListTaskListPartitionsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.task_list.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for TaskListPartitionMetadata {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            key: s.req_string(10, "")?,
+            owner_host_name: s.req_string(20, "")?,
+        })
+    }
+}
+
+impl ToThrift for TaskListPartitionMetadata {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.key);
+        f.sstr(20, &self.owner_host_name);
+        f.finish()
+    }
+}
+
+impl FromThrift for ListTaskListPartitionsResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            activity_task_list_partitions: s.opt_list(10)?.unwrap_or_default(),
+            decision_task_list_partitions: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for ListTaskListPartitionsResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.activity_task_list_partitions);
+        f.olist(20, &self.decision_task_list_partitions);
+        f.finish()
+    }
+}
+
+impl FromThrift for StartWorkflowExecutionAsyncRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            request: s.opt_struct(10)?,
+        })
+    }
+}
+
+impl ToThrift for StartWorkflowExecutionAsyncRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.request.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for StartWorkflowExecutionAsyncResponse {
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for StartWorkflowExecutionAsyncResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for SignalWithStartWorkflowExecutionAsyncRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            request: s.opt_struct(10)?,
+        })
+    }
+}
+
+impl ToThrift for SignalWithStartWorkflowExecutionAsyncRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.request.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for SignalWithStartWorkflowExecutionAsyncResponse {
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for SignalWithStartWorkflowExecutionAsyncResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for RefreshWorkflowTasksRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for RefreshWorkflowTasksRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.execution.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for DiagnoseWorkflowExecutionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_execution: s.opt_struct(20)?,
+            identity: s.req_string(30, "")?,
+        })
+    }
+}
+
+impl ToThrift for DiagnoseWorkflowExecutionRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.workflow_execution.as_ref());
+        f.sstr(30, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for DiagnoseWorkflowExecutionResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            diagnostic_workflow_execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for DiagnoseWorkflowExecutionResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.diagnostic_workflow_execution.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for ResetWorkflowExecutionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_execution: s.opt_struct(20)?,
+            reason: s.req_string(30, "")?,
+            decision_finish_event_id: s.opt_i64(40)?.unwrap_or(0),
+            request_id: s.req_string(50, "")?,
+            skip_signal_reapply: s.bool_or_false(60)?,
+        })
+    }
+}
+
+impl ToThrift for ResetWorkflowExecutionRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.workflow_execution.as_ref());
+        f.sstr(30, &self.reason);
+        if self.decision_finish_event_id != 0 {
+            f.fields.push((40, Value::I64(self.decision_finish_event_id)));
+        }
+        f.sstr(50, &self.request_id);
+        f.obool(60, self.skip_signal_reapply);
+        f.finish()
+    }
+}
+
+impl FromThrift for ResetWorkflowExecutionResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            run_id: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for ResetWorkflowExecutionResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.run_id);
+        f.finish()
+    }
+}
+
+impl FromThrift for RestartWorkflowExecutionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_execution: s.opt_struct(20)?,
+            reason: s.req_string(30, "")?,
+            identity: s.req_string(40, "")?,
+        })
+    }
+}
+
+impl ToThrift for RestartWorkflowExecutionRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.workflow_execution.as_ref());
+        f.sstr(30, &self.reason);
+        f.sstr(40, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for RestartWorkflowExecutionResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            run_id: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for RestartWorkflowExecutionResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.run_id);
+        f.finish()
+    }
+}
+
+impl FromThrift for ClusterAttribute {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            scope: s.req_string(1, "")?,
+            name: s.req_string(2, "")?,
+        })
+    }
+}
+
+impl ToThrift for ClusterAttribute {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(1, &self.scope);
+        f.sstr(2, &self.name);
+        f.finish()
+    }
+}
+
+impl FromThrift for FailoverDomainRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain_name: s.req_string(10, "")?,
+            domain_active_cluster_name: s.opt_string(20)?,
+            active_clusters: s.opt_struct(30)?,
+            reason: s.opt_string(40)?,
+            failover_timeout_in_seconds: s.opt_i32(50)?,
+            skip_destination_cluster_check: s.bool_or_false(60)?,
+        })
+    }
+}
+
+impl ToThrift for FailoverDomainRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain_name);
+        f.ostr(20, &self.domain_active_cluster_name);
+        f.ostruct(30, self.active_clusters.as_ref());
+        f.ostr(40, &self.reason);
+        f.oi32(50, self.failover_timeout_in_seconds);
+        f.obool(60, self.skip_destination_cluster_check);
+        f.finish()
+    }
+}
+
+impl FromThrift for FailoverDomainResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain_info: s.opt_struct(10)?,
+            configuration: s.opt_struct(20)?,
+            replication_configuration: s.opt_struct(30)?,
+            failover_version: s.i64_or_zero(40)?,
+            is_global_domain: s.bool_or_false(50)?,
+        })
+    }
+}
+
+impl ToThrift for FailoverDomainResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.domain_info.as_ref());
+        f.ostruct(20, self.configuration.as_ref());
+        f.ostruct(30, self.replication_configuration.as_ref());
+        if self.failover_version != 0 {
+            f.fields.push((40, Value::I64(self.failover_version)));
+        }
+        f.obool(50, self.is_global_domain);
+        f.finish()
+    }
+}
+
+impl FromThrift for ClusterFailover {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            from_cluster: s.opt_struct(10)?,
+            to_cluster: s.opt_struct(20)?,
+            cluster_attribute: s.opt_struct(30)?,
+        })
+    }
+}
+
+impl ToThrift for ClusterFailover {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.from_cluster.as_ref());
+        f.ostruct(20, self.to_cluster.as_ref());
+        f.ostruct(30, self.cluster_attribute.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for FailoverEvent {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            id: s.opt_string(10)?,
+            created_time: s.opt_i64(20)?,
+            failover_type: s.opt_enum(30)?,
+            cluster_failovers: s.opt_list(40)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for FailoverEvent {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostr(10, &self.id);
+        f.oi64(20, self.created_time);
+        f.oenum(30, self.failover_type);
+        f.olist(40, &self.cluster_failovers);
+        f.finish()
+    }
+}
+
+impl FromThrift for PaginationOptions {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            next_page_token: s.bytes_or_empty(20)?,
+        })
+    }
+}
+
+impl ToThrift for PaginationOptions {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, self.page_size);
+        f.sbytes(20, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for ListFailoverHistoryRequestFilters {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain_id: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for ListFailoverHistoryRequestFilters {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain_id);
+        f.finish()
+    }
+}
+
+impl FromThrift for ListFailoverHistoryRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            filters: s.opt_struct(10)?,
+            pagination: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for ListFailoverHistoryRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.filters.as_ref());
+        f.ostruct(20, self.pagination.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for ListFailoverHistoryResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            failover_events: s.opt_list(10)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(20)?,
+        })
+    }
+}
+
+impl ToThrift for ListFailoverHistoryResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.failover_events);
+        f.sbytes(20, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for ListArchivedWorkflowExecutionsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            page_size: s.opt_i32(20)?.unwrap_or(0),
+            next_page_token: s.bytes_or_empty(30)?,
+            query: s.req_string(40, "")?,
+        })
+    }
+}
+
+impl ToThrift for ListArchivedWorkflowExecutionsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        if self.page_size != 0 {
+            f.fields.push((20, Value::I32(self.page_size)));
+        }
+        f.sbytes(30, &self.next_page_token);
+        f.sstr(40, &self.query);
+        f.finish()
+    }
+}
+
+impl FromThrift for ListArchivedWorkflowExecutionsResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            executions: s.opt_list(10)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(20)?,
+        })
+    }
+}
+
+impl ToThrift for ListArchivedWorkflowExecutionsResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.executions);
+        f.sbytes(20, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for ScheduleSpec {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            cron_expression: s.req_string(10, "")?,
+            start_time_nano: s.opt_i64(20)?,
+            end_time_nano: s.opt_i64(30)?,
+            jitter_in_seconds: s.opt_i32(40)?,
+        })
+    }
+}
+
+impl ToThrift for ScheduleSpec {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.cron_expression);
+        f.oi64(20, self.start_time_nano);
+        f.oi64(30, self.end_time_nano);
+        f.oi32(40, self.jitter_in_seconds);
+        f.finish()
+    }
+}
+
+impl FromThrift for ScheduleStartWorkflowAction {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            workflow_type: s.opt_struct(10)?,
+            task_list: s.opt_struct(20)?,
+            input: s.bytes_or_empty(30)?,
+            workflow_id_prefix: s.req_string(40, "")?,
+            execution_start_to_close_timeout_seconds: s.opt_i32(50)?,
+            task_start_to_close_timeout_seconds: s.opt_i32(60)?,
+            retry_policy: s.opt_struct(70)?,
+            memo: s.opt_struct(80)?,
+            search_attributes: s.opt_struct(90)?,
+        })
+    }
+}
+
+impl ToThrift for ScheduleStartWorkflowAction {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.workflow_type.as_ref());
+        f.ostruct(20, self.task_list.as_ref());
+        f.sbytes(30, &self.input);
+        f.sstr(40, &self.workflow_id_prefix);
+        f.oi32(50, self.execution_start_to_close_timeout_seconds);
+        f.oi32(60, self.task_start_to_close_timeout_seconds);
+        f.ostruct(70, self.retry_policy.as_ref());
+        f.ostruct(80, self.memo.as_ref());
+        f.ostruct(90, self.search_attributes.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for ScheduleAction {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            start_workflow: s.opt_struct(10)?,
+        })
+    }
+}
+
+impl ToThrift for ScheduleAction {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.start_workflow.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for SchedulePolicies {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            overlap_policy: s.opt_enum(10)?,
+            catch_up_policy: s.opt_enum(20)?,
+            catch_up_window_in_seconds: s.opt_i32(30)?,
+            pause_on_failure: s.bool_or_false(40)?,
+            buffer_limit: s.opt_i32(50)?.unwrap_or(0),
+            concurrency_limit: s.opt_i32(60)?.unwrap_or(0),
+        })
+    }
+}
+
+impl ToThrift for SchedulePolicies {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oenum(10, self.overlap_policy);
+        f.oenum(20, self.catch_up_policy);
+        f.oi32(30, self.catch_up_window_in_seconds);
+        f.obool(40, self.pause_on_failure);
+        if self.buffer_limit != 0 {
+            f.fields.push((50, Value::I32(self.buffer_limit)));
+        }
+        if self.concurrency_limit != 0 {
+            f.fields.push((60, Value::I32(self.concurrency_limit)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for SchedulePauseInfo {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            reason: s.req_string(10, "")?,
+            paused_time_nano: s.opt_i64(20)?,
+            paused_by: s.req_string(30, "")?,
+        })
+    }
+}
+
+impl ToThrift for SchedulePauseInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.reason);
+        f.oi64(20, self.paused_time_nano);
+        f.sstr(30, &self.paused_by);
+        f.finish()
+    }
+}
+
+impl FromThrift for ScheduleState {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            paused: s.bool_or_false(10)?,
+            pause_info: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for ScheduleState {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.obool(10, self.paused);
+        f.ostruct(20, self.pause_info.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for BackfillInfo {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            backfill_id: s.req_string(10, "")?,
+            start_time_nano: s.opt_i64(20)?,
+            end_time_nano: s.opt_i64(30)?,
+            runs_completed: s.opt_i32(40)?.unwrap_or(0),
+            runs_total: s.opt_i32(50)?.unwrap_or(0),
+        })
+    }
+}
+
+impl ToThrift for BackfillInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.backfill_id);
+        f.oi64(20, self.start_time_nano);
+        f.oi64(30, self.end_time_nano);
+        if self.runs_completed != 0 {
+            f.fields.push((40, Value::I32(self.runs_completed)));
+        }
+        if self.runs_total != 0 {
+            f.fields.push((50, Value::I32(self.runs_total)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for ScheduleInfo {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            last_run_time_nano: s.opt_i64(10)?,
+            next_run_time_nano: s.opt_i64(20)?,
+            total_runs: s.opt_i64(30)?.unwrap_or(0),
+            create_time_nano: s.opt_i64(40)?,
+            last_update_time_nano: s.opt_i64(50)?,
+            ongoing_backfills: s.opt_list(60)?.unwrap_or_default(),
+            missed_runs: s.opt_i64(70)?.unwrap_or(0),
+            skipped_runs: s.opt_i64(80)?.unwrap_or(0),
+            buffered_fire_count: s.opt_i64(90)?.unwrap_or(0),
+            running_workflow_count: s.opt_i64(100)?.unwrap_or(0),
+        })
+    }
+}
+
+impl ToThrift for ScheduleInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(10, self.last_run_time_nano);
+        f.oi64(20, self.next_run_time_nano);
+        if self.total_runs != 0 {
+            f.fields.push((30, Value::I64(self.total_runs)));
+        }
+        f.oi64(40, self.create_time_nano);
+        f.oi64(50, self.last_update_time_nano);
+        f.olist(60, &self.ongoing_backfills);
+        if self.missed_runs != 0 {
+            f.fields.push((70, Value::I64(self.missed_runs)));
+        }
+        if self.skipped_runs != 0 {
+            f.fields.push((80, Value::I64(self.skipped_runs)));
+        }
+        if self.buffered_fire_count != 0 {
+            f.fields.push((90, Value::I64(self.buffered_fire_count)));
+        }
+        if self.running_workflow_count != 0 {
+            f.fields.push((100, Value::I64(self.running_workflow_count)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for ScheduleListEntry {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            schedule_id: s.req_string(10, "")?,
+            workflow_type: s.opt_struct(20)?,
+            state: s.opt_struct(30)?,
+            cron_expression: s.req_string(40, "")?,
+            memo: s.opt_struct(50)?,
+            search_attributes: s.opt_struct(60)?,
+        })
+    }
+}
+
+impl ToThrift for ScheduleListEntry {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.schedule_id);
+        f.ostruct(20, self.workflow_type.as_ref());
+        f.ostruct(30, self.state.as_ref());
+        f.sstr(40, &self.cron_expression);
+        f.ostruct(50, self.memo.as_ref());
+        f.ostruct(60, self.search_attributes.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for CreateScheduleRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            schedule_id: s.req_string(20, "")?,
+            spec: s.opt_struct(30)?,
+            action: s.opt_struct(40)?,
+            policies: s.opt_struct(50)?,
+            memo: s.opt_struct(60)?,
+            search_attributes: s.opt_struct(70)?,
+            state: s.opt_struct(80)?,
+        })
+    }
+}
+
+impl ToThrift for CreateScheduleRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.schedule_id);
+        f.ostruct(30, self.spec.as_ref());
+        f.ostruct(40, self.action.as_ref());
+        f.ostruct(50, self.policies.as_ref());
+        f.ostruct(60, self.memo.as_ref());
+        f.ostruct(70, self.search_attributes.as_ref());
+        f.ostruct(80, self.state.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for CreateScheduleResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            schedule_id: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for CreateScheduleResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.schedule_id);
+        f.finish()
+    }
+}
+
+impl FromThrift for DescribeScheduleRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            schedule_id: s.req_string(20, "")?,
+        })
+    }
+}
+
+impl ToThrift for DescribeScheduleRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.schedule_id);
+        f.finish()
+    }
+}
+
+impl FromThrift for DescribeScheduleResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            spec: s.opt_struct(10)?,
+            action: s.opt_struct(20)?,
+            policies: s.opt_struct(30)?,
+            state: s.opt_struct(40)?,
+            info: s.opt_struct(50)?,
+            memo: s.opt_struct(60)?,
+            search_attributes: s.opt_struct(70)?,
+        })
+    }
+}
+
+impl ToThrift for DescribeScheduleResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.spec.as_ref());
+        f.ostruct(20, self.action.as_ref());
+        f.ostruct(30, self.policies.as_ref());
+        f.ostruct(40, self.state.as_ref());
+        f.ostruct(50, self.info.as_ref());
+        f.ostruct(60, self.memo.as_ref());
+        f.ostruct(70, self.search_attributes.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for ListSchedulesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            page_size: s.opt_i32(20)?.unwrap_or(0),
+            next_page_token: s.bytes_or_empty(30)?,
+        })
+    }
+}
+
+impl ToThrift for ListSchedulesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        if self.page_size != 0 {
+            f.fields.push((20, Value::I32(self.page_size)));
+        }
+        f.sbytes(30, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for ListSchedulesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            schedules: s.opt_list(10)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(20)?,
+        })
+    }
+}
+
+impl ToThrift for ListSchedulesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.schedules);
+        f.sbytes(20, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for DeleteScheduleRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            schedule_id: s.req_string(20, "")?,
+        })
+    }
+}
+
+impl ToThrift for DeleteScheduleRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.schedule_id);
+        f.finish()
+    }
+}
+
+impl FromThrift for DeleteScheduleResponse {
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for DeleteScheduleResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for PauseScheduleRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            schedule_id: s.req_string(20, "")?,
+            reason: s.req_string(30, "")?,
+            identity: s.req_string(40, "")?,
+        })
+    }
+}
+
+impl ToThrift for PauseScheduleRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.schedule_id);
+        f.sstr(30, &self.reason);
+        f.sstr(40, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for PauseScheduleResponse {
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for PauseScheduleResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for UnpauseScheduleRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            schedule_id: s.req_string(20, "")?,
+            reason: s.req_string(30, "")?,
+            catch_up_policy: s.opt_enum(40)?,
+        })
+    }
+}
+
+impl ToThrift for UnpauseScheduleRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.schedule_id);
+        f.sstr(30, &self.reason);
+        f.oenum(40, self.catch_up_policy);
+        f.finish()
+    }
+}
+
+impl FromThrift for UnpauseScheduleResponse {
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for UnpauseScheduleResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for BackfillScheduleRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            schedule_id: s.req_string(20, "")?,
+            start_time_nano: s.opt_i64(30)?,
+            end_time_nano: s.opt_i64(40)?,
+            overlap_policy: s.opt_enum(50)?,
+            backfill_id: s.req_string(60, "")?,
+        })
+    }
+}
+
+impl ToThrift for BackfillScheduleRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.schedule_id);
+        f.oi64(30, self.start_time_nano);
+        f.oi64(40, self.end_time_nano);
+        f.oenum(50, self.overlap_policy);
+        f.sstr(60, &self.backfill_id);
+        f.finish()
+    }
+}
+
+impl FromThrift for BackfillScheduleResponse {
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for BackfillScheduleResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for UpdateScheduleRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            schedule_id: s.req_string(20, "")?,
+            spec: s.opt_struct(30)?,
+            action: s.opt_struct(40)?,
+            policies: s.opt_struct(50)?,
+            search_attributes: s.opt_struct(60)?,
+        })
+    }
+}
+
+impl ToThrift for UpdateScheduleRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.schedule_id);
+        f.ostruct(30, self.spec.as_ref());
+        f.ostruct(40, self.action.as_ref());
+        f.ostruct(50, self.policies.as_ref());
+        f.ostruct(60, self.search_attributes.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateScheduleResponse {
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for UpdateScheduleResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for Semaphore {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            semaphore_name: s.req_string(10, "")?,
+            capacity: s.opt_i32(20)?.unwrap_or(0),
+            bucket_capacity: s.opt_i32(30)?.unwrap_or(0),
+        })
+    }
+}
+
+impl ToThrift for Semaphore {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.semaphore_name);
+        if self.capacity != 0 {
+            f.fields.push((20, Value::I32(self.capacity)));
+        }
+        if self.bucket_capacity != 0 {
+            f.fields.push((30, Value::I32(self.bucket_capacity)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for CreateSemaphoreRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            semaphore_name: s.req_string(20, "")?,
+            capacity: s.opt_i32(30)?.unwrap_or(0),
+            bucket_capacity: s.opt_i32(40)?.unwrap_or(0),
+        })
+    }
+}
+
+impl ToThrift for CreateSemaphoreRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.semaphore_name);
+        if self.capacity != 0 {
+            f.fields.push((30, Value::I32(self.capacity)));
+        }
+        if self.bucket_capacity != 0 {
+            f.fields.push((40, Value::I32(self.bucket_capacity)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for CreateSemaphoreResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            semaphore: s.opt_struct(10)?,
+        })
+    }
+}
+
+impl ToThrift for CreateSemaphoreResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.semaphore.as_ref());
+        f.finish()
+    }
+}
+
 impl FromThrift for QueryRejected {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
             close_status: s.opt_enum(10)?,
         })
+    }
+}
+
+impl FromThrift for RespondQueryTaskCompletedRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            task_token: s.bytes_or_empty(10)?,
+            completed_type: s.opt_enum(20)?,
+            query_result: s.bytes_or_empty(30)?,
+            error_message: s.req_string(40, "")?,
+            worker_version_info: s.opt_struct(50)?,
+        })
+    }
+}
+
+impl ToThrift for RespondQueryTaskCompletedRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sbytes(10, &self.task_token);
+        f.oenum(20, self.completed_type);
+        f.sbytes(30, &self.query_result);
+        f.sstr(40, &self.error_message);
+        f.ostruct(50, self.worker_version_info.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for RespondQueryTaskCompletedResponse {
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for RespondQueryTaskCompletedResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
     }
 }
 
@@ -1525,6 +2760,33 @@ impl ToThrift for PollForDecisionTaskRequest {
     }
 }
 
+impl FromThrift for ResetStickyTaskListRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            execution: s.opt_struct(20)?,
+        })
+    }
+}
+impl ToThrift for ResetStickyTaskListRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut fields = Fields::new();
+        fields.sstr(10, &self.domain);
+        fields.ostruct(20, self.execution.as_ref());
+        fields.finish()
+    }
+}
+impl FromThrift for ResetStickyTaskListResponse {
+    fn from_thrift(_: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+impl ToThrift for ResetStickyTaskListResponse {
+    fn to_thrift(&self) -> Struct {
+        Struct { fields: Vec::new() }
+    }
+}
+
 impl FromThrift for PollForDecisionTaskResponse {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
@@ -1535,6 +2797,9 @@ impl FromThrift for PollForDecisionTaskResponse {
             started_event_id: s.opt_i64(50)?.unwrap_or(0),
             attempt: s.opt_i64(51)?.unwrap_or(0),
             backlog_count_hint: s.opt_i64(54)?.unwrap_or(0),
+            next_event_id: s.opt_i64(130)?.unwrap_or_default(),
+            scheduled_timestamp: s.opt_i64(100)?.map(|n| n / 1_000_000),
+            started_timestamp: s.opt_i64(110)?.map(|n| n / 1_000_000),
             history: s.opt_struct(60)?,
             next_page_token: s.bytes_or_empty(70)?,
             workflow_execution_task_list: s.opt_struct(90)?,
@@ -1555,9 +2820,9 @@ impl ToThrift for PollForDecisionTaskResponse {
         if self.started_event_id != 0 {
             f.fields.push((50, Value::I64(self.started_event_id)));
         }
-        if self.attempt != 0 {
-            f.fields.push((51, Value::I64(self.attempt)));
-        }
+        // SDKs use presence of Attempt to distinguish older servers. Zero
+        // must be present so a first worker panic sends its failure response.
+        f.fields.push((51, Value::I64(self.attempt)));
         if self.backlog_count_hint != 0 {
             f.fields.push((54, Value::I64(self.backlog_count_hint)));
         }
@@ -1565,6 +2830,8 @@ impl ToThrift for PollForDecisionTaskResponse {
         f.sbytes(70, &self.next_page_token);
         f.ostruct(80, self.query.as_ref());
         f.ostruct(90, self.workflow_execution_task_list.as_ref());
+        f.oi64(100, millis_to_nanos(self.scheduled_timestamp));
+        f.oi64(110, millis_to_nanos(self.started_timestamp));
         if let Some(q) = &self.queries {
             let mut items: Vec<(Value, Value)> = q
                 .iter()
@@ -1582,6 +2849,9 @@ impl ToThrift for PollForDecisionTaskResponse {
             if !items.is_empty() {
                 f.fields.push((120, Value::Map(items)));
             }
+        }
+        if self.next_event_id != 0 {
+            f.oi64(130, Some(self.next_event_id));
         }
         f.finish()
     }
@@ -1737,7 +3007,10 @@ impl ToThrift for PollForActivityTaskResponse {
         if self.attempt != 0 {
             f.fields.push((120, Value::I32(self.attempt)));
         }
-        f.oi64(130, millis_to_nanos(self.scheduled_timestamp_of_this_attempt));
+        f.oi64(
+            130,
+            millis_to_nanos(self.scheduled_timestamp_of_this_attempt),
+        );
         f.sbytes(140, &self.heartbeat_details);
         f.ostruct(150, self.workflow_type.as_ref());
         f.sstr(160, &self.workflow_domain);
@@ -2179,8 +3452,7 @@ impl FromThrift for Decision {
             request_cancel_activity_task_decision_attributes: s.opt_struct(40)?,
             cancel_timer_decision_attributes: s.opt_struct(50)?,
             cancel_workflow_execution_decision_attributes: s.opt_struct(60)?,
-            request_cancel_external_workflow_execution_decision_attributes: s
-                .opt_struct(70)?,
+            request_cancel_external_workflow_execution_decision_attributes: s.opt_struct(70)?,
             record_marker_decision_attributes: s.opt_struct(80)?,
             continue_as_new_workflow_execution_decision_attributes: s.opt_struct(90)?,
             start_child_workflow_execution_decision_attributes: s.opt_struct(100)?,
@@ -2196,17 +3468,51 @@ impl ToThrift for Decision {
         f.oenum(10, self.decision_type);
         f.ostruct(20, self.schedule_activity_task_decision_attributes.as_ref());
         f.ostruct(25, self.start_timer_decision_attributes.as_ref());
-        f.ostruct(30, self.complete_workflow_execution_decision_attributes.as_ref());
-        f.ostruct(35, self.fail_workflow_execution_decision_attributes.as_ref());
-        f.ostruct(40, self.request_cancel_activity_task_decision_attributes.as_ref());
+        f.ostruct(
+            30,
+            self.complete_workflow_execution_decision_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            35,
+            self.fail_workflow_execution_decision_attributes.as_ref(),
+        );
+        f.ostruct(
+            40,
+            self.request_cancel_activity_task_decision_attributes
+                .as_ref(),
+        );
         f.ostruct(50, self.cancel_timer_decision_attributes.as_ref());
-        f.ostruct(60, self.cancel_workflow_execution_decision_attributes.as_ref());
-        f.ostruct(70, self.request_cancel_external_workflow_execution_decision_attributes.as_ref());
+        f.ostruct(
+            60,
+            self.cancel_workflow_execution_decision_attributes.as_ref(),
+        );
+        f.ostruct(
+            70,
+            self.request_cancel_external_workflow_execution_decision_attributes
+                .as_ref(),
+        );
         f.ostruct(80, self.record_marker_decision_attributes.as_ref());
-        f.ostruct(90, self.continue_as_new_workflow_execution_decision_attributes.as_ref());
-        f.ostruct(100, self.start_child_workflow_execution_decision_attributes.as_ref());
-        f.ostruct(110, self.signal_external_workflow_execution_decision_attributes.as_ref());
-        f.ostruct(120, self.upsert_workflow_search_attributes_decision_attributes.as_ref());
+        f.ostruct(
+            90,
+            self.continue_as_new_workflow_execution_decision_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            100,
+            self.start_child_workflow_execution_decision_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            110,
+            self.signal_external_workflow_execution_decision_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            120,
+            self.upsert_workflow_search_attributes_decision_attributes
+                .as_ref(),
+        );
         f.finish()
     }
 }
@@ -2351,7 +3657,8 @@ impl ToThrift for ActivityTaskScheduledEventAttributes {
         f.oi32(55, self.start_to_close_timeout_seconds);
         f.oi32(60, self.heartbeat_timeout_seconds);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((90, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((90, Value::I64(self.decision_task_completed_event_id)));
         }
         f.ostruct(110, self.retry_policy.as_ref());
         f.ostruct(120, self.header.as_ref());
@@ -2461,7 +3768,8 @@ impl ToThrift for ActivityTaskCancelRequestedEventAttributes {
         let mut f = Fields::new();
         f.sstr(10, &self.activity_id);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((20, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((20, Value::I64(self.decision_task_completed_event_id)));
         }
         f.finish()
     }
@@ -2484,7 +3792,8 @@ impl ToThrift for ActivityTaskCanceledEventAttributes {
         let mut f = Fields::new();
         f.sbytes(10, &self.details);
         if self.latest_cancel_requested_event_id != 0 {
-            f.fields.push((20, Value::I64(self.latest_cancel_requested_event_id)));
+            f.fields
+                .push((20, Value::I64(self.latest_cancel_requested_event_id)));
         }
         if self.scheduled_event_id != 0 {
             f.fields.push((30, Value::I64(self.scheduled_event_id)));
@@ -2513,7 +3822,8 @@ impl ToThrift for TimerStartedEventAttributes {
         f.sstr(10, &self.timer_id);
         f.oi64(20, self.start_to_fire_timeout_seconds);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((30, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((30, Value::I64(self.decision_task_completed_event_id)));
         }
         f.finish()
     }
@@ -2539,6 +3849,28 @@ impl ToThrift for TimerFiredEventAttributes {
     }
 }
 
+impl FromThrift for CancelTimerFailedEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            timer_id: s.req_string(10, "")?,
+            cause: s.req_string(20, "")?,
+            decision_task_completed_event_id: s.opt_i64(30)?.unwrap_or(0),
+            identity: s.req_string(40, "")?,
+        })
+    }
+}
+impl ToThrift for CancelTimerFailedEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.timer_id);
+        f.sstr(20, &self.cause);
+        f.fields
+            .push((30, Value::I64(self.decision_task_completed_event_id)));
+        f.sstr(40, &self.identity);
+        f.finish()
+    }
+}
+
 impl FromThrift for TimerCanceledEventAttributes {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
@@ -2558,7 +3890,8 @@ impl ToThrift for TimerCanceledEventAttributes {
             f.fields.push((20, Value::I64(self.started_event_id)));
         }
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((30, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((30, Value::I64(self.decision_task_completed_event_id)));
         }
         f.sstr(40, &self.identity);
         f.finish()
@@ -2582,7 +3915,8 @@ impl ToThrift for MarkerRecordedEventAttributes {
         f.sstr(10, &self.marker_name);
         f.sbytes(20, &self.details);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((30, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((30, Value::I64(self.decision_task_completed_event_id)));
         }
         f.ostruct(40, self.header.as_ref());
         f.finish()
@@ -2620,6 +3954,8 @@ impl FromThrift for WorkflowExecutionStartedEventAttributes {
             partition_config: s.opt_map_str(150)?,
             request_id: s.req_string(160, "")?,
             cron_overlap_policy: s.opt_enum(170)?,
+            // No Thrift field ID: Go `common/types`-only, like the Rust struct.
+            jitter_start_seconds: None,
         })
     }
 }
@@ -2675,7 +4011,8 @@ impl ToThrift for WorkflowExecutionCompletedEventAttributes {
         let mut f = Fields::new();
         f.sbytes(10, &self.result);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((20, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((20, Value::I64(self.decision_task_completed_event_id)));
         }
         f.finish()
     }
@@ -2697,7 +4034,8 @@ impl ToThrift for WorkflowExecutionFailedEventAttributes {
         f.ostr(10, &self.reason);
         f.sbytes(20, &self.details);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((30, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((30, Value::I64(self.decision_task_completed_event_id)));
         }
         f.finish()
     }
@@ -2782,7 +4120,8 @@ impl ToThrift for WorkflowExecutionCanceledEventAttributes {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((10, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((10, Value::I64(self.decision_task_completed_event_id)));
         }
         f.sbytes(20, &self.details);
         f.finish()
@@ -2822,7 +4161,8 @@ impl ToThrift for WorkflowExecutionContinuedAsNewEventAttributes {
         f.oi32(50, self.execution_start_to_close_timeout_seconds);
         f.oi32(60, self.task_start_to_close_timeout_seconds);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((70, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((70, Value::I64(self.decision_task_completed_event_id)));
         }
         f.oi32(80, self.backoff_start_interval_in_seconds);
         f.oenum(90, self.initiator);
@@ -2877,7 +4217,8 @@ impl ToThrift for StartChildWorkflowExecutionInitiatedEventAttributes {
         f.oenum(81, self.parent_close_policy);
         f.sbytes(90, &self.control);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((100, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((100, Value::I64(self.decision_task_completed_event_id)));
         }
         f.oenum(110, self.workflow_id_reuse_policy);
         f.ostruct(120, self.retry_policy.as_ref());
@@ -2919,7 +4260,8 @@ impl ToThrift for StartChildWorkflowExecutionFailedEventAttributes {
             f.fields.push((60, Value::I64(self.initiated_event_id)));
         }
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((70, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((70, Value::I64(self.decision_task_completed_event_id)));
         }
         f.finish()
     }
@@ -3088,7 +4430,8 @@ impl ToThrift for SignalExternalWorkflowExecutionInitiatedEventAttributes {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((10, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((10, Value::I64(self.decision_task_completed_event_id)));
         }
         f.sstr(20, &self.domain);
         f.ostruct(30, self.workflow_execution.as_ref());
@@ -3117,7 +4460,8 @@ impl ToThrift for SignalExternalWorkflowExecutionFailedEventAttributes {
         let mut f = Fields::new();
         f.oenum(10, self.cause);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((20, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((20, Value::I64(self.decision_task_completed_event_id)));
         }
         f.sstr(30, &self.domain);
         f.ostruct(40, self.workflow_execution.as_ref());
@@ -3145,7 +4489,8 @@ impl ToThrift for RequestCancelExternalWorkflowExecutionInitiatedEventAttributes
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((10, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((10, Value::I64(self.decision_task_completed_event_id)));
         }
         f.sstr(20, &self.domain);
         f.ostruct(30, self.workflow_execution.as_ref());
@@ -3173,7 +4518,8 @@ impl ToThrift for RequestCancelExternalWorkflowExecutionFailedEventAttributes {
         let mut f = Fields::new();
         f.oenum(10, self.cause);
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((20, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((20, Value::I64(self.decision_task_completed_event_id)));
         }
         f.sstr(30, &self.domain);
         f.ostruct(40, self.workflow_execution.as_ref());
@@ -3198,7 +4544,8 @@ impl ToThrift for UpsertWorkflowSearchAttributesEventAttributes {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         if self.decision_task_completed_event_id != 0 {
-            f.fields.push((10, Value::I64(self.decision_task_completed_event_id)));
+            f.fields
+                .push((10, Value::I64(self.decision_task_completed_event_id)));
         }
         f.ostruct(20, self.search_attributes.as_ref());
         f.finish()
@@ -3254,6 +4601,10 @@ impl ToThrift for ExternalWorkflowExecutionCancelRequestedEventAttributes {
 impl FromThrift for HistoryEvent {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
+            workflow_execution_timed_out_event_attributes: s.opt_struct(70)?,
+            decision_task_timed_out_event_attributes: s.opt_struct(110)?,
+            activity_task_timed_out_event_attributes: s.opt_struct(170)?,
+            child_workflow_execution_timed_out_event_attributes: s.opt_struct(400)?,
             event_id: s.opt_i64(10)?.unwrap_or(0),
             timestamp: s.opt_i64(20)?,
             event_type: s.opt_enum(30)?,
@@ -3278,6 +4629,7 @@ impl FromThrift for HistoryEvent {
             activity_task_canceled_event_attributes: s.opt_struct(220)?,
             timer_started_event_attributes: s.opt_struct(180)?,
             timer_canceled_event_attributes: s.opt_struct(230)?,
+            cancel_timer_failed_event_attributes: s.opt_struct(240)?,
             marker_recorded_event_attributes: s.opt_struct(250)?,
             workflow_execution_continued_as_new_event_attributes: s.opt_struct(330)?,
             start_child_workflow_execution_initiated_event_attributes: s.opt_struct(340)?,
@@ -3289,8 +4641,10 @@ impl FromThrift for HistoryEvent {
             child_workflow_execution_terminated_event_attributes: s.opt_struct(410)?,
             signal_external_workflow_execution_initiated_event_attributes: s.opt_struct(420)?,
             signal_external_workflow_execution_failed_event_attributes: s.opt_struct(430)?,
-            request_cancel_external_workflow_execution_initiated_event_attributes: s.opt_struct(300)?,
-            request_cancel_external_workflow_execution_failed_event_attributes: s.opt_struct(310)?,
+            request_cancel_external_workflow_execution_initiated_event_attributes: s
+                .opt_struct(300)?,
+            request_cancel_external_workflow_execution_failed_event_attributes: s
+                .opt_struct(310)?,
             upsert_workflow_search_attributes_event_attributes: s.opt_struct(450)?,
             timer_fired_event_attributes: s.opt_struct(190)?,
             external_workflow_execution_signaled_event_attributes: s.opt_struct(440)?,
@@ -3313,8 +4667,14 @@ impl ToThrift for HistoryEvent {
         if self.task_id != 0 {
             f.fields.push((36, Value::I64(self.task_id)));
         }
-        f.ostruct(40, self.workflow_execution_started_event_attributes.as_ref());
-        f.ostruct(50, self.workflow_execution_completed_event_attributes.as_ref());
+        f.ostruct(
+            40,
+            self.workflow_execution_started_event_attributes.as_ref(),
+        );
+        f.ostruct(
+            50,
+            self.workflow_execution_completed_event_attributes.as_ref(),
+        );
         f.ostruct(60, self.workflow_execution_failed_event_attributes.as_ref());
         f.ostruct(80, self.decision_task_scheduled_event_attributes.as_ref());
         f.ostruct(90, self.decision_task_started_event_attributes.as_ref());
@@ -3326,29 +4686,118 @@ impl ToThrift for HistoryEvent {
         f.ostruct(160, self.activity_task_failed_event_attributes.as_ref());
         f.ostruct(180, self.timer_started_event_attributes.as_ref());
         f.ostruct(190, self.timer_fired_event_attributes.as_ref());
-        f.ostruct(200, self.activity_task_cancel_requested_event_attributes.as_ref());
+        f.ostruct(
+            200,
+            self.activity_task_cancel_requested_event_attributes
+                .as_ref(),
+        );
         f.ostruct(220, self.activity_task_canceled_event_attributes.as_ref());
         f.ostruct(230, self.timer_canceled_event_attributes.as_ref());
+        f.ostruct(240, self.cancel_timer_failed_event_attributes.as_ref());
         f.ostruct(250, self.marker_recorded_event_attributes.as_ref());
-        f.ostruct(260, self.workflow_execution_signaled_event_attributes.as_ref());
-        f.ostruct(270, self.workflow_execution_terminated_event_attributes.as_ref());
-        f.ostruct(280, self.workflow_execution_cancel_requested_event_attributes.as_ref());
-        f.ostruct(290, self.workflow_execution_canceled_event_attributes.as_ref());
-        f.ostruct(300, self.request_cancel_external_workflow_execution_initiated_event_attributes.as_ref());
-        f.ostruct(310, self.request_cancel_external_workflow_execution_failed_event_attributes.as_ref());
-        f.ostruct(320, self.external_workflow_execution_cancel_requested_event_attributes.as_ref());
-        f.ostruct(330, self.workflow_execution_continued_as_new_event_attributes.as_ref());
-        f.ostruct(340, self.start_child_workflow_execution_initiated_event_attributes.as_ref());
-        f.ostruct(350, self.start_child_workflow_execution_failed_event_attributes.as_ref());
-        f.ostruct(360, self.child_workflow_execution_started_event_attributes.as_ref());
-        f.ostruct(370, self.child_workflow_execution_completed_event_attributes.as_ref());
-        f.ostruct(380, self.child_workflow_execution_failed_event_attributes.as_ref());
-        f.ostruct(390, self.child_workflow_execution_canceled_event_attributes.as_ref());
-        f.ostruct(410, self.child_workflow_execution_terminated_event_attributes.as_ref());
-        f.ostruct(420, self.signal_external_workflow_execution_initiated_event_attributes.as_ref());
-        f.ostruct(430, self.signal_external_workflow_execution_failed_event_attributes.as_ref());
-        f.ostruct(440, self.external_workflow_execution_signaled_event_attributes.as_ref());
-        f.ostruct(450, self.upsert_workflow_search_attributes_event_attributes.as_ref());
+        f.ostruct(
+            260,
+            self.workflow_execution_signaled_event_attributes.as_ref(),
+        );
+        f.ostruct(
+            270,
+            self.workflow_execution_terminated_event_attributes.as_ref(),
+        );
+        f.ostruct(
+            280,
+            self.workflow_execution_cancel_requested_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            290,
+            self.workflow_execution_canceled_event_attributes.as_ref(),
+        );
+        f.ostruct(
+            300,
+            self.request_cancel_external_workflow_execution_initiated_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            310,
+            self.request_cancel_external_workflow_execution_failed_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            320,
+            self.external_workflow_execution_cancel_requested_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            330,
+            self.workflow_execution_continued_as_new_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            340,
+            self.start_child_workflow_execution_initiated_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            350,
+            self.start_child_workflow_execution_failed_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            360,
+            self.child_workflow_execution_started_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            370,
+            self.child_workflow_execution_completed_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            380,
+            self.child_workflow_execution_failed_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            390,
+            self.child_workflow_execution_canceled_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            410,
+            self.child_workflow_execution_terminated_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            420,
+            self.signal_external_workflow_execution_initiated_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            430,
+            self.signal_external_workflow_execution_failed_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            440,
+            self.external_workflow_execution_signaled_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            450,
+            self.upsert_workflow_search_attributes_event_attributes
+                .as_ref(),
+        );
+        f.ostruct(
+            70,
+            self.workflow_execution_timed_out_event_attributes.as_ref(),
+        );
+        f.ostruct(110, self.decision_task_timed_out_event_attributes.as_ref());
+        f.ostruct(170, self.activity_task_timed_out_event_attributes.as_ref());
+        f.ostruct(
+            400,
+            self.child_workflow_execution_timed_out_event_attributes
+                .as_ref(),
+        );
         f.finish()
     }
 }
@@ -3446,10 +4895,8 @@ impl ToThrift for DomainNotActiveError {
             .push((1, Value::Bytes(self.message.as_bytes().to_vec())));
         f.fields
             .push((2, Value::Bytes(self.domain_name.as_bytes().to_vec())));
-        f.fields.push((
-            3,
-            Value::Bytes(self.current_cluster.as_bytes().to_vec()),
-        ));
+        f.fields
+            .push((3, Value::Bytes(self.current_cluster.as_bytes().to_vec())));
         f.fields
             .push((4, Value::Bytes(self.active_cluster.as_bytes().to_vec())));
         f.fields.push((
@@ -3501,10 +4948,8 @@ impl ToThrift for ClientVersionNotSupportedError {
             .push((1, Value::Bytes(self.feature_version.as_bytes().to_vec())));
         f.fields
             .push((2, Value::Bytes(self.client_impl.as_bytes().to_vec())));
-        f.fields.push((
-            3,
-            Value::Bytes(self.supported_versions.as_bytes().to_vec()),
-        ));
+        f.fields
+            .push((3, Value::Bytes(self.supported_versions.as_bytes().to_vec())));
         f.finish()
     }
 }
@@ -3577,7 +5022,6 @@ impl ToThrift for RetryTaskV2Error {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3617,11 +5061,276 @@ mod tests {
     }
 
     #[test]
+    fn query_task_completed_round_trip() {
+        round_trip(&RespondQueryTaskCompletedRequest {
+            task_token: b"token".to_vec(),
+            completed_type: Some(QueryTaskCompletedType::Completed),
+            query_result: b"answer".to_vec(),
+            ..Default::default()
+        });
+        round_trip(&RespondQueryTaskCompletedRequest {
+            task_token: b"token".to_vec(),
+            completed_type: Some(QueryTaskCompletedType::Failed),
+            error_message: "boom".to_string(),
+            worker_version_info: Some(WorkerVersionInfo {
+                impl_: "go".to_string(),
+                feature_version: "1.0".to_string(),
+            }),
+            ..Default::default()
+        });
+        round_trip(&RespondQueryTaskCompletedResponse {});
+    }
+
+    #[test]
+    fn task_list_discovery_round_trip() {
+        round_trip(&GetTaskListsByDomainRequest {
+            domain: "d".to_string(),
+        });
+        round_trip(&GetTaskListsByDomainResponse {
+            decision_task_list_map: Some(
+                [(
+                    "tl".to_string(),
+                    DescribeTaskListResponse {
+                        pollers: vec![PollerInfo {
+                            identity: "w".to_string(),
+                            last_access_time: Some(1),
+                            rate_per_second: 0.0,
+                        }],
+                        ..Default::default()
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            activity_task_list_map: None,
+        });
+        round_trip(&ListTaskListPartitionsRequest {
+            domain: "d".to_string(),
+            task_list: Some(TaskList {
+                name: "tl".to_string(),
+                ..Default::default()
+            }),
+        });
+        round_trip(&ListTaskListPartitionsResponse {
+            activity_task_list_partitions: vec![TaskListPartitionMetadata {
+                key: "tl".to_string(),
+                owner_host_name: "h".to_string(),
+            }],
+            decision_task_list_partitions: vec![TaskListPartitionMetadata {
+                key: "tl".to_string(),
+                owner_host_name: "h".to_string(),
+            }],
+        });
+    }
+
+    #[test]
+    fn async_start_round_trip() {
+        round_trip(&StartWorkflowExecutionAsyncRequest {
+            request: Some(StartWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_id: "w".to_string(),
+                ..Default::default()
+            }),
+        });
+        round_trip(&StartWorkflowExecutionAsyncResponse {});
+        round_trip(&SignalWithStartWorkflowExecutionAsyncRequest {
+            request: Some(SignalWithStartWorkflowExecutionRequest {
+                domain: "d".to_string(),
+                workflow_id: "w".to_string(),
+                signal_name: "s".to_string(),
+                ..Default::default()
+            }),
+        });
+        round_trip(&SignalWithStartWorkflowExecutionAsyncResponse {});
+    }
+
+    #[test]
+    fn schedule_round_trip() {
+        round_trip(&ScheduleSpec {
+            cron_expression: "0 * * * *".to_string(),
+            start_time_nano: Some(1),
+            jitter_in_seconds: Some(5),
+            ..Default::default()
+        });
+        round_trip(&SchedulePolicies {
+            overlap_policy: Some(ScheduleOverlapPolicy::SkipNew),
+            catch_up_policy: Some(ScheduleCatchUpPolicy::All),
+            pause_on_failure: true,
+            buffer_limit: 3,
+            ..Default::default()
+        });
+        round_trip(&CreateScheduleRequest {
+            domain: "d".to_string(),
+            schedule_id: "s".to_string(),
+            spec: Some(ScheduleSpec {
+                cron_expression: "* * * * *".to_string(),
+                ..Default::default()
+            }),
+            action: Some(ScheduleAction {
+                start_workflow: Some(ScheduleStartWorkflowAction {
+                    workflow_type: Some(WorkflowType {
+                        name: "wt".to_string(),
+                    }),
+                    ..Default::default()
+                }),
+            }),
+            ..Default::default()
+        });
+        round_trip(&BackfillScheduleRequest {
+            domain: "d".to_string(),
+            schedule_id: "s".to_string(),
+            start_time_nano: Some(1),
+            end_time_nano: Some(2),
+            overlap_policy: Some(ScheduleOverlapPolicy::Concurrent),
+            backfill_id: "bf".to_string(),
+        });
+        round_trip(&DescribeScheduleResponse {
+            spec: Some(ScheduleSpec {
+                cron_expression: "* * * * *".to_string(),
+                ..Default::default()
+            }),
+            info: Some(ScheduleInfo {
+                total_runs: 4,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    fn semaphore_round_trip() {
+        round_trip(&CreateSemaphoreRequest {
+            domain: "d".to_string(),
+            semaphore_name: "s".to_string(),
+            capacity: 8,
+            bucket_capacity: 2,
+        });
+        round_trip(&CreateSemaphoreResponse {
+            semaphore: Some(Semaphore {
+                semaphore_name: "s".to_string(),
+                capacity: 8,
+                bucket_capacity: 2,
+            }),
+        });
+    }
+
+    #[test]
+    fn archived_visibility_round_trip() {
+        round_trip(&ListArchivedWorkflowExecutionsRequest {
+            domain: "d".to_string(),
+            page_size: 50,
+            next_page_token: b"t".to_vec(),
+            query: "q".to_string(),
+        });
+        round_trip(&ListArchivedWorkflowExecutionsResponse {
+            executions: vec![],
+            next_page_token: vec![],
+        });
+    }
+
+    #[test]
+    fn failover_round_trip() {
+        round_trip(&FailoverDomainRequest {
+            domain_name: "d".to_string(),
+            domain_active_cluster_name: Some("c2".to_string()),
+            reason: Some("drill".to_string()),
+            failover_timeout_in_seconds: Some(60),
+            skip_destination_cluster_check: true,
+            ..Default::default()
+        });
+        round_trip(&FailoverDomainResponse {
+            domain_info: Some(DomainInfo {
+                name: "d".to_string(),
+                uuid: "u".to_string(),
+                ..Default::default()
+            }),
+            failover_version: 3,
+            is_global_domain: true,
+            ..Default::default()
+        });
+        round_trip(&ListFailoverHistoryRequest {
+            filters: Some(ListFailoverHistoryRequestFilters {
+                domain_id: "u".to_string(),
+            }),
+            pagination: Some(PaginationOptions {
+                page_size: Some(10),
+                next_page_token: b"1".to_vec(),
+            }),
+        });
+        round_trip(&ListFailoverHistoryResponse {
+            failover_events: vec![FailoverEvent {
+                id: Some("e".to_string()),
+                created_time: Some(7),
+                failover_type: Some(FailoverType::Force),
+                cluster_failovers: vec![ClusterFailover {
+                    from_cluster: Some(ActiveClusterInfo {
+                        active_cluster_name: "c1".to_string(),
+                        failover_version: 1,
+                    }),
+                    to_cluster: Some(ActiveClusterInfo {
+                        active_cluster_name: "c2".to_string(),
+                        failover_version: 2,
+                    }),
+                    ..Default::default()
+                }],
+            }],
+            next_page_token: b"2".to_vec(),
+        });
+    }
+
+    #[test]
+    fn refresh_and_diagnose_round_trip() {
+        round_trip(&RefreshWorkflowTasksRequest {
+            domain: "d".to_string(),
+            execution: Some(WorkflowExecution::new("w", "r")),
+        });
+        round_trip(&DiagnoseWorkflowExecutionRequest {
+            domain: "d".to_string(),
+            workflow_execution: Some(WorkflowExecution::new("w", "r")),
+            identity: "tester".to_string(),
+        });
+        round_trip(&DiagnoseWorkflowExecutionResponse {
+            domain: "cadence-system".to_string(),
+            diagnostic_workflow_execution: Some(WorkflowExecution::new("d-r", "run")),
+        });
+    }
+
+    #[test]
+    fn reset_round_trip() {
+        round_trip(&ResetWorkflowExecutionRequest {
+            domain: "d".to_string(),
+            workflow_execution: Some(WorkflowExecution::new("w", "r")),
+            reason: "test".to_string(),
+            decision_finish_event_id: 3,
+            request_id: "reset-1".to_string(),
+            skip_signal_reapply: true,
+        });
+        round_trip(&ResetWorkflowExecutionResponse {
+            run_id: "new-run".to_string(),
+        });
+    }
+
+    #[test]
+    fn restart_round_trip() {
+        round_trip(&RestartWorkflowExecutionRequest {
+            domain: "d".to_string(),
+            workflow_execution: Some(WorkflowExecution::new("w", "r")),
+            reason: "retry".to_string(),
+            identity: "tester".to_string(),
+        });
+        round_trip(&RestartWorkflowExecutionResponse {
+            run_id: "new-run".to_string(),
+        });
+    }
+
+    #[test]
     fn requests_round_trip() {
         round_trip(&StartWorkflowExecutionRequest {
             domain: "d".to_string(),
             workflow_id: "w".to_string(),
-            workflow_type: Some(WorkflowType { name: "wt".to_string() }),
+            workflow_type: Some(WorkflowType {
+                name: "wt".to_string(),
+            }),
             request_id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
             execution_start_to_close_timeout_seconds: Some(60),
             task_start_to_close_timeout_seconds: Some(10),
@@ -3637,9 +5346,14 @@ mod tests {
         });
         let attrs = ScheduleActivityTaskDecisionAttributes {
             activity_id: "activity-1".to_string(),
-            activity_type: Some(ActivityType { name: "hello".to_string() }),
+            activity_type: Some(ActivityType {
+                name: "hello".to_string(),
+            }),
             domain: "domain-1".to_string(),
-            task_list: Some(TaskList { name: "task-list-1".to_string(), ..Default::default() }),
+            task_list: Some(TaskList {
+                name: "task-list-1".to_string(),
+                ..Default::default()
+            }),
             input: b"input".to_vec(),
             schedule_to_close_timeout_seconds: Some(90),
             schedule_to_start_timeout_seconds: Some(30),
@@ -3650,7 +5364,10 @@ mod tests {
         let wire = attrs.to_thrift();
         assert!(matches!(wire.get(30), Some(Value::Struct(_))));
         assert!(matches!(wire.get(25), Some(Value::Bytes(_))));
-        assert_eq!(ScheduleActivityTaskDecisionAttributes::from_thrift(&wire).unwrap(), attrs);
+        assert_eq!(
+            ScheduleActivityTaskDecisionAttributes::from_thrift(&wire).unwrap(),
+            attrs
+        );
     }
 
     #[test]
@@ -3661,7 +5378,9 @@ mod tests {
             version: 5,
             workflow_execution_started_event_attributes: Some(
                 WorkflowExecutionStartedEventAttributes {
-                    workflow_type: Some(WorkflowType { name: "wt".to_string() }),
+                    workflow_type: Some(WorkflowType {
+                        name: "wt".to_string(),
+                    }),
                     identity: "id".to_string(),
                     request_id: "r".to_string(),
                     ..Default::default()
@@ -3676,7 +5395,10 @@ mod tests {
             ..Default::default()
         }
         .to_thrift();
-        assert_eq!(timestamp.opt_i64(20).unwrap(), Some(1_700_000_000_123_000_000));
+        assert_eq!(
+            timestamp.opt_i64(20).unwrap(),
+            Some(1_700_000_000_123_000_000)
+        );
     }
 
     #[test]
@@ -3698,5 +5420,331 @@ mod tests {
             failure_category: Some(FailureCategory::Poll),
             next_retry_interval_seconds: Some(3),
         });
+    }
+}
+
+// Visibility API wire field IDs from cadence-idl/thrift/shared.thrift.
+impl FromThrift for ListWorkflowExecutionsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            page_size: s.opt_i32(20)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(30)?,
+            query: s.req_string(40, "")?,
+        })
+    }
+}
+impl ToThrift for ListWorkflowExecutionsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.oi32(20, Some(self.page_size));
+        f.sbytes(30, &self.next_page_token);
+        f.sstr(40, &self.query);
+        f.finish()
+    }
+}
+impl FromThrift for ListWorkflowExecutionsResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            executions: s.opt_list(10)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(20)?,
+        })
+    }
+}
+impl ToThrift for ListWorkflowExecutionsResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.executions);
+        f.sbytes(20, &self.next_page_token);
+        f.finish()
+    }
+}
+impl FromThrift for CountWorkflowExecutionsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            query: s.req_string(20, "")?,
+        })
+    }
+}
+impl ToThrift for CountWorkflowExecutionsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.query);
+        f.finish()
+    }
+}
+impl FromThrift for CountWorkflowExecutionsResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            count: s.opt_i64(10)?.unwrap_or_default(),
+        })
+    }
+}
+impl ToThrift for CountWorkflowExecutionsResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(10, Some(self.count));
+        f.finish()
+    }
+}
+macro_rules! legacy_list_wire {
+    ($request:ty,$response:ty,$($status:ident)?)=>{
+        impl FromThrift for $request {
+            fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error> {Ok(Self {domain:s.req_string(10,"")?,maximum_page_size:s.opt_i32(20)?.unwrap_or_default(),next_page_token:s.bytes_or_empty(30)?,start_time_filter:s.opt_struct(40)?,execution_filter:s.opt_struct(50)?,type_filter:s.opt_struct(60)?,$($status:s.opt_enum(70)?,)?})}
+        }
+        impl ToThrift for $request {
+            fn to_thrift(&self)->Struct {let mut f=Fields::new();f.sstr(10,&self.domain);f.oi32(20,Some(self.maximum_page_size));f.sbytes(30,&self.next_page_token);f.ostruct(40,self.start_time_filter.as_ref());f.ostruct(50,self.execution_filter.as_ref());f.ostruct(60,self.type_filter.as_ref());$(f.oenum(70,self.$status);)? f.finish()}
+        }
+        impl FromThrift for $response {
+            fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error> {Ok(Self {executions:s.opt_list(10)?.unwrap_or_default(),next_page_token:s.bytes_or_empty(20)?})}
+        }
+        impl ToThrift for $response {
+            fn to_thrift(&self)->Struct {let mut f=Fields::new();f.olist(10,&self.executions);f.sbytes(20,&self.next_page_token);f.finish()}
+        }
+    }
+}
+legacy_list_wire!(
+    ListOpenWorkflowExecutionsRequest,
+    ListOpenWorkflowExecutionsResponse,
+);
+legacy_list_wire!(
+    ListClosedWorkflowExecutionsRequest,
+    ListClosedWorkflowExecutionsResponse,
+    status_filter
+);
+impl FromThrift for GetSearchAttributesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            keys: s.opt_map_str(10)?,
+        })
+    }
+}
+impl ToThrift for GetSearchAttributesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        if let Some(keys) = &self.keys {
+            f.fields.push((
+                10,
+                Value::Map(
+                    keys.iter()
+                        .map(|(k, v)| (Value::Bytes(k.as_bytes().to_vec()), v.to_value()))
+                        .collect(),
+                ),
+            ));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for WorkflowExecutionTimedOutEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            timeout_type: s.opt_enum(10)?,
+        })
+    }
+}
+impl ToThrift for WorkflowExecutionTimedOutEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oenum(10, self.timeout_type);
+        f.finish()
+    }
+}
+
+impl FromThrift for DecisionTaskTimedOutEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            scheduled_event_id: s.opt_i64(10)?.unwrap_or_default(),
+            started_event_id: s.opt_i64(20)?.unwrap_or_default(),
+            timeout_type: s.opt_enum(30)?,
+            base_run_id: s.req_string(40, "")?,
+            new_run_id: s.req_string(50, "")?,
+            fork_event_version: s.opt_i64(60)?.unwrap_or_default(),
+            reason: s.req_string(70, "")?,
+            cause: s.opt_enum(80)?,
+            request_id: s.req_string(90, "")?,
+        })
+    }
+}
+impl ToThrift for DecisionTaskTimedOutEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        if self.scheduled_event_id != 0 {
+            f.fields.push((10, Value::I64(self.scheduled_event_id)));
+        }
+        if self.started_event_id != 0 {
+            f.fields.push((20, Value::I64(self.started_event_id)));
+        }
+        f.oenum(30, self.timeout_type);
+        f.sstr(40, &self.base_run_id);
+        f.sstr(50, &self.new_run_id);
+        if self.fork_event_version != 0 {
+            f.fields.push((60, Value::I64(self.fork_event_version)));
+        }
+        f.sstr(70, &self.reason);
+        f.oenum(80, self.cause);
+        f.sstr(90, &self.request_id);
+        f.finish()
+    }
+}
+
+impl FromThrift for ActivityTaskTimedOutEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            details: s.bytes_or_empty(5)?,
+            scheduled_event_id: s.opt_i64(10)?.unwrap_or_default(),
+            started_event_id: s.opt_i64(20)?.unwrap_or_default(),
+            timeout_type: s.opt_enum(30)?,
+            last_failure_reason: s.opt_string(40)?,
+            last_failure_details: s.bytes_or_empty(50)?,
+            last_failure_options: s.opt_struct(60)?,
+        })
+    }
+}
+impl ToThrift for ActivityTaskTimedOutEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sbytes(5, &self.details);
+        if self.scheduled_event_id != 0 {
+            f.fields.push((10, Value::I64(self.scheduled_event_id)));
+        }
+        if self.started_event_id != 0 {
+            f.fields.push((20, Value::I64(self.started_event_id)));
+        }
+        f.oenum(30, self.timeout_type);
+        f.ostr(40, &self.last_failure_reason);
+        f.sbytes(50, &self.last_failure_details);
+        f.ostruct(60, self.last_failure_options.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for ChildWorkflowExecutionTimedOutEventAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            timeout_type: s.opt_enum(10)?,
+            domain: s.req_string(20, "")?,
+            workflow_execution: s.opt_struct(30)?,
+            workflow_type: s.opt_struct(40)?,
+            initiated_event_id: s.opt_i64(50)?.unwrap_or_default(),
+            started_event_id: s.opt_i64(60)?.unwrap_or_default(),
+        })
+    }
+}
+impl ToThrift for ChildWorkflowExecutionTimedOutEventAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oenum(10, self.timeout_type);
+        f.sstr(20, &self.domain);
+        f.ostruct(30, self.workflow_execution.as_ref());
+        f.ostruct(40, self.workflow_type.as_ref());
+        if self.initiated_event_id != 0 {
+            f.fields.push((50, Value::I64(self.initiated_event_id)));
+        }
+        if self.started_event_id != 0 {
+            f.fields.push((60, Value::I64(self.started_event_id)));
+        }
+        f.finish()
+    }
+}
+
+#[cfg(test)]
+mod timeout_wire_tests {
+    use super::*;
+
+    #[test]
+    fn timeout_attributes_preserve_pinned_thrift_fields_and_opaque_bytes() {
+        let activity = ActivityTaskTimedOutEventAttributes {
+            details: vec![0, 255, 128],
+            scheduled_event_id: 42,
+            started_event_id: 43,
+            timeout_type: Some(TimeoutType::Heartbeat),
+            last_failure_reason: Some("previous failure".into()),
+            last_failure_details: vec![255, 0],
+            last_failure_options: Some(FailureOptions {
+                failure_category: Some(FailureCategory::Fatal),
+                next_retry_interval_seconds: Some(7),
+            }),
+        };
+        let encoded = activity.to_thrift();
+        assert_eq!(encoded.bytes_or_empty(5).unwrap(), vec![0, 255, 128]);
+        assert_eq!(encoded.opt_i64(10).unwrap(), Some(42));
+        assert_eq!(
+            encoded.opt_enum::<TimeoutType>(30).unwrap(),
+            Some(TimeoutType::Heartbeat)
+        );
+        assert_eq!(
+            ActivityTaskTimedOutEventAttributes::from_thrift(&encoded).unwrap(),
+            activity
+        );
+        let decision = DecisionTaskTimedOutEventAttributes {
+            scheduled_event_id: 7,
+            started_event_id: 8,
+            timeout_type: Some(TimeoutType::StartToClose),
+            cause: Some(DecisionTaskTimedOutCause::Reset),
+            fork_event_version: -24,
+            request_id: "reset-request".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            DecisionTaskTimedOutEventAttributes::from_thrift(&decision.to_thrift()).unwrap(),
+            decision
+        );
+        let child = ChildWorkflowExecutionTimedOutEventAttributes {
+            timeout_type: Some(TimeoutType::StartToClose),
+            domain: "child-domain".into(),
+            workflow_execution: Some(WorkflowExecution::new("child", "run")),
+            workflow_type: Some(WorkflowType {
+                name: "child-type".into(),
+            }),
+            initiated_event_id: 12,
+            started_event_id: 13,
+        };
+        assert_eq!(
+            ChildWorkflowExecutionTimedOutEventAttributes::from_thrift(&child.to_thrift()).unwrap(),
+            child
+        );
+        let workflow = WorkflowExecutionTimedOutEventAttributes {
+            timeout_type: Some(TimeoutType::StartToClose),
+        };
+        assert_eq!(
+            WorkflowExecutionTimedOutEventAttributes::from_thrift(&workflow.to_thrift()).unwrap(),
+            workflow
+        );
+    }
+    #[test]
+    fn cancel_timer_failure_uses_original_thrift_history_field() {
+        let attrs = CancelTimerFailedEventAttributes {
+            timer_id: "missing".into(),
+            cause: "TIMER_ID_UNKNOWN".into(),
+            decision_task_completed_event_id: 4,
+            identity: "worker".into(),
+        };
+        let event = HistoryEvent {
+            event_id: 5,
+            event_type: Some(EventType::CancelTimerFailed),
+            cancel_timer_failed_event_attributes: Some(attrs.clone()),
+            ..Default::default()
+        };
+        let encoded = event.to_thrift();
+        assert_eq!(
+            encoded
+                .opt_struct::<CancelTimerFailedEventAttributes>(240)
+                .unwrap(),
+            Some(attrs)
+        );
+        assert_eq!(HistoryEvent::from_thrift(&encoded).unwrap(), event);
+    }
+    #[test]
+    fn initial_decision_attempt_zero_is_present_on_the_wire() {
+        let response = PollForDecisionTaskResponse {
+            attempt: 0,
+            started_event_id: 3,
+            ..Default::default()
+        };
+        assert_eq!(response.to_thrift().opt_i64(51).unwrap(), Some(0));
     }
 }

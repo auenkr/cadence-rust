@@ -6,9 +6,14 @@
 
 pub mod domains;
 pub mod executions;
+pub mod schedules;
+pub mod semaphores;
+pub mod visibility;
 
-pub use domains::{DomainRecord, InMemoryDomainStore};
+pub use domains::{DomainRecord, FailoverError, InMemoryDomainStore};
 pub use executions::{
-    ExecutionRecord, HistoryPageError, InMemoryExecutionStore, QueryError, StartError, TaskError,
-    WorkflowMutationError,
+    AsyncRequest, AsyncRequestKind, ExecutionRecord, HistoryPageError, InMemoryExecutionStore,
+    QueryError, ResetError, StartError, StoredPartitionConfig, TaskError, WorkflowMutationError,
 };
+pub use schedules::{ScheduleError, ScheduleRecord};
+pub use semaphores::{AcquireError, SemaphoreError, SemaphoreHold, SemaphoreMetadata};

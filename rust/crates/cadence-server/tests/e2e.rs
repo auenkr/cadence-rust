@@ -370,7 +370,7 @@ async fn worker_simulation_drives_workflow_to_completion() {
         .collect();
     assert_eq!(
         kinds,
-        vec!["0", "4", "5", "6", "9", "4", "10", "11", "5", "6", "1"]
+        vec!["0", "4", "5", "6", "9", "10", "11", "4", "5", "6", "1"]
     );
 }
 
@@ -479,6 +479,1268 @@ async fn query_flow_answers_through_worker() {
     worker.await.unwrap();
     assert_eq!(status, StatusCode::OK, "{resp}");
     assert!(resp.get("queryResult").is_some());
+}
+
+#[tokio::test]
+async fn query_task_completed_answers_direct_query() {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    let (status, started) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("123e4567-e89b-12d3-a456-426614174022"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let run_id = started["runId"].as_str().unwrap().to_string();
+
+    // Worker task: poll in background, answer via RespondQueryTaskCompleted
+    // with a minted QueryTaskToken, like a direct matching dispatch.
+    let worker_app = app.clone();
+    let run_id_worker = run_id.clone();
+    let worker = tokio::spawn(async move {
+        let (status, decision) = call(
+            worker_app.clone(),
+            Method::POST,
+            "/api/v1/tasks/poll-decision?timeoutSecs=10",
+            json!({"domain": "e2e-domain", "taskList": {"name": "e2e-tl"}, "identity": "worker"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let qid = decision["queryId"].as_str().unwrap().to_string();
+        // Decode the decision token to recover the domain UUID, then mint
+        // the query token the same way Go matching does: the buffered
+        // query ID becomes the token taskId.
+        let raw = decision["taskToken"].as_str().unwrap().to_string();
+        let decoded: serde_json::Value =
+            serde_json::from_slice(&B64.decode(raw.as_bytes()).unwrap()).unwrap();
+        let token = serde_json::json!({
+            "domainId": decoded["domainId"],
+            "workflowId": "e2e-wf",
+            "runId": run_id_worker,
+            "taskList": "e2e-tl",
+            "taskId": qid,
+        });
+        let token_b64 = B64.encode(serde_json::to_vec(&token).unwrap());
+        let (status, _) = call(
+            worker_app.clone(),
+            Method::POST,
+            "/api/v1/tasks/respond-query-completed",
+            json!({
+                "taskToken": token_b64,
+                "completedType": 0,
+                "queryResult": "NDI=",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        // Complete the decision itself so the workflow can proceed.
+        let (status, _) = call(
+            worker_app,
+            Method::POST,
+            "/api/v1/tasks/respond-decision-complete",
+            json!({
+                "taskToken": decision["taskToken"],
+                "identity": "worker",
+                "decisions": [],
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    });
+
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/query?timeoutSecs=10",
+        json!({
+            "domain": "e2e-domain",
+            "execution": {"workflowId": "e2e-wf", "runId": run_id},
+            "query": {"queryType": "state"},
+        }),
+    )
+    .await;
+    worker.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert!(resp.get("queryResult").is_some());
+}
+
+#[tokio::test]
+async fn task_list_discovery_reports_queues() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("123e4567-e89b-12d3-a456-426614174023"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, desc) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasklists/describe",
+        json!({"domain": "e2e-domain", "taskList": {"name": "e2e-tl"}, "includeTaskListStatus": true}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(desc["taskListStatus"]["backlogCountHint"].as_i64().unwrap() >= 1);
+
+    let (status, by_domain) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasklists/by-domain",
+        json!({"domain": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(by_domain["decisionTaskListMap"]["e2e-tl"].is_object());
+
+    let (status, parts) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasklists/partitions",
+        json!({"domain": "e2e-domain", "taskList": {"name": "e2e-tl"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parts["decisionTaskListPartitions"][0]["key"], "e2e-tl");
+    assert_eq!(parts["activityTaskListPartitions"][0]["key"], "e2e-tl");
+
+    // Unknown domains are 404; missing task lists are 400.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasklists/by-domain",
+        json!({"domain": "nope"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasklists/partitions",
+        json!({"domain": "e2e-domain", "taskList": {"name": ""}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn restart_workflow_starts_new_run() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    let (status, started) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("123e4567-e89b-12d3-a456-426614174024"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let run_id = started["runId"].as_str().unwrap().to_string();
+
+    let (status, restarted) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/restart",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+            "identity": "e2e-restart",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let new_run = restarted["runId"].as_str().unwrap().to_string();
+    assert_ne!(new_run, run_id);
+
+    // The old run was terminated; the new run has a pollable decision.
+    let (status, hist) = get(
+        app.clone(),
+        &format!("/api/v1/workflows/history?domain=e2e-domain&workflowId=e2e-wf&runId={run_id}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let kinds: Vec<i64> = hist["history"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["eventType"].as_i64().unwrap())
+        .collect();
+    assert!(kinds.contains(&28));
+
+    let (status, decision) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasks/poll-decision?timeoutSecs=1",
+        json!({"domain": "e2e-domain", "taskList": {"name": "e2e-tl"}, "identity": "w"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        decision["workflowExecution"]["runId"].as_str().unwrap(),
+        new_run
+    );
+}
+
+#[tokio::test]
+async fn async_start_is_consumed_into_a_run() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    // Drive the worker-role consumer directly: enqueue, drain, consume.
+    let store = cadence_persistence::InMemoryExecutionStore::new();
+    store.register_domain_name("async-domain");
+    store.enqueue_async_start(cadence_api::types::StartWorkflowExecutionRequest {
+        domain: "async-domain".to_string(),
+        workflow_id: "async-wf".to_string(),
+        workflow_type: Some(cadence_api::types::WorkflowType {
+            name: "async-type".to_string(),
+        }),
+        task_list: Some(cadence_api::types::TaskList {
+            name: "async-tl".to_string(),
+            ..Default::default()
+        }),
+        execution_start_to_close_timeout_seconds: Some(60),
+        task_start_to_close_timeout_seconds: Some(10),
+        request_id: "123e4567-e89b-12d3-a456-426614174025".to_string(),
+        ..Default::default()
+    });
+    for request in store.drain_async_requests() {
+        assert!(store.consume_async_request(&request));
+    }
+    assert!(store.poll_decision("async-domain", "async-tl", "w").is_some());
+
+    // The HTTP route validates and enqueues without starting synchronously.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start-async",
+        json!({"request": start_body("123e4567-e89b-12d3-a456-426614174026")}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start-async",
+        json!({"request": {"domain": "e2e-domain"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn reset_workflow_forks_at_decision_boundary() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    let (status, started) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("123e4567-e89b-12d3-a456-426614174027"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let run_id = started["runId"].as_str().unwrap().to_string();
+
+    // Start the first decision and signal, then complete it.
+    let (status, decision) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasks/poll-decision?timeoutSecs=1",
+        json!({"domain": "e2e-domain", "taskList": {"name": "e2e-tl"}, "identity": "w"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/signal",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+            "signalName": "ping",
+            "requestId": "123e4567-e89b-12d3-a456-426614174028",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasks/respond-decision-complete",
+        json!({"taskToken": decision["taskToken"], "identity": "w", "decisions": []}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Reset to the DecisionTaskStarted boundary (event 3).
+    let (status, reset) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/reset",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+            "reason": "e2e-reset",
+            "decisionFinishEventId": 3,
+            "requestId": "123e4567-e89b-12d3-a456-426614174029",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reset}");
+    let new_run = reset["runId"].as_str().unwrap().to_string();
+    assert_ne!(new_run, run_id);
+
+    // The reset run replays prefix + signal and schedules a decision.
+    let (status, hist) = get(
+        app.clone(),
+        &format!("/api/v1/workflows/history?domain=e2e-domain&workflowId=e2e-wf&runId={new_run}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(hist["history"]["events"].as_array().unwrap().len(), 5);
+
+    // Invalid reset points are rejected.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/reset",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": new_run},
+            "decisionFinishEventId": 1,
+            "requestId": "123e4567-e89b-12d3-a456-426614174030",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn refresh_tasks_and_diagnose_behave() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    let (status, started) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("123e4567-e89b-12d3-a456-426614174031"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let run_id = started["runId"].as_str().unwrap().to_string();
+
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/refresh-tasks",
+        json!({
+            "domain": "e2e-domain",
+            "execution": {"workflowId": "e2e-wf", "runId": run_id},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Still exactly one pollable decision: refresh does not duplicate.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasks/poll-decision?timeoutSecs=1",
+        json!({"domain": "e2e-domain", "taskList": {"name": "e2e-tl"}, "identity": "w"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/tasks/poll-decision?timeoutSecs=1",
+        json!({"domain": "e2e-domain", "taskList": {"name": "e2e-tl"}, "identity": "w"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Unknown executions are 404.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/refresh-tasks",
+        json!({
+            "domain": "e2e-domain",
+            "execution": {"workflowId": "missing", "runId": "123e4567-e89b-12d3-a456-426614174099"},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Diagnose without the system domain is 404, like Go without system domains.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/diagnose",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+            "identity": "e2e",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // With the system domain registered, diagnose starts the starter workflow.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/register",
+        json!({"name": "cadence-system", "workflowExecutionRetentionPeriodInDays": 3}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/diagnose",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+            "identity": "e2e",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(resp["domain"], "cadence-system");
+    assert!(resp["diagnosticWorkflowExecution"]["runId"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty()));
+    // Re-diagnosing reuses the running starter workflow.
+    let (status, resp2) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/diagnose",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+            "identity": "e2e",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        resp["diagnosticWorkflowExecution"]["runId"],
+        resp2["diagnosticWorkflowExecution"]["runId"]
+    );
+}
+
+#[tokio::test]
+async fn failover_moves_global_domain_and_lists_history() {
+    let app = router(AppState::default());
+    // Global domain starting active on a remote cluster.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/register",
+        json!({
+            "name": "global-domain",
+            "workflowExecutionRetentionPeriodInDays": 7,
+            "isGlobalDomain": true,
+            "clusters": [{"clusterName": "remote"}, {"clusterName": "cluster0"}],
+            "activeClusterName": "remote",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Local-domain-shaped requests are rejected; use a second global domain.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/failover",
+        json!({"domainName": "e2e-domain", "domainActiveClusterName": "cluster0"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Missing target is 400.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/failover",
+        json!({"domainName": "global-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Fail over to this host's cluster.
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/failover",
+        json!({"domainName": "global-domain", "domainActiveClusterName": "cluster0"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(resp["replicationConfiguration"]["activeClusterName"], "cluster0");
+    assert_eq!(resp["failoverVersion"], 1);
+
+    // History lists the failover event; paging cursors work.
+    let domain_id = resp["domainInfo"]["uuid"].as_str().unwrap().to_string();
+    let (status, hist) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/failover-history",
+        json!({"filters": {"domainId": domain_id}, "pagination": {"pageSize": 1}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(hist["failoverEvents"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        hist["failoverEvents"][0]["clusterFailovers"][0]["toCluster"]["activeClusterName"],
+        "cluster0"
+    );
+    let token = hist["nextPageToken"].as_str().unwrap_or("");
+    assert!(token.is_empty());
+    let (status, hist2) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/failover-history",
+        json!({"filters": {"domainId": domain_id}, "pagination": {"pageSize": 10}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(hist2["failoverEvents"].as_array().unwrap().len(), 1);
+
+    // Missing filter is 400.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/domains/failover-history",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn archived_visibility_reports_unconfigured() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    // Missing domain is 400.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/archived",
+        json!({"pageSize": 10}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // Without an archival backend the exact Go gating error is returned.
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/archived",
+        json!({"domain": "e2e-domain", "pageSize": 10}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        resp["message"].as_str().unwrap(),
+        "Cluster is not configured for visibility archival"
+    );
+}
+
+fn schedule_app() -> axum::Router {
+    router(AppState {
+        scheduler_enabled: true,
+        ..Default::default()
+    })
+}
+
+fn schedule_body(id: &str) -> serde_json::Value {
+    json!({
+        "domain": "e2e-domain",
+        "scheduleId": id,
+        "spec": {"cronExpression": "* * * * *"},
+        "action": {"startWorkflow": {
+            "workflowType": {"name": "sched-type"},
+            "taskList": {"name": "sched-tl"},
+            "executionStartToCloseTimeoutSeconds": 60,
+            "taskStartToCloseTimeoutSeconds": 10,
+        }},
+    })
+}
+
+#[tokio::test]
+async fn schedule_crud_and_firing_flow() {
+    let app = schedule_app();
+    setup_domain(app.clone()).await;
+    // Disabled schedulers are rejected with Go's exact message.
+    let plain = router(AppState::default());
+    setup_domain(plain.clone()).await;
+    let (status, resp) = call(
+        plain.clone(),
+        Method::POST,
+        "/api/v1/schedules/create",
+        schedule_body("sched-1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(resp["message"].as_str().unwrap().contains("worker.enableScheduler"));
+
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/create",
+        schedule_body("sched-1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    // Duplicate creation is rejected.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/create",
+        schedule_body("sched-1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // Invalid crons are rejected.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/create",
+        json!({
+            "domain": "e2e-domain",
+            "scheduleId": "bad",
+            "spec": {"cronExpression": "nonsense"},
+            "action": {"startWorkflow": {
+                "workflowType": {"name": "t"},
+                "taskList": {"name": "tl"},
+                "executionStartToCloseTimeoutSeconds": 60,
+            }},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/describe",
+        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resp["spec"]["cronExpression"], "* * * * *");
+
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/list",
+        json!({"domain": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resp["schedules"].as_array().unwrap().len(), 1);
+
+    // Pause stops firing; unpause resumes.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/pause",
+        json!({"domain": "e2e-domain", "scheduleId": "sched-1", "reason": "hold"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/unpause",
+        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Update replaces the cron expression.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/update",
+        json!({
+            "domain": "e2e-domain",
+            "scheduleId": "sched-1",
+            "spec": {"cronExpression": "0 * * * *"},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/describe",
+        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resp["spec"]["cronExpression"], "0 * * * *");
+
+    // Delete is idempotent.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/delete",
+        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/delete",
+        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+fn semaphore_app() -> axum::Router {
+    router(AppState {
+        semaphore_enabled: true,
+        ..Default::default()
+    })
+}
+
+#[tokio::test]
+async fn semaphore_create_and_gate_flow() {
+    let app = semaphore_app();
+    setup_domain(app.clone()).await;
+    // Disabled hosts are rejected with Go's exact message.
+    let plain = router(AppState::default());
+    setup_domain(plain.clone()).await;
+    let (status, resp) = call(
+        plain.clone(),
+        Method::POST,
+        "/api/v1/semaphores/create",
+        json!({"domain": "e2e-domain", "semaphoreName": "s", "capacity": 2}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(resp["message"].as_str().unwrap().contains("system.enableDistributedSemaphore"));
+
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/semaphores/create",
+        json!({"domain": "e2e-domain", "semaphoreName": "s", "capacity": 2, "bucketCapacity": 2}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(resp["semaphore"]["bucketCapacity"], 2);
+    // Duplicates are rejected.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/semaphores/create",
+        json!({"domain": "e2e-domain", "semaphoreName": "s", "capacity": 2}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // Invalid capacities are rejected.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/semaphores/create",
+        json!({"domain": "e2e-domain", "semaphoreName": "s2", "capacity": 0}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn admin_cluster_config_and_workflow_maintenance() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+
+    let (status, cluster) = get(app.clone(), "/api/v1/admin/cluster/describe").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cluster["membershipInfo"]["rings"].as_array().unwrap().len(), 4);
+    assert!(!cluster["membershipInfo"]["currentHost"]["Identity"]
+        .as_str()
+        .unwrap()
+        .is_empty());
+
+    // Dynamic config round-trips through both namespaces independently.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dynamic-config/update",
+        json!({"configName": "test.key", "configValues": [{"value": {"Data": "bnVsbA==", "EncodingType": 0}}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, got) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dynamic-config/get",
+        json!({"configName": "test.key"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(got["value"].is_object());
+    let (status, listed) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dynamic-config/list",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["entries"].as_array().unwrap().len(), 1);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dynamic-config/restore",
+        json!({"configName": "test.key"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dynamic-config/get",
+        json!({"configName": "test.key"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Custom search attributes: system keys rejected, customs accepted.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/search-attributes/add",
+        json!({"searchAttribute": {"DomainID": 1}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/search-attributes/add",
+        json!({"searchAttribute": {"MyField": 1}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Start a workflow, refresh it via admin, then delete it.
+    let (status, started) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("123e4567-e89b-12d3-a456-426614174032"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let run_id = started["runId"].as_str().unwrap().to_string();
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/workflows/refresh-tasks",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, deleted) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/workflows/delete",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(deleted["historyDeleted"], true);
+    assert_eq!(deleted["executionsDeleted"], true);
+    assert_eq!(deleted["visibilityDeleted"], true);
+    // Gone from history now.
+    let (status, _) = get(
+        app.clone(),
+        &format!("/api/v1/workflows/history?domain=e2e-domain&workflowId=e2e-wf&runId={run_id}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn admin_isolation_and_async_config_flow() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+
+    // Global isolation groups round-trip.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/isolation-groups/global/update",
+        json!({"isolationGroups": {"isolationGroups": [{"name": "a", "state": 1}]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, groups) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/isolation-groups/global/get",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(groups["isolationGroups"]["isolationGroups"][0]["name"], "a");
+
+    // Domain isolation groups require the domain.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/isolation-groups/domain/get",
+        json!({"domain": "missing"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/isolation-groups/domain/update",
+        json!({
+            "domain": "e2e-domain",
+            "isolationGroups": {"isolationGroups": [{"name": "b", "state": 2}]},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, groups) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/isolation-groups/domain/get",
+        json!({"domain": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(groups["isolationGroups"]["isolationGroups"][0]["name"], "b");
+
+    // Async workflow configuration round-trips per domain.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/async-workflow-config/update",
+        json!({
+            "domain": "e2e-domain",
+            "configuration": {"enabled": true, "predefinedQueueName": "q"},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, cfg) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/async-workflow-config/get",
+        json!({"domain": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cfg["configuration"]["enabled"], true);
+    assert_eq!(cfg["configuration"]["predefinedQueueName"], "q");
+}
+
+#[tokio::test]
+async fn admin_shard_queue_history_and_maintain_flow() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+
+    let (status, host) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/history-host/describe",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(host["numberOfShards"], 4);
+    assert_eq!(host["shardIds"].as_array().unwrap().len(), 4);
+    assert_eq!(host["shardControllerStatus"], "running");
+
+    let (status, dist) = get(app.clone(), "/api/v1/admin/shards/describe-distribution").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dist["numberOfShards"], 4);
+
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/shards/close",
+        json!({"shardID": 1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/shards/close",
+        json!({"shardID": 99}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, queue) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/queues/describe",
+        json!({"shardID": 0, "type": 1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(queue["processingQueueStates"].as_array().unwrap().len(), 5);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/tasks/remove",
+        json!({"shardID": 0, "type": 2, "taskID": 7}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/queues/reset",
+        json!({"shardID": 0, "type": 3}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Start a workflow, read its raw history, describe it as admin, and
+    // maintain it (healthy: nothing deleted).
+    let (status, started) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("123e4567-e89b-12d3-a456-426614174033"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let run_id = started["runId"].as_str().unwrap().to_string();
+    let (status, raw) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/workflows/raw-history",
+        json!({
+            "domain": "e2e-domain",
+            "execution": {"workflowId": "e2e-wf", "runId": run_id},
+            "maximumPageSize": 10,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(raw["historyBatches"].as_array().unwrap().len(), 1);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/workflows/raw-history",
+        json!({
+            "domain": "e2e-domain",
+            "execution": {"workflowId": "e2e-wf", "runId": run_id},
+            "maximumPageSize": 0,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, desc) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/workflows/describe",
+        json!({
+            "domain": "e2e-domain",
+            "execution": {"workflowId": "e2e-wf", "runId": run_id},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(desc["shardId"], 0);
+    assert!(!desc["mutableStateInDatabase"].as_str().unwrap().is_empty());
+
+    let (status, maintained) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/workflows/maintain-corrupt",
+        json!({
+            "domain": "e2e-domain",
+            "execution": {"workflowId": "e2e-wf", "runId": run_id},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(maintained["historyDeleted"], false);
+}
+
+#[tokio::test]
+async fn admin_reapply_replication_dlq_and_cross_cluster() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+    let (status, started) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/workflows/start",
+        start_body("123e4567-e89b-12d3-a456-426614174034"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let run_id = started["runId"].as_str().unwrap().to_string();
+
+    // Reapply a signal batch to the open run.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/workflows/reapply-events",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+            "events": {"Data": "bnVsbA=="},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Missing events blob hits Go's WorkflowID quirk.
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/workflows/reapply-events",
+        json!({
+            "domain": "e2e-domain",
+            "workflowExecution": {"workflowId": "e2e-wf", "runId": run_id},
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(resp["message"].as_str().unwrap().contains("WorkflowID"));
+
+    // Replication fetches are empty; domain replication is not enabled.
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/replication/messages",
+        json!({"clusterName": "cluster0"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/replication/domain-messages",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    // DLQ surface: counts are zero, reads are empty, type is required.
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dlq/count",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resp["domain"], 0);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dlq/read",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dlq/read",
+        json!({"type": 1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dlq/purge",
+        json!({"type": 2}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/dlq/merge",
+        json!({"type": 1, "maximumPageSize": 10}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+
+    // Resend to self succeeds; unknown remotes are rejected.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/replication/resend",
+        json!({
+            "domainID": "e2e-domain",
+            "workflowID": "e2e-wf",
+            "runID": run_id,
+            "remoteCluster": "cluster0",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/replication/resend",
+        json!({
+            "domainID": "e2e-domain",
+            "workflowID": "e2e-wf",
+            "runID": run_id,
+            "remoteCluster": "nowhere",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Cross-cluster surface is empty but validated.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/cross-cluster/tasks",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, resp) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/cross-cluster/tasks",
+        json!({"targetCluster": "cluster0"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/cross-cluster/tasks-completed",
+        json!({"targetCluster": "cluster0"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

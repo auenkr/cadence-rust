@@ -38,10 +38,13 @@ impl Struct {
     pub fn opt_string(&self, id: i16) -> Result<Option<String>> {
         match self.get(id) {
             None => Ok(None),
-            Some(Value::Bytes(b)) => Ok(Some(String::from_utf8(b.clone()).map_err(
-                |e| Error::Invalid(format!("field {id}: {e}")),
-            )?)),
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected string, got {v:?}"))),
+            Some(Value::Bytes(b)) => Ok(Some(
+                String::from_utf8(b.clone())
+                    .map_err(|e| Error::Invalid(format!("field {id}: {e}")))?,
+            )),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected string, got {v:?}"
+            ))),
         }
     }
 
@@ -53,7 +56,9 @@ impl Struct {
         match self.get(id) {
             None => Ok(None),
             Some(Value::Bytes(b)) => Ok(Some(b.clone())),
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected binary, got {v:?}"))),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected binary, got {v:?}"
+            ))),
         }
     }
 
@@ -65,7 +70,9 @@ impl Struct {
         match self.get(id) {
             None => Ok(None),
             Some(Value::Bool(b)) => Ok(Some(*b)),
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected bool, got {v:?}"))),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected bool, got {v:?}"
+            ))),
         }
     }
 
@@ -79,7 +86,9 @@ impl Struct {
             Some(Value::I32(v)) => Ok(Some(*v)),
             Some(Value::I16(v)) => Ok(Some(i32::from(*v))),
             Some(Value::I8(v)) => Ok(Some(i32::from(*v))),
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected i32, got {v:?}"))),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected i32, got {v:?}"
+            ))),
         }
     }
 
@@ -89,7 +98,9 @@ impl Struct {
             Some(Value::I64(v)) => Ok(Some(*v)),
             Some(Value::I32(v)) => Ok(Some(i64::from(*v))),
             Some(Value::I16(v)) => Ok(Some(i64::from(*v))),
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected i64, got {v:?}"))),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected i64, got {v:?}"
+            ))),
         }
     }
 
@@ -101,7 +112,9 @@ impl Struct {
         match self.get(id) {
             None => Ok(None),
             Some(Value::F64(v)) => Ok(Some(*v)),
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected double, got {v:?}"))),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected double, got {v:?}"
+            ))),
         }
     }
 
@@ -111,10 +124,14 @@ impl Struct {
     {
         match self.get(id) {
             None => Ok(None),
-            Some(Value::I32(v)) => Ok(Some(E::from_i32(*v).ok_or_else(|| {
-                Error::Invalid(format!("field {id}: unknown enum value {v}"))
-            })?)),
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected enum, got {v:?}"))),
+            Some(Value::I32(v)) => {
+                Ok(Some(E::from_i32(*v).ok_or_else(|| {
+                    Error::Invalid(format!("field {id}: unknown enum value {v}"))
+                })?))
+            }
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected enum, got {v:?}"
+            ))),
         }
     }
 
@@ -125,7 +142,9 @@ impl Struct {
         match self.get(id) {
             None => Ok(None),
             Some(Value::Struct(s)) => Ok(Some(T::from_thrift(s)?)),
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected struct, got {v:?}"))),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected struct, got {v:?}"
+            ))),
         }
     }
 
@@ -135,10 +154,14 @@ impl Struct {
     {
         match self.get(id) {
             None => Ok(None),
-            Some(Value::List(items)) => {
-                items.iter().map(T::from_value).collect::<Result<Vec<_>>>().map(Some)
-            }
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected list, got {v:?}"))),
+            Some(Value::List(items)) => items
+                .iter()
+                .map(T::from_value)
+                .collect::<Result<Vec<_>>>()
+                .map(Some),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected list, got {v:?}"
+            ))),
         }
     }
 
@@ -152,9 +175,8 @@ impl Struct {
                 let mut map = std::collections::HashMap::with_capacity(items.len());
                 for (k, v) in items {
                     let key = match k {
-                        Value::Bytes(b) => String::from_utf8(b.clone()).map_err(|e| {
-                            Error::Invalid(format!("field {id}: {e}"))
-                        })?,
+                        Value::Bytes(b) => String::from_utf8(b.clone())
+                            .map_err(|e| Error::Invalid(format!("field {id}: {e}")))?,
                         _ => {
                             return Err(Error::Invalid(format!(
                                 "field {id}: expected string map key, got {k:?}"
@@ -165,7 +187,9 @@ impl Struct {
                 }
                 Ok(Some(map))
             }
-            Some(v) => Err(Error::Invalid(format!("field {id}: expected map, got {v:?}"))),
+            Some(v) => Err(Error::Invalid(format!(
+                "field {id}: expected map, got {v:?}"
+            ))),
         }
     }
 }
@@ -320,19 +344,18 @@ impl Fields {
         }
     }
 
-    pub fn omap_str_bytes(&mut self, id: i16, v: &Option<std::collections::HashMap<String, Vec<u8>>>) {
+    pub fn omap_str_bytes(
+        &mut self,
+        id: i16,
+        v: &Option<std::collections::HashMap<String, Vec<u8>>>,
+    ) {
         if let Some(m) = v {
             if m.is_empty() {
                 return;
             }
             let mut items: Vec<(Value, Value)> = m
                 .iter()
-                .map(|(k, b)| {
-                    (
-                        Value::Bytes(k.as_bytes().to_vec()),
-                        Value::Bytes(b.clone()),
-                    )
-                })
+                .map(|(k, b)| (Value::Bytes(k.as_bytes().to_vec()), Value::Bytes(b.clone())))
                 .collect();
             items.sort_by(|a, b| match (a, b) {
                 ((Value::Bytes(x), _), (Value::Bytes(y), _)) => x.cmp(y),
@@ -342,11 +365,7 @@ impl Fields {
         }
     }
 
-    pub fn omap_str_str(
-        &mut self,
-        id: i16,
-        v: &Option<std::collections::HashMap<String, String>>,
-    ) {
+    pub fn omap_str_str(&mut self, id: i16, v: &Option<std::collections::HashMap<String, String>>) {
         if let Some(m) = v {
             if m.is_empty() {
                 return;
@@ -368,11 +387,8 @@ impl Fields {
         }
     }
 
-    pub fn omap_str_struct<T>(
-        &mut self,
-        id: i16,
-        v: &Option<std::collections::HashMap<String, T>>,
-    ) where
+    pub fn omap_str_struct<T>(&mut self, id: i16, v: &Option<std::collections::HashMap<String, T>>)
+    where
         T: ToThrift,
     {
         if let Some(m) = v {
@@ -398,7 +414,9 @@ impl Fields {
 
     #[must_use]
     pub fn finish(self) -> Struct {
-        Struct { fields: self.fields }
+        Struct {
+            fields: self.fields,
+        }
     }
 }
 
@@ -574,7 +592,10 @@ mod tests {
         write_value(&mut w, &Value::Map(vec![]));
         let bytes = w.into_bytes();
         let mut r = Reader::new(&bytes);
-        assert_eq!(read_value(&mut r, TType::List).unwrap(), Value::List(vec![]));
+        assert_eq!(
+            read_value(&mut r, TType::List).unwrap(),
+            Value::List(vec![])
+        );
         assert_eq!(read_value(&mut r, TType::Map).unwrap(), Value::Map(vec![]));
     }
 }
