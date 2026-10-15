@@ -15,6 +15,7 @@ import time
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--artifacts-dir', type=Path)
+parser.add_argument('--matching-delivery', action='store_true', help='run Rust durable queue delivery against original Go History')
 parser.add_argument('--binary', type=Path, help='use an already built Go server')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
@@ -24,7 +25,7 @@ print(f'Go baseline artifacts: {work}', flush=True)
 binary = args.binary.resolve() if args.binary else work / 'cadence-server'
 if not args.binary:
     with (work / 'build.log').open('w') as output:
-        subprocess.run(['go', 'build', '-p', '1', '-o', str(binary), '.'],
+        subprocess.run(['go', 'build', '-p', '1', '-ldflags=-s -w', '-o', str(binary), '.'],
                        cwd=root / 'go/cmd/server', stdout=output, stderr=subprocess.STDOUT,
                        check=True, timeout=1200)
 config = work / 'config'
@@ -75,11 +76,15 @@ with (work / 'server.log').open('w') as log:
                     raise RuntimeError('Go baseline startup timed out')
                 time.sleep(0.1)
         with (work / 'probe.log').open('w') as output:
-            result = subprocess.run(['node', str(root / 'tests/service-workflow-compat.cjs'),
-                f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}'],
-                cwd=root, stdout=output, stderr=subprocess.STDOUT, timeout=120)
+            if args.matching_delivery:
+                probe = ['node', str(root / 'tests/matching-history-compat.cjs'),
+                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}']
+            else:
+                probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
+                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
+            result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT, timeout=600 if args.matching_delivery else 120)
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
-            'topology': 'all-Go', 'serverCommand': command}, indent=2) + '\n')
+            'topology': 'Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go', 'serverCommand': command}, indent=2) + '\n')
         if result.returncode:
             raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
     finally:
@@ -89,4 +94,4 @@ with (work / 'server.log').open('w') as log:
         except subprocess.TimeoutExpired:
             server.kill()
             server.wait(timeout=10)
-print(f'All-Go baseline passed: {work / "results.json"}', flush=True)
+print(f'Service baseline passed: {work / "results.json"}', flush=True)

@@ -1476,3 +1476,41 @@ pass (284 tests); committed two checkpoints and pushed.
 - Source ledger now has 25 partial and 2275 review-required Go files, none complete.
 - Continuing Matching queue writer/reader next. A new matching_queue.rs draft is
   not exported yet and was not compiled by this checkpoint. Preserve this boundary.
+
+## 2026-10-15: durable Matching queue and actual Go History delivery
+
+- DurableTaskQueue ports range allocation, read/ack recovery, bounded scan rules,
+  concurrent claims, expiry and rewrite-before-ack. Six focused tests + actual Go
+  reader/expiry fixtures pass. Fenced rewrite preserves original task in storage.
+- MatchingHistoryClient sends real History RPCs with YARPC headers, per-call
+  timeout, stable request UUID across Go-policy retries, typed application error
+  classification and Go-compatible matching responses/task tokens. Three focused
+  metadata/retry/cancellation tests pass; cargo check succeeds.
+- Live original-Go Frontend/History with Rust durable queue/client PASSED:
+  decisions -> activity/header -> heartbeat -> completion -> 11-event history.
+  Rust process reopens its queue for each delivery, and Go frontend accepts Rust
+  tokens. Evidence /tmp/cadence-matching-go-history2/results.json, probe.log and
+  outer exit 0. Harness retries only the known Go new-domain provisioning cache
+  race using the same StartWorkflow request ID. Servers cleaned up.
+- This is a boundary test, NOT replacement of the Matching listener. Independent
+  queue controller, RPC wiring, cancellation ownership, routing/membership,
+  query/poller/config and sync/passive/distributed paths remain incomplete.
+- Combined runner now includes original-Go delivery as a final separate stage,
+  after no-Go standalone Rust validation and SDK checks. Full regression runs
+  in cadence-rust:matching-delivery-full; record final results once it completes.
+
+## Verified delivery checkpoint (2026-10-15)
+
+All 21 compatibility stages passed using the unchanged original Go server:
+`/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-dispatch-verified/results.json`
+(outer exit 0). This includes SQLite/queue Go differential fixtures, strict
+workspace clippy, SDK checks, and an 11-event workflow with Rust queue delivery
+through actual Go History and completion through Go Frontend. Final cancellation
+worker checks passed: 7 focused tests and strict workspace all-target clippy
+(`/tmp/cadence-matching-dispatch-last-check.exit` = 0).
+
+The listener still uses the embedded engine. Next: independent Matching queue
+registry and RPC integration, then route Go Frontend/History to Rust Matching.
+Queries, forwarding, ownership, domain lifecycle, throttling, semaphores, internal
+transport and production membership remain. Matching is NOT complete.
+

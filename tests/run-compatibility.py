@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build and verify the Rust server with original Go code, IDLs and Go SDK.
 
-All server/client processes are local. No Go Cadence server is started.
+All processes are local. Standalone Rust checks run without Go services; a separate
+final boundary probe boots original Go roles with Rust queue/History delivery.
 Run long checks in tmux session cadence-rust, per the repository instructions.
 """
 import argparse
@@ -24,6 +25,7 @@ def main():
     os.environ.setdefault("CARGO_BUILD_JOBS", "1")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts-dir", type=Path)
+    parser.add_argument("--go-server-bin", type=Path, help="reuse an original Go server build for the final delivery probe")
     parser.add_argument("--skip-rust-checks", action="store_true",
                         help="skip workspace tests/clippy; still build and run compatibility checks")
     args = parser.parse_args()
@@ -56,6 +58,7 @@ def main():
         run("workspace-tests", ["cargo", "test", "--manifest-path", manifest, "--workspace"])
         run("workspace-clippy", ["cargo", "clippy", "--manifest-path", manifest,
                                  "--workspace", "--all-targets", "--", "-D", "warnings"])
+    run("matching-queue-differential", [sys.executable, str(root / "tests/run-matching-queue-compat.py")])
     run("matching-storage-differential", [sys.executable, str(root / "tests/run-matching-storage-compat.py")])
     run("matching-differential", [sys.executable, str(root / "tests/run-matching-compat.py")])
     run("scheduler-differential", [sys.executable, str(root / "tests/run-scheduler-compat.py")])
@@ -160,6 +163,11 @@ def main():
             except subprocess.TimeoutExpired:
                 server.kill()
                 server.wait()
+    go_probe = [sys.executable, str(root / "tests/run-go-service-baseline.py"),
+        "--matching-delivery", "--artifacts-dir", str(artifacts / "go-service-delivery")]
+    if args.go_server_bin:
+        go_probe += ["--binary", str(args.go_server_bin.resolve())]
+    run("go-services-matching-delivery", go_probe, timeout=2400)
     print(f"All compatibility checks passed. Results: {artifacts / 'results.json'}", flush=True)
 
 

@@ -1,10 +1,37 @@
 # Current resume checkpoint (2026-10-15)
 
+## Verified delivery checkpoint (2026-10-15)
+
+All 21 compatibility stages passed using the unchanged original Go server:
+`/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-dispatch-verified/results.json`
+(outer exit 0). This includes SQLite/queue Go differential fixtures, strict
+workspace clippy, SDK checks, and an 11-event workflow with Rust queue delivery
+through actual Go History and completion through Go Frontend. Final cancellation
+worker checks passed: 7 focused tests and strict workspace all-target clippy
+(`/tmp/cadence-matching-dispatch-last-check.exit` = 0).
+
+The listener still uses the embedded engine. Next: independent Matching queue
+registry and RPC integration, then route Go Frontend/History to Rust Matching.
+Queries, forwarding, ownership, domain lifecycle, throttling, semaphores, internal
+transport and production membership remain. Matching is NOT complete.
+
+
 Follow root AGENTS.md. The user explicitly requests continuing until the whole
 Go implementation is migrated, with drop-in compatibility and compatibility
 tests. The active goal is incomplete. Do not equate RPC adapter coverage with
 behavioral compatibility. Keep working autonomously; use tmux cadence-rust for
 long processes. Save progress, commit, and push after compaction.
+
+## Current queue / History delivery continuation
+
+Read matching-delivery-next.md first. Durable SQLite checkpoint 90e14cfac is
+pushed and fully verified. Queue core (6 focused tests + actual-Go reader/expiry
+fixtures) and History client (3 focused retry/metadata tests) now pass. They are
+not connected to the Matching listener. Live original-Go History delivery probe
+PASSED (/tmp/cadence-matching-go-history2/results.json, outer exit 0): Rust queue
+and History client drove an 11-event workflow completed through Go frontend.
+This does NOT replace the Go Matching listener. Full regression runs in
+cadence-rust:matching-delivery-full; this queue/client work is still uncommitted.
 
 ## Active durable Matching storage work
 

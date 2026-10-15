@@ -27,3 +27,4 @@ pub use semaphores::{AcquireError, SemaphoreError, SemaphoreHold, SemaphoreMetad
 
 pub mod matching_blob;
 pub mod matching_sqlite;
+pub mod matching_queue;

@@ -1,0 +1,52 @@
+[
+  {
+    "now": 100,
+    "expiry": -6795364578871345152,
+    "expired": false
+  },
+  {
+    "now": 100,
+    "expiry": -1,
+    "expired": false
+  },
+  {
+    "now": 100,
+    "expiry": 0,
+    "expired": false
+  },
+  {
+    "now": 100,
+    "expiry": 1,
+    "expired": true
+  },
+  {
+    "now": 100,
+    "expiry": 99,
+    "expired": true
+  },
+  {
+    "now": 100,
+    "expiry": 100,
+    "expired": false
+  },
+  {
+    "now": 100,
+    "expiry": 101,
+    "expired": false
+  },
+  {
+    "now": 0,
+    "expiry": 1,
+    "expired": false
+  },
+  {
+    "now": -1,
+    "expiry": 1,
+    "expired": false
+  },
+  {
+    "now": 9223372036854775807,
+    "expiry": 9223372036854775807,
+    "expired": false
+  }
+]

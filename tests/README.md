@@ -139,7 +139,8 @@ python3 tests/run-compatibility.py
 This runs workspace tests and strict clippy, compares scheduler behavior with
 Go, builds Rust, selects free local ports, and runs the public/internal gRPC
 clients and existing Go SDK over TChannel. It enables schedules and semaphores,
-starts no Go Cadence server, stops its test server afterward, and writes logs
+stops its Rust test server afterward, then runs a separate original-Go service
+boundary probe with Rust durable queue/History delivery, and writes logs
 plus `results.json` to a printed temporary directory. Use `--artifacts-dir DIR`
 for a specific results directory. Existing development servers are unaffected.
 This suite covers the implemented behavior; a pass does not establish complete
@@ -301,3 +302,16 @@ performs a bounded deletion, and Rust verifies the result. Rust tests also cover
 lease fencing across connections/restarts and atomic batch rollback. This is
 included in the combined runner. The SQLite component is not yet selected by
 server configuration or connected to Matching's RPC queue delivery loop.
+
+Rust Matching queue delivery against original Go History:
+
+```sh
+python3 tests/run-go-service-baseline.py --matching-delivery
+```
+
+This starts the original four Go roles with SQLite, then drives a workflow through
+Rust's independent durable queue and outbound History client. Rust tokens are
+completed through Go Frontend; payload/header, heartbeat and 11-event history are
+checked. The Rust delivery process reopens its SQLite queue on each poll. This
+probe is also the final stage of the combined runner. It tests the delivery
+boundary; the Go frontend is not yet routed to a Rust Matching RPC listener.

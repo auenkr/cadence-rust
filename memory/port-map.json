@@ -242,5 +242,33 @@
     "evidence": [
       "Matching task/list decode with unknown-field handling, optional containers and actual Go SQLite rows. Other persistence structures, exact malformed-field parity and broader codec validation remain unported."
     ]
+  },
+  "go/service/matching/tasklist/task_writer.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_queue.rs"
+    ],
+    "evidence": [
+      "Durable range-ID-based allocation, reserved IDs and post-write maxReadLevel (including append errors); recovery/concurrency/fencing tests pass. Async append batching, retry classification, dynamic config and full lifecycle remain incomplete."
+    ]
+  },
+  "go/service/matching/tasklist/task_reader.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_queue.rs"
+    ],
+    "evidence": [
+      "Actual-Go differential fixtures cover 10-range scan budget and expiry rules. Durable reader/ack/rewrite core passes recovery, concurrent claim and rewrite-failure retention tests. Dispatch pump, throttling/isolation, scheduling and operational lifecycle remain incomplete."
+    ]
+  },
+  "go/service/matching/handler/engine.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-server/src/matching_history.rs",
+      "rust/crates/cadence-persistence/src/matching_queue.rs"
+    ],
+    "evidence": [
+      "Outbound task-start calls preserve YARPC metadata, stable request UUIDs, Go retry/error classification and SDK tokens/response data. Real Go History + Go Frontend completed an 11-event workflow through Rust durable queue/client. This does not replace the Matching RPC listener; routing, queries, passive handling, sync match and distributed behavior remain incomplete."
+    ]
   }
 }
