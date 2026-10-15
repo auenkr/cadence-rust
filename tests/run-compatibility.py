@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -62,14 +63,21 @@ def main():
         for reservation in reservations:
             reservation.close()
     env = {**os.environ, "CADENCE_ENABLE_SCHEDULER": "1", "CADENCE_ENABLE_SEMAPHORE": "1"}
-    command = [str(root / "rust/target/debug/cadence-server"), "start", "--port", str(http),
+    # Prove the copied executable can boot from a directory with no Go tree.
+    server_workdir = artifacts / "standalone"
+    server_workdir.mkdir(exist_ok=True)
+    binary = server_workdir / "cadence-server"
+    shutil.copy2(root / "rust/target/debug/cadence-server", binary)
+    run("go-config-compat", [str(binary), "check-config", "--config",
+                             str(root / "go/config/development.yaml")], cwd=server_workdir)
+    command = [str(binary), "start", "--port", str(http),
                "--grpc-port", str(frontend), "--history-grpc-port", str(history),
                "--matching-grpc-port", str(matching), "--tchannel-port", str(tchannel)]
-    (artifacts / "server.json").write_text(json.dumps({"command": command, "ports": {
+    (artifacts / "server.json").write_text(json.dumps({"command": command, "workingDirectory": str(server_workdir), "ports": {
         "http": http, "frontend": frontend, "history": history,
         "matching": matching, "tchannel": tchannel}}, indent=2) + "\n")
     with (artifacts / "server.log").open("w") as log:
-        server = subprocess.Popen(command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT)
+        server = subprocess.Popen(command, cwd=server_workdir, env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 30
             while True:

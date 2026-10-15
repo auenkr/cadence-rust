@@ -16,9 +16,9 @@ struct Cli {
 enum Command {
     /// Start one or more services (default: all).
     Start {
-        /// Path to the YAML config file (same keys as go/config/*.yaml).
-        #[arg(long, default_value = "go/config/development.yaml")]
-        config: String,
+        /// YAML config file with Cadence keys; defaults to embedded development settings.
+        #[arg(long)]
+        config: Option<String>,
         /// Services to run. Empty means all.
         #[arg(long, value_delimiter = ',')]
         services: Vec<String>,
@@ -65,7 +65,10 @@ async fn main() -> anyhow::Result<()> {
             tchannel_port,
             data_dir,
         } => {
-            let cfg = config::Config::from_file(&config)?;
+            let cfg = match config {
+                Some(path) => config::Config::from_file(path)?,
+                None => config::Config::development()?,
+            };
             cfg.validate()?;
             let wanted: Vec<service::ServiceName> = if services.is_empty() {
                 service::ServiceName::all().to_vec()

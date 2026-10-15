@@ -161,6 +161,12 @@ pub struct ClusterMetadata {
 }
 
 impl Config {
+    /// Embedded development defaults keep the executable independent of the
+    /// reference Go checkout. Explicit files still use the Go-shaped parser.
+    pub fn development() -> anyhow::Result<Self> {
+        Self::from_yaml(include_str!("../../../config/development.yaml"))
+    }
+
     pub fn from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path.as_ref())?;
         Self::from_yaml(&text)
@@ -266,6 +272,15 @@ clusterMetadata:
   enableGlobalDomain: false
   currentClusterName: active
 "#;
+
+    #[test]
+    fn embedded_defaults_match_go_development_config() {
+        let embedded = Config::development().unwrap();
+        let reference =
+            Config::from_yaml(include_str!("../../../../go/config/development.yaml")).unwrap();
+        assert_eq!(embedded, reference);
+        embedded.validate().unwrap();
+    }
 
     #[test]
     fn parses_go_style_config() {

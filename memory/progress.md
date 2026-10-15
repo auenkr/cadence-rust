@@ -1156,3 +1156,24 @@
   execution from an empty working directory to compatibility verification.
   This is not full replacement completion: production backends, distributed
   ownership/replication/worker roles and other inventory gaps remain open.
+
+- Standalone bootstrap (2026-10-15): default start now reads embedded
+  rust/config/development.yaml, a Rust-owned copy of the pinned Go development
+  defaults. The executable no longer opens go/config/development.yaml at
+  runtime unless explicitly passed through --config. Explicit Go-shaped YAML
+  loading remains supported. Added parsed-default equivalence coverage.
+- Extended full compatibility runner to copy the built executable into a
+  fresh standalone working directory and run every client against it there.
+  Separately runs check-config with the existing Go YAML path to verify the
+  explicit flag. Runner artifacts retain the copied binary and server logs.
+- Latest complete runner PASSED all eight steps: 279 workspace tests, strict
+  workspace/all-targets clippy, real-Go scheduler comparisons (21 behavior
+  cases + 4 UUID + 7 limits), build, explicit Go config parsing, public/internal
+  gRPC clients, existing Go SDK TChannel. Artifact directory:
+  /tmp/cadence-standalone-compat (results.json; standalone/cadence-server).
+  Its server was cleaned up. Original development server was not restarted.
+- Config loading still lacks Go's base/env/AZ layering and CADENCE_* selection
+  semantics; this checkpoint removes a runtime source-tree dependency, not
+  all configuration gaps. Major production persistence, schema migration,
+  distributed ownership/replication/worker roles, archival and inventory gaps
+  remain. The active full-migration goal must remain incomplete.

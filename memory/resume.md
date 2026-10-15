@@ -23,6 +23,9 @@ pushed this session:
 - 817dc47e8: paused/large backfill queues, pending-only descriptions.
 - 9a490be26: exact Go UUID namespaces, buffered origins, system limits.
 - 693964d8e: cooperative cancellation and durable latest-target tracking.
+- 7c08f363b: monotonic fire accounting and full isolated compatibility runner.
+- Latest standalone bootstrap: Rust-owned embedded development defaults,
+  explicit Go config support, copied-binary verification outside the checkout.
 
 The latest checkpoint adds monotonic fire-attempt accounting and the automated
 full compatibility runner. Missing actions/start failures count MissedRuns and
@@ -38,19 +41,23 @@ Commands:
   differential fixtures, server build, isolated server on free ports,
   public/internal gRPC checks and existing Go SDK over TChannel. It prints
   artifact paths, writes results.json, and stops its own server afterward.
-- Latest complete runner passed in tmux cadence-rust:replacement-compat;
-  artifacts /tmp/cadence-replacement-compat/results.json, outer log
-  /tmp/cadence-replacement-compat-run.log, exit file
-  /tmp/cadence-replacement-compat.exit (0). Its isolated server was cleaned up.
+- Latest complete runner passed in tmux cadence-rust:standalone-final;
+  artifacts /tmp/cadence-standalone-compat/results.json, outer log
+  /tmp/cadence-standalone-compat-run.log, exit file
+  /tmp/cadence-standalone-compat.exit (0). Its isolated server was cleaned up.
+  It copied the executable to standalone/cadence-server and booted it from
+  that fresh working directory, using embedded defaults and no Go checkout.
 
-Latest full checkpoint: 278 workspace tests + strict workspace/all-targets
+Latest full checkpoint: 279 workspace tests + strict workspace/all-targets
 clippy passed. The full runner passed scheduler differential fixtures and all
 three wire/SDK drivers against the latest binary. Coverage is 21 behavioral
 scheduler scenarios + 4 UUID cases + 7 limit cases.
 
-Next: make default startup independent of go/config/development.yaml, preserving
-explicit --config compatibility. Add an empty-working-directory startup check.
-Major production migration gaps below still remain.
+Standalone startup is now independent of go/config/development.yaml; explicit
+--config still works. All eight full-runner stages pass. Next major work should
+move beyond the RPC surface toward production persistence/schema compatibility,
+version branches/replication, or configuration layering (Go base/env/AZ and
+CADENCE_* selection are not ported). Do not lose the remaining inventory gaps.
 
 ## Runtime
 

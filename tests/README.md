@@ -144,3 +144,8 @@ plus `results.json` to a printed temporary directory. Use `--artifacts-dir DIR`
 for a specific results directory. Existing development servers are unaffected.
 This suite covers the implemented behavior; a pass does not establish complete
 production replacement compatibility (see `memory/migration-inventory.md`).
+
+The full runner also copies the built server to its artifacts directory and
+boots it there, using embedded development defaults with no Go checkout in the
+working directory. It separately verifies that an explicit Go YAML config still
+parses. The copied binary and server working directory are retained with logs.

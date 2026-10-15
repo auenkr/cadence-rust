@@ -68,3 +68,10 @@ cargo run -p cadence-server -- start --port 8080
 - Unknown enum values are currently rejected on deserialize; Go preserves
   raw ints — full unknown-preserving enums are a follow-up.
 - `#[non_exhaustive]` on enums forces callers to handle future variants.
+
+The server embeds development settings from `rust/config/development.yaml`
+when `--config` is omitted. A built executable can start from an empty working
+directory without the Go checkout. Pass `--config /path/to/development.yaml`
+to load an existing Cadence YAML file explicitly. Default runtime persistence
+is still in memory (or development snapshots with `--data-dir`); configured
+production SQL/NoSQL backends remain unported.
