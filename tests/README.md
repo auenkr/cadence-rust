@@ -129,3 +129,18 @@ origins across snapshots and verify policy changes count dropped queued fires.
 Overlap fixtures compare Go's actual cancel/terminate client requests with Rust
 history and close status. `CANCEL_PREVIOUS` remains cooperative; only the latest
 started target receives either action, even if older runs are still open.
+
+Run the full current compatibility suite against an isolated Rust server:
+
+```sh
+python3 tests/run-compatibility.py
+```
+
+This runs workspace tests and strict clippy, compares scheduler behavior with
+Go, builds Rust, selects free local ports, and runs the public/internal gRPC
+clients and existing Go SDK over TChannel. It enables schedules and semaphores,
+starts no Go Cadence server, stops its test server afterward, and writes logs
+plus `results.json` to a printed temporary directory. Use `--artifacts-dir DIR`
+for a specific results directory. Existing development servers are unaffected.
+This suite covers the implemented behavior; a pass does not establish complete
+production replacement compatibility (see `memory/migration-inventory.md`).

@@ -1129,3 +1129,30 @@
   missing actions/start errors must count MissedRuns and consume the fire.
   PauseOnFailure and Jitter are present in API types but not acted upon in
   the pinned Go scheduler implementation; do not invent behavior for them.
+
+- Scheduler fire accounting (2026-10-15): LastRunTime and the attempted-fire
+  watermark now advance monotonically for every active attempt, including
+  buffered/skipped fires and missing actions/start failures. Missed actions
+  and start failures increment MissedRuns instead of being retried on every
+  tick. Older buffered fires cannot regress time. Removed the invented
+  pause-on-failure hook: the pinned Go scheduler does not act on that flag.
+  Added real-Go nil-action/monotonic-time fixtures, no-live-retry engine test,
+  and extended buffer snapshot/drain coverage. Corrected an old Rust test
+  that confused LastRunTime with the last successfully started target.
+- Added tests/run-compatibility.py: builds/checks Rust, runs real-Go scheduler
+  differential fixtures, starts an isolated Rust server on free local ports,
+  runs public/internal Node gRPC clients and existing Go SDK TChannel driver,
+  records per-check logs/results.json, and cleans up its server. No Go Cadence
+  process is started, and existing development servers are unaffected.
+- Full latest-code verification PASSED: 278 workspace tests, strict
+  workspace/all-targets clippy, 21 shared scheduler behavioral scenarios +
+  4 exact UUIDs + 7 limits, standalone binary build, public gRPC, internal
+  gRPC, Go SDK TChannel. Artifacts: /tmp/cadence-replacement-compat/results.json.
+  All seven runner steps exit 0; test server cleanup completed. Original
+  cadence-rust:rust development server still serves its older loaded binary.
+- Next: standalone bootstrap still defaults to go/config/development.yaml;
+  embed an equivalent Rust-owned default so a copied binary can start without
+  the Go checkout, preserving --config for existing Go config files. Add
+  execution from an empty working directory to compatibility verification.
+  This is not full replacement completion: production backends, distributed
+  ownership/replication/worker roles and other inventory gaps remain open.

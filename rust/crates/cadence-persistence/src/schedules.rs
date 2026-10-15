@@ -4,15 +4,14 @@
 //!
 //! Go implements schedules as `cadence-scheduler:<id>` workflows driven by a
 //! scheduler worker. A single-host port cannot rely on worker execution, so
-//! schedules live natively in the execution store: the same cron evaluation,
-//! overlap, catch-up, backfill and pause semantics, with target workflows
-//! started directly by the server's background loop.
+//! schedules live natively in the execution store, with target workflows
+//! started by the background loop. Differential tests cover cron evaluation,
+//! overlap, catch-up and backfill. Scheduler workflow histories, shared budgets
+//! and transient activity retry paths still need separate ports.
 
 use std::collections::VecDeque;
 
-use cadence_api::enums::{
-    ScheduleCatchUpPolicy, ScheduleOverlapPolicy, WorkflowExecutionCloseStatus,
-};
+use cadence_api::enums::{ScheduleCatchUpPolicy, ScheduleOverlapPolicy};
 use cadence_api::schedule::{
     BackfillInfo, ScheduleAction, ScheduleInfo, ScheduleListEntry, SchedulePauseInfo,
     SchedulePolicies, ScheduleSpec, ScheduleState,
@@ -98,7 +97,7 @@ pub struct ScheduleRecord {
     pub total_runs: i64,
     pub missed_runs: i64,
     pub skipped_runs: i64,
-    /// Fired target runs still believed open: (workflow_id, run_id).
+    /// Bounded CONCURRENT target runs: (workflow_id, run_id).
     pub running: Vec<(String, String)>,
     /// Go LastStartedWorkflow is independent of bounded concurrency tracking.
     #[serde(default)]
@@ -922,33 +921,41 @@ impl crate::executions::InMemoryExecutionStore {
         use cadence_api::types::StartWorkflowExecutionRequest;
         // Snapshot the firing inputs.
         let (action, overlap, concurrency_limit, prefix) = {
-            let inner = self.inner.read().expect("execution store lock");
+            let mut inner = self.inner.write().expect("execution store lock");
             match inner
                 .schedules
-                .get(&(domain.to_string(), schedule_id.to_string()))
+                .get_mut(&(domain.to_string(), schedule_id.to_string()))
             {
-                Some(r) if !r.deleted() && !r.paused => (
-                    r.action.clone(),
-                    if overlap_override == ScheduleOverlapPolicy::Invalid {
-                        r.policies
-                            .overlap_policy
-                            .unwrap_or(ScheduleOverlapPolicy::Invalid)
-                    } else {
-                        overlap_override
-                    },
-                    r.policies.concurrency_limit,
-                    r.action
-                        .start_workflow
-                        .as_ref()
-                        .map(|a| a.workflow_id_prefix.clone())
-                        .unwrap_or_default(),
-                ),
+                Some(r) if !r.deleted() && !r.paused => {
+                    r.last_run_nanos = Some(r.last_run_nanos.unwrap_or(fire_nanos).max(fire_nanos));
+                    r.last_fire_nanos =
+                        Some(r.last_fire_nanos.unwrap_or(fire_nanos).max(fire_nanos));
+                    (
+                        r.action.clone(),
+                        if overlap_override == ScheduleOverlapPolicy::Invalid {
+                            r.policies
+                                .overlap_policy
+                                .unwrap_or(ScheduleOverlapPolicy::Invalid)
+                        } else {
+                            overlap_override
+                        },
+                        r.policies.concurrency_limit,
+                        r.action
+                            .start_workflow
+                            .as_ref()
+                            .map(|a| a.workflow_id_prefix.clone())
+                            .unwrap_or_default(),
+                    )
+                }
                 _ => return false,
             }
         };
         let sw = match action.start_workflow {
             Some(sw) => sw,
-            None => return false,
+            None => {
+                self.note_schedule_miss(domain, schedule_id);
+                return false;
+            }
         };
         // Prune running list to actually-open runs and detect overlap.
         let running: Vec<(String, String)> = {
@@ -1029,7 +1036,8 @@ impl crate::executions::InMemoryExecutionStore {
                         } else {
                             r.skipped_runs += 1;
                         }
-                        r.last_fire_nanos = Some(fire_nanos);
+                        r.last_fire_nanos =
+                            Some(r.last_fire_nanos.unwrap_or(fire_nanos).max(fire_nanos));
                     }
                     return false;
                 }
@@ -1079,7 +1087,10 @@ impl crate::executions::InMemoryExecutionStore {
             Err(crate::executions::StartError::AlreadyStarted(e)) if !e.run_id.is_empty() => {
                 e.run_id
             }
-            Err(_) => return false,
+            Err(_) => {
+                self.note_schedule_miss(domain, schedule_id);
+                return false;
+            }
         };
         {
             let mut inner = self.inner.write().expect("execution store lock");
@@ -1094,16 +1105,22 @@ impl crate::executions::InMemoryExecutionStore {
                     r.running.clear();
                 }
                 r.total_runs += 1;
-                r.last_run_nanos = Some(fire_nanos);
-                r.last_fire_nanos = Some(fire_nanos);
+                r.last_run_nanos = Some(r.last_run_nanos.unwrap_or(fire_nanos).max(fire_nanos));
+                r.last_fire_nanos = Some(r.last_fire_nanos.unwrap_or(fire_nanos).max(fire_nanos));
                 r.update_nanos = now_nanos();
-                // pause_on_failure is evaluated on close, not here.
             }
         }
-        // pause_on_failure: if the just-started run already closed as failed
-        // (e.g. synchronous validation failure), pause immediately.
-        self.check_schedule_pause_on_failure(domain, schedule_id);
         true
+    }
+
+    fn note_schedule_miss(&self, domain: &str, id: &str) {
+        let mut inner = self.inner.write().expect("execution store lock");
+        if let Some(record) = inner
+            .schedules
+            .get_mut(&(domain.to_string(), id.to_string()))
+        {
+            record.missed_runs += 1;
+        }
     }
 
     /// Record an overlap skip and advance the watermark past the fire.
@@ -1114,7 +1131,7 @@ impl crate::executions::InMemoryExecutionStore {
             .get_mut(&(domain.to_string(), schedule_id.to_string()))
         {
             r.skipped_runs += 1;
-            r.last_fire_nanos = Some(fire_nanos);
+            r.last_fire_nanos = Some(r.last_fire_nanos.unwrap_or(fire_nanos).max(fire_nanos));
         }
     }
 
@@ -1149,54 +1166,7 @@ impl crate::executions::InMemoryExecutionStore {
         }
     }
 
-    /// Pause schedules whose tracked runs just closed as failed when
-    /// pause_on_failure is set, mirroring the scheduler worker.
-    fn check_schedule_pause_on_failure(&self, domain: &str, schedule_id: &str) {
-        let failures: Vec<(String, String)> = {
-            let inner = self.inner.read().expect("execution store lock");
-            let Some(record) = inner
-                .schedules
-                .get(&(domain.to_string(), schedule_id.to_string()))
-            else {
-                return;
-            };
-            if !record.policies.pause_on_failure {
-                return;
-            }
-            record
-                .running
-                .iter()
-                .chain(record.last_started_run.iter())
-                .filter(|(w, run)| {
-                    inner
-                        .by_run
-                        .get(&(domain.to_string(), w.clone(), run.clone()))
-                        .is_some_and(|rec| {
-                            rec.close_status == Some(WorkflowExecutionCloseStatus::Failed)
-                        })
-                })
-                .cloned()
-                .collect()
-        };
-        if failures.is_empty() {
-            return;
-        }
-        let mut inner = self.inner.write().expect("execution store lock");
-        if let Some(record) = inner
-            .schedules
-            .get_mut(&(domain.to_string(), schedule_id.to_string()))
-        {
-            if !record.paused {
-                record.paused = true;
-                record.pause_reason = "paused on workflow failure".to_string();
-                record.paused_by = format!("schedule:{schedule_id}");
-                record.paused_at_nanos = Some(now_nanos());
-                record.update_nanos = now_nanos();
-            }
-        }
-    }
-
-    /// Drain one buffered fire per BUFFER schedule with nothing running.
+    /// Drain the FIFO head when the latest target has stopped running.
     fn drain_schedule_buffers(&self) -> usize {
         let ready: Vec<(String, String, BufferedScheduleFire)> = {
             let inner = self.inner.read().expect("execution store lock");
@@ -1268,6 +1238,7 @@ impl ScheduleRecord {
 mod tests {
     use super::*;
     use crate::executions::InMemoryExecutionStore;
+    use cadence_api::enums::WorkflowExecutionCloseStatus;
     use cadence_api::types::{TaskList, WorkflowType};
 
     fn test_store() -> InMemoryExecutionStore {
@@ -1677,6 +1648,13 @@ mod tests {
             ScheduleOverlapPolicy::Buffer,
             "backfill:original-id"
         ));
+        assert!(!store.fire_schedule_at(
+            &namespace,
+            "buffer",
+            base + 120_000_000_000,
+            ScheduleOverlapPolicy::Buffer,
+            "schedule"
+        ));
         let path =
             std::env::temp_dir().join(format!("cadence-buffer-{}.json", uuid::Uuid::new_v4()));
         store.save_to_file(&path).unwrap();
@@ -1704,12 +1682,13 @@ mod tests {
             workflow,
             fire_request_id("buffer", fire, "backfill")
         )));
-        assert!(inner
+        let record = inner
             .schedules
             .get(&(namespace, "buffer".to_string()))
-            .unwrap()
-            .buffer
-            .is_empty());
+            .unwrap();
+        assert_eq!(record.buffer.len(), 1);
+        assert_eq!(record.last_run_nanos, Some(base + 120_000_000_000));
+        assert_eq!(record.last_fire_nanos, Some(base + 120_000_000_000));
         let legacy: BufferedScheduleFire = serde_json::from_str("1700000000000000000").unwrap();
         assert_eq!(
             legacy.parts(),
@@ -1884,6 +1863,73 @@ mod tests {
                 1
             );
         }
+    }
+
+    #[test]
+    fn scheduler_fire_accounting_fixtures() {
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            offsets: Vec<i64>,
+            last: Vec<i64>,
+            missed: Vec<i64>,
+        }
+        let cases: Vec<Case> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/scheduler-fire-accounting.json"
+        ))
+        .unwrap();
+        let base = nanos("2026-01-15T10:00:00Z");
+        for case in cases {
+            let store = test_store();
+            let mut req = create_req("missing-action", "* * * * *");
+            req.action = None;
+            store.create_schedule("d", &req).unwrap();
+            let namespace = store.inner.read().unwrap().domain_id("d");
+            for (i, offset) in case.offsets.iter().enumerate() {
+                assert!(!store.fire_schedule_at(
+                    &namespace,
+                    "missing-action",
+                    base + offset * 60_000_000_000,
+                    ScheduleOverlapPolicy::Invalid,
+                    "schedule"
+                ));
+                let inner = store.inner.read().unwrap();
+                let r = inner
+                    .schedules
+                    .get(&(namespace.clone(), "missing-action".to_string()))
+                    .unwrap();
+                assert_eq!(
+                    r.last_run_nanos,
+                    Some(base + case.last[i] * 60_000_000_000),
+                    "{} last",
+                    case.name
+                );
+                assert_eq!(r.missed_runs, case.missed[i], "{} missed", case.name);
+            }
+        }
+    }
+
+    #[test]
+    fn scheduler_missing_action_is_not_retried_by_next_tick() {
+        let store = test_store();
+        let base = nanos("2026-01-15T10:00:00Z");
+        let mut req = create_req("missing-action", "* * * * *");
+        req.action = None;
+        store.create_schedule("d", &req).unwrap();
+        {
+            let mut inner = store.inner.write().unwrap();
+            let key = InMemoryExecutionStore::schedule_key(&inner, "d", "missing-action");
+            inner.schedules.get_mut(&key).unwrap().create_nanos = base;
+        }
+        let now = base + 300_000_000_000;
+        assert_eq!(store.fire_due_schedules(now), 0);
+        assert_eq!(store.fire_due_schedules(now), 0);
+        let inner = store.inner.read().unwrap();
+        let key = InMemoryExecutionStore::schedule_key(&inner, "d", "missing-action");
+        let r = inner.schedules.get(&key).unwrap();
+        assert_eq!(r.missed_runs, 5);
+        assert_eq!(r.last_run_nanos, Some(now));
+        assert_eq!(r.last_fire_nanos, Some(now));
     }
 
     #[test]
@@ -2084,10 +2130,18 @@ mod tests {
         let info = desc.info.unwrap();
         assert!(info.total_runs >= 1);
         assert!(info.skipped_runs >= 1);
-        // The target workflow exists with the Go-style fire ID.
-        let wf_id = fire_workflow_id("sched", "s1", info.last_run_time_nano.unwrap());
+        // LastRunTime includes later overlap skips; the started target is
+        // identified independently, as Go LastStartedWorkflow does.
         let inner = store.inner.read().expect("execution store lock");
         let domain = inner.domain_id("d");
+        let record = inner
+            .schedules
+            .get(&(domain.clone(), "s1".to_string()))
+            .unwrap();
+        let first_fire = next_spec_fire_nanos(&record.spec, record.create_nanos).unwrap();
+        let wf_id = fire_workflow_id("sched", "s1", first_fire);
+        assert_eq!(record.last_started_run.as_ref().unwrap().0, wf_id);
+        assert!(info.last_run_time_nano.unwrap() > first_fire);
         assert!(inner.by_workflow.contains_key(&(domain, wf_id)));
     }
 

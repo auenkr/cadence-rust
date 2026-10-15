@@ -1,0 +1,4 @@
+[
+  {"name":"missing action consumes each attempted fire", "offsets":[1,2,3], "last":[1,2,3], "missed":[1,2,3]},
+  {"name":"older attempts cannot regress last run", "offsets":[5,2,6], "last":[5,5,6], "missed":[1,2,3]}
+]

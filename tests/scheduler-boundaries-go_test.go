@@ -217,3 +217,30 @@ func TestRustSchedulerOverlapFixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestRustSchedulerFireAccountingFixtures(t *testing.T) {
+	var cases []struct {
+		Name                  string
+		Offsets, Last, Missed []int
+	}
+	data, err := os.ReadFile(os.Getenv("CADENCE_SCHEDULER_ACCOUNTING_FIXTURES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			input := &SchedulerWorkflowInput{}
+			state := &SchedulerWorkflowState{}
+			for i, offset := range c.Offsets {
+				tryStartFire(nil, testLogger, input, state, base.Add(time.Duration(offset)*time.Minute), TriggerSourceSchedule, types.ScheduleOverlapPolicySkipNew, "")
+				if state.MissedRuns != int64(c.Missed[i]) || !state.LastRunTime.Equal(base.Add(time.Duration(c.Last[i])*time.Minute)) {
+					t.Fatalf("attempt %d missed=%d last=%v", i, state.MissedRuns, state.LastRunTime)
+				}
+			}
+		})
+	}
+}
