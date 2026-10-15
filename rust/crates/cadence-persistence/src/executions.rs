@@ -7368,7 +7368,9 @@ impl InMemoryExecutionStore {
         let data = std::fs::read(path.as_ref())?;
         let snapshot: ExecutionSnapshot = serde_json::from_slice(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        Ok(Self::restore(snapshot))
+        let store = Self::restore(snapshot);
+        store.resume_schedules_after_restart();
+        Ok(store)
     }
 }
 

@@ -1050,3 +1050,12 @@
   they were not in a pending catch-up pass at snapshot time. Paused backfill
   queues and backfill continuation are still incomplete. JSON snapshots
   remain development-only; no production persistence or XDC equivalence.
+
+- Scheduler startup recovery: loading execution snapshots now marks active
+  schedules for policy-based catch-up, including schedules that were live
+  (not pending catch-up) at shutdown. Paused/deleted schedules remain inert.
+  Added downtime SKIP/no-replay and legacy-field-deserialization coverage.
+  Persistence suite 128 tests passes; strict persistence/all-targets clippy
+  passes. The preceding full-workspace checkpoint had 269 passing tests.
+- Go SDK TChannel driver against isolated updated Rust server completed with
+  exit 0. All three external compatibility drivers passed this checkpoint.

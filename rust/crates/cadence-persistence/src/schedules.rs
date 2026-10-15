@@ -293,6 +293,17 @@ impl crate::executions::InMemoryExecutionStore {
         (inner.domain_id(domain), schedule_id.to_string())
     }
 
+    /// Go restarts scheduler workflows through their catch-up path. Restored
+    /// native schedules likewise apply policy before resuming live timers.
+    pub(crate) fn resume_schedules_after_restart(&self) {
+        let mut inner = self.inner.write().expect("execution store lock");
+        for record in inner.schedules.values_mut() {
+            if !record.paused && !record.deleted() {
+                record.catch_up_pending = true;
+            }
+        }
+    }
+
     /// Create a schedule, mirroring Go `CreateSchedule` after validation: a
     /// running schedule with the same ID is a user-visible "already exists"
     /// `BadRequest` (Go converts `WorkflowExecutionAlreadyStartedError`).
@@ -1242,6 +1253,48 @@ mod tests {
             assert_eq!(r.unpause_catchup, None);
             assert!(!r.catch_up_pending);
         }
+    }
+
+    #[test]
+    fn restored_schedule_applies_configured_policy_to_downtime() {
+        let store = catch_up_store(ScheduleCatchUpPolicy::Skip);
+        {
+            let mut inner = store.inner.write().unwrap();
+            let key = InMemoryExecutionStore::schedule_key(&inner, "d", "catch-up");
+            let r = inner.schedules.get_mut(&key).unwrap();
+            r.catch_up_pending = false;
+            r.unpause_catchup = None;
+        }
+        let path =
+            std::env::temp_dir().join(format!("cadence-recovery-{}.json", uuid::Uuid::new_v4()));
+        store.save_to_file(&path).unwrap();
+        let restored = InMemoryExecutionStore::load_from_file(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        let now = nanos("2026-01-15T10:05:00Z");
+        assert_eq!(restored.fire_due_schedules(now), 0);
+        assert_eq!(restored.fire_due_schedules(now), 0);
+        let inner = restored.inner.read().unwrap();
+        let key = InMemoryExecutionStore::schedule_key(&inner, "d", "catch-up");
+        let r = inner.schedules.get(&key).unwrap();
+        assert_eq!(r.skipped_runs, 5);
+        assert_eq!(r.last_processed_nanos, Some(now));
+        assert!(!r.catch_up_pending);
+    }
+
+    #[test]
+    fn old_snapshot_schedule_fields_default_without_unpausing() {
+        let store = catch_up_store(ScheduleCatchUpPolicy::All);
+        let inner = store.inner.read().unwrap();
+        let key = InMemoryExecutionStore::schedule_key(&inner, "d", "catch-up");
+        let mut value = serde_json::to_value(inner.schedules.get(&key).unwrap()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("last_processed_nanos");
+        object.remove("catch_up_pending");
+        object.insert("paused".to_string(), serde_json::Value::Bool(true));
+        let record: ScheduleRecord = serde_json::from_value(value).unwrap();
+        assert_eq!(record.last_processed_nanos, None);
+        assert!(!record.catch_up_pending);
+        assert!(record.paused);
     }
 
     #[test]
