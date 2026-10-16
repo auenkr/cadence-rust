@@ -68,6 +68,9 @@ fn queue_status(error: QueueError) -> Status {
     Status::unavailable(error.to_string())
 }
 impl TaskDispatcher {
+    pub(crate) fn reader_should_reload(&self) -> bool {
+        self.reader.as_ref().is_some_and(|reader| reader.should_reload())
+    }
     pub fn new(
         queue: Arc<DurableTaskQueue>,
         history: MatchingHistoryClient,

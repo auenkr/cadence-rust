@@ -148,6 +148,7 @@ struct Inner {
     stop: watch::Sender<bool>,
     completion: Arc<Completion>,
     loops: usize,
+    should_reload: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 impl Drop for Inner {
     fn drop(&mut self) {
@@ -181,6 +182,7 @@ enum BufferReceiver {
 pub struct IsolationConfig {
     pub groups: Vec<String>,
     pub select: IsolationSelector,
+    pub should_reload: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 pub type IsolationSelector =
     Arc<dyn Fn(&cadence_persistence::matching_blob::TaskData) -> (String, i64) + Send + Sync>;
@@ -189,6 +191,7 @@ impl Default for IsolationConfig {
         Self {
             groups: Vec::new(),
             select: Arc::new(|_| (String::new(), 0)),
+            should_reload: Arc::new(|| false),
         }
     }
 }
@@ -253,6 +256,7 @@ impl TaskReader {
             stop,
             completion: completion.clone(),
             loops: buffers + 1,
+            should_reload: isolation.should_reload.clone(),
         });
         let mut buffer_senders = HashMap::new();
         for buffer_group in std::iter::once(String::new()).chain(isolated.keys().cloned()) {
@@ -471,6 +475,9 @@ impl TaskReader {
     pub async fn poll(&self) -> Option<AllocatedTask> {
         self.inner.matcher.poll(self.inner.stop.subscribe()).await
     }
+    pub fn should_reload(&self) -> bool {
+        (self.inner.should_reload)()
+    }
     /// Known pollers read their isolated channel and the shared channel. Unknown
     /// or empty groups only read the shared channel, matching Go matcher.Poll.
     pub async fn poll_group(&self, group: &str) -> Option<AllocatedTask> {
@@ -615,6 +622,7 @@ mod tests {
             Arc::new(TaskListLimiter::with_defaults()),
             IsolationConfig {
                 groups: vec!["a".into(), "b".into()],
+                should_reload: Arc::new(|| false),
                 select: Arc::new(|task| {
                     (
                         task.partition_config
@@ -671,6 +679,7 @@ mod tests {
             Arc::new(TaskListLimiter::with_defaults()),
             IsolationConfig {
                 groups: vec!["a".into()],
+                should_reload: Arc::new(|| false),
                 select: Arc::new(move |_| {
                     let remaining = expires - now();
                     if remaining > 50_000_000 {

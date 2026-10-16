@@ -77,6 +77,56 @@ fn list() -> Option<p::TaskList> {
     })
 }
 #[tokio::test]
+async fn matching_rpc_isolation_toggle_returns_empty_poll_and_replaces_owner() {
+    use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
+    let (_dir, _store, matching, key) = fixture();
+    for task_type in [0, 1] {
+        let original = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), task_type).await.unwrap();
+        matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "system.enableTasklistIsolation", vec![DynamicConfigValue {
+            value: Some(DataBlob::new(EncodingType::JSON, if task_type == 0 { b"true".to_vec() } else { b"false".to_vec() })), filters: vec![],
+        }]);
+        if task_type == 0 {
+            let response = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+                domain_id: key.domain_id.to_string(), request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+            })).await.unwrap().into_inner();
+            assert!(response.task_token.is_empty());
+        } else {
+            let response = matching.poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+                domain_id: key.domain_id.to_string(), request: Some(p::PollForActivityTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+            })).await.unwrap().into_inner();
+            assert!(response.task_token.is_empty());
+        }
+        assert!(original.queue.is_stopped());
+        let replacement = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), task_type).await.unwrap();
+        assert!(!Arc::ptr_eq(&original.queue, &replacement.queue));
+        assert!(!replacement.stop_if_isolation_changed());
+    }
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_isolation_toggle_stops_owner_before_admitting_add() {
+    use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
+    let (_dir, store, matching, key) = fixture();
+    let first = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    for enabled in [true, false] {
+        matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "system.enableTasklistIsolation", vec![DynamicConfigValue {
+            value: Some(DataBlob::new(EncodingType::JSON, enabled.to_string().into_bytes())), filters: vec![],
+        }]);
+        let request = || Request::new(m::AddDecisionTaskRequest {
+            domain_id: key.domain_id.to_string(), task_list: list(), workflow_execution: execution(), schedule_id: 9, ..Default::default()
+        });
+        assert_eq!(matching.add_decision_task(request()).await.unwrap_err().code(), tonic::Code::Unavailable);
+        matching.add_decision_task(request()).await.unwrap();
+    }
+    assert!(first.queue.is_stopped());
+    let replacement = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    assert!(!Arc::ptr_eq(&first.queue, &replacement.queue));
+    assert_eq!(store.get_tasks(&key, 0, i64::MAX, 10).unwrap().len(), 2);
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
 async fn matching_rpc_isolation_policy_rechecks_drains_and_poller_recency() {
     let (_dir, _store, matching, key) = fixture();
     use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};

@@ -109,6 +109,16 @@ pub struct QueueHandle {
     writer: crate::matching_writer::TaskWriter,
 }
 impl QueueHandle {
+    /// Go AddTask/GetTask stop their owner when the domain isolation-enable
+    /// snapshot changes. Existing polls are released by the normal stop path.
+    pub fn stop_if_isolation_changed(&self) -> bool {
+        if self.dispatcher.reader_should_reload() {
+            self.queue.stop();
+            true
+        } else {
+            false
+        }
+    }
     pub async fn enqueue(
         &self,
         data: TaskData,

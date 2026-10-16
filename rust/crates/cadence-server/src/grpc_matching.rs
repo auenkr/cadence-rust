@@ -202,8 +202,14 @@ impl Matching {
             let domain_id = domain_id.to_owned();
             let task_list = task_list.to_owned();
             let executions = executions.clone();
+            let reload_overlay = overlay.clone();
+            let reload_name = name.clone();
             crate::matching_reader::IsolationConfig {
                 groups,
+                should_reload: Arc::new(move || {
+                    let config = reload_overlay.lock().expect("admin lock");
+                    cadence_persistence::dynamic_config::boolean(config.property_values("system.enableTasklistIsolation"), reload_name.as_deref(), false) != enabled
+                }),
                 select: Arc::new(move |task| {
                     let group = task.partition_config.as_ref().and_then(|map| map.get(ISOLATION_GROUP_KEY)).map(String::as_str).unwrap_or_default();
                     let now = matching_now();
@@ -299,6 +305,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 0).await?;
+            if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForDecisionTaskResponse::default())); }
             let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: crate::matching_limiter::TASK_DISPATCH_RPS, isolation_group: r.isolation_group } };
             // Go's matcher serves `queryTaskC` on the same long poll as the
             // decision backlog; a ready query is handed to this poller instead
@@ -387,6 +394,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 1).await?;
+            if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForActivityTaskResponse::default())); }
             // Go `getTask`: the worker-reported rate is applied to the shared
             // dispatch limiter before the poll is recorded; a missing or
             // negative metadata rate keeps the configured default for poller
@@ -448,6 +456,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             let run = uuid::Uuid::parse_str(&execution.run_id).map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
             let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
             let queue = self.durable_queue(&r.domain_id, list, 0).await?;
+            if queue.stop_if_isolation_changed() { return Err(Status::unavailable("task list shutting down")); }
             check_sticky_poller(&queue, list)?;
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
@@ -500,6 +509,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             self.domain_name(&r.source_domain_id)?;
             let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| Status::invalid_argument("Source domain UUID is not valid."))?;
             let queue = self.durable_queue(&r.domain_id, list, 1).await?;
+            if queue.stop_if_isolation_changed() { return Err(Status::unavailable("task list shutting down")); }
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()

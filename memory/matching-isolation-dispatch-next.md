@@ -80,3 +80,23 @@ runtime code changes during this run; added second wire regression test only.
 Final outcome: all30 stages PASSED; `/tmp/opencode/isolation-final.exit=0`.
 Mixed probe explicitly reports isolationDispatch passed, and existing Go SDK
 passed. Separately frozen workspace401 tests and strict all-target Clippy pass.
+
+## Follow-up: isolation enable-toggle owner reload
+
+Committed backlog checkpoint:63f374479. Next increment installs should_reload
+closure on the reader, comparing live domain-scoped enable config to the owner
+snapshot. AddDecision/AddActivity stop the owner before writing and return
+shutdown error; decision/activity GetTask stop the owner and return empty poll,
+as Go AddTask/GetTask do. Normal stop waker releases all reader loops and
+blocked polls; next lookup cleans up the stopped owner and acquires a new lease.
+Changes to the configured group list alone do not reload Go owners, so do not
+compare the live list for reload.
+
+Three focused policy/reload tests passed, including toggles both directions,
+durable row retention across owner replacement, empty decision/activity polls.
+Fresh full runner in tmux cadence-rust:reload-full:
+`/tmp/opencode/isolation-reload-full.log` / `.exit`, artifacts
+`.../matching-isolation-reload-full`. Still needs final outcome recorded.
+
+Reload final: all30 stages PASSED, exit marker0;403 workspace tests incl89
+server tests and strict all-target lint pass. Go SDK and mixed probe passed.

@@ -6,7 +6,11 @@ custom TaskListStatus encoding fixes it without IDL changes. Current workspace:
 401 tests (87 server) and strict all-target Clippy passed. Full30-stage runner
 PASSED: /tmp/opencode/isolation-final.log and .exit; artifacts
 matching-isolation-dispatch-final. Mixed probe isolationDispatch and Go SDK pass.
-Matching still incomplete; owner enable-toggle reload, metadata rewrite,
+Follow-up enable-toggle reload is implemented with3 focused tests passed;
+full30-stage verification PASSED at /tmp/opencode/isolation-reload-full.log and
+.exit=0. Current workspace403 tests (89 server) and strict all-target lint pass.
+Read matching-isolation-dispatch-next.md for details before continuing.
+Matching still incomplete; metadata rewrite,
 forwarding/partition routing/scaling, semaphores/membership/standalone remain.
 
 Prior verified continuation (2026-10-16): read matching-isolation-next.md, then
