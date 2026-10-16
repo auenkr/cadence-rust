@@ -26,6 +26,7 @@ struct Owner {
     dispatcher: TaskDispatcher,
     writer: crate::matching_writer::TaskWriter,
     reader: crate::matching_reader::TaskReader,
+    limiter: Arc<crate::matching_limiter::TaskListLimiter>,
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     last_update: Mutex<tokio::time::Instant>,
     next_idle_check: Mutex<tokio::time::Instant>,
@@ -37,8 +38,7 @@ impl Owner {
         self.reader.stop();
         self.queue.stop();
         self.dispatcher.notify_new_tasks();
-    }
-    fn finish(
+    }    fn finish(
         &self,
         now: i64,
         readers: &mut Vec<crate::matching_reader::TaskReader>,
@@ -73,6 +73,7 @@ pub struct QueueHandle {
     pub queue: Arc<DurableTaskQueue>,
     pub dispatcher: TaskDispatcher,
     pub pollers: Arc<Mutex<cadence_common::poller::Manager>>,
+    pub limiter: Arc<crate::matching_limiter::TaskListLimiter>,
     liveness: Arc<cadence_common::liveness::Liveness>,
     writer: crate::matching_writer::TaskWriter,
 }
@@ -258,11 +259,13 @@ impl QueueRegistry {
                         dispatcher.task_notification(),
                         crate::matching_writer::WriterConfig::default(),
                     );
-                    let reader = crate::matching_reader::TaskReader::with_domain_activity(
+                    let limiter = Arc::new(crate::matching_limiter::TaskListLimiter::with_defaults());
+                    let reader = crate::matching_reader::TaskReader::with_domain_activity_and_limiter(
                         queue.clone(),
                         dispatcher.task_notification(),
                         crate::matching_reader::ReaderConfig::default(),
                         activity,
+                        limiter.clone(),
                     );
                     let read_stop = reader.stop_signal();
                     let wake = registry.changed.clone();
@@ -278,6 +281,7 @@ impl QueueRegistry {
                             .with_reader(reader.clone()),
                         writer,
                         reader,
+                        limiter,
                         queue,
                         pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                         last_update: Mutex::new(tokio::time::Instant::now()),
@@ -303,6 +307,7 @@ impl QueueRegistry {
                 queue: owner.queue.clone(),
                 dispatcher: owner.dispatcher.clone(),
                 pollers: owner.pollers.clone(),
+                limiter: owner.limiter.clone(),
                 liveness: owner.liveness.clone(),
                 writer: owner.writer.clone(),
             })

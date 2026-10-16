@@ -30,6 +30,14 @@ History; no service is complete. Next: background reader and matcher rendezvous.
 
 # Current resume checkpoint (2026-10-16)
 
+Read matching-limiter-next.md first. The native queue-owner dispatch limiter is now
+wired: shared `TaskListLimiter` per owner, reader pre-handoff `Wait` under the Go
+`newDispatchContext` deadline, activity rate reports and `DescribeTaskList`
+`rate_per_second`. 5 new limiter tests + 70 cadence-server lib tests + strict
+all-target Clippy pass (/tmp/cadence-lim-lib.exit=0, /tmp/cadence-lim-clippy.exit=0).
+Full 29-stage runner and a mixed Go-services/Rust-Matching activity-pacing scenario
+are still required before the rate gate is claimed.
+
 Follow root AGENTS.md. The user requires continuing the entire Go-to-Rust rewrite,
 service by service: Matching -> History -> Frontend -> Worker. All roles remain
 incomplete. Keep working autonomously; use tmux session cadence-rust for long

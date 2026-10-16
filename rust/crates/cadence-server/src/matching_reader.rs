@@ -1,5 +1,6 @@
 //! Matching's local backlog reader: one SQL pump, a bounded task buffer,
 //! and a separate head waiting for an unbuffered local poller handoff.
+use crate::matching_limiter::{TaskListLimiter, WaitOutcome};
 use cadence_persistence::{matching_queue::DurableTaskQueue, matching_sqlite::AllocatedTask};
 use std::{
     collections::VecDeque,
@@ -13,7 +14,11 @@ use tokio::sync::{mpsc, watch, Notify};
 pub struct ReaderConfig {
     pub batch_size: NonZeroU32,
     pub read_range_size: NonZeroU32,
+    /// Go `AsyncTaskDispatchTimeout` (default 3 s).
     pub dispatch_timeout: Duration,
+    /// Go `taskDispatchTimeoutBuffer` (100 ms), added to the minimum timeout
+    /// needed to drain the buffers at the configured dispatch rate.
+    pub dispatch_timeout_buffer: Duration,
 }
 impl Default for ReaderConfig {
     fn default() -> Self {
@@ -21,6 +26,7 @@ impl Default for ReaderConfig {
             batch_size: NonZeroU32::new(1000).unwrap(),
             read_range_size: NonZeroU32::new(50000).unwrap(),
             dispatch_timeout: Duration::from_secs(3),
+            dispatch_timeout_buffer: Duration::from_millis(100),
         }
     }
 }
@@ -150,6 +156,15 @@ impl Drop for Inner {
 pub struct TaskReader {
     inner: Arc<Inner>,
 }
+/// Outcome of one dispatch attempt for the head task.
+enum Attempt {
+    /// Handed off to a poller.
+    Offered,
+    /// Retry the same head after a yield (throttled or dispatch deadline).
+    Retry,
+    /// The reader is stopping.
+    Stopped,
+}
 enum BufferSender {
     Buffered(mpsc::Sender<AllocatedTask>),
     Unbuffered(Arc<Rendezvous<AllocatedTask>>),
@@ -167,6 +182,24 @@ impl TaskReader {
         wake: Arc<Notify>,
         config: ReaderConfig,
         active: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        Self::with_domain_activity_and_limiter(
+            queue,
+            wake,
+            config,
+            active,
+            Arc::new(TaskListLimiter::with_defaults()),
+        )
+    }
+    /// One shared dispatch limiter per queue owner, matching Go's per-manager
+    /// `taskListLimiter`. The reader waits on it before each matcher handoff and
+    /// reads its current limit for the active-domain dispatch deadline.
+    pub fn with_domain_activity_and_limiter(
+        queue: Arc<DurableTaskQueue>,
+        wake: Arc<Notify>,
+        config: ReaderConfig,
+        active: Arc<dyn Fn() -> bool + Send + Sync>,
+        limiter: Arc<TaskListLimiter>,
     ) -> Self {
         let (stop, stopped) = watch::channel(false);
         let matcher = Arc::new(Rendezvous::default());
@@ -192,6 +225,9 @@ impl TaskReader {
         let dispatched = Completed(completion.clone());
         let mut dispatch_stop = stopped.clone();
         let dispatch_queue = queue.clone();
+        let dispatch_limiter = limiter;
+        let async_timeout = config.dispatch_timeout;
+        let timeout_buffer = config.dispatch_timeout_buffer;
         tokio::spawn(async move {
             let _completed = dispatched;
             'dispatch: loop {
@@ -221,20 +257,52 @@ impl TaskReader {
                         // immediate GC run, matching taskReader's expiry branch.
                         break;
                     }
-                    let offer = matcher.offer(task.clone(), dispatch_stop.clone());
-                    let offered = if active() {
-                        // Go only applies the async dispatch deadline to active
-                        // domains (or an unknown cache entry).
-                        tokio::time::timeout(config.dispatch_timeout, offer)
+                    // Go `newDispatchContext`: the deadline only applies to an
+                    // active (or unknown) domain above the 1e-7 noise floor.
+                    let rps = dispatch_limiter.limit();
+                    let deadline = (rps > 1e-7 && active()).then(|| {
+                        let min_timeout =
+                            Duration::from_secs_f64(1.0 / rps) + timeout_buffer;
+                        let timeout = async_timeout.max(min_timeout);
+                        dispatch_limiter
+                            .now()
+                            .saturating_add(timeout.as_nanos() as i64)
+                    });
+                    let attempt = async {
+                        // Go `taskMatcher.ratelimit` maps ErrCannotWait (zero
+                        // burst or an unreachable deadline) to a throttled retry.
+                        match dispatch_limiter
+                            .wait_until(dispatch_stop.clone(), deadline)
                             .await
-                            .ok()
-                    } else {
-                        Some(offer.await)
+                        {
+                            WaitOutcome::Acquired => (),
+                            WaitOutcome::Stopped => return Attempt::Stopped,
+                            WaitOutcome::Throttled => return Attempt::Retry,
+                        }
+                        if matcher.offer(task.clone(), dispatch_stop.clone()).await {
+                            Attempt::Offered
+                        } else {
+                            Attempt::Stopped
+                        }
                     };
-                    match offered {
-                        Some(true) => break,
-                        Some(false) => break 'dispatch,
-                        None => continue,
+                    let outcome = match deadline {
+                        Some(deadline) => {
+                            let remaining =
+                                Duration::from_nanos(deadline.saturating_sub(dispatch_limiter.now()) as u64);
+                            tokio::time::timeout(remaining, attempt)
+                                .await
+                                .unwrap_or(Attempt::Retry)
+                        }
+                        None => attempt.await,
+                    };
+                    match outcome {
+                        Attempt::Offered => break,
+                        Attempt::Stopped => break 'dispatch,
+                        Attempt::Retry => {
+                            // Go yields before retrying a throttled/timeout head.
+                            tokio::task::yield_now().await;
+                            continue;
+                        }
                     }
                 }
             }
@@ -429,6 +497,7 @@ mod tests {
                 batch_size: NonZeroU32::new(batch).unwrap(),
                 read_range_size: NonZeroU32::new(100).unwrap(),
                 dispatch_timeout,
+                ..ReaderConfig::default()
             },
             Arc::new(move || active),
         );
