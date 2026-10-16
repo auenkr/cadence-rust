@@ -1676,3 +1676,11 @@ stages including mixed Go services/Rust Matching and seven SDK scenarios:
 /tmp/cadence-retry-full.exit = 0;
 /home/ubuntu/.cache/cadence-rust-test-artifacts/matching-retry-verified/results.json.
 Reader/matcher pipeline, dynamic config and all remaining service gates stay open.
+
+## 2026-10-16: Compaction checkpoint and service sequence confirmation
+
+Resumed at f10e5bfca with a clean worktree. User explicitly reconfirmed service-by-
+service migration: finish Matching and validate against Go Frontend, History and
+Worker before moving on. Latest full validation is 348 workspace tests and all
+27 compatibility stages. Next scoped gap is reader persistence retry, followed
+by background reader/matcher coordination. Full migration remains incomplete.
