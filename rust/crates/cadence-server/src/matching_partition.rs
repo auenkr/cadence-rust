@@ -180,3 +180,67 @@ impl PartitionCache {
         Ok(Some((old, config)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadence_persistence::matching_blob::BlobEncoding;
+    #[test]
+    fn matching_native_partition_updates_match_original_go_fixtures() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/matching-partitions.json"
+        ))
+        .unwrap();
+        for case in cases.as_array().unwrap() {
+            let directory = tempfile::tempdir().unwrap();
+            let store = std::sync::Arc::new(
+                SqliteTaskStore::create(directory.path().join("queue.db"), BlobEncoding::ThriftRW)
+                    .unwrap(),
+            );
+            let key = TaskListKey {
+                domain_id: uuid::Uuid::from_u128(1),
+                name: "queue".into(),
+                task_type: 0,
+            };
+            let queue = DurableTaskQueue::open(
+                store.clone(),
+                key.clone(),
+                0,
+                std::num::NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap();
+            let cache = PartitionCache::load(&store, &queue, &key, 0).unwrap();
+            let mut writes = 0;
+            for (update, expected) in case["updates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["results"].as_array().unwrap())
+            {
+                let config: StoredPartitionConfig = serde_json::from_value(update.clone()).unwrap();
+                let error = match cache.update(&queue, config, 2) {
+                    Ok(Some(_)) => {
+                        writes += 1;
+                        String::new()
+                    }
+                    Ok(None) => String::new(),
+                    Err(error) => error.message().to_string(),
+                };
+                assert_eq!(error, expected["error"].as_str().unwrap());
+                assert_eq!(writes, expected["writes"].as_i64().unwrap());
+                assert_eq!(
+                    serde_json::to_value(cache.get()).unwrap(),
+                    expected["config"]
+                );
+                let persisted = store
+                    .get_task_list(&key)
+                    .unwrap()
+                    .data
+                    .adaptive_partition_config
+                    .map(from_storage);
+                assert_eq!(serde_json::to_value(persisted).unwrap(), expected["config"]);
+            }
+        }
+    }
+}

@@ -1,5 +1,6 @@
 //! Cadence public and internal protobuf APIs, generated from upstream IDLs.
 pub mod task_list_status;
+pub mod task_list_partition;
 // Preserve generated tonic signatures, protobuf oneofs, and upstream IDL docs.
 #[allow(
     clippy::result_large_err,
@@ -12,6 +13,7 @@ pub mod uber {
             pub mod v1 {
                 tonic::include_proto!("uber.cadence.api.v1");
                 pub use crate::task_list_status::TaskListStatus;
+                pub use crate::task_list_partition::api::TaskListPartitionConfig;
             }
         }
         pub mod admin {
@@ -27,6 +29,7 @@ pub mod uber {
         pub mod matching {
             pub mod v1 {
                 tonic::include_proto!("uber.cadence.matching.v1");
+                pub use crate::task_list_partition::matching::TaskListPartitionConfig;
             }
         }
         pub mod shared {

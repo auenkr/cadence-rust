@@ -1,3 +1,14 @@
+Latest partition protobuf follow-up (2026-10-16): read
+matching-native-partition-next.md. Public/internal partition config map encoders
+now preserve explicit empty message presence for pinned Go. Exact-byte Rust
+tests, actual-Go nil/presence decoder checks and native manager Go-oracle fixture
+test pass. Expanded mixed Go services/Rust Matching passes nativePartitionConfig
+through Go Frontend and all existing SDK scenarios. Strict all-target Clippy
+passes. Markers partition-presence.exit, partition-presence-mixed.exit and
+partition-presence-clippy.exit under /tmp/opencode are all0. Full30 baseline
+previously passed on native manager06c6996fa. Sync module still unwired.
+No service complete; continue sync/forwarding and remaining gates.
+
 Latest native partition manager continuation (2026-10-16): read
 matching-native-partition-next.md first. Native manager caches/startup/update/
 refresh/local notifications, RPC Describe and isolation consumers now use leased

@@ -98,3 +98,29 @@ compiled or validated yet. The latter handles default partition map presence,
 the same pinned-gogo issue as zero isolation metrics. Add actual-Go wire checks
 and mixed-service partition update/Describe coverage before claiming it fixed.
 Native manager oracle test draft: /tmp/opencode/native-partition-oracle-test.txt.
+
+## Partition wire-presence follow-up
+
+Manager checkpoint committed/pushed 06c6996fa. Custom public/internal partition
+config encoders now emit explicit optional Some values in map entries, including
+default empty partitions. Same public Rust paths/fields and upstream protobuf
+field numbers retained via extern_path and reexports. Exact-byte/default/
+duplicate-key unit test passes for both APIs. Actual pinned Go public/internal
+decoders verified omitted empty values become nil, fixed encoding is nonnil.
+The Go check runs in existing run-matching-compat.py PartitionWire test.
+
+Native manager now consumes original-Go matching-partitions.json directly,
+checking update errors, no-op/write counts, versions, cache and persisted rows.
+Passed alongside all existing Go matching differential fixtures.
+
+Mixed Go services/Rust Matching expanded with UpdateTaskListPartitionConfig then
+Describe through Go Frontend, checking sparse read ID5 and empty read/write ID0
+entries. PASSED including existing Go SDK:
+/tmp/opencode/partition-presence-mixed.exit=0,
+artifacts matching-native-partition-presence/probe.log reports
+nativePartitionConfig passed. Focused wire/oracle run marker:
+/tmp/opencode/partition-presence.exit=0.
+Strict lint final still running: /tmp/opencode/partition-presence-clippy.log/.exit.
+Final strict all-target workspace Clippy passed, marker 0.
+Sync module remains unwired/unvalidated; source includes cancellation-safe local
+handoff, History response coordination, group routing and deadline-tailroom draft.

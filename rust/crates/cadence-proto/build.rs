@@ -15,6 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     files.sort();
     tonic_build::configure()
         .extern_path(".uber.cadence.api.v1.TaskListStatus", "crate::task_list_status::TaskListStatus")
+        .extern_path(".uber.cadence.api.v1.TaskListPartitionConfig", "crate::task_list_partition::api::TaskListPartitionConfig")
+        .extern_path(".uber.cadence.matching.v1.TaskListPartitionConfig", "crate::task_list_partition::matching::TaskListPartitionConfig")
         .generate_default_stubs(true)
         .file_descriptor_set_path(
             std::path::PathBuf::from(std::env::var("OUT_DIR")?).join("cadence.bin"),

@@ -222,10 +222,22 @@ async function run() {
   await call('Matching', 'CancelOutstandingPoll', { domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', pollerId: pollerB });
   assert.equal((await pollB).error?.code, grpc.status.CANCELLED, 'other isolation group must not consume the isolated activity');
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: isolatedTask.taskToken, result: payload('isolated-ok') });
+  // Empty partition entries must survive Rust -> Go Frontend -> protobufjs.
+  // The Go gogo decoder treats an omitted default map value as a nil pointer.
+  await call('Matching', 'UpdateTaskListPartitionConfig', {
+    domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY',
+    partitionConfig: { version: '999', numReadPartitions: 2, numWritePartitions: 1,
+      readPartitions: { 0: {}, 5: { isolationGroups: ['zone-a'] } }, writePartitions: { 0: {} } },
+  });
+  const partitionInfo = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
+  assert.equal(partitionInfo.partitionConfig.version, '1');
+  assert.deepEqual(partitionInfo.partitionConfig.readPartitions['0'].isolationGroups, []);
+  assert.deepEqual(partitionInfo.partitionConfig.readPartitions['5'].isolationGroups, ['zone-a']);
+  assert.deepEqual(partitionInfo.partitionConfig.writePartitions['0'].isolationGroups, []);
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: 'passed', queryDispatch: 'passed', isolationDispatch: 'passed', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: 'passed', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', peer, domain, execution, attributes }));
   } finally {
     fs.writeFileSync(stop, 'stop');
     let shutdownTimer;

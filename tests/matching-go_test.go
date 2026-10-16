@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	apiv1 "github.com/uber/cadence-idl/go/proto/api/v1"
+	matchingv1 "github.com/uber/cadence/.gen/proto/matching/v1"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/types"
 	mapper "github.com/uber/cadence/common/types/mapper/proto"
@@ -128,6 +129,31 @@ func TestRustMatchingPartitions(t *testing.T) {
 }
 
 func TestRustMatchingPartitionWire(t *testing.T) {
+	// Prost's default map encoding omits an empty value. Pinned gogo
+	// decodes that as nil; explicit empty submessage presence is required.
+	for _, test := range []struct {
+		bytes   []byte
+		present bool
+	}{
+		{[]byte{0x22, 0}, false},
+		{[]byte{0x22, 2, 0x12, 0}, true},
+	} {
+		var api apiv1.TaskListPartitionConfig
+		if err := api.Unmarshal(test.bytes); err != nil {
+			t.Fatal(err)
+		}
+		if (api.ReadPartitions[0] != nil) != test.present {
+			t.Fatalf("public partition presence: %+v", api.ReadPartitions)
+		}
+		var internal matchingv1.TaskListPartitionConfig
+		if err := internal.Unmarshal(test.bytes); err != nil {
+			t.Fatal(err)
+		}
+		if (internal.ReadPartitions[0] != nil) != test.present {
+			t.Fatalf("internal partition presence: %+v", internal.ReadPartitions)
+		}
+	}
+
 	type fixture struct {
 		Count      int32              `json:"count"`
 		Partitions map[int32][]string `json:"partitions"`
