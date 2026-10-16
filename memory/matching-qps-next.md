@@ -1,9 +1,10 @@
-# Matching arrival QPS tracker (2026-10-16)
+# Matching arrival QPS tracker and load-balancer hints (2026-10-16)
 
 Ported Go `common/stats`'s EMA fixed-window QPS tracker and wired it into the
 durable matcher, closing the `TaskListStatus.newTasksPerSecond` reporting gap
-named in `matching-limiter-next.md` (the `IsolationGroupMetrics` half of
-`DescribeTaskList` is still open; see limits).
+named in `matching-limiter-next.md`, and returned `LoadBalancerHints` on the
+durable poll responses (the `IsolationGroupMetrics` half of `DescribeTaskList`
+is still open; see limits).
 
 ## Go semantics implemented
 
@@ -21,6 +22,14 @@ cfg.QPSTrackerInterval(domain, taskList, type), baseEvent)`:
   every later window is `qps*(1-exp) + counter*exp/windowSeconds` with `exp=0.5`.
 - Window length is the dynamic property `matching.qpsTrackerInterval`
   (filters DomainName, TaskListName, TaskType; default 10s).
+
+Go `taskListManagerImpl.LoadBalancerHints()` returns nil until the manager is 10s
+old (`createTime`), then `{BacklogCount: taskAckManager.GetBacklogCount(),
+RatePerSecond: qpsTracker.QPS()}` — `GetBacklogCount` is the
+delivered-but-unacked counter, the same value `TaskListStatus.backlogCountHint`
+uses. The engine attaches the hints to every decision/activity poll response it
+returns (a delivered task, an already-started forwarded task, a query task, and
+the empty/expired poll).
 
 Rust `cadence_common::qps::EmaQpsTracker` applies the identical EMA steps from an
 injectable clock instead of a background ticker: arrivals are recorded against
@@ -40,23 +49,30 @@ per-window attribution across an idle span.
   `system_clock`; 4 unit tests.
 - `rust/crates/cadence-server/src/matching_registry.rs`:
   `QueueHandle.qps` / `Owner.qps` (`Arc<EmaQpsTracker>`, `exp = 0.5`),
+  `Owner.created` / `QueueHandle.created` (Go `createTime`),
   `QpsIntervalProvider`, `DEFAULT_QPS_TRACKER_INTERVAL_NANOS` (10s),
-  `QueueRegistry::with_qps_interval`; the tracker is created with the owner.
+  `QueueRegistry::with_qps_interval`, `QueueHandle::load_balancer_hints`;
+  the tracker is created with the owner.
 - `rust/crates/cadence-server/src/grpc_matching.rs`: `report_arrival`
   (`ISOLATION_GROUP_KEY` = Go `isolationgroup.GroupKey`), called from
   `add_decision_task`/`add_activity_task` on the durable path after the sticky
-  check; durable `DescribeTaskList` now sets `new_tasks_per_second`;
-  `with_durable_queues` installs the `matching.qpsTrackerInterval` provider;
-  `domain_name_for` is the shared UUID->name lookup used by the providers.
+  check; durable `DescribeTaskList` now sets `new_tasks_per_second`; the durable
+  decision poll (query, query-failure and delivered paths) and the activity poll
+  now set `load_balancer_hints`; `with_durable_queues` installs the
+  `matching.qpsTrackerInterval` provider; `domain_name_for` is the shared
+  UUID->name lookup used by the providers.
 - `rust/crates/cadence-server/src/matching_rpc_tests.rs`:
-  `matching_rpc_reports_arrival_qps_by_isolation_group`.
+  `matching_rpc_reports_arrival_qps_by_isolation_group`,
+  `matching_rpc_reports_load_balancer_hints_only_for_old_task_lists`.
 
 ## Validation
 
 - `cargo test -p cadence-common --lib`: **35 passed** (4 new tracker tests).
-- `cargo test -p cadence-server --lib`: **81 passed** (1 new RPC test: root and
+- `cargo test -p cadence-server --lib`: **82 passed** (2 new RPC tests: root and
   isolation-group arrivals, nothing reported inside an open window, and
-  `DescribeTaskList.new_tasks_per_second` following the tracker).
+  `DescribeTaskList.new_tasks_per_second` following the tracker; and
+  `LoadBalancerHints` withheld for a task list younger than 10s, then reporting
+  the backlog and a nonzero arrival rate for a 20s-old one).
 - strict all-target Clippy clean.
 - **Full 29/29-stage runner PASSED** (exit 0, including `workspace-tests`,
   `workspace-clippy`, `go-sdk-tchannel`, `go-services-matching-delivery` and
@@ -65,17 +81,17 @@ per-window attribution across an idle span.
 
 ## Remaining limits
 
-1. `TaskListStatus.isolation_group_metrics` is still empty: it needs the
+2. `isolation_group_metrics` in `TaskListStatus` is still empty: it needs the
    isolation group list from the isolation-group state
    (`config.AllIsolationGroups()`), which the Rust matcher does not model yet
    (part of the open "isolation groups" gate item). `GroupQPS` itself is
    implemented and covered by the RPC test through the queue handle.
-2. `LoadBalancerHints` is not returned by the Rust durable poll responses; Go
-   returns it (nil for a task list younger than 10s) in the decision, activity
-   and query poll responses.
-3. The tracker window provider honours only a `domainName`-filtered dynamic
+3. `LoadBalancerHints` is returned on the durable decision and activity poll
+   responses only; Go also returns them on the not-started/`PartitionConfig`-only
+   paths of its poll loop, which the Rust durable poll does not have separately.
+4. The tracker window provider honours only a `domainName`-filtered dynamic
    value, like the existing `matching.numTasklistWritePartitions` provider; Go
    also filters by TaskListName and TaskType.
-4. `matching.qpsTrackerInterval` is read when a task list manager is created and
+5. `matching.qpsTrackerInterval` is read when a task list manager is created and
    is not refreshed afterwards, matching the Go note "Changes are not reflected
    until service restart".

@@ -596,6 +596,69 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
 }
 
 #[tokio::test]
+async fn matching_rpc_reports_load_balancer_hints_only_for_old_task_lists() {
+    let (_dir, _store, matching, key) = fixture();
+    // Shorten the arrival-QPS window so the reported rate is observable.
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin lock")
+        .update(
+            false,
+            "matching.qpsTrackerInterval",
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"\"50ms\"".to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
+    let registry = matching.queues.clone().expect("durable backend");
+    // Go `taskListManagerImpl.LoadBalancerHints` withholds hints until the task
+    // list manager is 10s old, and the hints carry the delivered-but-unacked
+    // backlog plus the arrival rate.
+    let old_key = TaskListKey {
+        name: "old".into(),
+        ..key.clone()
+    };
+    let old = registry
+        .get(old_key, 0, matching_now() - 20_000_000_000)
+        .await
+        .unwrap();
+    let fresh = registry.get(key.clone(), 0, matching_now()).await.unwrap();
+    assert_eq!(fresh.load_balancer_hints(matching_now()), None);
+    assert_eq!(
+        old.load_balancer_hints(matching_now()),
+        Some(m::LoadBalancerHints {
+            backlog_count: 0,
+            rate_per_second: 0.0,
+        })
+    );
+    matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: key.domain_id.to_string(),
+            workflow_execution: execution(),
+            task_list: Some(p::TaskList {
+                name: "old".into(),
+                ..Default::default()
+            }),
+            schedule_id: 7,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    let hints = old
+        .load_balancer_hints(matching_now())
+        .expect("a 20s old task list reports hints");
+    assert!(hints.rate_per_second > 0.0, "hints carry the arrival rate");
+}
+
+#[tokio::test]
 async fn matching_rpc_sticky_task_list_requires_a_recent_poller() {
     let (_dir, _store, matching, key) = fixture();
     let domain = key.domain_id.to_string();

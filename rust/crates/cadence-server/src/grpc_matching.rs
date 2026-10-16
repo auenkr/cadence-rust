@@ -261,15 +261,23 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let _wait=query_lifecycle.begin();
                     let execution=query.request.workflow_execution.clone().unwrap_or_default();
                     match queue.dispatcher.query_mutable_state(&execution).await {
-                        Ok(state)=>Ok(Response::new(crate::matching_query::query_response(query, &state))),
+                        Ok(state)=>{
+                            let mut response=crate::matching_query::query_response(query, &state);
+                            response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                            Ok(Response::new(response))
+                        }
                         // Go fails the waiting query and returns an empty poll.
                         Err(error)=>{
                             let _=queue.queries.complete(&query.task_id, crate::matching_query::QueryOutcome::Internal(error));
-                            Ok(Response::new(m::PollForDecisionTaskResponse::default()))
+                            Ok(Response::new(m::PollForDecisionTaskResponse { load_balancer_hints: queue.load_balancer_hints(matching_now()), ..Default::default() }))
                         }
                     }
                 }
-                result=queue.dispatcher.poll_decision_with_poller(payload, self.poll_expiration, lifecycle)=>result.map(Response::new),
+                result=queue.dispatcher.poll_decision_with_poller(payload, self.poll_expiration, lifecycle)=>
+                    result.map(|mut response| {
+                        response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                        Response::new(response)
+                    }),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }
@@ -343,7 +351,11 @@ impl m::matching_api_server::MatchingApi for Matching {
             };
             let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: rate, isolation_group: String::new() } };
             return tokio::select! {
-                result=queue.dispatcher.poll_activity_with_poller(payload, self.poll_expiration, lifecycle)=>result.map(Response::new),
+                result=queue.dispatcher.poll_activity_with_poller(payload, self.poll_expiration, lifecycle)=>
+                    result.map(|mut response| {
+                        response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                        Response::new(response)
+                    }),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }

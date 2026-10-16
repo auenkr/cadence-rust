@@ -1,5 +1,6 @@
 //! Matching-owned queue lifecycle, independent of workflow execution state.
 use crate::{matching_dispatch::TaskDispatcher, matching_history::MatchingHistoryClient};
+use cadence_proto::matching as m;
 use cadence_persistence::{
     matching_blob::TaskData,
     matching_queue::DurableTaskQueue,
@@ -30,6 +31,9 @@ struct Owner {
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     queries: Arc<crate::matching_query::QueryChannel>,
     qps: Arc<cadence_common::qps::EmaQpsTracker>,
+    /// Go `taskListManagerImpl.createTime`: when the manager was created, used
+    /// to withhold `LoadBalancerHints` for a task list's first 10s.
+    created: i64,
     last_update: Mutex<tokio::time::Instant>,
     next_idle_check: Mutex<tokio::time::Instant>,
     liveness: Arc<cadence_common::liveness::Liveness>,
@@ -98,6 +102,7 @@ pub struct QueueHandle {
     /// Go `taskListManagerImpl.qpsTracker`: arrival QPS reported through
     /// `DescribeTaskList.newTasksPerSecond` and the isolation group metrics.
     pub qps: Arc<cadence_common::qps::EmaQpsTracker>,
+    created: i64,
     liveness: Arc<cadence_common::liveness::Liveness>,
     writer: crate::matching_writer::TaskWriter,
 }
@@ -155,6 +160,20 @@ impl QueueHandle {
         })
         .await
         .map_err(|error| Status::internal(error.to_string()))?
+    }
+    /// Go `taskListManagerImpl.LoadBalancerHints`: a task list reports hints
+    /// only once it is 10s old, as the delivered-but-unacked backlog plus the
+    /// arrival QPS.
+    #[must_use]
+    pub fn load_balancer_hints(&self, now: i64) -> Option<m::LoadBalancerHints> {
+        if now.saturating_sub(self.created) < 10_000_000_000 {
+            return None;
+        }
+        let (_, _, backlog, ..) = self.queue.status();
+        Some(m::LoadBalancerHints {
+            backlog_count: backlog,
+            rate_per_second: self.qps.qps(),
+        })
     }
     /// Go `taskListManager.HasPollerAfter`: a poller is currently waiting, or
     /// finished its last poll after `after`. Used by the sticky availability
@@ -368,6 +387,7 @@ impl QueueRegistry {
                         pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                         queries: Arc::new(crate::matching_query::QueryChannel::new()),
                         qps,
+                        created: now,
                         last_update: Mutex::new(tokio::time::Instant::now()),
                         next_idle_check: Mutex::new(
                             tokio::time::Instant::now() + std::time::Duration::from_secs(150),
@@ -394,6 +414,7 @@ impl QueueRegistry {
                 limiter: owner.limiter.clone(),
                 queries: owner.queries.clone(),
                 qps: owner.qps.clone(),
+                created: owner.created,
                 liveness: owner.liveness.clone(),
                 writer: owner.writer.clone(),
             })
