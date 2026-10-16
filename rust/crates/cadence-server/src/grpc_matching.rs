@@ -26,6 +26,7 @@ fn report_arrival(
     queue: &crate::matching_registry::QueueHandle,
     data: &cadence_persistence::matching_blob::TaskData,
 ) {
+    queue.mark_alive();
     match data
         .partition_config
         .as_ref()
@@ -183,6 +184,14 @@ impl Matching {
                 cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.numTasklistReadPartitions"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 1)
             })
         };
+        let sync_wait: crate::matching_registry::SyncWaitProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_duration(config.property_values("matching.localTaskWaitTime"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 10_000_000)
+            })
+        };
         let cache_enabled: crate::matching_registry::PartitionCacheEnabledProvider = {
             let domains = domains.clone();
             let overlay = overlay.clone();
@@ -259,6 +268,7 @@ impl Matching {
         let queues = queues
             .with_partition_count(read_provider)
             .with_partition_cache_enabled(cache_enabled)
+            .with_sync_wait(sync_wait)
             .with_qps_interval(qps_interval)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
@@ -479,6 +489,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::AddDecisionTaskRequest>,
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
+        let parent_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         task_list_name(r.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default())?;
         let domain = self.domain_name(&r.domain_id)?;
@@ -495,11 +506,17 @@ impl m::matching_api_server::MatchingApi for Matching {
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
-            };
+            }.at_creation(matching_now(), 0);
             // Go `taskListManagerImpl.AddTask`: a non-forwarded add marks
             // liveness and reports arrival QPS, grouped by the task's isolation
             // group when it has one.
             report_arrival(&queue, &data);
+            let remaining = parent_deadline.map(|deadline| deadline.saturating_duration_since(tokio::time::Instant::now()));
+            let deadline = tokio::time::Instant::now() + crate::matching_sync::sync_match_budget(remaining);
+            let active = self.frontend.state.domains.is_active_in(&source.to_string(), &self.frontend.state.current_cluster_name).map_err(|error| Status::not_found(error.message))?;
+            if active && queue.try_sync_match(&data, source, deadline).await {
+                return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
+            }
             queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
             return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
         }
@@ -532,6 +549,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::AddActivityTaskRequest>,
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
+        let parent_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         task_list_name(r.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default())?;
         let domain = self.domain_name(&r.domain_id)?;
@@ -548,8 +566,14 @@ impl m::matching_api_server::MatchingApi for Matching {
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
-            };
+            }.at_creation(matching_now(), 0);
             report_arrival(&queue, &data);
+            let remaining = parent_deadline.map(|deadline| deadline.saturating_duration_since(tokio::time::Instant::now()));
+            let deadline = tokio::time::Instant::now() + crate::matching_sync::sync_match_budget(remaining);
+            let active = self.frontend.state.domains.is_active_in(&source.to_string(), &self.frontend.state.current_cluster_name).map_err(|error| Status::not_found(error.message))?;
+            if active && queue.try_sync_match(&data, source, deadline).await {
+                return Ok(Response::new(m::AddActivityTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
+            }
             queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
             return Ok(Response::new(m::AddActivityTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
         }

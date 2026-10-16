@@ -32,6 +32,9 @@ struct Owner {
     queries: Arc<crate::matching_query::QueryChannel>,
     qps: Arc<cadence_common::qps::EmaQpsTracker>,
     partitions: Arc<crate::matching_partition::PartitionCache>,
+    sync_matcher: Arc<crate::matching_sync::SyncMatcher>,
+    isolation_select: crate::matching_reader::IsolationSelector,
+    sync_wait: Arc<dyn Fn() -> std::time::Duration + Send + Sync>,
     /// Go `taskListManagerImpl.createTime`: when the manager was created, used
     /// to withhold `LoadBalancerHints` for a task list's first 10s.
     created: i64,
@@ -78,6 +81,7 @@ pub struct QueueRegistry {
     /// >= 1 by the same caller. `None` keeps the single-partition default.
     partition_count: Option<PartitionCountProvider>,
     cache_enabled: Option<PartitionCacheEnabledProvider>,
+    sync_wait: Option<SyncWaitProvider>,
     /// Go `cfg.QPSTrackerInterval(domain, taskList, type)`. `None` uses the
     /// dynamic-property default (10s).
     qps_interval: Option<QpsIntervalProvider>,
@@ -86,6 +90,7 @@ pub struct QueueRegistry {
 pub type IsolationProvider = Arc<dyn Fn(&str, &str, i32, i16, Arc<Mutex<cadence_common::poller::Manager>>, Arc<crate::matching_partition::PartitionCache>) -> crate::matching_reader::IsolationConfig + Send + Sync>;
 /// Live read-partition-count provider used to size the dispatch limiter and to
 /// divide dispatch rate, mirroring Go's `NumTasklistReadPartitions`.
+pub type SyncWaitProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 pub type PartitionCacheEnabledProvider = Arc<dyn Fn(&str, &str, i32) -> bool + Send + Sync>;
 pub type PartitionCountProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 /// Live QPS-tracker window per task list, mirroring Go's
@@ -108,6 +113,9 @@ pub struct QueueHandle {
     /// `DescribeTaskList.newTasksPerSecond` and the isolation group metrics.
     pub qps: Arc<cadence_common::qps::EmaQpsTracker>,
     pub partitions: Arc<crate::matching_partition::PartitionCache>,
+    sync_matcher: Arc<crate::matching_sync::SyncMatcher>,
+    isolation_select: crate::matching_reader::IsolationSelector,
+    sync_wait: Arc<dyn Fn() -> std::time::Duration + Send + Sync>,
     created: i64,
     liveness: Arc<cadence_common::liveness::Liveness>,
     writer: crate::matching_writer::TaskWriter,
@@ -122,6 +130,18 @@ impl QueueHandle {
         } else {
             false
         }
+    }
+    pub fn mark_alive(&self) { self.liveness.mark_alive(registry_now()); }
+    pub async fn try_sync_match(&self, data: &TaskData, source_domain: Uuid, deadline: tokio::time::Instant) -> bool {
+        use crate::matching_limiter::WaitOutcome;
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() || self.queue.is_stopped() { return false; }
+        let limiter_deadline = self.limiter.now().saturating_add(remaining.as_nanos().min(i64::MAX as u128) as i64);
+        let stop = self.sync_matcher.stop_signal();
+        let acquired = tokio::time::timeout_at(deadline, self.limiter.wait_until(stop, Some(limiter_deadline))).await;
+        if !matches!(acquired, Ok(WaitOutcome::Acquired)) { return false; }
+        let group = (self.isolation_select)(data).0;
+        self.sync_matcher.offer(data.clone(), &group, &source_domain.to_string(), (self.sync_wait)(), deadline).await
     }
     pub async fn enqueue(
         &self,
@@ -236,6 +256,7 @@ impl QueueRegistry {
             domain_metadata: None,
             partition_count: None,
             cache_enabled: None,
+            sync_wait: None,
             qps_interval: None,
             isolation: None,
         }
@@ -244,6 +265,10 @@ impl QueueRegistry {
     /// `matching.numTasklistReadPartitions`; the registry clamps to >= 1.
     pub fn with_partition_count(mut self, provider: PartitionCountProvider) -> Self {
         self.partition_count = Some(provider);
+        self
+    }
+    pub fn with_sync_wait(mut self, provider: SyncWaitProvider) -> Self {
+        self.sync_wait = Some(provider);
         self
     }
     pub fn with_partition_cache_enabled(mut self, provider: PartitionCacheEnabledProvider) -> Self {
@@ -403,6 +428,15 @@ impl QueueRegistry {
                     );
                     let pollers = Arc::new(Mutex::new(cadence_common::poller::Manager::default()));
                     let isolation = registry.isolation.as_ref().map(|provider| provider(&lookup.0.to_string(), &lookup.1, lookup.2, kind, pollers.clone(), partitions.clone())).unwrap_or_default();
+                    let sync_groups = isolation.groups.clone();
+                    let isolation_select = isolation.select.clone();
+                    let sync_wait: Arc<dyn Fn() -> std::time::Duration + Send + Sync> = {
+                        let provider = registry.sync_wait.clone();
+                        let domain = lookup.0.to_string();
+                        let name = lookup.1.clone();
+                        let task_type = lookup.2;
+                        Arc::new(move || std::time::Duration::from_nanos(provider.as_ref().map(|provider| provider(&domain, &name, task_type)).unwrap_or(10_000_000).max(0) as u64))
+                    };
                     let reader = crate::matching_reader::TaskReader::with_isolation(
                         queue.clone(),
                         dispatcher.task_notification(),
@@ -412,6 +446,7 @@ impl QueueRegistry {
                         isolation,
                     );
                     let read_stop = reader.stop_signal();
+                    let sync_matcher = Arc::new(crate::matching_sync::SyncMatcher::new(&sync_groups, read_stop.subscribe()));
                     let wake = registry.changed.clone();
                     let stopped = writer.stop_signal();
                     queue.set_stop_waker(Arc::new(move || {
@@ -422,7 +457,8 @@ impl QueueRegistry {
                     let owner = Arc::new(Owner {
                         dispatcher: dispatcher
                             .with_writer(writer.clone())
-                            .with_reader(reader.clone()),
+                            .with_reader(reader.clone())
+                            .with_sync_matcher(sync_matcher.clone()),
                         writer,
                         reader,
                         limiter,
@@ -431,6 +467,9 @@ impl QueueRegistry {
                         queries: Arc::new(crate::matching_query::QueryChannel::new()),
                         qps,
                         partitions,
+                        sync_matcher,
+                        isolation_select,
+                        sync_wait,
                         created: now,
                         last_update: Mutex::new(tokio::time::Instant::now()),
                         next_idle_check: Mutex::new(
@@ -476,6 +515,9 @@ impl QueueRegistry {
                 queries: owner.queries.clone(),
                 qps: owner.qps.clone(),
                 partitions: owner.partitions.clone(),
+                sync_matcher: owner.sync_matcher.clone(),
+                isolation_select: owner.isolation_select.clone(),
+                sync_wait: owner.sync_wait.clone(),
                 created: owner.created,
                 liveness: owner.liveness.clone(),
                 writer: owner.writer.clone(),

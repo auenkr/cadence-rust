@@ -673,6 +673,28 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "system.allIsolationGroups", vec![cadence_api::admin::DynamicConfigValue {
         value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#"["z","unused"]"#.to_vec())), filters: vec![],
     }]);
+    // Go `matching.localTaskWaitTime` (default 10ms) is spent on the sync-match
+    // attempt of every add when no poller waits. Disable it here so the five
+    // adds below stay inside the open QPS window; sync behavior itself is
+    // covered by the `matching_sync` tests.
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin lock")
+        .update(
+            false,
+            "matching.localTaskWaitTime",
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"\"0\"".to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
     // Go `matching.qpsTrackerInterval` (default 10s; shortened here) is read
     // when the task list manager is created, so it is updated first.
     matching

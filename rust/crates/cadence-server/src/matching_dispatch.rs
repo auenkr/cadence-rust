@@ -53,12 +53,17 @@ pub struct TaskDispatcher {
     liveness: Option<Arc<cadence_common::liveness::Liveness>>,
     writer: Option<crate::matching_writer::TaskWriter>,
     reader: Option<crate::matching_reader::TaskReader>,
+    sync_matcher: Option<Arc<crate::matching_sync::SyncMatcher>>,
 }
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|time| time.as_nanos() as i64)
         .unwrap_or_default()
+}
+struct DeliveryTask {
+    task: AllocatedTask,
+    sync: Option<crate::matching_sync::SyncTask>,
 }
 enum ClaimError {
     Queue(QueueError),
@@ -69,7 +74,9 @@ fn queue_status(error: QueueError) -> Status {
 }
 impl TaskDispatcher {
     pub(crate) fn reader_should_reload(&self) -> bool {
-        self.reader.as_ref().is_some_and(|reader| reader.should_reload())
+        self.reader
+            .as_ref()
+            .is_some_and(|reader| reader.should_reload())
     }
     pub fn new(
         queue: Arc<DurableTaskQueue>,
@@ -84,6 +91,7 @@ impl TaskDispatcher {
             liveness: None,
             writer: None,
             reader: None,
+            sync_matcher: None,
         }
     }
     pub fn with_liveness(mut self, liveness: Arc<cadence_common::liveness::Liveness>) -> Self {
@@ -96,6 +104,10 @@ impl TaskDispatcher {
     }
     pub fn with_reader(mut self, reader: crate::matching_reader::TaskReader) -> Self {
         self.reader = Some(reader);
+        self
+    }
+    pub fn with_sync_matcher(mut self, matcher: Arc<crate::matching_sync::SyncMatcher>) -> Self {
+        self.sync_matcher = Some(matcher);
         self
     }
     pub fn task_notification(&self) -> Arc<Notify> {
@@ -124,6 +136,30 @@ impl TaskDispatcher {
         .map_err(ClaimError::Join)?
         .map(|mut batch| (batch.tasks.pop(), batch.scan_pending))
         .map_err(ClaimError::Queue)
+    }
+    async fn claim_delivery(
+        &self,
+        group: &str,
+    ) -> Result<(Option<DeliveryTask>, bool), ClaimError> {
+        if let Some(matcher) = self.sync_matcher.as_ref().filter(|_| self.reader.is_some()) {
+            tokio::select! {
+                task = matcher.poll(group) => task.map(|sync| (Some(DeliveryTask { task: sync.task.clone(), sync: Some(sync) }), false)).ok_or(ClaimError::Queue(QueueError::Stopped)),
+                result = self.claim(group) => result.map(|(task, pending)| (task.map(|task| DeliveryTask { task, sync: None }), pending)),
+            }
+        } else {
+            self.claim(group).await.map(|(task, pending)| {
+                (task.map(|task| DeliveryTask { task, sync: None }), pending)
+            })
+        }
+    }
+    async fn finish_delivery(&self, task: DeliveryTask, result: Result<(), Status>) {
+        if let Some(sync) = task.sync {
+            sync.finish(result);
+        } else if result.is_ok() {
+            self.complete(task.task.task_id).await;
+        } else {
+            self.rewrite(task.task.task_id).await;
+        }
     }
     async fn rewrite(&self, task: i64) {
         if let Some(writer) = &self.writer {
@@ -206,11 +242,16 @@ impl TaskDispatcher {
     ) -> Result<m::PollForDecisionTaskResponse, Status> {
         let history = self.history.clone();
         let domain = self.domain_id.clone();
-        self.poll(poll, expiration, move |task, poll| {
-            let history = history.clone();
-            let domain = domain.clone();
-            async move { history.start_decision(&domain, &task, poll).await }
-        })
+        self.poll_with_lifecycle(
+            poll,
+            expiration,
+            move |task, poll, source_domain: Option<String>| {
+                let history = history.clone();
+                let domain = source_domain.unwrap_or_else(|| domain.clone());
+                async move { history.start_decision(&domain, &task, poll).await }
+            },
+            None,
+        )
         .await
     }
 
@@ -225,9 +266,9 @@ impl TaskDispatcher {
         self.poll_with_lifecycle(
             poll,
             expiration,
-            move |task, poll| {
+            move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
-                let domain = domain.clone();
+                let domain = source_domain.unwrap_or_else(|| domain.clone());
                 async move { history.start_decision(&domain, &task, poll).await }
             },
             Some(lifecycle),
@@ -241,11 +282,16 @@ impl TaskDispatcher {
     ) -> Result<m::PollForActivityTaskResponse, Status> {
         let history = self.history.clone();
         let domain = self.domain_id.clone();
-        self.poll(poll, expiration, move |task, poll| {
-            let history = history.clone();
-            let domain = domain.clone();
-            async move { history.start_activity(&domain, &task, poll).await }
-        })
+        self.poll_with_lifecycle(
+            poll,
+            expiration,
+            move |task, poll, source_domain: Option<String>| {
+                let history = history.clone();
+                let domain = source_domain.unwrap_or_else(|| domain.clone());
+                async move { history.start_activity(&domain, &task, poll).await }
+            },
+            None,
+        )
         .await
     }
 
@@ -260,20 +306,21 @@ impl TaskDispatcher {
         self.poll_with_lifecycle(
             poll,
             expiration,
-            move |task, poll| {
+            move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
-                let domain = domain.clone();
+                let domain = source_domain.unwrap_or_else(|| domain.clone());
                 async move { history.start_activity(&domain, &task, poll).await }
             },
             Some(lifecycle),
         )
         .await
     }
+    #[cfg(test)]
     async fn poll<Q, R, F, Fut>(
         &self,
         poll: Q,
         expiration: Duration,
-        deliver: F,
+        mut deliver: F,
     ) -> Result<R, Status>
     where
         Q: Clone + Send + 'static,
@@ -281,8 +328,13 @@ impl TaskDispatcher {
         F: FnMut(AllocatedTask, Q) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
-        self.poll_with_lifecycle(poll, expiration, deliver, None)
-            .await
+        self.poll_with_lifecycle(
+            poll,
+            expiration,
+            move |task, poll, _| deliver(task, poll),
+            None,
+        )
+        .await
     }
     async fn poll_with_lifecycle<Q, R, F, Fut>(
         &self,
@@ -294,7 +346,7 @@ impl TaskDispatcher {
     where
         Q: Clone + Send + 'static,
         R: Default + Send + 'static,
-        F: FnMut(AllocatedTask, Q) -> Fut + Send + 'static,
+        F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         let (sender, receiver) = oneshot::channel();
@@ -319,7 +371,7 @@ impl TaskDispatcher {
     ) where
         Q: Clone + Send,
         R: Default + Send,
-        F: FnMut(AllocatedTask, Q) -> Fut + Send,
+        F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         let mut waiting = None;
@@ -346,10 +398,10 @@ impl TaskDispatcher {
                 tokio::select! {
                     biased;
                     _ = sender.closed() => return,
-                    result = self.claim(lifecycle.as_ref().map(|l| l.info.isolation_group.as_str()).unwrap_or_default()) => result,
+                    result = self.claim_delivery(lifecycle.as_ref().map(|l| l.info.isolation_group.as_str()).unwrap_or_default()) => result,
                 }
             } else {
-                self.claim("").await
+                self.claim_delivery("").await
             };
             let (task, scan_pending) = match claim {
                 Ok(value) => value,
@@ -381,35 +433,42 @@ impl TaskDispatcher {
             drop(waiting.take());
             waiting_started = false;
             if sender.is_closed() {
-                self.rewrite(task.task_id).await;
+                self.finish_delivery(task, Err(Status::cancelled("Poll cancelled before start.")))
+                    .await;
                 return;
             }
             let result = tokio::select! {
                 biased;
-                _=sender.closed()=>{self.rewrite(task.task_id).await;return;},
-                result=deliver(task.clone(),poll.clone())=>result,
+                _=sender.closed()=>{self.finish_delivery(task, Err(Status::cancelled("Poll cancelled during start."))).await;return;},
+                result=deliver(task.task.clone(),poll.clone(),task.sync.as_ref().map(|sync| sync.source_domain.clone()))=>result,
             };
             match result {
                 Ok(response) => {
-                    self.complete(task.task_id).await;
+                    self.finish_delivery(task, Ok(())).await;
                     let _ = sender.send(Ok(response));
                     return;
                 }
                 Err(error) => match start_error_kind(&error) {
-                    StartErrorKind::Discard => self.complete(task.task_id).await,
+                    StartErrorKind::Discard => self.finish_delivery(task, Ok(())).await,
                     StartErrorKind::InactiveDomain => {
                         if self
                             .history
-                            .refresh_workflow_tasks(&self.domain_id, &task)
+                            .refresh_workflow_tasks(
+                                task.sync
+                                    .as_ref()
+                                    .map(|sync| sync.source_domain.as_str())
+                                    .unwrap_or(&self.domain_id),
+                                &task.task,
+                            )
                             .await
                             .is_ok()
                         {
-                            self.complete(task.task_id).await;
+                            self.finish_delivery(task, Ok(())).await;
                         } else {
-                            self.rewrite(task.task_id).await;
+                            self.finish_delivery(task, Err(error)).await;
                         }
                     }
-                    StartErrorKind::Retry => self.rewrite(task.task_id).await,
+                    StartErrorKind::Retry => self.finish_delivery(task, Err(error)).await,
                 },
             }
         }
@@ -658,7 +717,7 @@ mod tests {
             .poll_with_lifecycle(
                 (),
                 Duration::from_millis(10),
-                |_, _| -> std::future::Ready<Result<m::PollForDecisionTaskResponse, Status>> {
+                |_, _, _| -> std::future::Ready<Result<m::PollForDecisionTaskResponse, Status>> {
                     panic!("empty poll must not deliver")
                 },
                 Some(PollLifecycle {
@@ -736,7 +795,7 @@ mod tests {
             .poll_with_lifecycle(
                 (),
                 Duration::from_secs(2),
-                move |_, _| {
+                move |_, _, _| {
                     let mut manager = manager.lock().unwrap();
                     assert!(
                         !manager.contains_poll("poll"),
