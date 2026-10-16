@@ -28,9 +28,13 @@ for its token. Assertions:
   expected `paced-1`. The Rust Matching server, Go services and durable delivery
   all behaved; only the probe's ordering assert was wrong.
 - Fix applied (assert the delivered set, keep the >=500 ms last-poll bound).
-  Re-run (`.../matching-paced-mixed2`) was launched in tmux `cadence-rust` but
-  the machine restarted before it completed. MUST re-run and confirm before
-  claiming this gate.
+- Re-run CONFIRMED PASSING (2026-10-16): `.../matching-paced-mixed2` exit 0,
+  `probe.log` reports `{"result":"passed","topology":"Go Frontend/History/Worker
+  with Rust Matching RPC",...}`. The rate scenario (three paced activity polls +
+  the Describe rate assertion) ran and passed alongside the pre-existing
+  workflow/idle-recovery scenarios, so the mixed activity-pacing gate is now
+  validated: worker-reported `maxTasksPerSecond` reaches Rust Matching, paces
+  backlog dispatch, and is reflected in `DescribeTaskList`.
 
 ### Reproduce
 ```
