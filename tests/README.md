@@ -301,7 +301,8 @@ Go seeds rows, Rust reads and mutates them, Go validates Rust metadata/tasks and
 performs a bounded deletion, and Rust verifies the result. Rust tests also cover
 lease fencing across connections/restarts and atomic batch rollback. This is
 included in the combined runner. The SQLite component is not yet selected by
-server configuration or connected to Matching's RPC queue delivery loop.
+server configuration. An opt-in Matching RPC backend and mixed-service harness
+now exercise its decision/activity delivery path.
 
 Rust Matching queue delivery against original Go History:
 
@@ -310,11 +311,26 @@ python3 tests/run-go-service-baseline.py --matching-delivery
 ```
 
 This starts the original four Go roles with SQLite, then drives a workflow through
-Rust's independent durable queue and outbound History client. Rust tokens are
+a Rust Matching protobuf listener, durable queue and outbound History client. Rust tokens are
 completed through Go Frontend; payload/header, heartbeat and 11-event history are
 checked. The Rust delivery process reopens its SQLite queue on each poll. This
-probe is also the final stage of the combined runner. It tests the delivery
-boundary; the Go frontend is not yet routed to a Rust Matching RPC listener.
+probe tests the RPC/History boundary and seeds queued tasks itself.
+
+Actual mixed-service routing with no Go Matching process:
+
+```sh
+python3 tests/run-go-service-baseline.py --rust-matching
+```
+
+This builds a test-only Go CLI overlay using Fx discovery decoration, starts the
+original Go Frontend/History/Worker, and advertises the Rust Matching gRPC peer.
+The probe calls Go Frontend for all worker operations and also runs an existing
+Go SDK workflow/activity over its TChannel API. Domain metadata is seeded into
+the Rust test server; this is not production discovery/domain-cache parity.
+The combined runner includes both probes. Use `--go-mixed-server-bin` to reuse
+this overlay binary; `--go-server-bin` expects an ordinary original Go server.
+The harness precompiles the Rust integration executable before service startup
+so workflow deadlines exclude compilation time.
 
 The Matching SQLite interop stage also checks cross-domain activity row keys:
 task rows use the source domain while transaction fencing uses the target

@@ -82,6 +82,9 @@ Matching now has an independent SQLite task-store component in
 exchange a real database file with Go's SQL TaskStore, including source-domain
 activity row keys and target-domain lease fencing. Independent queue allocation,
 reader/ack recovery, cancellation-safe History delivery and registry lifecycle
-components are also available. These components are not yet
-wired into Matching RPC handlers or persistence configuration; the running server
-continues to use the embedded execution engine's task queues.
+components are also available. `Matching::with_durable_queues` connects AddTask
+and poll protobuf RPCs to those components. A mixed-service test runs original Go
+Frontend/History/Worker with Rust Matching and the existing Go SDK. This remains
+an opt-in library path: domain metadata is seeded by the test, forwarded sync
+matching and queries remain incomplete, and production configuration still uses
+the embedded execution engine's task queues.

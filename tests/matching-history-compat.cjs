@@ -1,5 +1,5 @@
-// Real Go Frontend/History with Rust durable queue + outbound History client.
-// This verifies the delivery boundary, not replacement of the Matching listener.
+// Real Go Frontend/History with Rust Matching protobuf AddTask/Poll RPCs.
+// This boundary probe seeds tasks directly; --rust-matching tests Go routing.
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');

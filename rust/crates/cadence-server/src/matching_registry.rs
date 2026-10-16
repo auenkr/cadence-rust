@@ -57,6 +57,24 @@ impl QueueHandle {
         .await
         .map_err(|error| Status::internal(error.to_string()))?
     }
+    pub async fn append_in_domain(
+        &self,
+        tasks: Vec<TaskData>,
+        source_domain: Uuid,
+        now: i64,
+    ) -> Result<Vec<AllocatedTask>, Status> {
+        let handle = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let tasks = handle
+                .queue
+                .append_in_domain(&tasks, source_domain, now)
+                .map_err(|error| Status::unavailable(error.to_string()))?;
+            handle.dispatcher.notify_new_tasks();
+            Ok(tasks)
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?
+    }
 }
 impl QueueRegistry {
     pub fn new(

@@ -4,6 +4,9 @@ use crate::{grpc::Frontend, grpc_internal::History};
 use cadence_proto::{api as p, matching as m};
 use cadence_common::task_list::TaskListName;
 
+fn matching_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|time| time.as_nanos() as i64).unwrap_or_default()
+}
 fn task_list_name(name: &str) -> Result<TaskListName, Status> {
     TaskListName::parse(name).map_err(Status::invalid_argument)
 }
@@ -53,13 +56,37 @@ impl Drop for PollGuard {
 pub struct Matching {
     pub frontend: Frontend,
     polls: Polls,
+    queues: Option<crate::matching_registry::QueueRegistry>,
+    poll_expiration: std::time::Duration,
 }
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
+            queues: None,
+            poll_expiration: std::time::Duration::from_secs(60),
         }
+    }
+    /// Incremental durable delivery backend. Domain metadata and the remaining
+    /// administrative/query methods still use the supplied application state.
+    pub fn with_durable_queues(
+        state: crate::handlers::AppState,
+        queues: crate::matching_registry::QueueRegistry,
+        poll_expiration: std::time::Duration,
+    ) -> Self {
+        let mut matching = Self::new(state);
+        matching.queues = Some(queues);
+        matching.poll_expiration = poll_expiration;
+        matching
+    }
+    async fn durable_queue(&self, domain: &str, list: &p::TaskList, task_type: i32) -> Result<crate::matching_registry::QueueHandle, Status> {
+        task_list_name(&list.name)?;
+        let domain_id = uuid::Uuid::parse_str(domain).map_err(|_| Status::invalid_argument("Domain UUID is not valid."))?;
+        let kind = match list.kind { 2 => 1, 3 => 2, _ => 0 };
+        self.queues.as_ref().expect("durable backend selected").get(
+            cadence_persistence::matching_sqlite::TaskListKey { domain_id, name: list.name.clone(), task_type }, kind, matching_now(),
+        ).await
     }
     fn domain_name(&self, id: &str) -> Result<String, Status> {
         History {
@@ -103,11 +130,18 @@ impl m::matching_api_server::MatchingApi for Matching {
             .clone();
         task_list_name(&task_list)?;
         let guard = self.register_poll(PollKey {
-            domain: r.domain_id,
+            domain: r.domain_id.clone(),
             task_list,
             task_type: 1,
             poller: r.poller_id,
         });
+        if self.queues.is_some() {
+            let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 0).await?;
+            return tokio::select! {
+                result=queue.dispatcher.poll_decision(payload, self.poll_expiration)=>result.map(Response::new),
+                _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
+            };
+        }
         let v = tokio::select! {
             result=p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,Request::new(payload))=>result?.into_inner(),
             _=guard.cancel.notified()=>return Err(Status::cancelled("Outstanding poll cancelled.")),
@@ -157,11 +191,18 @@ impl m::matching_api_server::MatchingApi for Matching {
             .clone();
         task_list_name(&task_list)?;
         let guard = self.register_poll(PollKey {
-            domain: r.domain_id,
+            domain: r.domain_id.clone(),
             task_list,
             task_type: 2,
             poller: r.poller_id,
         });
+        if self.queues.is_some() {
+            let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 1).await?;
+            return tokio::select! {
+                result=queue.dispatcher.poll_activity(payload, self.poll_expiration)=>result.map(Response::new),
+                _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
+            };
+        }
         let v = tokio::select! {
             result=p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,Request::new(payload))=>result?.into_inner(),
             _=guard.cancel.notified()=>return Err(Status::cancelled("Outstanding poll cancelled.")),
@@ -194,6 +235,21 @@ impl m::matching_api_server::MatchingApi for Matching {
         let r = request.into_inner();
         task_list_name(r.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default())?;
         let domain = self.domain_name(&r.domain_id)?;
+        if self.queues.is_some() {
+            if !r.forwarded_from.is_empty() { return Err(Status::unimplemented("Durable forwarded sync matching is not migrated yet.")); }
+            let list = r.task_list.as_ref().ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+            let execution = r.workflow_execution.as_ref().ok_or_else(|| Status::invalid_argument("WorkflowExecution is not set."))?;
+            let run = uuid::Uuid::parse_str(&execution.run_id).map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
+            let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
+            let queue = self.durable_queue(&r.domain_id, list, 0).await?;
+            let now = matching_now();
+            let data = cadence_persistence::matching_blob::TaskData {
+                workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
+                partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
+            }.at_creation(now, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default());
+            queue.append_in_domain(vec![data], source, now).await?;
+            return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: None }));
+        }
         let execution = r.workflow_execution.unwrap_or_default();
         let store = self
             .frontend
@@ -226,6 +282,22 @@ impl m::matching_api_server::MatchingApi for Matching {
         let r = request.into_inner();
         task_list_name(r.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default())?;
         let domain = self.domain_name(&r.domain_id)?;
+        if self.queues.is_some() {
+            if !r.forwarded_from.is_empty() { return Err(Status::unimplemented("Durable forwarded sync matching is not migrated yet.")); }
+            let list = r.task_list.as_ref().ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+            let execution = r.workflow_execution.as_ref().ok_or_else(|| Status::invalid_argument("WorkflowExecution is not set."))?;
+            let run = uuid::Uuid::parse_str(&execution.run_id).map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
+            self.domain_name(&r.source_domain_id)?;
+            let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| Status::invalid_argument("Source domain UUID is not valid."))?;
+            let queue = self.durable_queue(&r.domain_id, list, 1).await?;
+            let now = matching_now();
+            let data = cadence_persistence::matching_blob::TaskData {
+                workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
+                partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
+            }.at_creation(now, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default());
+            queue.append_in_domain(vec![data], source, now).await?;
+            return Ok(Response::new(m::AddActivityTaskResponse { partition_config: None }));
+        }
         let execution = r.workflow_execution.unwrap_or_default();
         let store = self
             .frontend
@@ -652,3 +724,7 @@ pub async fn serve(
         .await?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "matching_rpc_tests.rs"]
+mod durable_tests;

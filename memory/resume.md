@@ -1,10 +1,38 @@
-# Current resume checkpoint (2026-10-15)
+# Current resume checkpoint (2026-10-16)
 
 Follow root AGENTS.md. The user requires continuing the entire Go-to-Rust rewrite,
 service by service: Matching -> History -> Frontend -> Worker. All roles remain
 incomplete. Keep working autonomously; use tmux session cadence-rust for long
 processes. After compaction save progress, commit and push. Never equate adapter
 coverage or a boundary probe with complete service parity.
+
+## Latest verified Matching RPC checkpoint
+
+Read matching-rpc-next.md first. Opt-in Matching::with_durable_queues connects
+AddTask/poll protobuf handlers to the durable registry and Go History RPC client,
+without local workflow execution lookups. The production default is unchanged.
+Actual mixed Go Frontend/History/Worker + Rust Matching probe PASSED with no
+Go Matching process, using test-only Fx discovery and seeded Rust domain metadata.
+Existing Go SDK over Go Frontend TChannel also passed. Full accumulated runner:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-mixed-final-20261016/results.json
+and /tmp/cadence-matching-mixed-full.exit = 0: all 22 stages, 324 workspace tests,
+strict lint. Expanded SDK (echo, activity retry, child, workflow-run/task retry,
+activity timeout and signal) separately passed:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-mixed-sdk-expanded2/results.json.
+
+This checkpoint is being committed/pushed with these notes. Matching remains
+incomplete. Next: native poller history/DescribeTaskList, periodic ack maintenance,
+owned queue lifecycle; then query delivery, sync matching/forwarding, rate limits,
+partition/isolation/semaphores, production domain cache/config/membership and
+internal Matching Thrift/TChannel. Do not move to History prematurely.
+
+Build the Go routing harness with --rust-matching, or reuse:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-mixed-20261016/cadence-server.
+Combined runner uses --go-mixed-server-bin for that test binary; --go-server-bin
+is only for ordinary original Go CLI (/tmp/cadence-go-mixed/cadence-server).
+Serialize heavy linking; Rust integration tests are now precompiled by the
+baseline runner before services start. First two failed attempts were build
+contention and an invalid discovery seed; see matching-rpc-next.md.
 
 ## Verified checkpoints
 
@@ -37,25 +65,6 @@ Full accumulated runner PASSED all 21 stages and 321 workspace tests:
 differentials, standalone SDK checks and actual-Go History delivery. Used unchanged
 original Go binary /tmp/cadence-go-mixed/cadence-server. Source-domain checkpoint
 is being committed/pushed with these notes.
-
-## Next implementation
-
-Existing grpc_matching still delegates into the embedded engine. Independent
-storage/queue/History/dispatcher/registry components are NOT wired to the listener.
-Continue RPC integration and lifecycle: domain cache, owned queue registration,
-configured ack timer, ownership loss/unload and cancellation. Then query delivery,
-poller state, sticky lists, forwarding, partition scaling/isolation, throttling,
-semaphores, membership and internal Thrift/TChannel transport parity.
-
-Live boundary probe bypasses the Go Matching listener; it does not demonstrate
-replacement of Go Matching. Need Go Frontend + Go History + Go Worker routed to
-Rust Matching, exercising original SDKs and crash/restart/failover. A test-only
-Go Fx PeerProvider decorator can advertise Rust Matching without changing the
-original Go business logic; see matching-delivery-next.md and Go cadence/fx.go.
-
-Read service-migration-plan.md, matching-storage-next.md, matching-delivery-next.md,
-progress.md and port-map/ledger. No Go production sources changed. 29 source
-files are partial, none complete; the inventory remains deliberately conservative.
 
 ## Known validation/resource details
 

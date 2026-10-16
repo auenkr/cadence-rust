@@ -2,7 +2,8 @@
 """Build and verify the Rust server with original Go code, IDLs and Go SDK.
 
 All processes are local. Standalone Rust checks run without Go services; a separate
-final boundary probe boots original Go roles with Rust queue/History delivery.
+boundary probe boots original Go roles; the final mixed probe replaces Go Matching
+with the Rust protobuf listener and tests the existing SDK through Go Frontend.
 Run long checks in tmux session cadence-rust, per the repository instructions.
 """
 import argparse
@@ -25,6 +26,7 @@ def main():
     os.environ.setdefault("CARGO_BUILD_JOBS", "1")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts-dir", type=Path)
+    parser.add_argument("--go-mixed-server-bin", type=Path, help="reuse the test-only Go Fx routing harness build")
     parser.add_argument("--go-server-bin", type=Path, help="reuse an original Go server build for the final delivery probe")
     parser.add_argument("--skip-rust-checks", action="store_true",
                         help="skip workspace tests/clippy; still build and run compatibility checks")
@@ -168,6 +170,11 @@ def main():
     if args.go_server_bin:
         go_probe += ["--binary", str(args.go_server_bin.resolve())]
     run("go-services-matching-delivery", go_probe, timeout=2400)
+    mixed_probe = [sys.executable, str(root / "tests/run-go-service-baseline.py"),
+        "--rust-matching", "--artifacts-dir", str(artifacts / "mixed-matching")]
+    if args.go_mixed_server_bin:
+        mixed_probe += ["--binary", str(args.go_mixed_server_bin.resolve())]
+    run("go-services-rust-matching", mixed_probe, timeout=2400)
     print(f"All compatibility checks passed. Results: {artifacts / 'results.json'}", flush=True)
 
 

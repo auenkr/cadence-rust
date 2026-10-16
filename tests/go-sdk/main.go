@@ -1,5 +1,5 @@
 // Compatibility driver uses the existing Cadence Go SDK over native TChannel.
-// It intentionally runs no Go Cadence server.
+// Default mode targets standalone Rust; mixed mode targets Go Frontend with Rust Matching.
 package main
 
 import (
@@ -130,6 +130,10 @@ func main() {
 	rpc := workflowserviceclient.New(dispatcher.ClientConfig("cadence-frontend"))
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	if domain := os.Getenv("CADENCE_MIXED_MATCHING_DOMAIN"); domain != "" {
+		runMixedMatchingSDK(ctx, rpc, domain)
+		return
+	}
 	// The Go server registers a separate, case-sensitive Meta::health Thrift API.
 	healthResponse, err := dispatcher.ClientConfig("cadence-frontend").GetUnaryOutbound().Call(ctx, &transport.Request{Caller: "cadence-rust-go-sdk-compat", Service: "cadence-frontend", Procedure: "Meta::health", Encoding: "thrift", Body: bytes.NewReader([]byte{0})})
 	if err != nil {

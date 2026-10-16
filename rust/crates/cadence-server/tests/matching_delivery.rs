@@ -1,13 +1,13 @@
 //! Run by the original-Go service harness; never substitutes an embedded engine.
 use cadence_persistence::{
-    matching_blob::{BlobEncoding, TaskData},
-    matching_queue::DurableTaskQueue,
+    matching_blob::BlobEncoding,
     matching_sqlite::{SqliteTaskStore, TaskListKey},
 };
-use cadence_proto::api as p;
+use cadence_proto::{api as p, matching as m};
 use cadence_server::{
-    matching_dispatch::TaskDispatcher,
+    grpc_matching::Matching,
     matching_history::{start_error_kind, MatchingHistoryClient, StartErrorKind},
+    matching_registry::QueueRegistry,
 };
 use prost::Message;
 use serde::Deserialize;
@@ -17,6 +17,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tonic::Request;
 use uuid::Uuid;
 #[derive(Deserialize)]
 struct Fixture {
@@ -30,6 +31,10 @@ struct Fixture {
     schedule_id: i64,
     database: String,
     output: String,
+    #[serde(default)]
+    listen: Option<String>,
+    #[serde(default)]
+    stop_file: Option<String>,
 }
 #[tokio::test]
 #[ignore = "requires original Go History; run tests/run-go-service-baseline.py --matching-delivery"]
@@ -56,29 +61,7 @@ async fn matching_delivery_go_history() {
         name: fixture.task_list.clone(),
         task_type: if fixture.kind == "activity" { 1 } else { 0 },
     };
-    let queue = Arc::new(
-        DurableTaskQueue::open(
-            Arc::new(store),
-            key,
-            0,
-            NonZeroU32::new(100000).unwrap(),
-            now,
-        )
-        .unwrap(),
-    );
-    let data = TaskData {
-        workflow_id: fixture.workflow_id,
-        run_id: Some(
-            Uuid::parse_str(&fixture.run_id)
-                .unwrap()
-                .as_bytes()
-                .to_vec(),
-        ),
-        schedule_id: fixture.schedule_id,
-        ..Default::default()
-    }
-    .at_creation(now, 0);
-    let original = queue.append(&[data], now).unwrap().remove(0);
+    let store = Arc::new(store);
     let channel =
         tonic::transport::Endpoint::from_shared(format!("http://{}", fixture.history_peer))
             .unwrap()
@@ -86,6 +69,90 @@ async fn matching_delivery_go_history() {
             .await
             .unwrap();
     let client = MatchingHistoryClient::new(channel, Duration::from_secs(1), 32 * 1024 * 1024);
+    let registry = QueueRegistry::new(
+        store.clone(),
+        client.clone(),
+        NonZeroU32::new(100000).unwrap(),
+    );
+    let state = cadence_server::handlers::AppState::default();
+    state
+        .domains
+        .create(
+            cadence_api::types::DomainInfo {
+                name: fixture.domain.clone(),
+                uuid: fixture.domain_id.clone(),
+                ..Default::default()
+            },
+            Default::default(),
+            Default::default(),
+            false,
+        )
+        .unwrap();
+    let matching = Matching::with_durable_queues(state, registry.clone(), Duration::from_secs(15));
+    // Exercise the actual Matching protobuf listener and generated client, not
+    // only the queue/dispatcher library calls used by the earlier checkpoint.
+    let listener =
+        tokio::net::TcpListener::bind(fixture.listen.as_deref().unwrap_or("127.0.0.1:0"))
+            .await
+            .unwrap();
+    let address = listener.local_addr().unwrap();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(matching))
+            .serve_with_incoming(incoming)
+            .await
+            .unwrap();
+    });
+    if fixture.kind == "server" {
+        std::fs::write(&fixture.output, address.to_string()).unwrap();
+        let stop = fixture.stop_file.expect("server stop file");
+        while !Path::new(&stop).exists() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        registry.shutdown(now).await.unwrap();
+        server.abort();
+        return;
+    }
+    let mut matching =
+        m::matching_api_client::MatchingApiClient::connect(format!("http://{address}"))
+            .await
+            .unwrap();
+    let execution = Some(p::WorkflowExecution {
+        workflow_id: fixture.workflow_id.clone(),
+        run_id: fixture.run_id.clone(),
+    });
+    let add_list = Some(p::TaskList {
+        name: fixture.task_list.clone(),
+        kind: 1,
+        ..Default::default()
+    });
+    if fixture.kind == "activity" {
+        matching
+            .add_activity_task(Request::new(m::AddActivityTaskRequest {
+                domain_id: fixture.domain_id.clone(),
+                source_domain_id: fixture.domain_id.clone(),
+                workflow_execution: execution,
+                task_list: add_list,
+                schedule_id: fixture.schedule_id,
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+    } else {
+        matching
+            .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+                domain_id: fixture.domain_id.clone(),
+                workflow_execution: execution,
+                task_list: add_list,
+                schedule_id: fixture.schedule_id,
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+    }
+    let original = store.get_tasks(&key, 0, i64::MAX, 10).unwrap().remove(0);
+    let queue = registry.get(key, 0, now).await.unwrap().queue;
     let list = Some(p::TaskList {
         name: fixture.task_list,
         ..Default::default()
@@ -94,34 +161,39 @@ async fn matching_delivery_go_history() {
     let domain_id = fixture.domain_id.clone();
     let poll_domain = fixture.domain.clone();
     let poll_list = list.clone();
-    let dispatcher = TaskDispatcher::new(queue.clone(), client, fixture.domain_id);
     let bytes = if fixture.kind == "activity" {
-        dispatcher
-            .poll_activity(
-                p::PollForActivityTaskRequest {
+        matching
+            .poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+                domain_id: fixture.domain_id.clone(),
+                poller_id: "go-boundary-poller".into(),
+                request: Some(p::PollForActivityTaskRequest {
                     domain: fixture.domain,
                     task_list: list,
                     identity: "rust-durable-matching".into(),
                     ..Default::default()
-                },
-                Duration::from_secs(15),
-            )
+                }),
+                ..Default::default()
+            }))
             .await
             .unwrap()
+            .into_inner()
             .encode_to_vec()
     } else {
-        dispatcher
-            .poll_decision(
-                p::PollForDecisionTaskRequest {
+        matching
+            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+                domain_id: fixture.domain_id.clone(),
+                poller_id: "go-boundary-poller".into(),
+                request: Some(p::PollForDecisionTaskRequest {
                     domain: fixture.domain,
                     task_list: list,
                     identity: "rust-durable-matching".into(),
                     ..Default::default()
-                },
-                Duration::from_secs(15),
-            )
+                }),
+                ..Default::default()
+            }))
             .await
             .unwrap()
+            .into_inner()
             .encode_to_vec()
     };
     // Confirm actual Go error envelopes classify terminal duplicates/missing
@@ -165,5 +237,6 @@ async fn matching_delivery_go_history() {
         );
     }
     queue.persist_ack(now).unwrap();
+    server.abort();
     std::fs::write(fixture.output, bytes).unwrap();
 }

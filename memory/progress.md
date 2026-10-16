@@ -1557,3 +1557,18 @@ original-Go differentials, standalone SDK checks and actual-Go History delivery.
 Matching remains incomplete; this does not wire an RPC service or provide sync
 matching for source-domain activities.
 
+
+## 2026-10-16: Matching protobuf RPC and actual mixed-service SDK validation
+
+See matching-rpc-next.md. Added opt-in durable AddTask/Poll backend with domain
+validation and cancellation. Built a test-only Go Fx PeerProvider decorator;
+original Go Frontend/History/Worker now route to Rust Matching, with no Go
+Matching process. Basic 11-event probe and existing Go SDK workflow/activity pass.
+Full accumulated validation: all 22 stages and 324 workspace tests, strict lint;
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-mixed-final-20261016/results.json.
+Expanded existing SDK additionally passed activity retry, child, workflow-run/task
+retry, activity timeout and signal scenarios, separately verified at
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-mixed-sdk-expanded2/results.json.
+Domain metadata remains seeded, discovery substituted in tests, other matching
+methods use embedded state, and forwarded sync matching is explicitly unported
+in the opt-in backend. Matching is not complete and is not selected by CLI config.

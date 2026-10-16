@@ -1,0 +1,103 @@
+// Go Frontend/History/Worker routed to the Rust Matching protobuf listener.
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { randomUUID } = require('node:crypto');
+const fs = require('node:fs');
+const { spawn, spawnSync } = require('node:child_process');
+const { createRequire } = require('node:module');
+const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
+const grpc = webRequire('@grpc/grpc-js');
+const loader = webRequire('@grpc/proto-loader');
+const root = path.resolve(__dirname, '../go/idls/proto');
+const files = ['domain', 'workflow', 'worker'].map(name => path.join(root, `uber/cadence/api/v1/service_${name}.proto`));
+const internalRoot = path.resolve(__dirname, '../go/proto/internal');
+files.push(path.join(internalRoot, 'uber/cadence/matching/v1/service.proto'));
+const schema = grpc.loadPackageDefinition(loader.loadSync(files, {
+  includeDirs: [root, internalRoot], enums: String, longs: String, bytes: Buffer, defaults: true, oneofs: true,
+})).uber.cadence;
+const api = schema.api.v1;
+const peer = process.argv[2] || '127.0.0.1:7833';
+const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
+function call(service, method, request) {
+  const metadata = new grpc.Metadata();
+  metadata.set('rpc-service', service === 'Matching' ? 'cadence-matching' : 'cadence-frontend');
+  metadata.set('rpc-encoding', 'proto');
+  metadata.set('rpc-caller', 'cadence-service-compat');
+  return new Promise((resolve, reject) => clients[service][method](request, metadata,
+    { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
+}
+const payload = data => ({ data: Buffer.from(data) });
+async function run() {
+  const id = randomUUID(), domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
+  await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+  const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
+  const work = path.resolve(process.argv[5]);
+  fs.mkdirSync(work, { recursive: true });
+  const ready = path.join(work, 'ready'), stop = path.join(work, 'stop'), fixture = path.join(work, 'fixture.json');
+  fs.writeFileSync(fixture, JSON.stringify({ domain, domain_id: domainId, workflow_id: '', run_id: '', task_list: taskList.name, history_peer: process.argv[3], kind: 'server', schedule_id: 0, database: path.join(work, 'matching.db'), output: ready, listen: process.argv[4], stop_file: stop }));
+  const output = fs.openSync(path.join(work, 'rust-server.log'), 'w');
+  const rust = spawn('cargo', ['test', '--manifest-path', path.resolve(__dirname, '../rust/Cargo.toml'), '-p', 'cadence-server', '--test', 'matching_delivery', 'matching_delivery_go_history', '--', '--ignored', '--exact'], { cwd: path.resolve(__dirname, '..'), env: { ...process.env, CARGO_BUILD_JOBS: '1', CADENCE_MATCHING_DELIVERY_FIXTURE: fixture }, stdio: ['ignore', output, output] });
+  fs.closeSync(output);
+  const exited = new Promise(resolve => rust.once('exit', (code, signal) => resolve({ code, signal })));
+  try {
+    const deadline = Date.now() + 180000;
+    while (!fs.existsSync(ready)) {
+      if (rust.exitCode !== null || rust.signalCode !== null || Date.now() > deadline) throw new Error(`Rust Matching startup failed; see ${work}/rust-server.log`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  const startRequest = {
+    domain, workflowId: id, workflowType: { name: 'ServiceCompatibility' }, taskList,
+    requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
+    taskStartToCloseTimeout: { seconds: '10' }, input: payload('start'),
+  };
+  let started;
+  const provisionDeadline = Date.now() + 15000;
+  for (;;) {
+    try { started = await call('WorkflowAPI', 'StartWorkflowExecution', startRequest); break; }
+    catch (error) {
+      if (!error.details?.includes('DefaultDomainCache encounter case') || Date.now() >= provisionDeadline) throw error;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+  const execution = { workflowId: id, runId: started.runId };
+  const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
+  assert.equal(decision.workflowExecution.runId, started.runId);
+  await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
+    taskToken: decision.taskToken, identity: 'service-probe', decisions: [{ scheduleActivityTaskDecisionAttributes: {
+      activityId: 'echo', activityType: { name: 'Echo' }, taskList, input: payload('activity'),
+      scheduleToCloseTimeout: { seconds: '60' }, scheduleToStartTimeout: { seconds: '30' },
+      startToCloseTimeout: { seconds: '30' }, heartbeatTimeout: { seconds: '10' },
+    } }],
+  });
+  const activity = await call('WorkerAPI', 'PollForActivityTask', { domain, taskList, identity: 'service-probe' });
+  assert.equal(activity.input.data.toString(), 'activity');
+  assert.equal((await call('WorkerAPI', 'RecordActivityTaskHeartbeat', { taskToken: activity.taskToken, details: payload('heartbeat') })).cancelRequested, false);
+  await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: activity.taskToken, result: payload('activity-result'), identity: 'service-probe' });
+  const final = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
+  await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
+    taskToken: final.taskToken, identity: 'service-probe', decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('done') } }],
+  });
+  const history = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: execution });
+  const events = history.history.events;
+  const attributes = events.map(event => Object.keys(event).find(key => key.endsWith('EventAttributes') && event[key] != null));
+  assert.deepEqual(attributes, [
+    'workflowExecutionStartedEventAttributes', 'decisionTaskScheduledEventAttributes', 'decisionTaskStartedEventAttributes',
+    'decisionTaskCompletedEventAttributes', 'activityTaskScheduledEventAttributes', 'activityTaskStartedEventAttributes',
+    'activityTaskCompletedEventAttributes', 'decisionTaskScheduledEventAttributes', 'decisionTaskStartedEventAttributes',
+    'decisionTaskCompletedEventAttributes', 'workflowExecutionCompletedEventAttributes',
+  ]);
+  assert.equal(events.at(-1).workflowExecutionCompletedEventAttributes.result.data.toString(), 'done');
+  const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
+  fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
+  if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
+  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', peer, domain, execution, attributes }));
+  } finally {
+    fs.writeFileSync(stop, 'stop');
+    let shutdownTimer;
+    const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
+    clearTimeout(shutdownTimer);
+    if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
+    if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server.log`);
+  }
+}
+run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));

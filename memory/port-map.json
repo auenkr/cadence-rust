@@ -269,7 +269,8 @@
       "rust/crates/cadence-persistence/src/matching_queue.rs"
     ],
     "evidence": [
-      "Outbound task-start calls preserve YARPC metadata, stable request UUIDs, Go retry/error classification and SDK tokens/response data. Real Go History + Go Frontend completed an 11-event workflow through Rust durable queue/client. This does not replace the Matching RPC listener; routing, queries, passive handling, sync match and distributed behavior remain incomplete."
+      "Outbound task-start calls preserve YARPC metadata, stable request UUIDs, Go retry/error classification and SDK tokens/response data. Real Go History + Go Frontend completed an 11-event workflow through Rust durable queue/client. This does not replace the Matching RPC listener; routing, queries, passive handling, sync match and distributed behavior remain incomplete.",
+      "Opt-in durable AddTask/poll protobuf handlers validated with original Go Frontend/History/Worker and existing Go SDK; no Go Matching process, test-only Fx discovery and seeded domain metadata. Sync/forwarding/query/lifecycle parity remains incomplete."
     ]
   },
   "go/service/matching/tasklist/task_list_registry.go": {

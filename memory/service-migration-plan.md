@@ -11,15 +11,18 @@ RPC services are not equivalent to these four deployment roles.
 ## Active: Matching
 
 Source: go/service/matching (handler, tasklist, poller, config, semaphore).
-Current Rust grpc_matching delegates polls into the embedded frontend/execution
-engine and AddTask looks up local workflow state. Go Matching accepts queued
+Default Rust grpc_matching delegates polls into the embedded frontend/execution
+engine and AddTask looks up local workflow state. An opt-in durable queue backend
+now routes AddTask/poll protobuf RPCs independently of local workflow state. Go Matching accepts queued
 references and calls History.Record*TaskStarted on delivery. Consequently current
-Rust Matching cannot replace Go Matching in a mixed Go/Rust cluster.
+Rust Matching is not yet a complete replacement. The basic mixed-service SDK
+probe now passes with no Go Matching process (see matching-rpc-next.md).
 
 Independent components now verified: Go-format SQLite store, durable queue core,
 Go History client, cancellation-safe delivery worker and basic queue registry.
-The 11-event live probe uses Go Frontend/History and Rust queue delivery, but
-bypasses the Matching RPC listener. It does not satisfy the replacement gate.
+Both RPC/History boundary and actual Go Frontend/History/Worker routing probes
+now exercise the Rust Matching listener. The latter includes the existing SDK.
+These basic workflows do not satisfy all replacement gates below.
 Source-domain SQL writes are now checked against the original Go TaskStore.
 
 Completion gates:
