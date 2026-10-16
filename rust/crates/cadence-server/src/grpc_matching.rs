@@ -126,6 +126,7 @@ struct ForwardedAdd<'a> {
     entry: &'a crate::matching_registry::QueueHandle,
     deadline: tokio::time::Instant,
     forwarded: bool,
+    backlog: bool,
 }impl Drop for PollGuard {
     fn drop(&mut self) {
         let mut polls = self.polls.lock().expect("poll cancellation lock");
@@ -247,6 +248,22 @@ impl Matching {
                 cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.forwarderMaxOutstandingPolls"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 1)
             })
         };
+        let forward_tasks: crate::matching_registry::ForwardPollsProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.forwarderMaxOutstandingTasks"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 1)
+            })
+        };
+        let forward_rate: crate::matching_registry::ForwardPollsProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.forwarderMaxRatePerSecond"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 10)
+            })
+        };
         let isolation: crate::matching_registry::IsolationProvider = Arc::new(move |domain_id, task_list, task_type, kind, pollers, partitions| {
             let name = domain_name_for(&domains, domain_id);
             let config = overlay.lock().expect("admin lock");
@@ -298,6 +315,7 @@ impl Matching {
             .with_sync_wait(sync_wait)
             .with_forward_degree(forward_degree)
             .with_forward_polls(forward_polls)
+            .with_forward_tasks(forward_tasks, forward_rate)
             .with_qps_interval(qps_interval)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
@@ -356,6 +374,7 @@ impl Matching {
             entry,
             deadline,
             forwarded,
+            backlog,
         } = add;
         let name = task_list_name(&list.name)?;
         let degree = {
@@ -371,6 +390,7 @@ impl Matching {
         let mut list = list.clone();
         let mut handle = entry.clone();
         let mut ancestor = false;
+        let mut permits = Vec::new();
         loop {
             let matched = if ancestor || forwarded {
                 handle.try_sync_match_forwarded(data, source, deadline).await
@@ -381,6 +401,9 @@ impl Matching {
                 return Ok(Some(entry.partitions.get().map(partition_config_to_internal)));
             }
             let name = TaskListName::parse(&list.name).map_err(|_| Status::invalid_argument("TaskList is not valid."))?;
+            if backlog && (ancestor || forwarded) && name.is_root() {
+                return Ok(handle.offer_forwarded_backlog(data, source, deadline).await.then(|| entry.partitions.get().map(partition_config_to_internal)));
+            }
             if name.is_root() || list.kind == 2 || degree <= 0 || tokio::time::Instant::now() >= deadline {
                 return Ok(None);
             }
@@ -388,6 +411,8 @@ impl Matching {
             if parent.is_empty() {
                 return Ok(None);
             }
+            let Some(permit) = handle.try_forward_task() else { return Ok(None); };
+            permits.push(permit);
             list.name = parent;
             handle = match self.durable_queue(domain_id, &list, task_type).await {
                 Ok(handle) => handle,
@@ -637,6 +662,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         entry: &queue,
                         deadline,
                         forwarded,
+                        backlog: r.source == 2,
                     })
                     .await?;
                 if let Some(partition_config) = matched {
@@ -719,6 +745,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         entry: &queue,
                         deadline,
                         forwarded,
+                        backlog: r.source == 2,
                     })
                     .await?;
                 if let Some(partition_config) = matched {
@@ -766,9 +793,12 @@ impl m::matching_api_server::MatchingApi for Matching {
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         payload.domain = self.domain_name(&r.domain_id)?;
         if self.queues.is_some() {
-            // Go `QueryWorkflow`: queries are decision task-list scoped and
-            // delivered to a decision poller through the matcher's query
-            // channel, not answered in-process.
+            // Go `matcher.OfferQuery`: offer to a waiting local decision
+            // poller, else forward up the partition chain with a forward-task
+            // token (no rate limit, unlike `ForwardTask`). The root fails
+            // fast with `ErrNoParent` when no poller waits anywhere; sticky
+            // lists never forward. Permits are held until the query resolves,
+            // like Go releasing the token when `ForwardQueryTask` returns.
             let task_list = r
                 .task_list
                 .clone()
@@ -777,22 +807,63 @@ impl m::matching_api_server::MatchingApi for Matching {
             let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
             check_sticky_poller(&queue, &task_list)?;
             let task_id = uuid::Uuid::new_v4().to_string();
-            let receiver = queue.queries.register(crate::matching_query::PendingQuery {
-                task_id: task_id.clone(),
-                domain_id: r.domain_id.clone(),
-                task_list: name.root().to_owned(),
-                request: payload,
-            });
-            return match tokio::time::timeout(self.poll_expiration, receiver).await {
-                Ok(Ok(result)) => crate::matching_query::query_outcome(result).map(Response::new),
-                Ok(Err(_)) => Err(Status::unavailable("Matching query channel closed.")),
-                Err(_) => {
-                    queue.queries.withdraw(&task_id);
-                    Err(Status::deadline_exceeded(
-                        "Query task not completed before the deadline.",
-                    ))
-                }
+            let root = name.root().to_owned();
+            let degree = {
+                let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer(
+                    config.property_values("matching.forwarderMaxChildrenPerNode"),
+                    domain_name_for(&self.frontend.state.domains, &r.domain_id).as_deref(),
+                    root.as_str(),
+                    0,
+                    20,
+                )
             };
+            let deadline = tokio::time::Instant::now() + self.poll_expiration;
+            let mut list = task_list.clone();
+            let mut handle = queue;
+            let mut permits = Vec::new();
+            let mut force_local = false;
+            loop {
+                let query = crate::matching_query::PendingQuery {
+                    task_id: task_id.clone(),
+                    domain_id: r.domain_id.clone(),
+                    task_list: root.clone(),
+                    request: payload.clone(),
+                };
+                let receiver = handle.queries.register(query.clone());
+                let _registration = handle.queries.registration(&task_id);
+                if force_local || handle.queries.try_offer(query) {
+                    return match tokio::time::timeout_at(deadline, receiver).await {
+                        Ok(Ok(result)) => crate::matching_query::query_outcome(result).map(Response::new),
+                        Ok(Err(_)) => Err(Status::unavailable("Matching query channel closed.")),
+                        Err(_) => {
+                            Err(Status::deadline_exceeded(
+                                "Query task not completed before the deadline.",
+                            ))
+                        }
+                    };
+                }
+                // `_registration` withdraws the unoffered entry; Go's
+                // unbuffered send likewise leaves nothing behind on failure.
+                let current = TaskListName::parse(&list.name).map_err(|_| Status::invalid_argument("TaskList is not valid."))?;
+                if list.kind == 2 || current.is_root() || degree <= 0 || tokio::time::Instant::now() >= deadline {
+                    return Err(Status::internal("cannot find parent task list for forwarding"));
+                }
+                let parent = current.parent(degree);
+                if parent.is_empty() {
+                    return Err(Status::internal("cannot find parent task list for forwarding"));
+                }
+                match handle.try_forward_query() {
+                    Some(permit) => {
+                        permits.push(permit);
+                        list.name = parent;
+                        handle = self.durable_queue(&r.domain_id, &list, 0).await?;
+                    }
+                    // Go blocks on the token while racing a local match; with
+                    // an exhausted pool wait on the current level instead.
+                    None => force_local = true,
+                }
+            }
         }
         let v = p::workflow_api_server::WorkflowApi::query_workflow(
             &self.frontend,
@@ -1231,7 +1302,14 @@ pub async fn serve(
     addr: std::net::SocketAddr,
     state: crate::handlers::AppState,
 ) -> anyhow::Result<()> {
-    let limit = state.grpc_max_message_size;
+    serve_with(addr, Matching::new(state)).await
+}
+
+/// Serve a prebuilt matcher. The standalone server passes a durable-queue
+/// matcher so production traffic uses the same partition/forwarding path as
+/// the mixed-service harness instead of the in-memory engine.
+pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyhow::Result<()> {
+    let limit = matching.frontend.state.grpc_max_message_size;
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(cadence_proto::FILE_DESCRIPTOR_SET)
         .with_service_name("uber.cadence.matching.v1.MatchingAPI")
@@ -1239,7 +1317,7 @@ pub async fn serve(
     tonic::transport::Server::builder()
         .add_service(reflection)
         .add_service(
-            m::matching_api_server::MatchingApiServer::new(Matching::new(state))
+            m::matching_api_server::MatchingApiServer::new(matching)
                 .max_decoding_message_size(limit),
         )
         .serve(addr)

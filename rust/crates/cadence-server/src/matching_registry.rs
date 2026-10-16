@@ -35,6 +35,8 @@ struct Owner {
     sync_matcher: Arc<crate::matching_sync::SyncMatcher>,
     isolation_select: crate::matching_reader::IsolationSelector,
     sync_wait: Arc<dyn Fn() -> std::time::Duration + Send + Sync>,
+    forward_tasks: Arc<crate::matching_forward::RequestTokens>,
+    forward_rate: Arc<crate::matching_forward::ForwardRate>,
     /// Go `taskListManagerImpl.createTime`: when the manager was created, used
     /// to withhold `LoadBalancerHints` for a task list's first 10s.
     created: i64,
@@ -88,6 +90,8 @@ pub struct QueueRegistry {
     /// Go `cfg.ForwarderMaxOutstandingPolls(domain, taskList, type)`
     /// (`matching.forwarderMaxOutstandingPolls`, default 1). `None` uses the default.
     forward_polls: Option<ForwardPollsProvider>,
+    forward_tasks: Option<ForwardPollsProvider>,
+    forward_rate: Option<ForwardPollsProvider>,
     /// Go `cfg.QPSTrackerInterval(domain, taskList, type)`. `None` uses the
     /// dynamic-property default (10s).
     qps_interval: Option<QpsIntervalProvider>,
@@ -131,8 +135,19 @@ pub struct QueueHandle {
     created: i64,
     liveness: Arc<cadence_common::liveness::Liveness>,
     writer: crate::matching_writer::TaskWriter,
+    forward_tasks: Arc<crate::matching_forward::RequestTokens>,
+    forward_rate: Arc<crate::matching_forward::ForwardRate>,
 }
 impl QueueHandle {
+    pub fn try_forward_task(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        let permit = self.forward_tasks.try_acquire()?;
+        self.forward_rate.allow(registry_now()).then_some(permit)
+    }
+    /// Go `OfferQuery` takes a forward-task token but `ForwardQueryTask`
+    /// applies no rate limit, unlike `ForwardTask`.
+    pub fn try_forward_query(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.forward_tasks.try_acquire()
+    }
     /// Go AddTask/GetTask stop their owner when the domain isolation-enable
     /// snapshot changes. Existing polls are released by the normal stop path.
     pub fn stop_if_isolation_changed(&self) -> bool {
@@ -152,6 +167,10 @@ impl QueueHandle {
     /// them before forwarding.
     pub async fn try_sync_match_forwarded(&self, data: &TaskData, source_domain: Uuid, deadline: tokio::time::Instant) -> bool {
         self.offer_sync(data, source_domain, deadline, false).await
+    }
+    pub async fn offer_forwarded_backlog(&self, data: &TaskData, source_domain: Uuid, deadline: tokio::time::Instant) -> bool {
+        let group = (self.isolation_select)(data).0;
+        self.sync_matcher.offer(data.clone(), &group, &source_domain.to_string(), deadline.saturating_duration_since(tokio::time::Instant::now()), deadline).await
     }
     async fn offer_sync(&self, data: &TaskData, source_domain: Uuid, deadline: tokio::time::Instant, limit: bool) -> bool {
         use crate::matching_limiter::WaitOutcome;
@@ -282,6 +301,8 @@ impl QueueRegistry {
             sync_wait: None,
             forward_degree: None,
             forward_polls: None,
+            forward_tasks: None,
+            forward_rate: None,
             qps_interval: None,
             isolation: None,
         }
@@ -302,6 +323,11 @@ impl QueueRegistry {
     }
     pub fn with_forward_polls(mut self, provider: ForwardPollsProvider) -> Self {
         self.forward_polls = Some(provider);
+        self
+    }
+    pub fn with_forward_tasks(mut self, tasks: ForwardPollsProvider, rate: ForwardPollsProvider) -> Self {
+        self.forward_tasks = Some(tasks);
+        self.forward_rate = Some(rate);
         self
     }
     pub fn with_partition_cache_enabled(mut self, provider: PartitionCacheEnabledProvider) -> Self {
@@ -490,54 +516,48 @@ impl QueueRegistry {
                         if kind == 1 || name.is_root() {
                             None
                         } else {
-                            let degree = registry
-                                .forward_degree
-                                .as_ref()
-                                .map(|provider| provider(&domain, &lookup.1, lookup.2))
-                                .unwrap_or(20)
-                                .max(0);
-                            let parent = name.parent(degree);
-                            if parent.is_empty() {
-                                None
-                            } else {
-                                let max_outstanding = registry
-                                    .forward_polls
-                                    .as_ref()
-                                    .map(|provider| provider(&domain, &lookup.1, lookup.2))
-                                    .unwrap_or(1)
-                                    .max(0) as usize;
-                                let parent_key = TaskListKey {
-                                    domain_id: key.domain_id,
-                                    name: parent,
-                                    task_type: key.task_type,
-                                };
-                                // Owners live in registry.state; retaining that
-                                // same Arc here would form an owner/registry cycle.
-                                let resolve_state = Arc::downgrade(&registry.state);
-                                let mut resolve_registry = registry.clone();
-                                resolve_registry.state = Arc::new(Mutex::new(State::default()));
-                                Some(crate::matching_dispatch::ForwardState::new(
-                                    move || {
-                                        let mut resolve_registry = resolve_registry.clone();
-                                        let state = resolve_state.upgrade();
-                                        let parent_key = parent_key.clone();
-                                        Box::pin(async move {
-                                            resolve_registry.state = state?;
-                                            resolve_parent_dispatcher(resolve_registry, parent_key, kind).await
-                                        })
-                                            as std::pin::Pin<
-                                                Box<
-                                                    dyn std::future::Future<
-                                                            Output = Option<
-                                crate::matching_dispatch::TaskDispatcher,
-                                                            >,
-                                                        > + Send,
-                                                >,
-                                            >
-                                    },
-                                    max_outstanding,
-                                ))
-                            }
+                            let max_outstanding: crate::matching_forward::Count = {
+                                let provider = registry.forward_polls.clone();
+                                let domain = domain.clone();
+                                let name = lookup.1.clone();
+                                let task_type = lookup.2;
+                                Arc::new(move || provider.as_ref().map(|provider| provider(&domain, &name, task_type)).unwrap_or(1))
+                            };
+                            let parent_key = TaskListKey {
+                                domain_id: key.domain_id,
+                                name: lookup.1.clone(),
+                                task_type: key.task_type,
+                            };
+                            let resolve_domain = domain.clone();
+                            // Owners live in registry.state; retaining that
+                            // same Arc here would form an owner/registry cycle.
+                            let resolve_state = Arc::downgrade(&registry.state);
+                            let mut resolve_registry = registry.clone();
+                            resolve_registry.state = Arc::new(Mutex::new(State::default()));
+                            Some(crate::matching_dispatch::ForwardState::new(
+                                move || {
+                                    let mut resolve_registry = resolve_registry.clone();
+                                    let state = resolve_state.upgrade();
+                                    let parent_key = parent_key.clone();
+                                    let domain = resolve_domain.clone();
+                                    Box::pin(async move {
+                                        resolve_registry.state = state?;
+                                        let degree = resolve_registry.forward_degree.as_ref().map(|p| p(&domain, &parent_key.name, parent_key.task_type)).unwrap_or(20);
+                                        let parent = cadence_common::task_list::TaskListName::parse(&parent_key.name).ok()?.parent(degree);
+                                        if parent.is_empty() { return None; }
+                                        let parent_key = TaskListKey { name: parent.clone(), ..parent_key };
+                                        resolve_parent_dispatcher(resolve_registry, parent_key, kind).await.map(|dispatcher| (dispatcher, parent))
+                                    })
+                                        as std::pin::Pin<
+                                            Box<
+                                                dyn std::future::Future<
+                                                        Output = Option<(crate::matching_dispatch::TaskDispatcher, String)>,
+                                                    > + Send,
+                                            >,
+                                        >
+                                },
+                                max_outstanding,
+                            ))
                         }
                     };
                     let wake = registry.changed.clone();
@@ -556,6 +576,20 @@ impl QueueRegistry {
                         dispatcher = dispatcher.with_forward(forward);
                     }
                     let owner = Arc::new(Owner {
+                        forward_tasks: Arc::new(crate::matching_forward::RequestTokens::new({
+                            let provider = registry.forward_tasks.clone();
+                            let domain = domain.clone();
+                            let name = lookup.1.clone();
+                            let task_type = lookup.2;
+                            Arc::new(move || provider.as_ref().map(|p| p(&domain, &name, task_type)).unwrap_or(1))
+                        })),
+                        forward_rate: Arc::new(crate::matching_forward::ForwardRate::new({
+                            let provider = registry.forward_rate.clone();
+                            let domain = domain.clone();
+                            let name = lookup.1.clone();
+                            let task_type = lookup.2;
+                            Arc::new(move || provider.as_ref().map(|p| p(&domain, &name, task_type)).unwrap_or(10))
+                        }, now)),
                         dispatcher,
                         writer,
                         reader,
@@ -619,6 +653,8 @@ impl QueueRegistry {
                 created: owner.created,
                 liveness: owner.liveness.clone(),
                 writer: owner.writer.clone(),
+                forward_tasks: owner.forward_tasks.clone(),
+                forward_rate: owner.forward_rate.clone(),
             })
         })
         .await

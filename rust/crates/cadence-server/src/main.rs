@@ -217,11 +217,10 @@ async fn main() -> anyhow::Result<()> {
             });
             let grpc_state = state.clone();
             let history_state = state.clone();
-            let matching_state = state.clone();
             let tchannel_state = state.clone();
             let run_frontend = wanted.contains(&service::ServiceName::Frontend);
             let app = if run_frontend {
-                handlers::router(state)
+                handlers::router(state.clone())
             } else {
                 handlers::health_router()
             };
@@ -282,6 +281,69 @@ async fn main() -> anyhow::Result<()> {
             if run_matching {
                 println!("Cadence internal matching gRPC listening on {matching_addr}");
             }
+            // Durable matching queues live beside the JSON snapshots so a
+            // standalone restart recovers backlog, partition fencing and ack
+            // levels. Without `--data-dir` matching keeps the previous
+            // in-memory engine, exactly like snapshots stay in-memory.
+            let matching_service = if run_matching {
+                match data_dir.as_ref() {
+                    Some(dir) => {
+                        let path = std::path::PathBuf::from(dir).join("matching.db");
+                        let store =
+                            if path.exists() {
+                                cadence_persistence::matching_sqlite::SqliteTaskStore::open(
+                                    &path,
+                                    cadence_persistence::matching_blob::BlobEncoding::ThriftRWSnappy,
+                                )
+                            } else {
+                                cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+                                    &path,
+                                    cadence_persistence::matching_blob::BlobEncoding::ThriftRWSnappy,
+                                )
+                            }?;
+                        let store = std::sync::Arc::new(store);
+                        // History runs in this process; talk to it over
+                        // loopback gRPC like any other matching host would.
+                        let history_peer =
+                            format!("http://127.0.0.1:{}", history_addr.port());
+                        let history_channel =
+                            tonic::transport::Endpoint::from_shared(history_peer)?
+                                .connect_lazy();
+                        let history =
+                            cadence_server::matching_history::MatchingHistoryClient::new(
+                                history_channel,
+                                std::time::Duration::from_secs(1),
+                                32 * 1024 * 1024,
+                            );
+                        let registry =
+                            cadence_server::matching_registry::QueueRegistry::new(
+                                store,
+                                history,
+                                std::num::NonZeroU32::new(100000).expect("task id range"),
+                            );
+                        let controller = registry.clone();
+                        tokio::spawn(async move {
+                            if let Err(error) = controller
+                                .maintain_until(
+                                    std::time::Duration::from_secs(10),
+                                    std::future::pending(),
+                                )
+                                .await
+                            {
+                                eprintln!("matching maintenance failed: {error}");
+                            }
+                        });
+                        cadence_server::grpc_matching::Matching::with_durable_queues(
+                            state.clone(),
+                            registry,
+                            std::time::Duration::from_secs(60),
+                        )
+                    }
+                    None => cadence_server::grpc_matching::Matching::new(state.clone()),
+                }
+            } else {
+                cadence_server::grpc_matching::Matching::new(state.clone())
+            };
             tokio::try_join!(
                 async {
                     axum::serve(listener, app)
@@ -311,7 +373,7 @@ async fn main() -> anyhow::Result<()> {
                 },
                 async {
                     if run_matching {
-                        cadence_server::grpc_matching::serve(matching_addr, matching_state).await
+                        cadence_server::grpc_matching::serve_with(matching_addr, matching_service).await
                     } else {
                         std::future::pending::<anyhow::Result<()>>().await
                     }

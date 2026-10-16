@@ -33,6 +33,7 @@ pub mod matching_registry;
 #[allow(clippy::result_large_err)]
 pub mod matching_partition;
 pub mod matching_sync;
+pub mod matching_forward;
 
 #[allow(clippy::result_large_err)]
 pub mod matching_writer;

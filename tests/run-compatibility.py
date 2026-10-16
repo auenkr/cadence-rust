@@ -62,6 +62,7 @@ def main():
                                  "--workspace", "--all-targets", "--", "-D", "warnings"])
     run("clock-rate-differential", [sys.executable, str(root / "tests/run-clock-rate-compat.py")], timeout=300)
     run("matching-rate-differential", [sys.executable, str(root / "tests/run-matching-rate-compat.py")], timeout=300)
+    run("matching-forward-differential", [sys.executable, str(root / "tests/run-matching-forward-compat.py")], timeout=300)
     run("matching-retry-differential", [sys.executable, str(root / "tests/run-matching-retry-compat.py")], timeout=300)
     run("matching-writer-differential", [sys.executable, str(root / "tests/run-matching-writer-compat.py")], timeout=300)
     run("matching-liveness-differential", [sys.executable, str(root / "tests/run-matching-liveness-compat.py")], timeout=300)

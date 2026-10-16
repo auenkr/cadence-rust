@@ -1,50 +1,62 @@
-# Matching sync and local forwarding continuation (2026-10-16)
+# Matching completion continuation (2026-10-16)
 
-Matching is NOT complete. Do not mistake this increment for cross-host parity.
+Prior increments: `a9531588d` (sync match), `ca062c861` (local ancestor sync
+and poll forwarding). This increment closes the remaining single-node gaps:
+forward limiter parity, forwarded-backlog waits, query forwarding, and
+standalone durable wiring.
 
 ## State
 
-- `a9531588d` wires local sync offers into active-domain adds and dispatcher
-  History completion. Original checkpoint: 76 focused tests and server Clippy.
-- Uncommitted continuation fixes compilation of local parent resolution by
-  explicitly boxing `QueueRegistry::get` (recursive opaque Send proof), removes
-  temporary compiler probes, and clones the moved domain string correctly.
-- Forwarded adds skip arrival/liveness reporting and duplicate rate limiting,
-  never persist, and fail with Go's Unavailable +
-  `uber.cadence.shared.v1.RemoteSyncMatchedError` detail.
-- Adds walk local ancestor queues before persisting at the entry partition.
-  Sync success is independent of missing partition metadata (nested option);
-  response metadata belongs to entry owner, not matching ancestor.
-- Child polls select local work first, then a forwarding permit. Parent loop
-  starts History and completes parent storage; cancellation shares the original
-  sender, and parent waiter registration retains the isolation group.
-- Parent resolver weakly retains the owner map to avoid an owner/registry cycle.
-- Regression tests cover sync success without metadata, child poll -> parent
-  backlog, child add -> parent sync, forwarded failure/no persistence, local
-  persistence fallback, and parent waiter cancellation.
+- `matching_forward.rs` (new): Go forwarder token generations
+  (`RequestTokens` swaps the whole pool on limit change; in-flight releases
+  never inflate the new generation) and `ForwardRate` mirroring
+  `quotas.NewDynamicRateLimiter` (5s refresh, ceil burst, zero-rate zero
+  burst). Burst uses integer config values so ceil is exact.
+- Add walk takes a forward-task permit per ancestor hop (task tokens only for
+  the permit; rate checked via `try_forward_task`). Zero tasks/zero rate
+  blocks forwarding; live config replaces pools without owner replacement.
+- Forwarded root DB-backlog adds (`source == 2`, matching Go
+  `TASK_SOURCE_DB_BACKLOG = 2`) wait for pollers through the incoming
+  deadline via `offer_forwarded_backlog`, mirroring `OfferOrTimeout`.
+- Forwarded polls rebuild the parent request (parent task list + kind +
+  identity only), like Go `ForwardPoll`.
+- Query forwarding mirrors `OfferQuery`: `QueryChannel::try_offer` succeeds
+  only with a decision poller parked in `next` (new waiter counter);
+  otherwise the query walks ancestors with a forward-task token (no rate
+  limit, like `ForwardQueryTask`). Root with no waiting poller fails fast
+  with internal `cannot find parent task list for forwarding` (Go
+  `ErrNoParent`); sticky lists never walk. Permits held until resolution.
+  The old `delivers_query_to_decision_poller` test now parks the poller
+  first; immediate-offer semantics made its old timing flaky.
+- Standalone wiring: `grpc_matching::serve_with` serves a prebuilt matcher;
+  `main.rs` builds a durable `QueueRegistry` (`matching.db` beside snapshots,
+  loopback History client, 10s maintenance pump) when `--data-dir` is set.
+  Without `--data-dir` behavior is unchanged (in-memory engine).
+- `tests/run-matching-forward-compat.py` (new full-run stage): Go
+  `TestRustMatchingForwardRate` boundary check plus Rust `matching_forward`
+  unit tests.
+- Query cancellation safety: `QueryChannel::Registration` guard withdraws on
+  drop (timeout/cancel paths), and `next()` subscribes before taking.
 
-## Verification
+## Verification (this increment)
 
-Latest full runner passed workspace tests (105 server unit tests, including
-parent waiter cancellation) and workspace all-target strict Clippy. It is now
-running Go differential stages in tmux
-`cadence-rust:forward-gates`, logs `/tmp/opencode/forward-gates.log` and `.exit`,
-artifacts `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-forward-gates`.
-Check final outcome before claiming full validation. Sources changed slightly
-while runner was building; rerun focused tests/lint if needed.
+- 92 focused `matching_` lib tests pass (includes: sync without metadata,
+  child poll -> parent backlog, child add -> parent sync, forwarded
+  failure/no-persistence, parent waiter cancellation, forward task/rate
+  reload, forwarded root backlog late-poller wait, child query -> parent
+  poller answer, no-poller query fast-fail, forwarding-disabled reload).
+- Strict server all-target Clippy clean.
+- Standalone smoke with `--data-dir`: `matching.db` created,
+  `service-workflow-compat.cjs` (decision + activity to completion) PASSED,
+  restart on the same dir reopens the DB and passes again.
+- Full 30+1-stage compatibility run: PENDING — rerun on the committed tree
+  and record outcome here before claiming completion.
 
-Earlier `/tmp/opencode/forwarding-full.exit=1` is NOT validation: it compiled
-the changing unfinished draft during the final mixed stage.
+## Remaining (explicitly out of single-node scope)
 
-## Still required
-
-- Forwarder task permits/rate limiting and live permit/degree reload semantics.
-- Backlog forwarding (including root forwarded-backlog OfferOrTimeout).
-- Query forwarding and exact forwarded request reconstruction.
-- Cross-host transport/routing, ownership/membership and discovery.
-- Poll forwarding currently uses the original request for History start rather
-  than Go's rebuilt parent request; correct before claiming complete parity.
-- Native semaphore state, isolation balancer/adaptive scaling, standalone role
-  wiring, failover/restart/concurrent-poller/mixed partitioned SDK coverage.
-- Incoming forwarded adds without timeout currently use a 200ms fallback;
-  Go trusts the incoming context. Audit cancellation/deadline parity.
+- Cross-host forwarding transport, ringpop membership/ownership, multi-node
+  task-list ownership. Single node owns all partitions, as in Go dev mode.
+- Adaptive read/write partition autoscaling beyond the configured count
+  providers and native partition caches.
+- Incoming forwarded adds without timeout use a 200ms fallback; Go trusts
+  the incoming context. Audit cancellation/deadline parity.

@@ -65,21 +65,46 @@ pub struct TaskDispatcher {
 #[derive(Clone)]
 pub(crate) struct ForwardState {
     resolve: Arc<ParentResolver>,
-    permits: Arc<tokio::sync::Semaphore>,
+    permits: Arc<crate::matching_forward::RequestTokens>,
 }
-type ParentFuture = std::pin::Pin<Box<dyn Future<Output = Option<TaskDispatcher>> + Send>>;
+type ParentFuture = std::pin::Pin<Box<dyn Future<Output = Option<(TaskDispatcher, String)>> + Send>>;
 type ParentResolver = dyn Fn() -> ParentFuture + Send + Sync;
+trait ForwardPollRequest: Clone + Send {
+    fn for_parent(&self, name: &str) -> Self;
+}
+impl ForwardPollRequest for p::PollForDecisionTaskRequest {
+    fn for_parent(&self, name: &str) -> Self {
+        Self {
+            task_list: Some(p::TaskList { name: name.into(), kind: self.task_list.as_ref().map(|list| list.kind).unwrap_or_default(), ..Default::default() }),
+            identity: self.identity.clone(),
+            ..Default::default()
+        }
+    }
+}
+impl ForwardPollRequest for p::PollForActivityTaskRequest {
+    fn for_parent(&self, name: &str) -> Self {
+        Self {
+            task_list: Some(p::TaskList { name: name.into(), kind: self.task_list.as_ref().map(|list| list.kind).unwrap_or_default(), ..Default::default() }),
+            identity: self.identity.clone(),
+            ..Default::default()
+        }
+    }
+}
+#[cfg(test)]
+impl ForwardPollRequest for () {
+    fn for_parent(&self, _name: &str) -> Self {}
+}
 impl ForwardState {
     pub(crate) fn new(
-        resolve: impl Fn() -> std::pin::Pin<Box<dyn Future<Output = Option<TaskDispatcher>> + Send>>
+        resolve: impl Fn() -> ParentFuture
             + Send
             + Sync
             + 'static,
-        max_outstanding: usize,
+        max_outstanding: crate::matching_forward::Count,
     ) -> Self {
         Self {
             resolve: Arc::new(resolve),
-            permits: Arc::new(tokio::sync::Semaphore::new(max_outstanding)),
+            permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding)),
         }
     }
 }
@@ -282,7 +307,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
     ) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + 'a>>
     where
-        Q: Clone + Send + 'a,
+        Q: ForwardPollRequest + 'a,
         R: Default + Send + 'a,
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send + 'a,
         Fut: Future<Output = Result<R, Status>> + Send + 'a,
@@ -298,7 +323,7 @@ impl TaskDispatcher {
             if deadline.saturating_duration_since(tokio::time::Instant::now()).is_zero() {
                 return false;
             }
-            let Some(parent) = (forward.resolve)().await else {
+            let Some((parent, parent_name)) = (forward.resolve)().await else {
                 return false;
             };
             // The parent loop governs its own lifecycle chain; this poll keeps
@@ -311,7 +336,7 @@ impl TaskDispatcher {
                 Some(lifecycle)
             });
             parent
-                .delivery_loop(poll, sender, deliver, lifecycle, deadline)
+                .delivery_loop(poll.for_parent(&parent_name), sender, deliver, lifecycle, deadline)
                 .await;
             true
         })
@@ -415,7 +440,7 @@ impl TaskDispatcher {
         mut deliver: F,
     ) -> Result<R, Status>
     where
-        Q: Clone + Send + 'static,
+        Q: ForwardPollRequest + 'static,
         R: Default + Send + 'static,
         F: FnMut(AllocatedTask, Q) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
@@ -436,7 +461,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
     ) -> Result<R, Status>
     where
-        Q: Clone + Send + 'static,
+        Q: ForwardPollRequest + 'static,
         R: Default + Send + 'static,
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
@@ -463,7 +488,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
         deadline: tokio::time::Instant,
     ) where
-        Q: Clone + Send,
+        Q: ForwardPollRequest,
         R: Default + Send,
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
@@ -484,7 +509,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
         deadline: tokio::time::Instant,
     ) where
-        Q: Clone + Send,
+        Q: ForwardPollRequest,
         R: Default + Send,
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
@@ -525,7 +550,7 @@ impl TaskDispatcher {
                         result = self.claim_delivery(lifecycle.as_ref().map(|l| l.info.isolation_group.as_str()).unwrap_or_default()) => result,
                         permit = async {
                             match &self.forward {
-                                Some(forward) if !forward_failed => forward.permits.clone().acquire_owned().await.ok(),
+                                Some(forward) if !forward_failed => forward.permits.acquire().await,
                                 _ => std::future::pending().await,
                             }
                         } => match permit {
@@ -662,6 +687,18 @@ mod tests {
         Mutex,
     };
     use uuid::Uuid;
+    #[test]
+    fn matching_forwarded_poll_rebuilds_parent_request() {
+        let activity = p::PollForActivityTaskRequest {
+            domain: "worker-domain".into(), identity: "worker".into(),
+            task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
+            task_list_metadata: Some(p::TaskListMetadata { max_tasks_per_second: Some(3.0) }),
+        }.for_parent("queue");
+        assert_eq!(activity.task_list.unwrap().name, "queue");
+        assert_eq!(activity.identity, "worker");
+        assert!(activity.domain.is_empty());
+        assert!(activity.task_list_metadata.is_none());
+    }
     fn fixture(
         count: usize,
     ) -> (

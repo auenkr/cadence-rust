@@ -17,6 +17,7 @@ const EMPTY_EVENT_ID: i64 = -23;
 const STICKY_QUERY_MIN_MAJOR: u64 = 1;
 
 /// A query offered by `QueryWorkflow` and awaiting a decision poller.
+#[derive(Clone)]
 pub struct PendingQuery {
     pub task_id: String,
     pub domain_id: String,
@@ -39,9 +40,26 @@ pub struct QueryChannel {
     pending: Mutex<VecDeque<PendingQuery>>,
     waiting: Mutex<HashMap<String, oneshot::Sender<QueryOutcome>>>,
     notify: Notify,
+    /// Decision polls parked in `next`, used by `try_offer` to mirror Go's
+    /// non-blocking `queryTaskC` send (succeeds only with a waiting poller).
+    waiters: std::sync::atomic::AtomicUsize,
+}
+/// Mirror Go's deferred query-map deletion on completion, timeout, and RPC
+/// cancellation (not only on the explicit timeout branch).
+pub struct Registration {
+    channel: std::sync::Arc<QueryChannel>,
+    task_id: String,
+}
+impl Drop for Registration {
+    fn drop(&mut self) {
+        self.channel.withdraw(&self.task_id);
+    }
 }
 
 impl QueryChannel {
+    pub fn registration(self: &std::sync::Arc<Self>, task_id: &str) -> Registration {
+        Registration { channel: self.clone(), task_id: task_id.into() }
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -63,13 +81,38 @@ impl QueryChannel {
         receiver
     }
 
+    /// Go `OfferQuery`'s non-blocking `queryTaskC` send: offer only when a
+    /// decision poller is parked in `next`. The caller must `register` the
+    /// result waiter first; returns false when no poller is waiting so the
+    /// caller forwards to the parent instead of stranding the query.
+    pub fn try_offer(&self, query: PendingQuery) -> bool {
+        if self.waiters.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            return false;
+        }
+        self.pending
+            .lock()
+            .expect("matching query lock")
+            .push_back(query);
+        self.notify.notify_waiters();
+        true
+    }
+
+    pub fn has_waiters(&self) -> bool {
+        self.waiters.load(std::sync::atomic::Ordering::SeqCst) > 0
+    }
+
     /// Go `matcher.Poll` on `queryTaskC`: wait for a query offer.
     pub async fn next(&self) -> PendingQuery {
         loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             if let Some(query) = self.take() {
                 return query;
             }
-            self.notify.notified().await;
+            self.waiters.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            notified.await;
+            self.waiters.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -189,6 +232,17 @@ pub fn query_outcome(outcome: QueryOutcome) -> Result<m::QueryWorkflowResponse, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn matching_query_registration_drop_withdraws_cancelled_offer() {
+        let channel = std::sync::Arc::new(QueryChannel::new());
+        let receiver = channel.register(query("cancelled"));
+        let registration = channel.registration("cancelled");
+        drop(registration);
+        assert!(channel.take().is_none());
+        assert!(channel.complete("cancelled", QueryOutcome::Internal(Status::cancelled("cancelled"))).is_err());
+        assert!(receiver.blocking_recv().is_err());
+    }
 
     fn query(task_id: &str) -> PendingQuery {
         PendingQuery {
