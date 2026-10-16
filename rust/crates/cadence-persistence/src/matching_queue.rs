@@ -39,6 +39,7 @@ pub struct DurableTaskQueue {
     range_size: NonZeroU32,
     state: Mutex<State>,
     ack: AckManager,
+    gc: crate::matching_gc::TaskGarbageCollector,
 }
 #[derive(Debug)]
 pub struct ReadBatch {
@@ -108,6 +109,7 @@ impl DurableTaskQueue {
             key,
             range_size,
             ack,
+            gc: crate::matching_gc::TaskGarbageCollector::default(),
             state: Mutex::new(State {
                 range_id: lease.range_id,
                 next_id,
@@ -267,8 +269,18 @@ impl DurableTaskQueue {
         Ok(written.remove(0))
     }
     pub fn persist_ack(&self, now: i64) -> Result<()> {
+        self.persist_ack_impl(now, false)
+    }
+    /// Go reader.Stop persists its final cursor even after the writer stopped.
+    /// The database lease fence remains authoritative for this final write.
+    pub fn persist_final_ack(&self, now: i64) -> Result<()> {
+        self.persist_ack_impl(now, true)
+    }
+    fn persist_ack_impl(&self, now: i64, final_update: bool) -> Result<()> {
         let mut state = self.state.lock().expect("matching queue lock");
-        Self::active(&state)?;
+        if !final_update {
+            Self::active(&state)?;
+        }
         let (_, ack, _) = self.ack.levels();
         if ack >= 0 {
             let mut metadata = state.metadata.clone();
@@ -286,6 +298,30 @@ impl DurableTaskQueue {
     pub fn collect_garbage(&self, limit: i64) -> Result<usize> {
         let (_, ack, _) = self.ack.levels();
         Ok(self.store.complete_tasks_less_than(&self.key, ack, limit)?)
+    }
+    /// Go defaults: 100 rows per delete batch, one second between small drains.
+    pub fn run_garbage_collection(&self, force: bool) -> Result<usize> {
+        self.run_garbage_collection_with(
+            force,
+            NonZeroU32::new(100).unwrap(),
+            std::time::Duration::from_secs(1),
+        )
+    }
+    pub fn run_garbage_collection_with(
+        &self,
+        force: bool,
+        batch: NonZeroU32,
+        max_interval: std::time::Duration,
+    ) -> Result<usize> {
+        let (_, ack, _) = self.ack.levels();
+        Ok(self.gc.run(
+            ack,
+            batch,
+            max_interval,
+            force,
+            std::time::Instant::now(),
+            |ack, limit| self.store.complete_tasks_less_than(&self.key, ack, limit),
+        )?)
     }
     pub fn levels(&self) -> (i64, i64, i64) {
         self.ack.levels()

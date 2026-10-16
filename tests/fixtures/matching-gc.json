@@ -1,0 +1,245 @@
+[
+  {
+    "name": "no-advance",
+    "cursor": 4,
+    "ack": 4,
+    "batch": 10,
+    "force": true,
+    "results": [],
+    "calls": [],
+    "expected_cursor": 4,
+    "attempted": false
+  },
+  {
+    "name": "first-small-drain",
+    "cursor": 0,
+    "ack": 1,
+    "batch": 10,
+    "results": [
+      0
+    ],
+    "calls": [
+      [
+        1,
+        10
+      ]
+    ],
+    "expected_cursor": 1,
+    "attempted": true
+  },
+  {
+    "name": "batch-equality",
+    "cursor": 0,
+    "ack": 10,
+    "batch": 10,
+    "last": true,
+    "results": [
+      10,
+      0
+    ],
+    "calls": [
+      [
+        10,
+        10
+      ],
+      [
+        10,
+        10
+      ]
+    ],
+    "expected_cursor": 10,
+    "attempted": true
+  },
+  {
+    "name": "multiple-batches",
+    "cursor": 0,
+    "ack": 100,
+    "batch": 10,
+    "last": true,
+    "results": [
+      10,
+      10,
+      3
+    ],
+    "calls": [
+      [
+        100,
+        10
+      ],
+      [
+        100,
+        10
+      ],
+      [
+        100,
+        10
+      ]
+    ],
+    "expected_cursor": 100,
+    "attempted": true
+  },
+  {
+    "name": "time-too-soon",
+    "cursor": 1,
+    "ack": 2,
+    "batch": 10,
+    "last": true,
+    "results": [],
+    "calls": [],
+    "expected_cursor": 1,
+    "attempted": false
+  },
+  {
+    "name": "time-elapsed",
+    "cursor": 1,
+    "ack": 2,
+    "batch": 10,
+    "last": true,
+    "elapsed_ns": 2000000000,
+    "results": [
+      0
+    ],
+    "calls": [
+      [
+        2,
+        10
+      ]
+    ],
+    "expected_cursor": 2,
+    "attempted": true
+  },
+  {
+    "name": "forced-small-drain",
+    "cursor": 1,
+    "ack": 2,
+    "batch": 10,
+    "force": true,
+    "last": true,
+    "results": [
+      1
+    ],
+    "calls": [
+      [
+        2,
+        10
+      ]
+    ],
+    "expected_cursor": 2,
+    "attempted": true
+  },
+  {
+    "name": "failed-first-call",
+    "cursor": 1,
+    "ack": 2,
+    "batch": 10,
+    "force": true,
+    "last": true,
+    "results": [
+      -1
+    ],
+    "calls": [
+      [
+        2,
+        10
+      ]
+    ],
+    "expected_cursor": 1,
+    "attempted": true
+  },
+  {
+    "name": "failed-after-full",
+    "cursor": 0,
+    "ack": 20,
+    "batch": 10,
+    "results": [
+      10,
+      -1
+    ],
+    "calls": [
+      [
+        20,
+        10
+      ],
+      [
+        20,
+        10
+      ]
+    ],
+    "expected_cursor": 0,
+    "attempted": true
+  },
+  {
+    "name": "busy",
+    "cursor": 0,
+    "ack": 100,
+    "batch": 10,
+    "busy": true,
+    "results": [],
+    "calls": [],
+    "expected_cursor": 0,
+    "attempted": false
+  },
+  {
+    "name": "sparse-read-level",
+    "cursor": 0,
+    "ack": 100000,
+    "batch": 100,
+    "results": [
+      0
+    ],
+    "calls": [
+      [
+        100000,
+        100
+      ]
+    ],
+    "expected_cursor": 100000,
+    "attempted": true
+  },
+  {
+    "name": "regression",
+    "cursor": 10,
+    "ack": 9,
+    "batch": 10,
+    "force": true,
+    "results": [],
+    "calls": [],
+    "expected_cursor": 10,
+    "attempted": false
+  },
+  {
+    "name": "future-last-delete",
+    "cursor": 1,
+    "ack": 2,
+    "batch": 10,
+    "last": true,
+    "elapsed_ns": -2000000000,
+    "results": [],
+    "calls": [],
+    "expected_cursor": 1,
+    "attempted": false
+  },
+  {
+    "name": "configured-small-batch",
+    "cursor": 1,
+    "ack": 2,
+    "batch": 1,
+    "last": true,
+    "results": [
+      1,
+      0
+    ],
+    "calls": [
+      [
+        2,
+        1
+      ],
+      [
+        2,
+        1
+      ]
+    ],
+    "expected_cursor": 2,
+    "attempted": true
+  }
+]

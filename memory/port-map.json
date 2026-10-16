@@ -293,5 +293,17 @@
     "evidence": [
       "10 original-Go manager/cache snapshots: identity deduplication, start/end refresh, cancellation ownership, TTL equality and expiry, empty identities/IDs, group state and 5000-entry eviction. Opt-in native poller history and DescribeTaskList wired; callbacks, isolation metadata, rate limiter/controller parity remain."
     ]
+  },
+  "go/service/matching/tasklist/task_gc.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-persistence/src/matching_gc.rs",
+      "rust/crates/cadence-persistence/src/matching_queue.rs",
+      "rust/crates/cadence-server/src/matching_dispatch.rs",
+      "rust/crates/cadence-server/src/matching_registry.rs"
+    ],
+    "evidence": [
+      "14 actual-Go collector cases plus deterministic strict-time and failure-cooldown tests; native GC/forced teardown/final stopped-writer ack integration. Full frozen-source 333-test/24-stage regression and mixed Go-services/SDK probes passed. Dynamic controller config and full shutdown coordination remain."
+    ]
   }
 }

@@ -351,3 +351,15 @@ uses this state for DescribeTaskList, with durable queue read/ack/block fields.
 Actual rate enforcement, isolation metadata and controller metrics remain
 separate incomplete work. The mixed probe verifies DescribeTaskList through
 Go Frontend as well as existing SDK retries, child workflows, timeouts and signals.
+
+Matching garbage collector differential check:
+
+```sh
+python3 tests/run-matching-gc-compat.py
+```
+
+Fourteen original-Go cases check the deletion cursor, thresholds, force, batch
+draining, failures and lock contention. Rust also checks exact time equality and
+error cooldown. Native delivery now uses Go's default 100-row/one-second GC
+policy, and teardown forces completed-row drainage after final acknowledgement.
+Full controller shutdown/in-flight coordination remains incomplete.

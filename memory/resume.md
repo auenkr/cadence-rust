@@ -6,6 +6,28 @@ incomplete. Keep working autonomously; use tmux session cadence-rust for long
 processes. After compaction save progress, commit and push. Never equate adapter
 coverage or a boundary probe with complete service parity.
 
+## Latest GC/final acknowledgement checkpoint
+
+Read matching-gc-next.md first. Prior checkpoint 0d0952ff8 is pushed. Native queue
+now owns Go-style thresholded task GC: try-lock, cursor, batch/time thresholds,
+full-batch drain, error cooldown, forced teardown cleanup. Dispatcher uses the
+Go defaults (100 rows, one second), replacing unconditional 1000-row deletes.
+Final reader acknowledgement can persist after writer stop, with SQL lease fencing;
+stopped-owner replacement/unload/shutdown drain completed rows before release.
+
+PASSED fresh frozen-source full validation: 333 workspace tests, strict workspace
+all-target clippy, all 24 compatibility stages. /tmp/cadence-gc-verified.exit = 0;
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-gc-verified/results.json.
+Fourteen actual-Go GC fixtures plus deterministic time/error tests pass; actual
+mixed Go services + Rust Matching and seven existing SDK scenarios pass.
+This checkpoint is being committed/pushed with these notes.
+
+Next: strict writer-stop/unregister ordering vs concurrent RPCs, in-flight
+shutdown coordination, immediate fatal-owner watchers, idle unload, dynamic
+per-task-list configuration; then queries, sync matching/forwarding and remaining
+controller/transport work. Registry still holds its map lock during teardown,
+while Go unregisters first. No service gate is complete; preserve the whole goal.
+
 ## Latest queue maintenance checkpoint
 
 Read matching-maintenance-next.md first. Prior checkpoint 0e7dbae0e is pushed.

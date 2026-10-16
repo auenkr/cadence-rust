@@ -97,7 +97,7 @@ impl TaskDispatcher {
                 queue.stop();
                 return Err(error);
             }
-            queue.collect_garbage(1000)?;
+            queue.run_garbage_collection(false)?;
             Ok(())
         })
         .await;
@@ -115,7 +115,7 @@ impl TaskDispatcher {
         let queue = self.queue.clone();
         let result = tokio::task::spawn_blocking(move || {
             queue.complete(task)?;
-            queue.collect_garbage(1000)?;
+            queue.run_garbage_collection(false)?;
             Ok::<_, QueueError>(())
         })
         .await;
@@ -434,6 +434,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.task_token, vec![42]);
         assert_eq!(*seen.lock().unwrap(), vec![1, 2]);
+        dispatcher.queue.run_garbage_collection(true).unwrap();
         assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
     }
     #[tokio::test]
@@ -471,6 +472,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(calls.load(Ordering::Relaxed), 2);
+        dispatcher.queue.run_garbage_collection(true).unwrap();
         assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
         assert_eq!(
             dispatcher

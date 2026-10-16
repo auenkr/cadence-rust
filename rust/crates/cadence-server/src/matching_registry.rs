@@ -116,6 +116,12 @@ impl QueueRegistry {
                 .is_some_and(|owner| owner.queue.is_stopped())
             {
                 if let Some(owner) = state.owners.remove(&lookup) {
+                    if let Err(error) = owner.queue.persist_final_ack(now) {
+                        eprintln!("Matching stopped owner final acknowledgement failed: {error}");
+                    }
+                    if let Err(error) = owner.queue.run_garbage_collection(true) {
+                        eprintln!("Matching stopped owner garbage collection failed: {error}");
+                    }
                     owner.dispatcher.notify_new_tasks();
                 }
             }
@@ -173,11 +179,14 @@ impl QueueRegistry {
             if !Arc::ptr_eq(&owner.queue, &handle.queue) {
                 return Ok(false);
             }
-            let result = owner.queue.persist_ack(now);
+            let result = owner.queue.persist_final_ack(now);
+            let garbage = owner.queue.run_garbage_collection(true);
             owner.queue.stop();
             owner.dispatcher.notify_new_tasks();
             state.owners.remove(&lookup);
-            result.map_err(|error| Status::unavailable(error.to_string()))?;
+            result
+                .and(garbage.map(|_| ()))
+                .map_err(|error| Status::unavailable(error.to_string()))?;
             Ok(true)
         })
         .await
@@ -250,11 +259,21 @@ impl QueueRegistry {
                 }) {
                     continue;
                 }
-                if let Err(error) = owner.queue.persist_ack(now) {
+                let update = if stop || owner.queue.is_stopped() {
+                    owner.queue.persist_final_ack(now)
+                } else {
+                    owner.queue.persist_ack(now)
+                };
+                if let Err(error) = update {
                     failure.get_or_insert_with(|| Status::unavailable(error.to_string()));
                 }
                 *owner.last_update.lock().expect("Matching ack timer lock") =
                     tokio::time::Instant::now();
+                if stop || owner.queue.is_stopped() {
+                    if let Err(error) = owner.queue.run_garbage_collection(true) {
+                        failure.get_or_insert_with(|| Status::unavailable(error.to_string()));
+                    }
+                }
                 if stop {
                     owner.queue.stop();
                 }
@@ -441,16 +460,34 @@ mod tests {
         stop.send(()).unwrap();
         pump.await.unwrap().unwrap();
         assert!(handle.queue.is_stopped());
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
         assert!(handle.append(vec![TaskData::default()], 2).await.is_err());
     }
     #[tokio::test]
     async fn stopped_writer_is_replaced_without_waiting_for_ack_timer() {
         let (_dir, store, registry, key) = fixture();
         let old = registry.get(key.clone(), 0, 1).await.unwrap();
+        old.append(vec![TaskData::default()], 1).await.unwrap();
+        let task = old
+            .queue
+            .read_batch(
+                NonZeroU32::new(100).unwrap(),
+                NonZeroU32::new(1).unwrap(),
+                1,
+            )
+            .unwrap()
+            .tasks
+            .remove(0);
+        old.queue.complete(task.task_id).unwrap();
         old.queue.stop();
         let new = registry.get(key.clone(), 0, 2).await.unwrap();
         assert!(!Arc::ptr_eq(&old.queue, &new.queue));
         assert_eq!(store.get_task_list(&key).unwrap().range_id, 2);
+        assert_eq!(
+            store.get_task_list(&key).unwrap().data.ack_level,
+            task.task_id
+        );
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
         assert!(!registry.unload(key, old, 3).await.unwrap());
     }
     #[tokio::test]

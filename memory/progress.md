@@ -1604,3 +1604,20 @@ with Rust Matching and seven SDK scenarios passed
 (/tmp/cadence-maintenance-mixed.exit = 0). Full prior 327-test/23-stage checkpoint
 is separate. GC/controller shutdown sequencing, idle unload, dynamic per-list
 configuration, ownership discovery and query/sync matching gates remain open.
+
+## 2026-10-16: Go-style Matching GC and final stopped-writer acknowledgements
+
+See matching-gc-next.md. Added shared per-queue collector with cursor, thresholds,
+nonblocking single ownership, repeated full-batch drain and failure cooldown.
+Native dispatcher uses default 100-row/one-second GC; registry forces teardown
+drains and persists final reader ack even after writer stop, while retaining SQL
+lease fences. Recovery/shutdown tests verify final metadata and physical cleanup.
+Fourteen actual-Go GC fixtures and strict time/error Rust tests pass.
+
+Fresh full regression PASSED 333 workspace tests, strict lint and all 24 stages:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-gc-verified/results.json;
+/tmp/cadence-gc-verified.exit = 0. Includes actual mixed Go services/Rust Matching
+and seven SDK scenarios. First build attempt was invalidated by editing shared
+API during compilation; it was replaced by the complete frozen-source run.
+Strict stop/unregister/in-flight ordering, idle unload, dynamic controller config
+and remaining Matching query/sync/routing/transport gates remain incomplete.
