@@ -1745,3 +1745,14 @@ verifies old task delivery and ack update progress before recovery. 367 workspac
 tests, strict lint and all27 compatibility stages incl mixed Go services/Rust
 Matching passed: /tmp/cadence-lock-full.exit = 0. See matching-db-lock-next.md.
 Rate-report oracle and scalar draft prepared under/tmp; details in matching-rate-next.md.
+
+## 2026-10-16: Matching dispatch rate report aggregation
+
+Pure cadence-common matching_rate state port now matches11 actual-Go sequences:
+TTL/received boundaries, precision asymmetry, partitions/provider reads, fractional
+/zero/negative reports, backwards fake time and arm64 overflow burst conversion.
+Actual oracle corrected draft overflow assumption. New differential stage brings
+runner to28. All30 common tests, Go/Rust comparison and strict workspace lint
+passed (/tmp/cadence-rate-common.exit=0; /tmp/cadence-rate-final.exit=0).
+No native pacing claim: clock reservations/token bucket and RPC/reader wiring
+remain next. Last full live run is DB-lock checkpoint367 tests/27 stages.

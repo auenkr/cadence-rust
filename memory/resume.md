@@ -1,3 +1,11 @@
+Latest scalar rate-report checkpoint:11 actual-Go sequences,30 common tests and
+strict all-target workspace Clippy passed. See matching-rate-next.md. New runner
+has28 stages; full runtime last passed367 tests/27 stages before scalar addition.
+Next complete common/clock/ratelimiter reservation/timing semantics, then wire
+shared queue-owner limits into reader pre-handoff wait, activity reports and
+DescribeTaskList. Scalar aggregate currently unconnected to dispatch enforcement.
+Matching remains active; no service complete.
+
 Latest checkpoint: queue writer/DB/state lock separation validated (367 tests,
 strict Clippy, all27 compatibility stages; /tmp/cadence-lock-full.exit=0). See
 matching-db-lock-next.md. Next rate-report oracle/scalar draft under/tmp documented

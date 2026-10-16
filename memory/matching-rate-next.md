@@ -92,3 +92,27 @@ poll reports a new low rate. Updating limit/burst does not revoke that head. The
 next head can still consume the new burst immediately; do not incorrectly assert
 that the very first two deliveries after rate transition must be spaced apart.
 Preserve Go reservation/update timing rather than consuming at poll receipt.
+
+## Scalar report checkpoint
+
+Go oracle rerun passed serially (/tmp/cadence-rate-oracle-retry.exit=0), then
+harness and fixture moved into tests/matching-rate-go_test.go and
+tests/fixtures/matching-rate.json. cadence-common matching_rate now implements
+report aggregation with11 Go sequences. run-matching-rate-compat.py compares
+actual Go output then Rust fields/provider-read counts. report_with_clock reads
+fresh timestamp for tryUpdate after optimistic check; fixed-clock report wraps it.
+New matching-rate-differential stage brings full runner to28 stages.
+
+/tmp/cadence-rate-final.exit =0: eleven actual-Go/Rust sequences plus strict
+workspace all-target Clippy passed. First draft incorrectly assumed positive
+float-to-int overflow became MinInt; actual Go arm64 oracle saturates to MaxInt64,
+so corrected to Rust saturating cast. This architecture-specific edge remains
+covered by differential, not assumed from language specification.
+
+This checkpoint is pure aggregate state, not dispatch enforcement. Native poll
+rate reports/Describe and bucket/reservation integration still need wiring.
+Next implement clock limiter reservation semantics and connect shared owner policy
+to reader's pre-handoff Wait, default/minimum dispatch timeout, activity reports
+and DescribeTaskList before claiming native rate behavior. Full service remains
+incomplete, as do all four roles. Latest full runtime validation remains prior
+DB-lock checkpoint367 tests/27 stages; new scalar checks are focused only.

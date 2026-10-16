@@ -23,3 +23,5 @@ pub mod ack_manager;
 pub mod poller;
 
 pub mod liveness;
+
+pub mod matching_rate;
