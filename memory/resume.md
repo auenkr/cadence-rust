@@ -6,6 +6,28 @@ incomplete. Keep working autonomously; use tmux session cadence-rust for long
 processes. After compaction save progress, commit and push. Never equate adapter
 coverage or a boundary probe with complete service parity.
 
+## Poller state continuation
+
+Read matching-pollers-next.md first. Prior RPC/mixed SDK checkpoint ad9ebf44a is
+pushed. New common poller manager matches ten original-Go reference snapshots.
+Native registry/poll/DescribeTaskList integration and queue status are added.
+A source review corrected EndPoll timing: dispatcher wait cycles end BEFORE
+History start, and restart after failed deliveries. New focused test asserts it.
+
+Final verification PASSED:
+- /tmp/cadence-poller-workspace-final.exit = 0: all 327 workspace tests.
+- /tmp/cadence-poller-timing-tests.exit = 0: 16 focused Matching tests and strict
+  all-target workspace clippy, including corrected pre-History EndPoll timing.
+- /tmp/cadence-matching-poller-full.exit = 0: all 23 compatibility stages;
+  /home/ubuntu/.cache/cadence-rust-test-artifacts/matching-poller-final-20261016/results.json.
+  Native live stages compile the corrected dispatcher and check DescribeTaskList
+  through Go Frontend, plus all seven expanded SDK scenarios with no Go Matching.
+Poller state checkpoint is being committed/pushed with these notes.
+
+Next: configured periodic ack maintenance, fenced owner unload, query delivery
+and sync matching/forwarding. Rates/isolation/QPS/config/membership/semaphores
+and internal Thrift transport remain partial. All four roles are incomplete.
+
 ## Latest verified Matching RPC checkpoint
 
 Read matching-rpc-next.md first. Opt-in Matching::with_durable_queues connects

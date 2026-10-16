@@ -290,6 +290,14 @@ impl DurableTaskQueue {
     pub fn levels(&self) -> (i64, i64, i64) {
         self.ack.levels()
     }
+    /// Queue status fields exposed by Go DescribeTaskList. Rate/isolation/QPS
+    /// belong to the task-list controller rather than the persistence reader.
+    pub fn status(&self) -> (i64, i64, i64, i64, i64, bool) {
+        let state = self.state.lock().expect("matching queue lock");
+        let (read, ack, backlog) = self.ack.levels();
+        let (start, end) = block(state.range_id, self.range_size);
+        (read, ack, backlog, start, end, ack == state.max_read_level)
+    }
     pub fn stop(&self) {
         self.state.lock().expect("matching queue lock").stopped = true;
     }

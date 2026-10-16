@@ -17,6 +17,7 @@ type Key = (Uuid, String, i32);
 struct Owner {
     queue: Arc<DurableTaskQueue>,
     dispatcher: TaskDispatcher,
+    pollers: Arc<Mutex<cadence_common::poller::Manager>>,
 }
 #[derive(Default)]
 struct State {
@@ -36,6 +37,7 @@ pub struct QueueRegistry {
 pub struct QueueHandle {
     pub queue: Arc<DurableTaskQueue>,
     pub dispatcher: TaskDispatcher,
+    pub pollers: Arc<Mutex<cadence_common::poller::Manager>>,
 }
 impl QueueHandle {
     /// Notification remains in the persistence worker if the AddTask RPC is
@@ -122,6 +124,7 @@ impl QueueRegistry {
                             domain,
                         ),
                         queue,
+                        pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                     });
                     state.owners.insert(lookup, owner.clone());
                     owner
@@ -130,6 +133,7 @@ impl QueueRegistry {
             Ok(QueueHandle {
                 queue: owner.queue.clone(),
                 dispatcher: owner.dispatcher.clone(),
+                pollers: owner.pollers.clone(),
             })
         })
         .await

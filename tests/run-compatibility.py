@@ -60,6 +60,7 @@ def main():
         run("workspace-tests", ["cargo", "test", "--manifest-path", manifest, "--workspace"])
         run("workspace-clippy", ["cargo", "clippy", "--manifest-path", manifest,
                                  "--workspace", "--all-targets", "--", "-D", "warnings"])
+    run("matching-poller-differential", [sys.executable, str(root / "tests/run-matching-poller-compat.py")], timeout=300)
     run("matching-queue-differential", [sys.executable, str(root / "tests/run-matching-queue-compat.py")])
     run("matching-storage-differential", [sys.executable, str(root / "tests/run-matching-storage-compat.py")])
     run("matching-differential", [sys.executable, str(root / "tests/run-matching-compat.py")])

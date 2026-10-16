@@ -1572,3 +1572,22 @@ retry, activity timeout and signal scenarios, separately verified at
 Domain metadata remains seeded, discovery substituted in tests, other matching
 methods use embedded state, and forwarded sync matching is explicitly unported
 in the opt-in backend. Matching is not complete and is not selected by CLI config.
+
+## 2026-10-16: Native Matching poller history and DescribeTaskList
+
+See matching-pollers-next.md. Common poller manager matches ten original-Go
+manager/cache snapshots for identity deduplication, recency, outstanding/group
+state, cancellation, empty IDs, TTL and 5000-entry eviction. Native poll RPCs
+record wait cycles; EndPoll precedes History start and begins again on retry,
+with a focused timing assertion. Native DescribeTaskList returns actual pollers
+and queue read/ack/backlog/block/empty fields. Go Frontend mixed probe verifies
+the native history/status and all seven SDK scenarios. Remaining rate/isolation
+controller metrics, callbacks and lifecycle work are still explicitly partial.
+
+Final post-correction workspace run PASSED 327 tests:
+/tmp/cadence-poller-workspace-final.exit = 0. Final 16 focused Matching tests and
+strict all-target workspace lint PASSED: /tmp/cadence-poller-timing-tests.exit = 0.
+Full 23-stage compatibility runner PASSED:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-poller-final-20261016/results.json.
+All four deployment roles remain incomplete. Continue Matching with configured
+ack maintenance/ownership unload, queries and sync matching before moving roles.

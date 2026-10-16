@@ -1,0 +1,252 @@
+{
+  "snapshots": [
+    {
+      "a": false,
+      "b": false,
+      "c": false,
+      "cancelled": 0,
+      "count_after": 0,
+      "count_before": 0,
+      "first": "",
+      "groups": {},
+      "has_after": false,
+      "last": "",
+      "listed": 0,
+      "newest": 0,
+      "rate": 0
+    },
+    {
+      "a": true,
+      "b": true,
+      "c": false,
+      "cancelled": 0,
+      "count_after": 1,
+      "count_before": 1,
+      "first": "worker",
+      "groups": {
+        "b": 1
+      },
+      "has_after": true,
+      "last": "worker",
+      "listed": 1,
+      "newest": 1000000010,
+      "rate": 20
+    },
+    {
+      "a": false,
+      "b": true,
+      "c": false,
+      "cancelled": 0,
+      "count_after": 1,
+      "count_before": 1,
+      "first": "worker",
+      "groups": {},
+      "has_after": true,
+      "last": "worker",
+      "listed": 1,
+      "newest": 1000000010,
+      "rate": 10
+    },
+    {
+      "a": false,
+      "b": true,
+      "c": false,
+      "cancelled": 1,
+      "count_after": 1,
+      "count_before": 1,
+      "first": "worker",
+      "groups": {},
+      "has_after": true,
+      "last": "worker",
+      "listed": 1,
+      "newest": 1000000010,
+      "rate": 10
+    },
+    {
+      "a": false,
+      "b": false,
+      "c": false,
+      "cancelled": 1,
+      "count_after": 1,
+      "count_before": 1,
+      "first": "worker",
+      "groups": {},
+      "has_after": false,
+      "last": "worker",
+      "listed": 1,
+      "newest": 1000000010,
+      "rate": 20
+    },
+    {
+      "a": false,
+      "b": false,
+      "c": false,
+      "cancelled": 1,
+      "count_after": 1,
+      "count_before": 1,
+      "first": "worker",
+      "groups": {},
+      "has_after": false,
+      "last": "worker",
+      "listed": 1,
+      "newest": 1000000010,
+      "rate": 20
+    },
+    {
+      "a": false,
+      "b": false,
+      "c": false,
+      "cancelled": 1,
+      "count_after": 0,
+      "count_before": 1,
+      "first": "",
+      "groups": {},
+      "has_after": false,
+      "last": "",
+      "listed": 0,
+      "newest": 0,
+      "rate": 0
+    },
+    {
+      "a": false,
+      "b": false,
+      "c": true,
+      "cancelled": 1,
+      "count_after": 0,
+      "count_before": 0,
+      "first": "",
+      "groups": {},
+      "has_after": true,
+      "last": "",
+      "listed": 0,
+      "newest": 0,
+      "rate": 0
+    },
+    {
+      "a": false,
+      "b": false,
+      "c": false,
+      "cancelled": 1,
+      "count_after": 1,
+      "count_before": 1,
+      "first": "orphan",
+      "groups": {},
+      "has_after": false,
+      "last": "orphan",
+      "listed": 1,
+      "newest": 301000000011,
+      "rate": 5
+    },
+    {
+      "a": false,
+      "b": false,
+      "c": false,
+      "cancelled": 1,
+      "count_after": 5000,
+      "count_before": 5000,
+      "first": "bulk-5000",
+      "groups": {},
+      "has_after": false,
+      "last": "bulk-1",
+      "listed": 5000,
+      "newest": 301000000011,
+      "rate": 5000
+    }
+  ],
+  "steps": [
+    {
+      "op": "snapshot"
+    },
+    {
+      "group": "a",
+      "id": "1",
+      "identity": "worker",
+      "op": "start",
+      "rate": 10
+    },
+    {
+      "nanos": 10,
+      "op": "advance"
+    },
+    {
+      "group": "b",
+      "id": "2",
+      "identity": "worker",
+      "op": "start",
+      "rate": 20
+    },
+    {
+      "op": "snapshot"
+    },
+    {
+      "id": "1",
+      "op": "end"
+    },
+    {
+      "op": "snapshot"
+    },
+    {
+      "id": "2",
+      "op": "cancel"
+    },
+    {
+      "op": "snapshot"
+    },
+    {
+      "id": "2",
+      "op": "end"
+    },
+    {
+      "id": "missing",
+      "op": "end"
+    },
+    {
+      "op": "snapshot"
+    },
+    {
+      "nanos": 300000000000,
+      "op": "advance"
+    },
+    {
+      "op": "snapshot"
+    },
+    {
+      "nanos": 1,
+      "op": "advance"
+    },
+    {
+      "op": "snapshot"
+    },
+    {
+      "group": "c",
+      "id": "empty",
+      "identity": "",
+      "op": "start",
+      "rate": 0
+    },
+    {
+      "op": "snapshot"
+    },
+    {
+      "id": "empty",
+      "op": "end"
+    },
+    {
+      "group": "c",
+      "id": "",
+      "identity": "orphan",
+      "op": "start",
+      "rate": 5
+    },
+    {
+      "op": "snapshot"
+    },
+    {
+      "count": 5001,
+      "op": "bulk"
+    },
+    {
+      "op": "snapshot"
+    }
+  ]
+}

@@ -28,6 +28,12 @@ fn partition_config_from_proto(config: p::TaskListPartitionConfig) -> cadence_pe
     }
 }
 
+#[allow(deprecated)]
+fn partition_config_to_proto(c: cadence_persistence::StoredPartitionConfig) -> p::TaskListPartitionConfig {
+    let partitions = |map: std::collections::HashMap<i32, Vec<String>>| map.into_iter().map(|(id, groups)| (id, p::TaskListPartition { isolation_groups: groups })).collect();
+    p::TaskListPartitionConfig { version: c.version, num_read_partitions: c.read_partitions.len() as i32, num_write_partitions: c.write_partitions.len() as i32, read_partitions: partitions(c.read_partitions), write_partitions: partitions(c.write_partitions) }
+}
+
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct PollKey {
     domain: String,
@@ -137,8 +143,9 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 0).await?;
+            let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: 100000.0, isolation_group: String::new() } };
             return tokio::select! {
-                result=queue.dispatcher.poll_decision(payload, self.poll_expiration)=>result.map(Response::new),
+                result=queue.dispatcher.poll_decision_with_poller(payload, self.poll_expiration, lifecycle)=>result.map(Response::new),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }
@@ -198,8 +205,9 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 1).await?;
+            let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: payload.task_list_metadata.as_ref().and_then(|metadata| metadata.max_tasks_per_second).filter(|rate| *rate >= 0.0).unwrap_or(100000.0), isolation_group: String::new() } };
             return tokio::select! {
-                result=queue.dispatcher.poll_activity(payload, self.poll_expiration)=>result.map(Response::new),
+                result=queue.dispatcher.poll_activity_with_poller(payload, self.poll_expiration, lifecycle)=>result.map(Response::new),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }
@@ -659,6 +667,20 @@ impl m::matching_api_server::MatchingApi for Matching {
         let task_list_type = payload.task_list_type;
         let task_list_name = task_list.clone().map(|t| t.name).unwrap_or_default();
         self::task_list_name(&task_list_name)?;
+        if self.queues.is_some() {
+            if !matches!(task_list_type, 1 | 2) { return Err(Status::invalid_argument("TaskListType is invalid.")); }
+            let queue = self.durable_queue(&r.domain_id, task_list.as_ref().expect("validated task list"), task_list_type - 1).await?;
+            let pollers = queue.pollers.lock().expect("poller history lock").list(matching_now()).into_iter().map(|poller| p::PollerInfo {
+                identity: poller.identity, rate_per_second: poller.rate_per_second,
+                last_access_time: Some(prost_types::Timestamp { seconds: poller.last_access_time.div_euclid(1_000_000_000), nanos: poller.last_access_time.rem_euclid(1_000_000_000) as i32 }),
+            }).collect();
+            let task_list_status = if payload.include_task_list_status {
+                let (read_level, ack_level, backlog_count_hint, start_id, end_id, empty) = queue.queue.status();
+                Some(p::TaskListStatus { read_level, ack_level, backlog_count_hint, task_id_block: Some(p::TaskIdBlock { start_id, end_id }), empty, rate_per_second: 100000.0, ..Default::default() })
+            } else { None };
+            let partition_config = self.frontend.state.executions.partition_config(&r.domain_id, &task_list_name, task_list_type).map(partition_config_to_proto);
+            return Ok(Response::new(m::DescribeTaskListResponse { pollers, task_list_status, task_list, partition_config }));
+        }
         let v = p::workflow_api_server::WorkflowApi::describe_task_list(
             &self.frontend,
             Request::new(payload),
@@ -670,32 +692,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             .state
             .executions
             .partition_config(&r.domain_id, &task_list_name, task_list_type)
-            .map(|c| {
-                let partitions = |map: std::collections::HashMap<i32, Vec<String>>| {
-                    map.into_iter()
-                        .map(|(id, groups)| {
-                            (
-                                id,
-                                p::TaskListPartition {
-                                    isolation_groups: groups,
-                                },
-                            )
-                        })
-                        .collect()
-                };
-                #[allow(deprecated)]
-                {
-                    let num_read_partitions = c.read_partitions.len() as i32;
-                    let num_write_partitions = c.write_partitions.len() as i32;
-                    p::TaskListPartitionConfig {
-                        version: c.version,
-                        read_partitions: partitions(c.read_partitions),
-                        write_partitions: partitions(c.write_partitions),
-                        num_read_partitions,
-                        num_write_partitions,
-                    }
-                }
-            });
+            .map(partition_config_to_proto);
         Ok(Response::new(m::DescribeTaskListResponse {
             pollers: v.pollers,
             task_list_status: v.task_list_status,

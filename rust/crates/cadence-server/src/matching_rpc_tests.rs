@@ -185,3 +185,86 @@ async fn matching_rpc_durable_cancel_unregisters_waiting_poller() {
     assert_eq!(error.code(), tonic::Code::Cancelled);
     assert!(matching.polls.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status() {
+    let (_dir, _store, matching, key) = fixture();
+    let worker = matching.clone();
+    let domain = key.domain_id.to_string();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move {
+        worker
+            .poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+                domain_id: poll_domain,
+                poller_id: "activity-poller".into(),
+                request: Some(p::PollForActivityTaskRequest {
+                    task_list: list(),
+                    identity: "sdk-worker".into(),
+                    task_list_metadata: Some(p::TaskListMetadata {
+                        max_tasks_per_second: Some(42.0),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }))
+            .await
+    });
+    let describe = || {
+        matching.describe_task_list(Request::new(m::DescribeTaskListRequest {
+            domain_id: domain.clone(),
+            request: Some(p::DescribeTaskListRequest {
+                task_list: list(),
+                task_list_type: 2,
+                include_task_list_status: true,
+                ..Default::default()
+            }),
+        }))
+    };
+    let active = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let info = describe().await.unwrap().into_inner();
+            if !info.pollers.is_empty() {
+                break info;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(active.pollers.len(), 1);
+    assert_eq!(active.pollers[0].identity, "sdk-worker");
+    assert_eq!(active.pollers[0].rate_per_second, 42.0);
+    let status = active.task_list_status.unwrap();
+    assert_eq!(status.read_level, 0);
+    assert_eq!(status.ack_level, 0);
+    assert!(status.empty);
+    assert_eq!(
+        status.task_id_block,
+        Some(p::TaskIdBlock {
+            start_id: 1,
+            end_id: 100
+        })
+    );
+    matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain.clone(),
+            task_list: list(),
+            task_list_type: 2,
+            poller_id: "activity-poller".into(),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        poll.await.unwrap().unwrap_err().code(),
+        tonic::Code::Cancelled
+    );
+    let ended = describe().await.unwrap().into_inner();
+    assert_eq!(ended.pollers.len(), 1);
+    let timestamp = |time: &Option<prost_types::Timestamp>| {
+        time.as_ref().map(|time| (time.seconds, time.nanos))
+    };
+    assert!(
+        timestamp(&ended.pollers[0].last_access_time)
+            >= timestamp(&active.pollers[0].last_access_time)
+    );
+}

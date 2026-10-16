@@ -62,6 +62,10 @@ async function run() {
   const execution = { workflowId: id, runId: started.runId };
   const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(decision.workflowExecution.runId, started.runId);
+  const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+  assert(described.pollers.some(poller => poller.identity === 'service-probe'));
+  assert.equal(described.taskListStatus.taskIdBlock.startId, '1');
+  assert.equal(described.taskListStatus.taskIdBlock.endId, '100000');
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: decision.taskToken, identity: 'service-probe', decisions: [{ scheduleActivityTaskDecisionAttributes: {
       activityId: 'echo', activityType: { name: 'Echo' }, taskList, input: payload('activity'),

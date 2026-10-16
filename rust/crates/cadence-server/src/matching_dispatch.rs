@@ -16,6 +16,34 @@ use std::{
 use tokio::sync::{oneshot, Notify};
 use tonic::Status;
 
+/// Observation of one getTask wait. EndPoll precedes History's start RPC, as
+/// in Go taskListManager.getTask; failed deliveries begin another wait cycle.
+#[derive(Clone)]
+pub struct PollLifecycle {
+    pub manager: Arc<std::sync::Mutex<cadence_common::poller::Manager>>,
+    pub id: String,
+    pub info: cadence_common::poller::Info,
+}
+struct PollWaitGuard(PollLifecycle);
+impl PollLifecycle {
+    fn begin(&self) -> PollWaitGuard {
+        self.manager
+            .lock()
+            .expect("poller history lock")
+            .start(&self.id, self.info.clone(), now());
+        PollWaitGuard(self.clone())
+    }
+}
+impl Drop for PollWaitGuard {
+    fn drop(&mut self) {
+        self.0
+            .manager
+            .lock()
+            .expect("poller history lock")
+            .end(&self.0.id, now());
+    }
+}
+
 #[derive(Clone)]
 pub struct TaskDispatcher {
     queue: Arc<DurableTaskQueue>,
@@ -116,6 +144,27 @@ impl TaskDispatcher {
         })
         .await
     }
+
+    pub async fn poll_decision_with_poller(
+        &self,
+        poll: p::PollForDecisionTaskRequest,
+        expiration: Duration,
+        lifecycle: PollLifecycle,
+    ) -> Result<m::PollForDecisionTaskResponse, Status> {
+        let history = self.history.clone();
+        let domain = self.domain_id.clone();
+        self.poll_with_lifecycle(
+            poll,
+            expiration,
+            move |task, poll| {
+                let history = history.clone();
+                let domain = domain.clone();
+                async move { history.start_decision(&domain, &task, poll).await }
+            },
+            Some(lifecycle),
+        )
+        .await
+    }
     pub async fn poll_activity(
         &self,
         poll: p::PollForActivityTaskRequest,
@@ -130,6 +179,27 @@ impl TaskDispatcher {
         })
         .await
     }
+
+    pub async fn poll_activity_with_poller(
+        &self,
+        poll: p::PollForActivityTaskRequest,
+        expiration: Duration,
+        lifecycle: PollLifecycle,
+    ) -> Result<m::PollForActivityTaskResponse, Status> {
+        let history = self.history.clone();
+        let domain = self.domain_id.clone();
+        self.poll_with_lifecycle(
+            poll,
+            expiration,
+            move |task, poll| {
+                let history = history.clone();
+                let domain = domain.clone();
+                async move { history.start_activity(&domain, &task, poll).await }
+            },
+            Some(lifecycle),
+        )
+        .await
+    }
     async fn poll<Q, R, F, Fut>(
         &self,
         poll: Q,
@@ -142,10 +212,28 @@ impl TaskDispatcher {
         F: FnMut(AllocatedTask, Q) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
+        self.poll_with_lifecycle(poll, expiration, deliver, None)
+            .await
+    }
+    async fn poll_with_lifecycle<Q, R, F, Fut>(
+        &self,
+        poll: Q,
+        expiration: Duration,
+        deliver: F,
+        lifecycle: Option<PollLifecycle>,
+    ) -> Result<R, Status>
+    where
+        Q: Clone + Send + 'static,
+        R: Default + Send + 'static,
+        F: FnMut(AllocatedTask, Q) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<R, Status>> + Send,
+    {
         let (sender, receiver) = oneshot::channel();
         let worker = self.clone();
         tokio::spawn(async move {
-            worker.delivery_worker(poll, sender, deliver).await;
+            worker
+                .delivery_worker(poll, sender, deliver, lifecycle)
+                .await;
         });
         match tokio::time::timeout(expiration, receiver).await {
             Ok(Ok(result)) => result,
@@ -158,15 +246,20 @@ impl TaskDispatcher {
         poll: Q,
         mut sender: oneshot::Sender<Result<R, Status>>,
         mut deliver: F,
+        lifecycle: Option<PollLifecycle>,
     ) where
         Q: Clone + Send,
         R: Send,
         F: FnMut(AllocatedTask, Q) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
+        let mut waiting = None;
         loop {
             if sender.is_closed() {
                 return;
+            }
+            if waiting.is_none() {
+                waiting = lifecycle.as_ref().map(PollLifecycle::begin);
             }
             // Register before reading storage: an append between an empty read
             // and waiting must not lose its notification (important for short polls).
@@ -176,6 +269,7 @@ impl TaskDispatcher {
             let (task, scan_pending) = match self.claim().await {
                 Ok(value) => value,
                 Err(error) => {
+                    drop(waiting.take());
                     let _ = sender.send(Err(error));
                     return;
                 }
@@ -188,6 +282,7 @@ impl TaskDispatcher {
                 tokio::select! {_=sender.closed()=>return,_=notification=>(),_=tokio::time::sleep(Duration::from_millis(100))=>()};
                 continue;
             };
+            drop(waiting.take());
             if sender.is_closed() {
                 self.rewrite(task.task_id).await;
                 return;
@@ -401,5 +496,47 @@ mod tests {
         assert!(response.task_token.is_empty());
         assert_eq!(calls.load(Ordering::Relaxed), 0);
         assert_eq!(dispatcher.queue.levels().2, 0);
+    }
+    #[tokio::test]
+    async fn matching_dispatch_poller_wait_ends_before_history_and_restarts_after_failure() {
+        let (_directory, _store, _key, dispatcher) = fixture(1);
+        let manager = Arc::new(Mutex::new(cadence_common::poller::Manager::default()));
+        let lifecycle = PollLifecycle {
+            manager: manager.clone(),
+            id: "poll".into(),
+            info: cadence_common::poller::Info {
+                identity: "worker".into(),
+                rate_per_second: 42.0,
+                isolation_group: "a".into(),
+            },
+        };
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let timestamps = seen.clone();
+        dispatcher
+            .poll_with_lifecycle(
+                (),
+                Duration::from_secs(2),
+                move |_, _| {
+                    let mut manager = manager.lock().unwrap();
+                    assert!(
+                        !manager.contains_poll("poll"),
+                        "Go EndPoll precedes History start"
+                    );
+                    assert!(!manager.has_after(i64::MAX));
+                    let mut seen = timestamps.lock().unwrap();
+                    seen.push(manager.list(now())[0].last_access_time);
+                    std::future::ready(if seen.len() == 1 {
+                        Err(Status::internal("exhausted History retries"))
+                    } else {
+                        Ok(m::PollForDecisionTaskResponse::default())
+                    })
+                },
+                Some(lifecycle),
+            )
+            .await
+            .unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert!(seen[1] >= seen[0]);
     }
 }

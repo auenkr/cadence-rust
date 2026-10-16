@@ -337,3 +337,17 @@ task rows use the source domain while transaction fencing uses the target
 task-list lease. It verifies both Go-to-Rust and Rust-to-Go reads and rollback
 under a stale lease. Queue registry tests cover concurrent single ownership,
 shutdown acknowledgements, fencing and stale-manager teardown.
+
+Original-Go poller history differential check:
+
+```sh
+python3 tests/run-matching-poller-compat.py
+```
+
+This checks identity deduplication, start/end timestamps, outstanding and
+isolation-group state, cancellation, empty IDs/identities, strict five-minute
+TTL expiry and 5,000-entry MRU eviction. The opt-in native Matching backend now
+uses this state for DescribeTaskList, with durable queue read/ack/block fields.
+Actual rate enforcement, isolation metadata and controller metrics remain
+separate incomplete work. The mixed probe verifies DescribeTaskList through
+Go Frontend as well as existing SDK retries, child workflows, timeouts and signals.
