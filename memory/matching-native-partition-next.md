@@ -60,3 +60,41 @@ claiming sync success, persist only unmatched original adds; forwarded adds must
 never persist at receiving owner. Cancellation/History errors must retain task
 responsibility. Forwarding, routing/scaling, membership, semaphores and production
 standalone lifecycle remain open. No complete migration claim is justified.
+
+## Manager/cache continuation
+
+Implemented matching_partition::PartitionCache, root/nonroot startup loading,
+versioned root updates with Go persistence retries and fatal stop on failure,
+version-gated local owner notifications (including removed partition IDs),
+explicit root-row refresh, and native durable Update/Refresh/Describe adapters.
+Isolation selection now reads that native cache. Adds/polls return internal
+partition configs; Describe returns public API configs. Explicit type validation
+prevents invalid enum arithmetic. Execution metadata remains only the development
+in-process backend's source, not the durable backend's source.
+
+Go source audit corrected a prior implementation error: dispatch limiting divides
+by READ partitions, not write partitions. Read-count config is independent of the
+write-count provider still used by ListTaskListPartitions. With
+matching.enableGetNumberOfPartitionsFromCache, limiter division uses cached read
+map size and AddTask rejects absent write IDs with Go's typed ABORTED
+ReadOnlyPartitionError before arrival accounting/persistence. New scoped boolean
+config reader uses root-name filters for this flag, like Go.
+
+Three RPC tests cover persistence/recovery, no-op/equality/version assignment,
+removed-partition notifications, out-of-order push versus explicit reload,
+concurrent updates, fencing, read/write count separation and drain admission.
+70 focused Matching tests passed. Full runner currently has 409 workspace tests,
+strict lint and all differential/standalone/delivery stages passed; final mixed
+stage is pending. Logs: /tmp/opencode/native-partition-full.log and .exit;
+artifacts matching-native-partition-full. Final outcome: all 30 stages passed,
+marker 0, including mixed Go services/Rust Matching and the existing Go SDK.
+
+Notifications currently address local registry owners. Cross-host notifications,
+routing/membership and adaptive scaling still need implementation.
+
+Prepared but UNWIRED scratch source: matching_sync.rs (not in lib.rs) and
+cadence-proto/src/task_list_partition.rs (not in lib.rs/build.rs). Neither is
+compiled or validated yet. The latter handles default partition map presence,
+the same pinned-gogo issue as zero isolation metrics. Add actual-Go wire checks
+and mixed-service partition update/Describe coverage before claiming it fixed.
+Native manager oracle test draft: /tmp/opencode/native-partition-oracle-test.txt.

@@ -1,3 +1,16 @@
+Latest native partition manager continuation (2026-10-16): read
+matching-native-partition-next.md first. Native manager caches/startup/update/
+refresh/local notifications, RPC Describe and isolation consumers now use leased
+queue metadata. Go audit fixed dispatch division to READ partitions, while list
+enumeration still uses configured writes. Cache-enable flag controls cached
+read counts and typed drained-write rejection. All30 compatibility stages passed:
+/tmp/opencode/native-partition-full.exit=0;409 workspace tests and strict Clippy,
+existing SDK and mixed Go services/Rust Matching passed. Notifications are still
+local-only pending cross-host routing/membership. Sync source and protobuf
+partition-presence macro are UNWIRED scratch files, not compiled/validated.
+Next wire and test partition map presence + native actual-Go oracle, then sync
+matching completion/cancellation coordination and remaining gates. No role done.
+
 Latest native partition storage continuation (2026-10-16): read
 matching-native-partition-next.md first. DurableTaskQueue partition config
 read/update API now serializes with ack/lease writes and only publishes after

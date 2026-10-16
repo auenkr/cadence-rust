@@ -74,6 +74,18 @@ pub fn task_list_integer(
         .unwrap_or(default)
 }
 
+pub fn task_list_boolean(
+    values: &[DynamicConfigValue],
+    domain: Option<&str>,
+    task_list: &str,
+    task_type: i32,
+    default: bool,
+) -> bool {
+    selected_context(values, domain, Some((task_list, task_type)))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
 pub fn task_list_duration(
     values: &[DynamicConfigValue],
     domain: Option<&str>,

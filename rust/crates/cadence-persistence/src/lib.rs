@@ -31,4 +31,4 @@ pub mod matching_queue;
 
 pub mod matching_gc;
 
-mod matching_retry;
+pub mod matching_retry;

@@ -138,14 +138,14 @@ async fn matching_rpc_isolation_policy_rechecks_drains_and_poller_recency() {
     }
     let queue = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
     let provider = matching.queues.as_ref().unwrap().isolation_provider_for_test();
-    let isolation = provider(&key.domain_id.to_string(), "queue", 0, 0, queue.pollers.clone());
+    let isolation = provider(&key.domain_id.to_string(), "queue", 0, 0, queue.pollers.clone(), queue.partitions.clone());
     let task = cadence_persistence::matching_blob::TaskData { created_nanos: matching_now(), partition_config: Some(std::collections::BTreeMap::from([("isolation-group".into(), "a".into())])), ..Default::default() };
     assert_eq!((isolation.select)(&task).0, "", "no recent group poller leaks");
     queue.pollers.lock().unwrap().start("id", cadence_common::poller::Info { identity: "worker".into(), rate_per_second: 1.0, isolation_group: "a".into() }, matching_now());
     assert_eq!((isolation.select)(&task).0, "a");
     matching.frontend.state.domains.update_domain_isolation_groups("domain", Some(cadence_api::types::IsolationGroupConfiguration { isolation_groups: vec![cadence_api::types::IsolationGroupPartition { name: "a".into(), state: Some(cadence_api::enums::IsolationGroupState::Drained) }] })).unwrap();
     assert_eq!((isolation.select)(&task).0, "", "drain changes leak without restarting the owner");
-    let sticky = provider(&key.domain_id.to_string(), "queue", 0, 1, queue.pollers.clone());
+    let sticky = provider(&key.domain_id.to_string(), "queue", 0, 1, queue.pollers.clone(), queue.partitions.clone());
     assert!(sticky.groups.is_empty());
     assert_eq!((sticky.select)(&task).0, "");
 }
@@ -480,6 +480,16 @@ async fn matching_rpc_scopes_partition_counts_to_task_list_and_type() {
             ],
         }],
     );
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(
+        false, "matching.numTasklistReadPartitions", vec![DynamicConfigValue {
+            value: json_blob(serde_json::json!(3)),
+            filters: vec![
+                DynamicConfigFilter { name: "domainName".into(), value: json_blob(serde_json::json!("domain")) },
+                DynamicConfigFilter { name: "taskListName".into(), value: json_blob(serde_json::json!("queue")) },
+                DynamicConfigFilter { name: "taskType".into(), value: json_blob(serde_json::json!(1)) },
+            ],
+        }],
+    );
     let response = matching.list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
         domain: "domain".into(), task_list: list(),
     })).await.unwrap().into_inner();
@@ -488,7 +498,7 @@ async fn matching_rpc_scopes_partition_counts_to_task_list_and_type() {
     let decision = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
     let activity = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 1).await.unwrap();
     assert_eq!(decision.limiter.partitions(), 1);
-    assert_eq!(activity.limiter.partitions(), 4);
+    assert_eq!(activity.limiter.partitions(), 3);
     let other = matching.list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
         domain: "domain".into(), task_list: Some(p::TaskList { name: "other".into(), ..Default::default() }),
     })).await.unwrap().into_inner();
@@ -924,4 +934,101 @@ async fn matching_rpc_sticky_task_list_requires_a_recent_poller() {
         }
     }
     poll.abort();
+}
+
+#[allow(deprecated)]
+fn native_config(version: i64, read: &[i32], write: &[i32]) -> p::TaskListPartitionConfig {
+    p::TaskListPartitionConfig {
+        version,
+        num_read_partitions: read.len() as i32,
+        num_write_partitions: write.len() as i32,
+        read_partitions: read.iter().map(|id| (*id, p::TaskListPartition { isolation_groups: vec![format!("group-{id}")] })).collect(),
+        write_partitions: write.iter().map(|id| (*id, p::TaskListPartition::default())).collect(),
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_native_partition_cache_updates_refreshes_and_recovers() {
+    let (_dir, store, matching, key) = fixture();
+    let update = |config| Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: key.domain_id.to_string(), task_list: list(), task_list_type: 1, partition_config: Some(config),
+    });
+    matching.update_task_list_partition_config(update(native_config(999, &[0], &[0]))).await.unwrap();
+    let root = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    assert!(root.partitions.get().is_none(), "initial single-partition config is a no-op");
+    let child_list = p::TaskList { name: "/__cadence_sys/queue/5".into(), kind: 1, ..Default::default() };
+    let child = matching.durable_queue(&key.domain_id.to_string(), &child_list, 0).await.unwrap();
+    matching.update_task_list_partition_config(update(native_config(999, &[0, 5], &[0, 5]))).await.unwrap();
+    assert_eq!(root.partitions.get().unwrap().version, 1);
+    assert_eq!(child.partitions.get().unwrap().version, 1);
+    assert_eq!(store.get_task_list(&key).unwrap().data.adaptive_partition_config.unwrap().version, 1);
+    assert!(matching.frontend.state.executions.partition_config(&key.domain_id.to_string(), "queue", 1).is_none(), "native Matching must not write workflow execution metadata");
+    matching.update_task_list_partition_config(update(native_config(-100, &[0, 5], &[0, 5]))).await.unwrap();
+    assert_eq!(root.partitions.get().unwrap().version, 1, "request version is ignored for equality");
+    matching.update_task_list_partition_config(update(native_config(1, &[0], &[0]))).await.unwrap();
+    assert_eq!(child.partitions.get().unwrap().version, 2, "removed partition receives drain notification");
+    assert!(!child.partitions.get().unwrap().read_partitions.contains_key(&5));
+    let refresh = |config| Request::new(m::RefreshTaskListPartitionConfigRequest {
+        domain_id: key.domain_id.to_string(), task_list: Some(child_list.clone()), task_list_type: 1, partition_config: config,
+    });
+    matching.refresh_task_list_partition_config(refresh(Some(native_config(1, &[0, 5], &[0])))).await.unwrap();
+    assert_eq!(child.partitions.get().unwrap().version, 2, "old push ignored");
+    matching.refresh_task_list_partition_config(refresh(Some(native_config(50, &[0, 5], &[0])))).await.unwrap();
+    assert_eq!(child.partitions.get().unwrap().version, 50);
+    matching.refresh_task_list_partition_config(refresh(None)).await.unwrap();
+    assert_eq!(child.partitions.get().unwrap().version, 2, "explicit reload is not version gated");
+    let described = matching.describe_task_list(Request::new(m::DescribeTaskListRequest {
+        domain_id: key.domain_id.to_string(), request: Some(p::DescribeTaskListRequest { task_list: list(), task_list_type: 1, ..Default::default() }),
+    })).await.unwrap().into_inner();
+    assert_eq!(described.partition_config.unwrap().version, 2);
+    matching.queues.as_ref().unwrap().unload(key.clone(), root, matching_now()).await.unwrap();
+    let replacement = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    assert_eq!(replacement.partitions.get().unwrap().version, 2, "root startup reads native leased metadata");
+    let late_child = matching.durable_queue(&key.domain_id.to_string(), &p::TaskList { name: "/__cadence_sys/queue/8".into(), kind: 1, ..Default::default() }, 0).await.unwrap();
+    assert_eq!(late_child.partitions.get().unwrap().version, 2, "nonroot startup reads root row");
+    let sticky = matching.durable_queue(&key.domain_id.to_string(), &p::TaskList { name: "sticky-config".into(), kind: 2, ..Default::default() }, 0).await.unwrap();
+    assert!(sticky.partitions.get().is_none());
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_native_partition_concurrent_versions_and_fencing() {
+    let (_dir, store, matching, key) = fixture();
+    let registry = matching.queues.as_ref().unwrap();
+    let root = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    let first = registry.update_partition_config(key.clone(), root.clone(), partition_config_from_proto(native_config(0, &[0, 1], &[0])), matching_now());
+    let second = registry.update_partition_config(key.clone(), root.clone(), partition_config_from_proto(native_config(0, &[0, 2], &[0])), matching_now());
+    let (first, second) = tokio::join!(first, second);
+    first.unwrap(); second.unwrap();
+    assert_eq!(root.partitions.get().unwrap().version, 2);
+    assert_eq!(store.get_task_list(&key).unwrap().data.adaptive_partition_config.unwrap().version, 2);
+    store.lease(&key, 0, 0, matching_now()).unwrap();
+    let error = registry.update_partition_config(key, root.clone(), partition_config_from_proto(native_config(0, &[0, 3], &[0])), matching_now()).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert!(root.queue.is_stopped());
+    assert_eq!(root.partitions.get().unwrap().version, 2);
+}
+
+#[tokio::test]
+async fn matching_rpc_native_partition_cache_controls_dispatch_rate_and_drained_admission() {
+    use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
+    let (_dir, store, matching, key) = fixture();
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.enableGetNumberOfPartitionsFromCache", vec![DynamicConfigValue {
+        value: Some(DataBlob::new(EncodingType::JSON, b"true".to_vec())), filters: vec![],
+    }]);
+    matching.update_task_list_partition_config(Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: key.domain_id.to_string(), task_list: list(), task_list_type: 1,
+        partition_config: Some(native_config(0, &[0, 5, 9], &[0])),
+    })).await.unwrap();
+    let child_list = p::TaskList { name: "/__cadence_sys/queue/5".into(), kind: 1, ..Default::default() };
+    let child = matching.durable_queue(&key.domain_id.to_string(), &child_list, 0).await.unwrap();
+    assert_eq!(child.limiter.partitions(), 3, "limiter uses read map size, including sparse IDs");
+    let error = matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(), task_list: Some(child_list), workflow_execution: execution(), schedule_id: 7, ..Default::default()
+    })).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Aborted);
+    assert_eq!(error.message(), "Current partition is drained.");
+    assert_eq!(child.qps.qps(), 0.0);
+    assert!(store.get_tasks(&TaskListKey { name: "/__cadence_sys/queue/5".into(), ..key }, 0, i64::MAX, 10).unwrap().is_empty());
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }

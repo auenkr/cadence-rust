@@ -95,6 +95,12 @@ fn partition_config_to_proto(c: cadence_persistence::StoredPartitionConfig) -> p
     p::TaskListPartitionConfig { version: c.version, num_read_partitions: c.read_partitions.len() as i32, num_write_partitions: c.write_partitions.len() as i32, read_partitions: partitions(c.read_partitions), write_partitions: partitions(c.write_partitions) }
 }
 
+#[allow(deprecated)]
+fn partition_config_to_internal(c: cadence_persistence::StoredPartitionConfig) -> m::TaskListPartitionConfig {
+    let partitions = |map: std::collections::HashMap<i32, Vec<String>>| map.into_iter().map(|(id, groups)| (id, m::TaskListPartition { isolation_groups: groups })).collect();
+    m::TaskListPartitionConfig { version: c.version, num_read_partitions: c.read_partitions.len() as i32, num_write_partitions: c.write_partitions.len() as i32, read_partitions: partitions(c.read_partitions), write_partitions: partitions(c.write_partitions) }
+}
+
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct PollKey {
     domain: String,
@@ -169,6 +175,22 @@ impl Matching {
                 )
             })
         };
+        let read_provider: crate::matching_registry::PartitionCountProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.numTasklistReadPartitions"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 1)
+            })
+        };
+        let cache_enabled: crate::matching_registry::PartitionCacheEnabledProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_boolean(config.property_values("matching.enableGetNumberOfPartitionsFromCache"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, false)
+            })
+        };
         // Go `cfg.QPSTrackerInterval(domain, taskList, type)`
         // (`matching.qpsTrackerInterval`, default 10s in nanoseconds).
         let qps_interval: crate::matching_registry::QpsIntervalProvider = {
@@ -189,8 +211,7 @@ impl Matching {
                 )
             })
         };
-        let executions = state.executions.clone();
-        let isolation: crate::matching_registry::IsolationProvider = Arc::new(move |domain_id, task_list, task_type, kind, pollers| {
+        let isolation: crate::matching_registry::IsolationProvider = Arc::new(move |domain_id, task_list, task_type, kind, pollers, partitions| {
             let name = domain_name_for(&domains, domain_id);
             let config = overlay.lock().expect("admin lock");
             let enabled = cadence_persistence::dynamic_config::boolean(config.property_values("system.enableTasklistIsolation"), name.as_deref(), false);
@@ -199,9 +220,7 @@ impl Matching {
             let known = groups.clone();
             let overlay = overlay.clone();
             let domains = domains.clone();
-            let domain_id = domain_id.to_owned();
             let task_list = task_list.to_owned();
-            let executions = executions.clone();
             let reload_overlay = overlay.clone();
             let reload_name = name.clone();
             crate::matching_reader::IsolationConfig {
@@ -222,7 +241,7 @@ impl Matching {
                         config.into_iter().flat_map(|config| config.isolation_groups).any(|partition| partition.name == group && partition.state == Some(cadence_api::enums::IsolationGroupState::Drained))
                         || domains.global_isolation_groups().into_iter().flat_map(|config| config.isolation_groups).any(|partition| partition.name == group && partition.state == Some(cadence_api::enums::IsolationGroupState::Drained))
                     });
-                    let partition = executions.partition_config(&domain_id, &task_list, task_type + 1);
+                    let partition = partitions.get();
                     let partition_id = TaskListName::parse(&task_list).map(|name| name.partition() as i32).unwrap_or_default();
                     let partition_groups = partition.as_ref().map(|config| config.read_partitions.get(&partition_id));
                     let empty = Vec::new();
@@ -238,7 +257,8 @@ impl Matching {
             }
         });
         let queues = queues
-            .with_partition_count(provider.clone())
+            .with_partition_count(read_provider)
+            .with_partition_cache_enabled(cache_enabled)
             .with_qps_interval(qps_interval)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
@@ -255,6 +275,16 @@ impl Matching {
         self.queues.as_ref().expect("durable backend selected").get(
             cadence_persistence::matching_sqlite::TaskListKey { domain_id, name: list.name.clone(), task_type }, kind, matching_now(),
         ).await
+    }
+    fn check_write_partition(&self, domain_id: &str, list: &p::TaskList, task_type: i32, queue: &crate::matching_registry::QueueHandle) -> Result<(), Status> {
+        let name = task_list_name(&list.name)?;
+        let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+        let enabled = cadence_persistence::dynamic_config::task_list_boolean(config.property_values("matching.enableGetNumberOfPartitionsFromCache"), domain_name_for(&self.frontend.state.domains, domain_id).as_deref(), name.root(), task_type, false);
+        drop(config);
+        if enabled && queue.partitions.get().is_some_and(|config| !config.write_partitions.contains_key(&(name.partition() as i32))) {
+            return Err(crate::grpc::detailed_status(tonic::Code::Aborted, "Current partition is drained.", "ReadOnlyPartitionError", p::ReadOnlyPartitionError {}));
+        }
+        Ok(())
     }
     fn domain_name(&self, id: &str) -> Result<String, Status> {
         History {
@@ -321,18 +351,20 @@ impl m::matching_api_server::MatchingApi for Matching {
                         Ok(state)=>{
                             let mut response=crate::matching_query::query_response(query, &state);
                             response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                            response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                             Ok(Response::new(response))
                         }
                         // Go fails the waiting query and returns an empty poll.
                         Err(error)=>{
                             let _=queue.queries.complete(&query.task_id, crate::matching_query::QueryOutcome::Internal(error));
-                            Ok(Response::new(m::PollForDecisionTaskResponse { load_balancer_hints: queue.load_balancer_hints(matching_now()), ..Default::default() }))
+                            Ok(Response::new(m::PollForDecisionTaskResponse { load_balancer_hints: queue.load_balancer_hints(matching_now()), partition_config: queue.partitions.get().map(partition_config_to_internal), ..Default::default() }))
                         }
                     }
                 }
                 result=queue.dispatcher.poll_decision_with_poller(payload, self.poll_expiration, lifecycle)=>
                     result.map(|mut response| {
                         response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                            response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                         Response::new(response)
                     }),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
@@ -412,6 +444,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 result=queue.dispatcher.poll_activity_with_poller(payload, self.poll_expiration, lifecycle)=>
                     result.map(|mut response| {
                         response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                            response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                         Response::new(response)
                     }),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
@@ -457,6 +490,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
             let queue = self.durable_queue(&r.domain_id, list, 0).await?;
             if queue.stop_if_isolation_changed() { return Err(Status::unavailable("task list shutting down")); }
+            self.check_write_partition(&r.domain_id, list, 0, &queue)?;
             check_sticky_poller(&queue, list)?;
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
@@ -467,7 +501,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             // group when it has one.
             report_arrival(&queue, &data);
             queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
-            return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: None }));
+            return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
         }
         let execution = r.workflow_execution.unwrap_or_default();
         let store = self
@@ -510,13 +544,14 @@ impl m::matching_api_server::MatchingApi for Matching {
             let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| Status::invalid_argument("Source domain UUID is not valid."))?;
             let queue = self.durable_queue(&r.domain_id, list, 1).await?;
             if queue.stop_if_isolation_changed() { return Err(Status::unavailable("task list shutting down")); }
+            self.check_write_partition(&r.domain_id, list, 1, &queue)?;
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
             };
             report_arrival(&queue, &data);
             queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
-            return Ok(Response::new(m::AddActivityTaskResponse { partition_config: None }));
+            return Ok(Response::new(m::AddActivityTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
         }
         let execution = r.workflow_execution.unwrap_or_default();
         let store = self
@@ -786,6 +821,15 @@ impl m::matching_api_server::MatchingApi for Matching {
         if !name.is_root() {
             return Err(Status::invalid_argument("Only root partition's partition config can be updated."));
         }
+        if let Some(registry) = &self.queues {
+            if !matches!(r.task_list_type, 1 | 2) { return Err(Status::invalid_argument("TaskListType is invalid.")); }
+            let queue = self.durable_queue(&r.domain_id, &task_list, r.task_list_type - 1).await?;
+            registry.update_partition_config(
+                cadence_persistence::matching_sqlite::TaskListKey { domain_id: uuid::Uuid::parse_str(&r.domain_id).expect("validated domain"), name: task_list.name, task_type: r.task_list_type - 1 },
+                queue, partition_config_from_proto(config), matching_now(),
+            ).await?;
+            return Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {}));
+        }
         let store = self.frontend.state.executions.clone();
         let domain = self.domain_name(&r.domain_id)?;
         let stored = partition_config_from_proto(config);
@@ -819,6 +863,15 @@ impl m::matching_api_server::MatchingApi for Matching {
         let name = task_list_name(&task_list.name)?;
         if name.is_root() && r.partition_config.is_some() {
             return Err(Status::invalid_argument("PartitionConfig must be nil for root partition."));
+        }
+        if let Some(registry) = &self.queues {
+            if !matches!(r.task_list_type, 1 | 2) { return Err(Status::invalid_argument("TaskListType is invalid.")); }
+            let queue = self.durable_queue(&r.domain_id, &task_list, r.task_list_type - 1).await?;
+            registry.refresh_partition_config(
+                cadence_persistence::matching_sqlite::TaskListKey { domain_id: uuid::Uuid::parse_str(&r.domain_id).expect("validated domain"), name: task_list.name, task_type: r.task_list_type - 1 },
+                queue, r.partition_config.map(partition_config_from_proto),
+            ).await?;
+            return Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {}));
         }
         let store = self.frontend.state.executions.clone();
         let pushed = r.partition_config.map(partition_config_from_proto);
@@ -972,7 +1025,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 }).collect();
                 Some(p::TaskListStatus { read_level, ack_level, backlog_count_hint, task_id_block: Some(p::TaskIdBlock { start_id, end_id }), empty, rate_per_second: queue.limiter.limit(), new_tasks_per_second: queue.qps.qps(), isolation_group_metrics })
             } else { None };
-            let partition_config = self.frontend.state.executions.partition_config(&r.domain_id, &task_list_name, task_list_type).map(partition_config_to_proto);
+            let partition_config = queue.partitions.get().map(partition_config_to_proto);
             return Ok(Response::new(m::DescribeTaskListResponse { pollers, task_list_status, task_list, partition_config }));
         }
         let v = p::workflow_api_server::WorkflowApi::describe_task_list(

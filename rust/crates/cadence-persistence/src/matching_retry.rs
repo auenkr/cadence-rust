@@ -30,7 +30,8 @@ fn run<T>(
     }
 }
 
-pub(crate) fn persistence<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
+/// Go persistence retry policy, also used by Matching manager metadata reads.
+pub fn persistence<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
     let policy = ExponentialRetryPolicy::new(Duration::from_millis(50))
         .with_maximum_interval(Duration::from_secs(10))
         .with_expiration_interval(Duration::from_secs(30));

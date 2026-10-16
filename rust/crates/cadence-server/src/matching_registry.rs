@@ -31,6 +31,7 @@ struct Owner {
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     queries: Arc<crate::matching_query::QueryChannel>,
     qps: Arc<cadence_common::qps::EmaQpsTracker>,
+    partitions: Arc<crate::matching_partition::PartitionCache>,
     /// Go `taskListManagerImpl.createTime`: when the manager was created, used
     /// to withhold `LoadBalancerHints` for a task list's first 10s.
     created: i64,
@@ -73,17 +74,19 @@ pub struct QueueRegistry {
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
     domain_metadata: Option<(cadence_persistence::InMemoryDomainStore, String)>,
-    /// Go `cfg.NumTasklistWritePartitions(domain, taskList, type)`, clamped to
+    /// Go `cfg.NumTasklistReadPartitions(domain, taskList, type)`, clamped to
     /// >= 1 by the same caller. `None` keeps the single-partition default.
     partition_count: Option<PartitionCountProvider>,
+    cache_enabled: Option<PartitionCacheEnabledProvider>,
     /// Go `cfg.QPSTrackerInterval(domain, taskList, type)`. `None` uses the
     /// dynamic-property default (10s).
     qps_interval: Option<QpsIntervalProvider>,
     isolation: Option<IsolationProvider>,
 }
-pub type IsolationProvider = Arc<dyn Fn(&str, &str, i32, i16, Arc<Mutex<cadence_common::poller::Manager>>) -> crate::matching_reader::IsolationConfig + Send + Sync>;
-/// Live write-partition-count provider used to size the dispatch limiter and to
-/// enumerate partitions, mirroring Go's `NumTasklistWritePartitions`.
+pub type IsolationProvider = Arc<dyn Fn(&str, &str, i32, i16, Arc<Mutex<cadence_common::poller::Manager>>, Arc<crate::matching_partition::PartitionCache>) -> crate::matching_reader::IsolationConfig + Send + Sync>;
+/// Live read-partition-count provider used to size the dispatch limiter and to
+/// divide dispatch rate, mirroring Go's `NumTasklistReadPartitions`.
+pub type PartitionCacheEnabledProvider = Arc<dyn Fn(&str, &str, i32) -> bool + Send + Sync>;
 pub type PartitionCountProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 /// Live QPS-tracker window per task list, mirroring Go's
 /// `cfg.QPSTrackerInterval(domain, taskList, type)` (`matching.qpsTrackerInterval`,
@@ -104,6 +107,7 @@ pub struct QueueHandle {
     /// Go `taskListManagerImpl.qpsTracker`: arrival QPS reported through
     /// `DescribeTaskList.newTasksPerSecond` and the isolation group metrics.
     pub qps: Arc<cadence_common::qps::EmaQpsTracker>,
+    pub partitions: Arc<crate::matching_partition::PartitionCache>,
     created: i64,
     liveness: Arc<cadence_common::liveness::Liveness>,
     writer: crate::matching_writer::TaskWriter,
@@ -231,14 +235,19 @@ impl QueueRegistry {
             startups: Arc::new(Mutex::new(HashMap::new())),
             domain_metadata: None,
             partition_count: None,
+            cache_enabled: None,
             qps_interval: None,
             isolation: None,
         }
     }
-    /// Install Go's `NumTasklistWritePartitions` provider. The provider reads
-    /// `matching.numTasklistWritePartitions`; the registry clamps to >= 1.
+    /// Install Go's `NumTasklistReadPartitions` provider. The provider reads
+    /// `matching.numTasklistReadPartitions`; the registry clamps to >= 1.
     pub fn with_partition_count(mut self, provider: PartitionCountProvider) -> Self {
         self.partition_count = Some(provider);
+        self
+    }
+    pub fn with_partition_cache_enabled(mut self, provider: PartitionCacheEnabledProvider) -> Self {
+        self.cache_enabled = Some(provider);
         self
     }
     /// Install Go's `QPSTrackerInterval` provider. The provider reads
@@ -315,12 +324,32 @@ impl QueueRegistry {
                 None => {
                     drop(state);
                     let domain = key.domain_id.to_string();
+                    let queue = Arc::new(
+                        DurableTaskQueue::open(
+                            registry.store.clone(),
+                            key.clone(),
+                            kind,
+                            registry.range_size,
+                            now,
+                        )
+                        .map_err(|error| Status::unavailable(error.to_string()))?,
+                    );
+                    let partitions = match crate::matching_partition::PartitionCache::load(&registry.store, &queue, &key, kind) {
+                        Ok(cache) => Arc::new(cache),
+                        Err(error) => { queue.stop(); return Err(error); }
+                    };
                     let count_partitions: crate::matching_limiter::PartitionCount = {
                         let provider = registry.partition_count.clone();
+                        let enabled = registry.cache_enabled.clone();
+                        let cache = partitions.clone();
                         let domain_id = key.domain_id.to_string();
                         let task_list = key.name.clone();
                         let task_type = key.task_type;
                         Arc::new(move || {
+                            let root = cadence_common::task_list::TaskListName::parse(&task_list).expect("validated queue name");
+                            if enabled.as_ref().is_some_and(|enabled| enabled(&domain_id, root.root(), task_type)) {
+                                return cache.get().map(|config| config.read_partitions.len() as i64).unwrap_or(1);
+                            }
                             provider
                                 .as_ref()
                                 .map(|provider| provider(&domain_id, &task_list, task_type))
@@ -328,16 +357,6 @@ impl QueueRegistry {
                                 .max(1)
                         })
                     };
-                    let queue = Arc::new(
-                        DurableTaskQueue::open(
-                            registry.store.clone(),
-                            key,
-                            kind,
-                            registry.range_size,
-                            now,
-                        )
-                        .map_err(|error| Status::unavailable(error.to_string()))?,
-                    );
                     let liveness = Arc::new(cadence_common::liveness::Liveness::new(
                         registry_now(),
                         300_000_000_000,
@@ -383,7 +402,7 @@ impl QueueRegistry {
                         crate::matching_limiter::TaskListLimiter::with_partitions(count_partitions),
                     );
                     let pollers = Arc::new(Mutex::new(cadence_common::poller::Manager::default()));
-                    let isolation = registry.isolation.as_ref().map(|provider| provider(&lookup.0.to_string(), &lookup.1, lookup.2, kind, pollers.clone())).unwrap_or_default();
+                    let isolation = registry.isolation.as_ref().map(|provider| provider(&lookup.0.to_string(), &lookup.1, lookup.2, kind, pollers.clone(), partitions.clone())).unwrap_or_default();
                     let reader = crate::matching_reader::TaskReader::with_isolation(
                         queue.clone(),
                         dispatcher.task_notification(),
@@ -411,6 +430,7 @@ impl QueueRegistry {
                         pollers,
                         queries: Arc::new(crate::matching_query::QueryChannel::new()),
                         qps,
+                        partitions,
                         created: now,
                         last_update: Mutex::new(tokio::time::Instant::now()),
                         next_idle_check: Mutex::new(
@@ -426,6 +446,23 @@ impl QueueRegistry {
                         }
                         return Err(Status::unavailable("Matching registry stopped."));
                     }
+                    // Reconcile publication with concurrent root updates. A
+                    // nonroot startup may have read SQL before the root wrote
+                    // and published its notification.
+                    if kind == 0 {
+                        let name = cadence_common::task_list::TaskListName::parse(&lookup.1).map_err(Status::invalid_argument)?;
+                        if name.is_root() {
+                            if let Some(config) = owner.partitions.get() {
+                                for ((domain, task_list, task_type), other) in &state.owners {
+                                    if *domain == lookup.0 && *task_type == lookup.2 && cadence_common::task_list::TaskListName::parse(task_list).is_ok_and(|other| other.root() == name.root()) {
+                                        other.partitions.push(&config);
+                                    }
+                                }
+                            }
+                        } else if let Some(root) = state.owners.get(&(lookup.0, name.root().into(), lookup.2)) {
+                            if let Some(config) = root.partitions.get() { owner.partitions.push(&config); }
+                        }
+                    }
                     state.owners.insert(lookup, owner.clone());
                     registry.changed.notify_waiters();
                     owner
@@ -438,12 +475,54 @@ impl QueueRegistry {
                 limiter: owner.limiter.clone(),
                 queries: owner.queries.clone(),
                 qps: owner.qps.clone(),
+                partitions: owner.partitions.clone(),
                 created: owner.created,
                 liveness: owner.liveness.clone(),
                 writer: owner.writer.clone(),
             })
         })
         .await
+    }
+    pub async fn update_partition_config(
+        &self,
+        key: TaskListKey,
+        handle: QueueHandle,
+        config: cadence_persistence::StoredPartitionConfig,
+        now: i64,
+    ) -> Result<(), Status> {
+        let registry = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let Some((old, new)) = handle.partitions.update(&handle.queue, config, now)? else { return Ok(()); };
+            let mut notify = std::collections::HashSet::new();
+            for config in old.iter().chain(std::iter::once(&new)) {
+                notify.extend(config.read_partitions.keys().copied());
+                notify.extend(config.write_partitions.keys().copied());
+            }
+            let name = cadence_common::task_list::TaskListName::parse(&key.name).map_err(Status::invalid_argument)?;
+            let state = registry.state.lock().expect("Matching registry lock");
+            for ((domain, task_list, task_type), owner) in &state.owners {
+                if *domain != key.domain_id || *task_type != key.task_type { continue; }
+                if let Ok(other) = cadence_common::task_list::TaskListName::parse(task_list) {
+                    if other.root() == name.root() && !other.is_root() && notify.contains(&(other.partition() as i32)) {
+                        owner.partitions.push(&new);
+                    }
+                }
+            }
+            Ok(())
+        }).await.map_err(|error| Status::internal(error.to_string()))?
+    }
+    pub async fn refresh_partition_config(
+        &self,
+        mut key: TaskListKey,
+        handle: QueueHandle,
+        config: Option<cadence_persistence::StoredPartitionConfig>,
+    ) -> Result<(), Status> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(config) = config { handle.partitions.push(&config); return Ok(()); }
+            key.name = cadence_common::task_list::TaskListName::parse(&key.name).map_err(Status::invalid_argument)?.root().into();
+            handle.partitions.refresh(&store, &key)
+        }).await.map_err(|error| Status::internal(error.to_string()))?
     }
     /// An old manager's teardown must never unregister its replacement.
     pub async fn unload(
