@@ -1,6 +1,6 @@
 # Matching queue lock source audit (2026-10-16)
 
-Follow-up after rewrite checkpoint: queue state mutex currently spans ID rollover
+Source gap before current working-tree correction: queue state mutex spans ID rollover
 lease retry and CreateTasks SQL. New background reader gets an owned read cursor
 and no blocking buffer waits, but per-row registration still needs queue state;
 therefore a lease retry can delay delivery of already durable rows. Go DB mutex
@@ -9,7 +9,7 @@ is independent. Go retry sleeps occur outside taskListDB.Lock. Native final ack
 can also wait through a full30sec retry where Go can update between attempts.
 This remains a Matching error-path parity gap, not covered by happy-path SDKs.
 
-Proposed correction (not yet implemented):
+Correction now implemented in working tree (pending full validation):
 - Separate writer serialization gate (entire append/allocation, including direct
   queue APIs) from short state mutex and DB metadata-operation gate.
 - Each lease attempt acquires DB gate, snapshots state, does SQL without state
@@ -30,3 +30,21 @@ UPDATE of task_lists for rollover, start second append/renewal in blocking worke
 While retries are underway reader must claim/complete first durable row without
 waiting for recovery. Remove trigger; append succeeds. Existing Go retry/queue/
 writer fixtures and mixed-service SDK checks must continue passing.
+
+Implemented writer and database gates, each lease retry attempt releasing DB gate
+before sleep; short state updates only. Creation timestamp for pending appends is
+computed after acquiring DB gate so lock waits do not stale the timestamp. Ack
+snapshot/update is DB-gated against self-renewal while reader admission remains
+independent. Existing direct synchronous APIs retain serialized writes.
+
+Focused validation PASSED15 queue tests and strict workspace all-target lint
+(/tmp/cadence-lock-final.exit = 0). New real SQLite trigger rejects only renewal
+range increases; durable row1 reads/completes/persists ack while retrying, then
+recovery permits range2/write2 and verifies persisted ack1. Cleanup releases
+trigger before asserting failure result to avoid stranded retry threads.
+
+Full regression PASSED:367 workspace tests, strict workspace all-target Clippy,
+all27 compatibility stages including actual mixed Go services/Rust Matching SDK
+scenarios. /tmp/cadence-lock-full.exit = 0; artifacts
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-db-lock-verified.
+Next: rate-report aggregation and clock limiter, see matching-rate-next.md.

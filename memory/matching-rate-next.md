@@ -62,3 +62,33 @@ current burst; update last. If cancelling latest event, previous event can repla
 lastEvent only if not before cancellation time. Reservation uses its original
 rate for cancellation even after current rate changes. Used(false) is not guarded
 by a once flag; repeated calls can restore more than once, bounded by burst.
+
+Prepared scalar-report oracle (not yet committed or verified):
+/tmp/cadence-matching-rate-go_test.go; input /tmp/cadence-matching-rate-input.json;
+overlay /tmp/cadence-matching-rate-overlay.json. Ten sequences cover TTL, precision,
+partition snapshots, fractional/zero/negative direct rates, backwards fake clock.
+Initial oracle run was interrupted to serialize heavy Go package builds with the
+DB-lock full regression. Restart with CADENCE_MATCHING_RATE_INPUT/OUTPUT pointing
+to input and /tmp/cadence-matching-rate-output.json and go test -overlay ...
+./service/matching/tasklist -run '^TestRustMatchingRateReports$' -count=1.
+If output matches intended schema, move harness/input+regenerated output into tests
+and implement scalar aggregate state; do not claim dispatch enforcement until
+clock token/reservation behavior and reader/RPC wiring are also ported/tested.
+Prepared scalar Rust draft: /tmp/cadence-matching-rate.rs (standalone rustc library
+compile passed; NOT fixture-validated or integrated). Implements TTL/precision/
+partition report state and Go64 float-to-int overflow convention for burst. Move
+into cadence-common only after the current DB-lock checkpoint and Go oracle pass.
+
+Native wiring notes: activity PollRequest metadata.max_tasks_per_second is already
+recorded in PollLifecycle.info but is not reported to any shared dispatch limiter.
+Native DescribeTaskList.status.rate_per_second is hardcoded100000. Decision polls
+supply no worker rate. Those sites are in grpc_matching.rs. Queue owner can own a
+shared scalar/bucket policy; default partition count1 until real partition state
+is wired (do not claim partition scaling from a constant provider).
+
+Timing caveat for mixed rate tests: MustOffer calls limiter.Wait BEFORE blocking
+for a poller. A dispatch head may already own an old/default-rate token when a
+poll reports a new low rate. Updating limit/burst does not revoke that head. The
+next head can still consume the new burst immediately; do not incorrectly assert
+that the very first two deliveries after rate transition must be spaced apart.
+Preserve Go reservation/update timing rather than consuming at poll receipt.

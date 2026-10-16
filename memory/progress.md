@@ -1735,3 +1735,13 @@ verify retry before ack and gap IDs. 366 workspace tests, strict lint and all27
 compatibility stages incl mixed Go services/Rust Matching PASSED;
 /tmp/cadence-rewrite-full.exit = 0. See matching-rewrite-next.md.
 Further source audits saved in matching-db-lock-next.md and matching-rate-next.md.
+
+## 2026-10-16: Matching lease backoff no longer blocks reader state
+
+Separate writer serialization and DB metadata gates keep queue state free during
+SQL and lease backoff. Ack snapshot/update remains fenced against self-renewal.
+Creation time is sampled after DB gate acquisition. SQLite renewal trigger test
+verifies old task delivery and ack update progress before recovery. 367 workspace
+tests, strict lint and all27 compatibility stages incl mixed Go services/Rust
+Matching passed: /tmp/cadence-lock-full.exit = 0. See matching-db-lock-next.md.
+Rate-report oracle and scalar draft prepared under/tmp; details in matching-rate-next.md.

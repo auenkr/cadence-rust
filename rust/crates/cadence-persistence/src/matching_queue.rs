@@ -46,6 +46,8 @@ pub struct DurableTaskQueue {
     key: TaskListKey,
     range_size: NonZeroU32,
     state: Mutex<State>,
+    writer: Mutex<()>,
+    database: Mutex<()>,
     reader: Arc<ReaderGate>,
     ack: AckManager,
     gc: crate::matching_gc::TaskGarbageCollector,
@@ -182,6 +184,8 @@ impl DurableTaskQueue {
             gc: crate::matching_gc::TaskGarbageCollector::default(),
             stopped: AtomicBool::new(false),
             stop_waker: Mutex::new(None),
+            writer: Mutex::new(()),
+            database: Mutex::new(()),
             reader: Arc::new(ReaderGate::default()),
             state: Mutex::new(State {
                 range_id: lease.range_id,
@@ -206,9 +210,8 @@ impl DurableTaskQueue {
         }
         result.map_err(Into::into)
     }
-    fn append_locked(
+    fn append_serialized(
         &self,
-        state: &mut State,
         data: &[(uuid::Uuid, TaskData)],
         now: i64,
         timeouts: Option<&[i32]>,
@@ -216,19 +219,28 @@ impl DurableTaskQueue {
         self.active()?;
         let mut tasks = Vec::with_capacity(data.len());
         for (_, data) in data {
+            let mut state = self.state.lock().expect("matching queue lock");
             if state.next_id > state.block_end {
+                drop(state);
                 let result = crate::matching_retry::lease(now, |attempt_now| {
-                    self.store
-                        .lease(&self.key, state.metadata.kind, state.range_id, attempt_now)
+                    // Go taskListDB holds its mutex for each lease operation,
+                    // not through the retry sleep. Reader state is independent.
+                    let _database = self.database.lock().expect("matching database gate");
+                    let (kind, range) = {
+                        let state = self.state.lock().expect("matching queue lock");
+                        (state.metadata.kind, state.range_id)
+                    };
+                    let lease = self.store.lease(&self.key, kind, range, attempt_now)?;
+                    let mut state = self.state.lock().expect("matching queue lock");
+                    state.range_id = lease.range_id;
+                    (state.next_id, state.block_end) = block(lease.range_id, self.range_size);
+                    Ok(())
                 });
-                // Go stops the writer on every terminal renewal failure,
-                // including exhausted transient errors, not only lost leases.
                 if result.is_err() {
                     self.stop();
                 }
-                let lease = result?;
-                state.range_id = lease.range_id;
-                (state.next_id, state.block_end) = block(lease.range_id, self.range_size);
+                result?;
+                state = self.state.lock().expect("matching queue lock");
             }
             tasks.push(AllocatedTask {
                 task_id: state.next_id,
@@ -236,6 +248,8 @@ impl DurableTaskQueue {
             });
             state.next_id = state.next_id.wrapping_add(1);
         }
+        let _database = self.database.lock().expect("matching database gate");
+        let range_id = self.state.lock().expect("matching queue lock").range_id;
         if let Some(timeouts) = timeouts {
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -247,7 +261,7 @@ impl DurableTaskQueue {
         }
         let result = self.store.create_tasks_with_domains(
             &self.key,
-            state.range_id,
+            range_id,
             tasks
                 .iter()
                 .zip(data)
@@ -257,23 +271,17 @@ impl DurableTaskQueue {
         // Allocated IDs are never reused after an uncertain persistence outcome.
         if let Some(last) = tasks.last() {
             if last.task_id > 0 {
-                state.max_read_level = last.task_id;
+                self.state
+                    .lock()
+                    .expect("matching queue lock")
+                    .max_read_level = last.task_id;
             }
         }
         self.check(result)?;
         Ok(tasks)
     }
     pub fn append(&self, data: &[TaskData], now: i64) -> Result<Vec<AllocatedTask>> {
-        self.append_locked(
-            &mut self.state.lock().expect("matching queue lock"),
-            &data
-                .iter()
-                .cloned()
-                .map(|task| (self.key.domain_id, task))
-                .collect::<Vec<_>>(),
-            now,
-            None,
-        )
+        self.append_in_domain(data, self.key.domain_id, now)
     }
     /// Preserve Go SQL's source-domain row keys for cross-domain activities.
     /// Reading this queue still filters on the target task-list domain.
@@ -283,8 +291,8 @@ impl DurableTaskQueue {
         source_domain: uuid::Uuid,
         now: i64,
     ) -> Result<Vec<AllocatedTask>> {
-        self.append_locked(
-            &mut self.state.lock().expect("matching queue lock"),
+        let _writer = self.writer.lock().expect("matching writer gate");
+        self.append_serialized(
             &data
                 .iter()
                 .cloned()
@@ -301,12 +309,8 @@ impl DurableTaskQueue {
         data: &[(uuid::Uuid, TaskData)],
         now: i64,
     ) -> Result<Vec<AllocatedTask>> {
-        self.append_locked(
-            &mut self.state.lock().expect("matching queue lock"),
-            data,
-            now,
-            None,
-        )
+        let _writer = self.writer.lock().expect("matching writer gate");
+        self.append_serialized(data, now, None)
     }
     pub fn append_pending(&self, pending: &[PendingTask]) -> Result<Vec<AllocatedTask>> {
         let data = pending
@@ -321,12 +325,8 @@ impl DurableTaskQueue {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|time| time.as_nanos() as i64)
             .unwrap_or_default();
-        self.append_locked(
-            &mut self.state.lock().expect("matching queue lock"),
-            &data,
-            now,
-            Some(&timeouts),
-        )
+        let _writer = self.writer.lock().expect("matching writer gate");
+        self.append_serialized(&data, now, Some(&timeouts))
     }
     pub fn task_list_kind(&self) -> i16 {
         self.state
@@ -465,16 +465,14 @@ impl DurableTaskQueue {
     /// not retain ScheduleToStartTimeoutSeconds, so retry persistence has zero
     /// timeout and a fresh creation time, exactly like Go's completeTask path.
     pub fn rewrite_failed(&self, task_id: i64, now: i64) -> Result<AllocatedTask> {
-        let mut state = self.state.lock().expect("matching queue lock");
-        let original = state
+        let _writer = self.writer.lock().expect("matching writer gate");
+        let data = self.retry_data(task_id)?.at_creation(now, 0);
+        let mut written = self.append_serialized(&[(self.key.domain_id, data)], now, None)?;
+        self.state
+            .lock()
+            .expect("matching queue lock")
             .in_flight
-            .get(&task_id)
-            .ok_or(QueueError::NotInFlight(task_id))?
-            .clone();
-        let data = original.data.at_creation(now, 0);
-        let mut written =
-            self.append_locked(&mut state, &[(self.key.domain_id, data)], now, None)?;
-        state.in_flight.remove(&task_id);
+            .remove(&task_id);
         self.ack.ack_item(task_id);
         Ok(written.remove(0))
     }
@@ -487,19 +485,23 @@ impl DurableTaskQueue {
         self.persist_ack_impl(now, true)
     }
     fn persist_ack_impl(&self, now: i64, final_update: bool) -> Result<()> {
-        let mut state = self.state.lock().expect("matching queue lock");
+        // Fence the metadata snapshot against this owner's own lease renewal.
+        let _database = self.database.lock().expect("matching database gate");
         if !final_update {
             self.active()?;
         }
         let (_, ack, _) = self.ack.levels();
         if ack >= 0 {
-            let mut metadata = state.metadata.clone();
+            let (range, mut metadata) = {
+                let state = self.state.lock().expect("matching queue lock");
+                (state.range_id, state.metadata.clone())
+            };
             metadata.ack_level = ack;
-            let result =
-                self.store
-                    .update_task_list(&self.key, state.range_id, metadata.clone(), now);
+            let result = self
+                .store
+                .update_task_list(&self.key, range, metadata.clone(), now);
             self.check(result)?;
-            state.metadata = metadata;
+            self.state.lock().expect("matching queue lock").metadata = metadata;
         }
         Ok(())
     }
@@ -657,6 +659,53 @@ mod tests {
         drop(held);
         worker.join().unwrap();
         assert!(queue.append(&[data()], 2).is_err());
+    }
+    #[test]
+    fn matching_queue_lease_backoff_allows_durable_reads_and_ack_updates() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tasks.db");
+        let store = Arc::new(SqliteTaskStore::create(&path, BlobEncoding::ThriftRW).unwrap());
+        let queue = Arc::new(DurableTaskQueue::open(store.clone(), key(), 0, n(1), 1).unwrap());
+        queue.append(&[data()], 2).unwrap();
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_renewal BEFORE UPDATE ON task_lists WHEN NEW.range_id > OLD.range_id BEGIN SELECT RAISE(FAIL, 'temporary lease outage'); END;").unwrap();
+        let copy = queue.clone();
+        let writing = std::thread::spawn(move || copy.append(&[data()], 3));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while queue.writer.try_lock().is_ok() {
+            assert!(std::time::Instant::now() < deadline, "writer did not enter");
+            std::thread::yield_now();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(!writing.is_finished(), "renewal must wait for recovery");
+        let copy = queue.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let reading = std::thread::spawn(move || {
+            let result = (|| -> Result<()> {
+                let rows = copy.read_batch(n(100), n(1), 4)?;
+                assert_eq!(rows.tasks[0].task_id, 1);
+                copy.complete(1)?;
+                copy.persist_ack(5)
+            })();
+            sender.send(result).unwrap();
+        });
+        let progress = receiver.recv_timeout(std::time::Duration::from_millis(500));
+        // Always release the lease worker before asserting the concurrency
+        // result, so a failing regression does not leave a30sec retry thread.
+        connection
+            .execute_batch("DROP TRIGGER reject_renewal")
+            .unwrap();
+        let written = writing.join().unwrap().unwrap();
+        reading.join().unwrap();
+        progress
+            .expect("lease backoff blocked existing task delivery/ack")
+            .unwrap();
+        assert_eq!(written[0].task_id, 2);
+        let persisted = store.get_task_list(&key()).unwrap();
+        assert_eq!(persisted.range_id, 2);
+        assert_eq!(persisted.data.ack_level, 1);
+        assert_eq!(queue.read_batch(n(100), n(1), 6).unwrap().tasks, written);
+        assert!(!queue.is_stopped());
     }
     #[test]
     fn matching_queue_lease_retries_sql_failure_and_stops_on_terminal_renewal() {

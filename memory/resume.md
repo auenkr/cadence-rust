@@ -1,3 +1,9 @@
+Latest checkpoint: queue writer/DB/state lock separation validated (367 tests,
+strict Clippy, all27 compatibility stages; /tmp/cadence-lock-full.exit=0). See
+matching-db-lock-next.md. Next rate-report oracle/scalar draft under/tmp documented
+in matching-rate-next.md; oracle was interrupted, rerun serially before claiming
+it validated. All services remain incomplete; Matching is active.
+
 Latest: Matching rewrite retry validated (366 tests, strict lint, all27 stages;
 /tmp/cadence-rewrite-full.exit=0). See matching-rewrite-next.md. Next concrete gap:
 queue state lock spans lease backoff, blocking existing-task admission; source
