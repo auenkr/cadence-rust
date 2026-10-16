@@ -25,6 +25,21 @@ struct Owner {
     dispatcher: TaskDispatcher,
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     last_update: Mutex<tokio::time::Instant>,
+    next_idle_check: Mutex<tokio::time::Instant>,
+    liveness: Arc<cadence_common::liveness::Liveness>,
+}
+impl Owner {
+    fn stop(&self) {
+        self.queue.stop();
+        self.dispatcher.notify_new_tasks();
+    }
+    fn finish(&self, now: i64) -> Result<(), Status> {
+        self.stop();
+        let ack = self.queue.persist_final_ack(now);
+        let garbage = self.queue.run_garbage_collection(true);
+        ack.and(garbage.map(|_| ()))
+            .map_err(|error| Status::unavailable(error.to_string()))
+    }
 }
 #[derive(Default)]
 struct State {
@@ -39,12 +54,14 @@ pub struct QueueRegistry {
     history: MatchingHistoryClient,
     range_size: NonZeroU32,
     state: Arc<Mutex<State>>,
+    changed: Arc<tokio::sync::Notify>,
 }
 #[derive(Clone)]
 pub struct QueueHandle {
     pub queue: Arc<DurableTaskQueue>,
     pub dispatcher: TaskDispatcher,
     pub pollers: Arc<Mutex<cadence_common::poller::Manager>>,
+    liveness: Arc<cadence_common::liveness::Liveness>,
 }
 impl QueueHandle {
     /// Notification remains in the persistence worker if the AddTask RPC is
@@ -56,6 +73,7 @@ impl QueueHandle {
     ) -> Result<Vec<AllocatedTask>, Status> {
         let handle = self.clone();
         tokio::task::spawn_blocking(move || {
+            handle.liveness.mark_alive(registry_now());
             let tasks = handle
                 .queue
                 .append(&tasks, now)
@@ -74,6 +92,7 @@ impl QueueHandle {
     ) -> Result<Vec<AllocatedTask>, Status> {
         let handle = self.clone();
         tokio::task::spawn_blocking(move || {
+            handle.liveness.mark_alive(registry_now());
             let tasks = handle
                 .queue
                 .append_in_domain(&tasks, source_domain, now)
@@ -96,6 +115,7 @@ impl QueueRegistry {
             history,
             range_size,
             state: Arc::new(Mutex::new(State::default())),
+            changed: Arc::new(tokio::sync::Notify::new()),
         }
     }
     /// task_type is the persistence enum (decision 0, activity 1).
@@ -116,13 +136,14 @@ impl QueueRegistry {
                 .is_some_and(|owner| owner.queue.is_stopped())
             {
                 if let Some(owner) = state.owners.remove(&lookup) {
-                    if let Err(error) = owner.queue.persist_final_ack(now) {
-                        eprintln!("Matching stopped owner final acknowledgement failed: {error}");
+                    drop(state);
+                    if let Err(error) = owner.finish(now) {
+                        eprintln!("Matching stopped owner cleanup failed: {error}");
                     }
-                    if let Err(error) = owner.queue.run_garbage_collection(true) {
-                        eprintln!("Matching stopped owner garbage collection failed: {error}");
+                    state = registry.state.lock().expect("Matching registry lock");
+                    if state.stopped {
+                        return Err(Status::unavailable("Matching registry stopped."));
                     }
-                    owner.dispatcher.notify_new_tasks();
                 }
             }
             let owner = match state.owners.get(&lookup) {
@@ -139,17 +160,29 @@ impl QueueRegistry {
                         )
                         .map_err(|error| Status::unavailable(error.to_string()))?,
                     );
+                    let wake = registry.changed.clone();
+                    queue.set_stop_waker(Arc::new(move || wake.notify_waiters()));
+                    let liveness = Arc::new(cadence_common::liveness::Liveness::new(
+                        registry_now(),
+                        300_000_000_000,
+                    ));
                     let owner = Arc::new(Owner {
                         dispatcher: TaskDispatcher::new(
                             queue.clone(),
                             registry.history.clone(),
                             domain,
-                        ),
+                        )
+                        .with_liveness(liveness.clone()),
                         queue,
                         pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                         last_update: Mutex::new(tokio::time::Instant::now()),
+                        next_idle_check: Mutex::new(
+                            tokio::time::Instant::now() + std::time::Duration::from_secs(150),
+                        ),
+                        liveness,
                     });
                     state.owners.insert(lookup, owner.clone());
+                    registry.changed.notify_waiters();
                     owner
                 }
             };
@@ -157,6 +190,7 @@ impl QueueRegistry {
                 queue: owner.queue.clone(),
                 dispatcher: owner.dispatcher.clone(),
                 pollers: owner.pollers.clone(),
+                liveness: owner.liveness.clone(),
             })
         })
         .await
@@ -179,14 +213,9 @@ impl QueueRegistry {
             if !Arc::ptr_eq(&owner.queue, &handle.queue) {
                 return Ok(false);
             }
-            let result = owner.queue.persist_final_ack(now);
-            let garbage = owner.queue.run_garbage_collection(true);
-            owner.queue.stop();
-            owner.dispatcher.notify_new_tasks();
-            state.owners.remove(&lookup);
-            result
-                .and(garbage.map(|_| ()))
-                .map_err(|error| Status::unavailable(error.to_string()))?;
+            let owner = state.owners.remove(&lookup).expect("checked owner");
+            drop(state);
+            owner.finish(now)?;
             Ok(true)
         })
         .await
@@ -215,24 +244,116 @@ impl QueueRegistry {
     {
         tokio::pin!(shutdown);
         loop {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if let Err(error) = self.reap_stopped(registry_now()).await {
+                eprintln!("Matching fatal-owner cleanup failed: {error}");
+            }
             let deadline = self
                 .state
                 .lock()
                 .expect("Matching registry lock")
                 .owners
                 .values()
-                .map(|owner| *owner.last_update.lock().expect("Matching ack timer lock") + interval)
+                .map(|owner| {
+                    (*owner.last_update.lock().expect("Matching ack timer lock") + interval).min(
+                        *owner
+                            .next_idle_check
+                            .lock()
+                            .expect("Matching idle timer lock"),
+                    )
+                })
                 .min()
                 .unwrap_or_else(|| tokio::time::Instant::now() + interval);
             tokio::select! {
                 biased;
                 _ = &mut shutdown => return self.shutdown(registry_now()).await,
+                _ = &mut changed => continue,
                 _ = tokio::time::sleep_until(deadline) => {
+                    if let Err(error) = self.sweep_idle(registry_now(), true).await { eprintln!("Matching idle cleanup failed: {error}"); }
                     if let Err(error) = self.flush(registry_now(), false, Some(interval)).await {
                         eprintln!("Matching acknowledgement update failed: {error}");
                     }
                 }
             }
+        }
+    }
+    async fn reap_stopped(&self, now: i64) -> Result<(), Status> {
+        let registry = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let candidates = registry
+                .state
+                .lock()
+                .expect("Matching registry lock")
+                .owners
+                .iter()
+                .filter(|(_, owner)| owner.queue.is_stopped())
+                .map(|(key, owner)| (key.clone(), owner.clone()))
+                .collect::<Vec<_>>();
+            let mut failure = None;
+            for (key, owner) in candidates {
+                if registry.detach(&key, &owner) {
+                    if let Err(error) = owner.finish(now) {
+                        failure.get_or_insert(error);
+                    }
+                }
+            }
+            failure.map_or(Ok(()), Err)
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?
+    }
+    /// Check idleness using the caller's wall-clock time source. Scheduled
+    /// ticks use due_only; an explicit controller scan may check every owner.
+    pub async fn sweep_idle(&self, now: i64, due_only: bool) -> Result<(), Status> {
+        let registry = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let candidates = {
+                let state = registry.state.lock().expect("Matching registry lock");
+                state
+                    .owners
+                    .iter()
+                    .filter_map(|(key, owner)| {
+                        let mut next = owner
+                            .next_idle_check
+                            .lock()
+                            .expect("Matching idle timer lock");
+                        if due_only && *next > tokio::time::Instant::now() {
+                            return None;
+                        }
+                        // Go uses a ticker at TTL/2; retain its cadence after delayed ticks.
+                        let interval = std::time::Duration::from_secs(150);
+                        let lag = tokio::time::Instant::now().saturating_duration_since(*next);
+                        *next += interval * ((lag.as_nanos() / interval.as_nanos() + 1) as u32);
+                        (!owner.liveness.is_alive(now)).then(|| (key.clone(), owner.clone()))
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let mut failure = None;
+            for (key, owner) in candidates {
+                if registry.detach(&key, &owner) {
+                    if let Err(error) = owner.finish(now) {
+                        failure.get_or_insert(error);
+                    }
+                }
+            }
+            failure.map_or(Ok(()), Err)
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?
+    }
+    fn detach(&self, key: &Key, expected: &Arc<Owner>) -> bool {
+        let mut state = self.state.lock().expect("Matching registry lock");
+        if state
+            .owners
+            .get(key)
+            .is_some_and(|owner| Arc::ptr_eq(owner, expected))
+        {
+            state.owners.remove(key);
+            true
+        } else {
+            false
         }
     }
     async fn flush(
@@ -243,48 +364,65 @@ impl QueueRegistry {
     ) -> Result<(), Status> {
         let registry = self.clone();
         tokio::task::spawn_blocking(move || {
-            let mut state = registry.state.lock().expect("Matching registry lock");
-            if state.stopped {
-                return Ok(());
+            let owners = {
+                let mut state = registry.state.lock().expect("Matching registry lock");
+                if state.stopped {
+                    return Ok(());
+                }
+                if stop {
+                    state.stopped = true;
+                    state.owners.drain().collect::<Vec<_>>()
+                } else {
+                    state
+                        .owners
+                        .iter()
+                        .map(|(key, owner)| (key.clone(), owner.clone()))
+                        .collect()
+                }
+            };
+            // Unregister all owners and stop admission before doing any database
+            // cleanup. A slow owner must not hold the registry lock or leave
+            // other shutdown handles accepting new work.
+            if stop {
+                for (_, owner) in &owners {
+                    owner.stop();
+                }
             }
             let mut failure = None;
-            for owner in state.owners.values() {
-                if due.is_some_and(|interval| {
-                    owner
-                        .last_update
-                        .lock()
-                        .expect("Matching ack timer lock")
-                        .elapsed()
-                        < interval
-                }) {
+            for (key, owner) in owners {
+                if stop {
+                    if let Err(error) = owner.finish(now) {
+                        failure.get_or_insert(error);
+                    }
                     continue;
                 }
-                let update = if stop || owner.queue.is_stopped() {
-                    owner.queue.persist_final_ack(now)
-                } else {
-                    owner.queue.persist_ack(now)
-                };
+                if !owner.queue.is_stopped()
+                    && due.is_some_and(|interval| {
+                        owner
+                            .last_update
+                            .lock()
+                            .expect("Matching ack timer lock")
+                            .elapsed()
+                            < interval
+                    })
+                {
+                    continue;
+                }
+                let update = owner.queue.persist_ack(now);
                 if let Err(error) = update {
                     failure.get_or_insert_with(|| Status::unavailable(error.to_string()));
                 }
                 *owner.last_update.lock().expect("Matching ack timer lock") =
                     tokio::time::Instant::now();
-                if stop || owner.queue.is_stopped() {
-                    if let Err(error) = owner.queue.run_garbage_collection(true) {
-                        failure.get_or_insert_with(|| Status::unavailable(error.to_string()));
+                if owner.queue.is_stopped() {
+                    let detached = registry.detach(&key, &owner);
+                    if detached {
+                        if let Err(error) = owner.finish(now) {
+                            failure.get_or_insert(error);
+                        }
                     }
                 }
-                if stop {
-                    owner.queue.stop();
-                }
                 owner.dispatcher.notify_new_tasks();
-            }
-            // Go's fatal reader/writer watcher unregisters stopped managers.
-            // Keep healthy queues alive when another owner loses its lease.
-            state.owners.retain(|_, owner| !owner.queue.is_stopped());
-            if stop {
-                state.stopped = true;
-                state.owners.clear();
             }
             failure.map_or(Ok(()), Err)
         })
@@ -505,12 +643,12 @@ mod tests {
         });
         tokio::task::yield_now().await;
         registry.shutdown(2).await.unwrap();
-        let error = tokio::time::timeout(Duration::from_secs(2), poll)
+        let response = tokio::time::timeout(Duration::from_secs(2), poll)
             .await
             .unwrap()
             .unwrap()
-            .unwrap_err();
-        assert_eq!(error.code(), tonic::Code::Unavailable);
+            .unwrap();
+        assert!(response.task_token.is_empty());
     }
     #[tokio::test]
     async fn maintenance_deadlines_are_per_owner_and_reset_after_update() {
@@ -558,5 +696,173 @@ mod tests {
             1
         );
         registry.shutdown(102).await.unwrap();
+    }
+    #[tokio::test]
+    async fn replacement_can_load_before_old_cleanup_and_keeps_its_lease() {
+        let (_dir, store, registry, key) = fixture();
+        let old = registry.get(key.clone(), 0, 1).await.unwrap();
+        old.append(vec![TaskData::default()], 1).await.unwrap();
+        let task = old
+            .queue
+            .read_batch(
+                NonZeroU32::new(100).unwrap(),
+                NonZeroU32::new(1).unwrap(),
+                1,
+            )
+            .unwrap()
+            .tasks
+            .remove(0);
+        old.queue.complete(task.task_id).unwrap();
+        let lookup = (key.domain_id, key.name.clone(), key.task_type);
+        let owner = registry.state.lock().unwrap().owners[&lookup].clone();
+        assert!(registry.detach(&lookup, &owner));
+        owner.stop();
+        let new = registry.get(key.clone(), 0, 2).await.unwrap();
+        let added = new.append(vec![TaskData::default()], 2).await.unwrap();
+        assert_eq!(added[0].task_id, 101);
+        assert!(owner.finish(3).is_err(), "old final ack must be fenced");
+        assert!(!registry.detach(&lookup, &owner));
+        assert!(Arc::ptr_eq(
+            &new.queue,
+            &registry.get(key.clone(), 0, 4).await.unwrap().queue
+        ));
+        assert_eq!(store.get_task_list(&key).unwrap().range_id, 2);
+        assert_eq!(store.get_task_list(&key).unwrap().data.ack_level, 0);
+        assert_eq!(
+            store
+                .get_tasks(&key, 0, 200, 10)
+                .unwrap()
+                .iter()
+                .map(|task| task.task_id)
+                .collect::<Vec<_>>(),
+            vec![101]
+        );
+    }
+    #[tokio::test]
+    async fn idle_unload_retains_unacknowledged_tasks_for_recovery() {
+        let (_dir, store, registry, key) = fixture();
+        let old = registry.get(key.clone(), 0, 1).await.unwrap();
+        old.append(vec![TaskData::default()], 1).await.unwrap();
+        old.liveness.mark_alive(0);
+        registry.sweep_idle(300_000_000_000, false).await.unwrap();
+        assert!(old.queue.is_stopped());
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 1);
+        let new = registry.get(key.clone(), 0, 300_000_000_001).await.unwrap();
+        assert_eq!(store.get_task_list(&key).unwrap().range_id, 2);
+        let recovered = new
+            .queue
+            .read_batch(
+                NonZeroU32::new(100).unwrap(),
+                NonZeroU32::new(1).unwrap(),
+                300_000_000_001,
+            )
+            .unwrap();
+        assert_eq!(recovered.tasks[0].task_id, 1);
+    }
+    #[tokio::test]
+    async fn describe_lookup_does_not_refresh_liveness_but_append_does() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        handle.liveness.mark_alive(0);
+        let described = registry.get(key.clone(), 0, 2).await.unwrap();
+        assert!(!described.liveness.is_alive(registry_now()));
+        handle.append(vec![TaskData::default()], 2).await.unwrap();
+        assert!(described.liveness.is_alive(registry_now()));
+        registry.sweep_idle(registry_now(), false).await.unwrap();
+        assert!(!handle.queue.is_stopped());
+    }
+    #[tokio::test]
+    async fn idle_tick_runs_without_waiting_for_ack_deadline() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        handle.liveness.mark_alive(0);
+        {
+            let state = registry.state.lock().unwrap();
+            *state.owners[&(key.domain_id, key.name.clone(), key.task_type)]
+                .next_idle_check
+                .lock()
+                .unwrap() = tokio::time::Instant::now();
+        }
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
+        let worker = registry.clone();
+        let pump = tokio::spawn(async move {
+            worker
+                .maintain_until(Duration::from_secs(60), async {
+                    let _ = shutdown.await;
+                })
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !handle.queue.is_stopped() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.send(()).unwrap();
+        pump.await.unwrap().unwrap();
+    }
+    #[tokio::test]
+    async fn fatal_owner_wakeup_does_not_wait_for_ack_interval() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
+        let worker = registry.clone();
+        let pump = tokio::spawn(async move {
+            worker
+                .maintain_until(Duration::from_secs(3600), async {
+                    let _ = shutdown.await;
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        handle.queue.stop();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !registry.state.lock().unwrap().owners.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.send(()).unwrap();
+        pump.await.unwrap().unwrap();
+    }
+    #[tokio::test]
+    async fn registration_notification_reschedules_empty_controller() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        let lookup = (key.domain_id, key.name.clone(), key.task_type);
+        let owner = registry
+            .state
+            .lock()
+            .unwrap()
+            .owners
+            .remove(&lookup)
+            .unwrap();
+        owner.liveness.mark_alive(0);
+        *owner.next_idle_check.lock().unwrap() = tokio::time::Instant::now();
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
+        let worker = registry.clone();
+        let pump = tokio::spawn(async move {
+            worker
+                .maintain_until(Duration::from_secs(3600), async {
+                    let _ = shutdown.await;
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        // Controlled registration after the pump has begun waiting with no owners.
+        registry.state.lock().unwrap().owners.insert(lookup, owner);
+        registry.changed.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !handle.queue.is_stopped() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.send(()).unwrap();
+        pump.await.unwrap().unwrap();
     }
 }

@@ -35,6 +35,10 @@ struct Fixture {
     listen: Option<String>,
     #[serde(default)]
     stop_file: Option<String>,
+    #[serde(default)]
+    idle_trigger: Option<String>,
+    #[serde(default)]
+    idle_done: Option<String>,
 }
 #[tokio::test]
 #[ignore = "requires original Go History; run tests/run-go-service-baseline.py --matching-delivery"]
@@ -117,6 +121,24 @@ async fn matching_delivery_go_history() {
         std::fs::write(&fixture.output, address.to_string()).unwrap();
         let stop = fixture.stop_file.expect("server stop file");
         while !Path::new(&stop).exists() {
+            if let Some(trigger) = &fixture.idle_trigger {
+                if Path::new(trigger).exists() {
+                    // Test clock advance: exercise actual idle teardown without
+                    // waiting five minutes. No workflow/business logic is changed.
+                    let future = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos() as i64
+                        + 300_000_000_000;
+                    registry.sweep_idle(future, false).await.unwrap();
+                    std::fs::remove_file(trigger).unwrap();
+                    std::fs::write(
+                        fixture.idle_done.as_ref().expect("idle completion file"),
+                        "done",
+                    )
+                    .unwrap();
+                }
+            }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         stop_pump.send(()).unwrap();

@@ -363,3 +363,22 @@ draining, failures and lock contention. Rust also checks exact time equality and
 error cooldown. Native delivery now uses Go's default 100-row/one-second GC
 policy, and teardown forces completed-row drainage after final acknowledgement.
 Full controller shutdown/in-flight coordination remains incomplete.
+
+Matching idle liveness differential check:
+
+```sh
+python3 tests/run-matching-liveness-compat.py
+```
+
+This compares Go TTL equality, refresh and clock rollback behavior. Native
+controllers check the default five-minute TTL every half TTL, refresh only task
+adds/new poll waits, and retain pending rows on idle unload. Tests also cover
+old/new owner cleanup races, nonblocking stop, and registration/fatal wakeups.
+Production per-task-list config and full in-flight teardown coordination remain
+incomplete.
+
+The mixed probe also advances a test-only idle clock after observing an active
+poll through Go Frontend. It checks that closing its owner returns an empty
+successful poll, then verifies an unacknowledged queued workflow task survives
+unload and completes after lease reload. The fixture clock avoids a five-minute
+wait; workflow/History behavior remains in the original Go services.

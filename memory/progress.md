@@ -1621,3 +1621,24 @@ and seven SDK scenarios. First build attempt was invalidated by editing shared
 API during compilation; it was replaced by the complete frozen-source run.
 Strict stop/unregister/in-flight ordering, idle unload, dynamic controller config
 and remaining Matching query/sync/routing/transport gates remain incomplete.
+
+## 2026-10-16: Matching teardown, idle unload and closed-poll parity
+
+See matching-idle-next.md. Queue stop is atomic/nonblocking, registry cleanup
+runs outside the map lock after identity-checked unregister, replacement metadata
+stays fenced, and new/fatal owner notifications reschedule the controller. Added
+Go liveness predicate and half-TTL idle ticks, only refreshed by task adds/new
+GetTask waits. Pending rows survive idle unload. Closed pumps return empty
+successful polls, matching Go engine branches rather than Unavailable.
+
+Final source-frozen full run PASSED 342 workspace tests, strict lint and all
+25 stages: /tmp/cadence-idle-verified.exit = 0; artifacts at
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-idle-verified/results.json.
+Actual mixed Go Frontend/History/Worker + Rust Matching passes idle empty-poll
+and pending-task recovery scenarios plus seven existing SDK cases. The earlier
+run was deliberately interrupted to correct closed-pump response semantics.
+
+Source audit clarified that manager stopWG waits for partition notification, not
+all History RPCs; reader stopWg tracks background reader loops. Full reader/writer
+pipelines, startup/concurrency, dynamic config, transport drain, sync/query and
+remaining service gates are still incomplete. No complete service is claimed.

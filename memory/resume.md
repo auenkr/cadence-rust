@@ -6,6 +6,30 @@ incomplete. Keep working autonomously; use tmux session cadence-rust for long
 processes. After compaction save progress, commit and push. Never equate adapter
 coverage or a boundary probe with complete service parity.
 
+## Teardown/idle liveness continuation
+
+Read matching-idle-next.md first. Prior cbd02ab7c is pushed. New atomic queue stop,
+out-of-registry-lock teardown, replacement-safe cleanup, idle liveness, half-TTL
+checks, new-owner/fatal-stop controller wakeups are implemented. Liveness is only
+refreshed by AddTask/new GetTask waits, not describe/empty storage retry loops.
+Closed pumps now return empty successful polls, matching actual Go engine code.
+The mixed probe adds blocked-idle-poll and pending-task unload/reload checks.
+
+Final frozen-source validation PASSED: 342 workspace tests, strict workspace
+all-target clippy and all 25 compatibility stages. /tmp/cadence-idle-verified.exit
+= 0; /home/ubuntu/.cache/cadence-rust-test-artifacts/matching-idle-verified/results.json.
+Mixed probe confirms empty idle poll through Go Frontend, durable queued-task
+recovery after unload and all seven existing SDK scenarios without Go Matching.
+This checkpoint is being committed/pushed with these notes. Earlier
+matching-idle-final was intentionally interrupted for the closed-pump correction.
+
+Next: background task reader buffering/writer batching and per-owner startup/
+controller concurrency, dynamic per-list configuration, sync matcher/query
+broker/forwarding, remaining controllers/transports and production discovery.
+Go Manager.Stop does not wait for all History RPCs (see matching-idle-next.md);
+do not add stricter behavior. Transport drain/concurrent shutdown still need
+validation. No role gate is complete; retain the entire rewrite objective.
+
 ## Latest GC/final acknowledgement checkpoint
 
 Read matching-gc-next.md first. Prior checkpoint 0d0952ff8 is pushed. Native queue

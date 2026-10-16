@@ -34,7 +34,7 @@ async function run() {
   const work = path.resolve(process.argv[5]);
   fs.mkdirSync(work, { recursive: true });
   const ready = path.join(work, 'ready'), stop = path.join(work, 'stop'), fixture = path.join(work, 'fixture.json');
-  fs.writeFileSync(fixture, JSON.stringify({ domain, domain_id: domainId, workflow_id: '', run_id: '', task_list: taskList.name, history_peer: process.argv[3], kind: 'server', schedule_id: 0, database: path.join(work, 'matching.db'), output: ready, listen: process.argv[4], stop_file: stop }));
+  fs.writeFileSync(fixture, JSON.stringify({ domain, domain_id: domainId, workflow_id: '', run_id: '', task_list: taskList.name, history_peer: process.argv[3], kind: 'server', schedule_id: 0, database: path.join(work, 'matching.db'), output: ready, listen: process.argv[4], stop_file: stop, idle_trigger: path.join(work, 'idle-trigger'), idle_done: path.join(work, 'idle-done') }));
   const output = fs.openSync(path.join(work, 'rust-server.log'), 'w');
   const rust = spawn('cargo', ['test', '--manifest-path', path.resolve(__dirname, '../rust/Cargo.toml'), '-p', 'cadence-server', '--test', 'matching_delivery', 'matching_delivery_go_history', '--', '--ignored', '--exact'], { cwd: path.resolve(__dirname, '..'), env: { ...process.env, CARGO_BUILD_JOBS: '1', CADENCE_MATCHING_DELIVERY_FIXTURE: fixture }, stdio: ['ignore', output, output] });
   fs.closeSync(output);
@@ -91,10 +91,46 @@ async function run() {
     'decisionTaskCompletedEventAttributes', 'workflowExecutionCompletedEventAttributes',
   ]);
   assert.equal(events.at(-1).workflowExecutionCompletedEventAttributes.result.data.toString(), 'done');
+  async function expireIdleOwners() {
+    const done = path.join(work, 'idle-done');
+    if (fs.existsSync(done)) fs.unlinkSync(done);
+    fs.writeFileSync(path.join(work, 'idle-trigger'), 'advance-clock');
+    const deadline = Date.now() + 10000;
+    while (!fs.existsSync(done)) {
+      if (Date.now() > deadline) throw new Error('Rust idle teardown did not finish');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+  const idleList = { name: `idle-${id}` };
+  const pendingPoll = call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: idleList, identity: 'idle-probe' });
+  // Observe the wait through Go Frontend before expiring its owner.
+  const pollDeadline = Date.now() + 10000;
+  for (;;) {
+    const info = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+    if (info.pollers.some(poller => poller.identity === 'idle-probe')) break;
+    if (Date.now() > pollDeadline) throw new Error('idle probe poll was not registered');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  await expireIdleOwners();
+  assert.equal((await pendingPoll).taskToken.length, 0, 'closed task-list pump must return an empty successful poll');
+  const recovery = await call('WorkflowAPI', 'StartWorkflowExecution', { ...startRequest, workflowId: `idle-recovery-${id}`, taskList: idleList, requestId: randomUUID() });
+  const queuedDeadline = Date.now() + 10000;
+  for (;;) {
+    const info = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+    if (!info.taskListStatus.empty) break;
+    if (Date.now() > queuedDeadline) throw new Error('Go History did not enqueue the idle recovery task');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  await expireIdleOwners();
+  const recovered = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: idleList, identity: 'idle-recovery-probe' });
+  assert.equal(recovered.workflowExecution.runId, recovery.runId);
+  await call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: recovered.taskToken, decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('idle-recovered') } }] });
+  const recoveredHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: `idle-recovery-${id}`, runId: recovery.runId } });
+  assert.equal(recoveredHistory.history.events.at(-1).workflowExecutionCompletedEventAttributes.result.data.toString(), 'idle-recovered');
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: 'passed', peer, domain, execution, attributes }));
   } finally {
     fs.writeFileSync(stop, 'stop');
     let shutdownTimer;

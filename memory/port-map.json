@@ -305,5 +305,16 @@
     "evidence": [
       "14 actual-Go collector cases plus deterministic strict-time and failure-cooldown tests; native GC/forced teardown/final stopped-writer ack integration. Full frozen-source 333-test/24-stage regression and mixed Go-services/SDK probes passed. Dynamic controller config and full shutdown coordination remain."
     ]
+  },
+  "go/service/matching/liveness/liveness.go": {
+    "status": "partial",
+    "rustSources": [
+      "rust/crates/cadence-common/src/liveness.rs",
+      "rust/crates/cadence-server/src/matching_registry.rs",
+      "rust/crates/cadence-server/src/matching_dispatch.rs"
+    ],
+    "evidence": [
+      "15 actual-Go liveness observations; half-TTL idle checks, AddTask/GetTask-only refresh, atomic stop, replacement-safe cleanup and fatal/registration wakeups. Full 342-test/25-stage validation passed, including idle empty-poll and durable reload through Go Frontend plus seven SDK scenarios. Production per-list configuration/controller parity remains."
+    ]
   }
 }

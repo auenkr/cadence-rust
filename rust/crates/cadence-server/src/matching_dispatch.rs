@@ -50,12 +50,17 @@ pub struct TaskDispatcher {
     history: MatchingHistoryClient,
     domain_id: String,
     wake: Arc<Notify>,
+    liveness: Option<Arc<cadence_common::liveness::Liveness>>,
 }
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|time| time.as_nanos() as i64)
         .unwrap_or_default()
+}
+enum ClaimError {
+    Queue(QueueError),
+    Join(tokio::task::JoinError),
 }
 fn queue_status(error: QueueError) -> Status {
     Status::unavailable(error.to_string())
@@ -71,12 +76,17 @@ impl TaskDispatcher {
             history,
             domain_id,
             wake: Arc::new(Notify::new()),
+            liveness: None,
         }
+    }
+    pub fn with_liveness(mut self, liveness: Arc<cadence_common::liveness::Liveness>) -> Self {
+        self.liveness = Some(liveness);
+        self
     }
     pub fn notify_new_tasks(&self) {
         self.wake.notify_waiters();
     }
-    async fn claim(&self) -> Result<(Option<AllocatedTask>, bool), Status> {
+    async fn claim(&self) -> Result<(Option<AllocatedTask>, bool), ClaimError> {
         let queue = self.queue.clone();
         tokio::task::spawn_blocking(move || {
             queue.read_batch(
@@ -86,9 +96,9 @@ impl TaskDispatcher {
             )
         })
         .await
-        .map_err(|error| Status::internal(error.to_string()))?
+        .map_err(ClaimError::Join)?
         .map(|mut batch| (batch.tasks.pop(), batch.scan_pending))
-        .map_err(queue_status)
+        .map_err(ClaimError::Queue)
     }
     async fn rewrite(&self, task: i64) {
         let queue = self.queue.clone();
@@ -249,17 +259,22 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
     ) where
         Q: Clone + Send,
-        R: Send,
+        R: Default + Send,
         F: FnMut(AllocatedTask, Q) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         let mut waiting = None;
+        let mut waiting_started = false;
         loop {
             if sender.is_closed() {
                 return;
             }
-            if waiting.is_none() {
+            if !waiting_started {
+                if let Some(liveness) = &self.liveness {
+                    liveness.mark_alive(now());
+                }
                 waiting = lifecycle.as_ref().map(PollLifecycle::begin);
+                waiting_started = true;
             }
             // Register before reading storage: an append between an empty read
             // and waiting must not lose its notification (important for short polls).
@@ -268,9 +283,20 @@ impl TaskDispatcher {
             notification.as_mut().enable();
             let (task, scan_pending) = match self.claim().await {
                 Ok(value) => value,
+                Err(ClaimError::Queue(QueueError::Stopped)) => {
+                    drop(waiting.take());
+                    // Go maps a closed task-list pump to an empty successful
+                    // poll, allowing workers to poll its replacement normally.
+                    let _ = sender.send(Ok(R::default()));
+                    return;
+                }
                 Err(error) => {
                     drop(waiting.take());
-                    let _ = sender.send(Err(error));
+                    let status = match error {
+                        ClaimError::Queue(error) => queue_status(error),
+                        ClaimError::Join(error) => Status::internal(error.to_string()),
+                    };
+                    let _ = sender.send(Err(status));
                     return;
                 }
             };
@@ -283,6 +309,7 @@ impl TaskDispatcher {
                 continue;
             };
             drop(waiting.take());
+            waiting_started = false;
             if sender.is_closed() {
                 self.rewrite(task.task_id).await;
                 return;
@@ -540,5 +567,33 @@ mod tests {
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
         assert!(seen[1] >= seen[0]);
+    }
+    #[tokio::test]
+    async fn matching_dispatch_empty_wait_does_not_refresh_liveness_repeatedly() {
+        let (_directory, _store, _key, dispatcher) = fixture(0);
+        let liveness = Arc::new(cadence_common::liveness::Liveness::new(0, 300_000_000_000));
+        let worker = dispatcher.with_liveness(liveness.clone());
+        let poll = tokio::spawn(async move {
+            worker
+                .poll_decision(
+                    p::PollForDecisionTaskRequest::default(),
+                    Duration::from_secs(10),
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !liveness.is_alive(now()) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // Force the stored time backwards while the same GetTask wait is active.
+        // Internal 100ms persistence reads must not count as another client poll.
+        liveness.mark_alive(0);
+        tokio::time::sleep(Duration::from_millis(220)).await;
+        assert!(!liveness.is_alive(now()));
+        poll.abort();
+        assert!(poll.await.unwrap_err().is_cancelled());
     }
 }

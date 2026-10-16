@@ -9,7 +9,10 @@ use cadence_common::ack_manager::AckManager;
 use std::{
     collections::HashMap,
     num::NonZeroU32,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -31,7 +34,6 @@ struct State {
     max_read_level: i64,
     metadata: TaskListData,
     in_flight: HashMap<i64, AllocatedTask>,
-    stopped: bool,
 }
 pub struct DurableTaskQueue {
     store: Arc<SqliteTaskStore>,
@@ -40,6 +42,8 @@ pub struct DurableTaskQueue {
     state: Mutex<State>,
     ack: AckManager,
     gc: crate::matching_gc::TaskGarbageCollector,
+    stopped: AtomicBool,
+    stop_waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 #[derive(Debug)]
 pub struct ReadBatch {
@@ -110,6 +114,8 @@ impl DurableTaskQueue {
             range_size,
             ack,
             gc: crate::matching_gc::TaskGarbageCollector::default(),
+            stopped: AtomicBool::new(false),
+            stop_waker: Mutex::new(None),
             state: Mutex::new(State {
                 range_id: lease.range_id,
                 next_id,
@@ -117,20 +123,19 @@ impl DurableTaskQueue {
                 max_read_level: next_id.wrapping_sub(1),
                 metadata: lease.data,
                 in_flight: HashMap::new(),
-                stopped: false,
             }),
         })
     }
-    fn active(state: &State) -> Result<()> {
-        if state.stopped {
+    fn active(&self) -> Result<()> {
+        if self.is_stopped() {
             Err(QueueError::Stopped)
         } else {
             Ok(())
         }
     }
-    fn check<T>(state: &mut State, result: StorageResult<T>) -> Result<T> {
+    fn check<T>(&self, result: StorageResult<T>) -> Result<T> {
         if matches!(result, Err(StorageError::ConditionFailed(_))) {
-            state.stopped = true;
+            self.stop();
         }
         result.map_err(Into::into)
     }
@@ -141,14 +146,14 @@ impl DurableTaskQueue {
         source_domain: uuid::Uuid,
         now: i64,
     ) -> Result<Vec<AllocatedTask>> {
-        Self::active(state)?;
+        self.active()?;
         let mut tasks = Vec::with_capacity(data.len());
         for data in data {
             if state.next_id > state.block_end {
                 let result = self
                     .store
                     .lease(&self.key, state.metadata.kind, state.range_id, now);
-                let lease = Self::check(state, result)?;
+                let lease = self.check(result)?;
                 state.range_id = lease.range_id;
                 (state.next_id, state.block_end) = block(lease.range_id, self.range_size);
             }
@@ -170,7 +175,7 @@ impl DurableTaskQueue {
                 state.max_read_level = last.task_id;
             }
         }
-        Self::check(state, result)?;
+        self.check(result)?;
         Ok(tasks)
     }
     pub fn append(&self, data: &[TaskData], now: i64) -> Result<Vec<AllocatedTask>> {
@@ -205,7 +210,7 @@ impl DurableTaskQueue {
         now: i64,
     ) -> Result<ReadBatch> {
         let mut state = self.state.lock().expect("matching queue lock");
-        Self::active(&state)?;
+        self.active()?;
         let (initial_read, initial_ack, _) = self.ack.levels();
         let scanned = scan_batch(
             &self.store,
@@ -279,7 +284,7 @@ impl DurableTaskQueue {
     fn persist_ack_impl(&self, now: i64, final_update: bool) -> Result<()> {
         let mut state = self.state.lock().expect("matching queue lock");
         if !final_update {
-            Self::active(&state)?;
+            self.active()?;
         }
         let (_, ack, _) = self.ack.levels();
         if ack >= 0 {
@@ -288,7 +293,7 @@ impl DurableTaskQueue {
             let result =
                 self.store
                     .update_task_list(&self.key, state.range_id, metadata.clone(), now);
-            Self::check(&mut state, result)?;
+            self.check(result)?;
             state.metadata = metadata;
         }
         Ok(())
@@ -335,10 +340,27 @@ impl DurableTaskQueue {
         (read, ack, backlog, start, end, ack == state.max_read_level)
     }
     pub fn is_stopped(&self) -> bool {
-        self.state.lock().expect("matching queue lock").stopped
+        self.stopped.load(Ordering::Acquire)
+    }
+    /// The wake callback must be nonblocking and idempotent. It can be invoked
+    /// after registration races with a stop; it must not reenter queue methods.
+    pub fn set_stop_waker(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        *self.stop_waker.lock().expect("Matching stop waker lock") = Some(wake.clone());
+        if self.is_stopped() {
+            wake();
+        }
     }
     pub fn stop(&self) {
-        self.state.lock().expect("matching queue lock").stopped = true;
+        if !self.stopped.swap(true, Ordering::AcqRel) {
+            let wake = self
+                .stop_waker
+                .lock()
+                .expect("Matching stop waker lock")
+                .clone();
+            if let Some(wake) = wake {
+                wake();
+            }
+        }
     }
 }
 
@@ -365,6 +387,29 @@ mod tests {
             ..Default::default()
         }
         .at_creation(100, 0)
+    }
+    #[test]
+    fn matching_queue_stop_does_not_wait_for_inflight_state_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = Arc::new(DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap());
+        let held = queue.state.lock().unwrap();
+        let copy = queue.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            copy.stop();
+            let _ = sender.send(());
+        });
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("stop must not wait for database work holding queue state");
+        assert!(queue.is_stopped());
+        drop(held);
+        worker.join().unwrap();
+        assert!(queue.append(&[data()], 2).is_err());
     }
     #[test]
     fn matching_queue_cross_domain_rows_keep_source_key_and_target_fence() {
