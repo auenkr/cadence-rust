@@ -141,6 +141,15 @@ impl QueueHandle {
         .await
         .map_err(|error| Status::internal(error.to_string()))?
     }
+    /// Go `taskListManager.HasPollerAfter`: a poller is currently waiting, or
+    /// finished its last poll after `after`. Used by the sticky availability
+    /// check (`_stickyPollerUnavailableWindow`).
+    pub fn has_poller_after(&self, after: i64) -> bool {
+        self.pollers
+            .lock()
+            .expect("poller history lock")
+            .has_after(after)
+    }
 }
 // SQL cleanup runs on the blocking pool; joining async loops must release that
 // worker first, so simultaneous owner unloads cannot starve their own readers.

@@ -508,3 +508,95 @@ async fn matching_rpc_delivers_query_to_decision_poller() {
         Some(b"pong".to_vec())
     );
 }
+
+#[tokio::test]
+async fn matching_rpc_sticky_task_list_requires_a_recent_poller() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let sticky = || {
+        Some(p::TaskList {
+            name: "queue:sticky".into(),
+            kind: 2,
+            ..Default::default()
+        })
+    };
+    // Go `_stickyPollerUnavailableError`: no sticky worker has polled, so the
+    // caller can fall back to the non-sticky list instead of stranding a task
+    // or a query on the sticky list.
+    let error = matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            workflow_execution: execution(),
+            task_list: sticky(),
+            schedule_id: 3,
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert!(error.message().contains("sticky worker is unavailable"));
+    let query = matching
+        .query_workflow(Request::new(m::QueryWorkflowRequest {
+            request: Some(p::QueryWorkflowRequest {
+                workflow_execution: execution(),
+                ..Default::default()
+            }),
+            domain_id: domain.clone(),
+            task_list: sticky(),
+            forwarded_from: String::new(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(query.code(), tonic::Code::Unavailable);
+    // A waiting sticky poller marks the list available again.
+    let worker = matching.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move {
+        worker
+            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+                domain_id: poll_domain,
+                poller_id: "sticky-worker".into(),
+                request: Some(p::PollForDecisionTaskRequest {
+                    task_list: sticky(),
+                    identity: "sticky-worker".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }))
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !matching.polls.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // The delivery worker registers the outstanding poll asynchronously.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match matching
+            .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+                domain_id: domain.clone(),
+                workflow_execution: execution(),
+                task_list: sticky(),
+                schedule_id: 4,
+                ..Default::default()
+            }))
+            .await
+        {
+            Ok(_) => break,
+            Err(error)
+                if error.code() == tonic::Code::Unavailable
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(error) => panic!("a waiting sticky poller must make the list available: {error}"),
+        }
+    }
+    poll.abort();
+}

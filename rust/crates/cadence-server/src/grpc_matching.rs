@@ -10,6 +10,36 @@ fn matching_now() -> i64 {
 fn task_list_name(name: &str) -> Result<TaskListName, Status> {
     TaskListName::parse(name).map_err(Status::invalid_argument)
 }
+/// Go `_stickyPollerUnavailableWindow`.
+const STICKY_POLLER_UNAVAILABLE_WINDOW: i64 = 10_000_000_000;
+/// Go `taskListKind == types.TaskListKindSticky`.
+fn sticky_task_list(list: &p::TaskList) -> bool {
+    list.kind == 2
+}
+/// Go `_stickyPollerUnavailableError`: a sticky task list is only usable while
+/// a sticky worker polled it recently, so the caller can fall back to the
+/// non-sticky list instead of leaving the task stranded.
+fn sticky_unavailable() -> Status {
+    const MESSAGE: &str = "sticky worker is unavailable, please use non-sticky task list.";
+    crate::grpc::detailed_status(
+        tonic::Code::Unavailable,
+        MESSAGE,
+        "StickyWorkerUnavailableError",
+        p::StickyWorkerUnavailableError {},
+    )
+}
+/// Go matching's sticky pre-check in `AddDecisionTask` and `QueryWorkflow`.
+fn check_sticky_poller(
+    queue: &crate::matching_registry::QueueHandle,
+    list: &p::TaskList,
+) -> Result<(), Status> {
+    if sticky_task_list(list)
+        && !queue.has_poller_after(matching_now().saturating_sub(STICKY_POLLER_UNAVAILABLE_WINDOW))
+    {
+        return Err(sticky_unavailable());
+    }
+    Ok(())
+}
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -310,6 +340,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             let run = uuid::Uuid::parse_str(&execution.run_id).map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
             let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
             let queue = self.durable_queue(&r.domain_id, list, 0).await?;
+            check_sticky_poller(&queue, list)?;
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
@@ -408,6 +439,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
             let name = task_list_name(&task_list.name)?;
             let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
+            check_sticky_poller(&queue, &task_list)?;
             let task_id = uuid::Uuid::new_v4().to_string();
             let receiver = queue.queries.register(crate::matching_query::PendingQuery {
                 task_id: task_id.clone(),

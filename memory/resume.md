@@ -28,6 +28,20 @@ See matching-reader-next.md. 349 tests, strict lint, all 27 compatibility stages
 including mixed Go services passed. User reconfirmed complete Matching before
 History; no service is complete. Next: background reader and matcher rendezvous.
 
+# Current resume checkpoint (2026-10-16) — sticky availability
+
+Read matching-sticky-next.md first. Sticky task lists now fail fast like Go: a
+durable `AddDecisionTask`/`QueryWorkflow` on a sticky list with no poller in the
+last 10s returns `StickyWorkerUnavailableError` (gRPC UNAVAILABLE + proto
+detail), so History clears stickiness and retries non-sticky instead of leaving
+the task/query stranded. 80 cadence-server lib tests + strict all-target Clippy
+pass; full 29/29-stage runner PASSED, including the Go SDK sticky scenario
+against Rust Matching:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-sticky-full/results.json.
+Remaining Matching gate items: forwarding, partition routing/scaling, isolation
+groups, semaphores, membership/ownership, standalone lifecycle, and wiring the
+durable matcher into the production standalone server.
+
 # Current resume checkpoint (2026-10-16) — durable query delivery
 
 Read matching-query-next.md first. The durable matcher now delivers Go-style
