@@ -346,7 +346,18 @@ impl TaskReader {
                                 WaitOutcome::Stopped => return Attempt::Stopped,
                                 WaitOutcome::Throttled => return Attempt::Retry,
                             }
-                            if target.offer(task.clone(), dispatch_stop.clone()).await {
+                            let mut dispatched = task.clone();
+                            let dispatch_group = if isolated.contains_key(&group) {
+                                group.as_str()
+                            } else {
+                                ""
+                            };
+                            dispatched.data.partition_config =
+                                cadence_common::task_isolation::dispatch_partition_config(
+                                    &task.data.partition_config,
+                                    dispatch_group,
+                                );
+                            if target.offer(dispatched, dispatch_stop.clone()).await {
                                 Attempt::Offered
                             } else {
                                 Attempt::Stopped
@@ -690,7 +701,20 @@ mod tests {
                 }),
             },
         );
-        queue.append(&[TaskData::default()], now()).unwrap();
+        let original_config = Some(std::collections::BTreeMap::from([
+            ("isolation-group".into(), "a".into()),
+            ("wf-id".into(), "workflow".into()),
+            ("extra".into(), "persisted-only".into()),
+        ]));
+        queue
+            .append(
+                &[TaskData {
+                    partition_config: original_config.clone(),
+                    ..Default::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
         wait_read(&queue, 1).await;
         assert!(
@@ -708,7 +732,15 @@ mod tests {
             1,
             "leaking a task must not allocate another ID"
         );
-        assert!(queue.retry_data(1).is_ok());
+        let dispatched = delivered.data.partition_config.unwrap();
+        assert_eq!(dispatched["isolation-group"], "");
+        assert_eq!(dispatched["original-isolation-group"], "a");
+        assert_eq!(dispatched["wf-id"], "workflow");
+        assert!(!dispatched.contains_key("extra"));
+        assert_eq!(
+            queue.retry_data(1).unwrap().partition_config,
+            original_config
+        );
         stop(queue, reader).await;
     }
     #[tokio::test]

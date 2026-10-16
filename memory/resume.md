@@ -10,7 +10,21 @@ Follow-up enable-toggle reload is implemented with3 focused tests passed;
 full30-stage verification PASSED at /tmp/opencode/isolation-reload-full.log and
 .exit=0. Current workspace403 tests (89 server) and strict all-target lint pass.
 Read matching-isolation-dispatch-next.md for details before continuing.
-Matching still incomplete; metadata rewrite,
+Reload committed0c4c63323; backlog dispatch committed63f374479. Follow-up
+dispatch-only partition metadata rewrite now implemented with21 Go oracle cases
+and persisted-original regression passing. Full runner in progress:
+/tmp/opencode/isolation-metadata-full.log and .exit; artifacts
+matching-isolation-metadata-full. Await result before claiming full validation.
+First metadata full run hit ENOSPC at server build after tests/lint/oracles
+passed; cleared36GB generated rust/target/debug/incremental ONLY. Latest retry
+uses CARGO_INCREMENTAL=0: /tmp/opencode/isolation-metadata-final.log and .exit,
+artifacts matching-isolation-metadata-final. Check this run, not failed full.
+Metadata retry PASSED all30 stages, marker0;403 workspace tests,89 server,
+strict all-target lint, Go SDK and mixed isolationDispatch pass.21 metadata
+rewrites match actual Go. Next substantial Matching gap: sync matching and
+forwarding/partition routing; durable partition config remains in execution
+metadata and must migrate to native queue metadata (already blob-codec capable).
+Matching still incomplete; sync matching,
 forwarding/partition routing/scaling, semaphores/membership/standalone remain.
 
 Prior verified continuation (2026-10-16): read matching-isolation-next.md, then

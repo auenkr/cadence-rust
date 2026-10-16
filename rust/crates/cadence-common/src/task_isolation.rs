@@ -2,6 +2,31 @@
 //! resolves drains, poller recency and partition membership before calling it.
 pub const MINIMUM_ISOLATION_NANOS: i64 = 50_000_000;
 
+/// Go newInternalTask copies only isolation/original/workflow keys when a
+/// group key exists. Do not call this on the persisted original task data.
+pub fn dispatch_partition_config(
+    config: &Option<std::collections::BTreeMap<String, String>>,
+    group: &str,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let Some(map) = config else { return None };
+    let Some(original) = map.get("isolation-group") else {
+        return config.clone();
+    };
+    Some(std::collections::BTreeMap::from([
+        ("isolation-group".into(), group.into()),
+        (
+            "original-isolation-group".into(),
+            map.get("original-isolation-group")
+                .unwrap_or(original)
+                .clone(),
+        ),
+        (
+            "wf-id".into(),
+            map.get("wf-id").cloned().unwrap_or_default(),
+        ),
+    ]))
+}
+
 pub struct TaskIsolation<'a> {
     pub enabled: bool,
     pub sticky: bool,
@@ -116,6 +141,14 @@ mod tests {
                     100_000_000
                 ),
                 case["expected"].as_i64().unwrap()
+            );
+        }
+        for case in fixtures["rewrites"].as_array().unwrap() {
+            let input = serde_json::from_value(case["input"].clone()).unwrap();
+            let expected = serde_json::from_value(case["expected"].clone()).unwrap();
+            assert_eq!(
+                dispatch_partition_config(&input, case["group"].as_str().unwrap()),
+                expected
             );
         }
     }

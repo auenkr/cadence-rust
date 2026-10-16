@@ -1,4 +1,210 @@
 {
+  "rewrites": [
+    {
+      "expected": null,
+      "group": "",
+      "input": null
+    },
+    {
+      "expected": null,
+      "group": "a",
+      "input": null
+    },
+    {
+      "expected": null,
+      "group": "b",
+      "input": null
+    },
+    {
+      "expected": {},
+      "group": "",
+      "input": {}
+    },
+    {
+      "expected": {},
+      "group": "a",
+      "input": {}
+    },
+    {
+      "expected": {},
+      "group": "b",
+      "input": {}
+    },
+    {
+      "expected": {
+        "other": "retained"
+      },
+      "group": "",
+      "input": {
+        "other": "retained"
+      }
+    },
+    {
+      "expected": {
+        "other": "retained"
+      },
+      "group": "a",
+      "input": {
+        "other": "retained"
+      }
+    },
+    {
+      "expected": {
+        "other": "retained"
+      },
+      "group": "b",
+      "input": {
+        "other": "retained"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "",
+        "original-isolation-group": "a",
+        "wf-id": ""
+      },
+      "group": "",
+      "input": {
+        "isolation-group": "a"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "a",
+        "original-isolation-group": "a",
+        "wf-id": ""
+      },
+      "group": "a",
+      "input": {
+        "isolation-group": "a"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "b",
+        "original-isolation-group": "a",
+        "wf-id": ""
+      },
+      "group": "b",
+      "input": {
+        "isolation-group": "a"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      },
+      "group": "",
+      "input": {
+        "isolation-group": "a",
+        "other": "dropped",
+        "wf-id": "workflow"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "a",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      },
+      "group": "a",
+      "input": {
+        "isolation-group": "a",
+        "other": "dropped",
+        "wf-id": "workflow"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "b",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      },
+      "group": "b",
+      "input": {
+        "isolation-group": "a",
+        "other": "dropped",
+        "wf-id": "workflow"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      },
+      "group": "",
+      "input": {
+        "isolation-group": "b",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "a",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      },
+      "group": "a",
+      "input": {
+        "isolation-group": "b",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "b",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      },
+      "group": "b",
+      "input": {
+        "isolation-group": "b",
+        "original-isolation-group": "a",
+        "wf-id": "workflow"
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "",
+        "original-isolation-group": "",
+        "wf-id": ""
+      },
+      "group": "",
+      "input": {
+        "isolation-group": "",
+        "original-isolation-group": ""
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "a",
+        "original-isolation-group": "",
+        "wf-id": ""
+      },
+      "group": "a",
+      "input": {
+        "isolation-group": "",
+        "original-isolation-group": ""
+      }
+    },
+    {
+      "expected": {
+        "isolation-group": "b",
+        "original-isolation-group": "",
+        "wf-id": ""
+      },
+      "group": "b",
+      "input": {
+        "isolation-group": "",
+        "original-isolation-group": ""
+      }
+    }
+  ],
   "selection": [
     {
       "name": "isolated",

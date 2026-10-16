@@ -121,7 +121,15 @@ func TestRustMatchingIsolationFixtures(t *testing.T) {
 			}
 		}
 	}
-	data, err := json.MarshalIndent(map[string]any{"selection": selections, "timeouts": timeouts}, "", "  ")
+	var rewrites []map[string]any
+	for _, input := range []map[string]string{nil, {}, {"other": "retained"}, {"isolation-group": "a"}, {"isolation-group": "a", "wf-id": "workflow", "other": "dropped"}, {"isolation-group": "b", "original-isolation-group": "a", "wf-id": "workflow"}, {"isolation-group": "", "original-isolation-group": ""}} {
+		for _, group := range []string{"", "a", "b"} {
+			info := &persistence.TaskInfo{PartitionConfig: input}
+			task := newInternalTask(info, nil, types.TaskSourceDbBacklog, "", false, group)
+			rewrites = append(rewrites, map[string]any{"input": input, "group": group, "expected": task.Event.PartitionConfig})
+		}
+	}
+	data, err := json.MarshalIndent(map[string]any{"selection": selections, "timeouts": timeouts, "rewrites": rewrites}, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

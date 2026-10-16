@@ -100,3 +100,31 @@ Fresh full runner in tmux cadence-rust:reload-full:
 
 Reload final: all30 stages PASSED, exit marker0;403 workspace tests incl89
 server tests and strict all-target lint pass. Go SDK and mixed probe passed.
+
+## Follow-up: dispatch-only metadata rewrite
+
+Reload committed0c4c63323. Next increment ports Go newInternalTask's partition
+config rewrite: if isolation-group key exists, preserve original-isolation-group
+(even explicit empty), record actual dispatch group, copy wf-id/default empty,
+drop unrelated keys. Missing group key leaves the entire map unchanged; nil and
+empty remain distinct. Rewrite applies only to the cloned handoff, never the DB
+row or retry selection input.21 actual-Go rewrite oracle cases added; Go/Rust
+comparison passes. Timeout fallback test asserts original config survives in DB
+while delivered config records shared group and original A.
+
+Full runner started in tmux cadence-rust:metadata-full:
+`/tmp/opencode/isolation-metadata-full.log` / `.exit`, artifacts
+`.../matching-isolation-metadata-full`. Await final result before claiming pass.
+
+Metadata first runner passed workspace/lint/differentials then hit ENOSPC at
+server-build, not a behavior failure. Removed ONLY generated
+rust/target/debug/incremental (36GB), no source/artifacts removed. Retry with
+CARGO_INCREMENTAL=0: `/tmp/opencode/isolation-metadata-final.log` / `.exit`,
+artifacts `.../matching-isolation-metadata-final`. Check this latest run.
+
+Metadata retry final: PASSED all30 stages; marker0.403 workspace tests incl89
+server, strict all-target lint, actual Go21 rewrite cases and mixed Go SDK/
+isolationDispatch passed. No role complete. Next: sync matching / forwarding
+and native durable partition configuration; existing SQL blob supports config
+but RPC adapters still use execution metadata. Production configstore/global
+drain watcher and metadata loading remain open.

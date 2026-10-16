@@ -24,4 +24,4 @@ with tempfile.TemporaryDirectory(prefix='cadence-isolation-') as directory:
         raise RuntimeError('original Go isolation fixture drift')
 if not args.regenerate:
     subprocess.run(['cargo', 'test', '--manifest-path', str(root/'rust/Cargo.toml'), '-p', 'cadence-common', 'task_isolation::tests'], check=True)
-print(f'Verified {len(actual["selection"])} isolation decisions and {len(actual["timeouts"])} dispatch timeouts')
+print(f'Verified {len(actual["selection"])} isolation decisions, {len(actual["timeouts"])} dispatch timeouts and {len(actual["rewrites"])} metadata rewrites')
