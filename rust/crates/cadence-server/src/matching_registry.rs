@@ -79,7 +79,9 @@ pub struct QueueRegistry {
     /// Go `cfg.QPSTrackerInterval(domain, taskList, type)`. `None` uses the
     /// dynamic-property default (10s).
     qps_interval: Option<QpsIntervalProvider>,
+    isolation: Option<IsolationProvider>,
 }
+pub type IsolationProvider = Arc<dyn Fn(&str, &str, i32, i16, Arc<Mutex<cadence_common::poller::Manager>>) -> crate::matching_reader::IsolationConfig + Send + Sync>;
 /// Live write-partition-count provider used to size the dispatch limiter and to
 /// enumerate partitions, mirroring Go's `NumTasklistWritePartitions`.
 pub type PartitionCountProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
@@ -220,6 +222,7 @@ impl QueueRegistry {
             domain_metadata: None,
             partition_count: None,
             qps_interval: None,
+            isolation: None,
         }
     }
     /// Install Go's `NumTasklistWritePartitions` provider. The provider reads
@@ -233,6 +236,14 @@ impl QueueRegistry {
     pub fn with_qps_interval(mut self, provider: QpsIntervalProvider) -> Self {
         self.qps_interval = Some(provider);
         self
+    }
+    pub fn with_isolation(mut self, provider: IsolationProvider) -> Self {
+        self.isolation = Some(provider);
+        self
+    }
+    #[cfg(test)]
+    pub(crate) fn isolation_provider_for_test(&self) -> IsolationProvider {
+        self.isolation.clone().expect("isolation provider installed")
     }
     pub fn with_domain_metadata(
         mut self,
@@ -361,12 +372,15 @@ impl QueueRegistry {
                     let limiter = Arc::new(
                         crate::matching_limiter::TaskListLimiter::with_partitions(count_partitions),
                     );
-                    let reader = crate::matching_reader::TaskReader::with_domain_activity_and_limiter(
+                    let pollers = Arc::new(Mutex::new(cadence_common::poller::Manager::default()));
+                    let isolation = registry.isolation.as_ref().map(|provider| provider(&lookup.0.to_string(), &lookup.1, lookup.2, kind, pollers.clone())).unwrap_or_default();
+                    let reader = crate::matching_reader::TaskReader::with_isolation(
                         queue.clone(),
                         dispatcher.task_notification(),
                         crate::matching_reader::ReaderConfig::default(),
                         activity,
                         limiter.clone(),
+                        isolation,
                     );
                     let read_stop = reader.stop_signal();
                     let wake = registry.changed.clone();
@@ -384,7 +398,7 @@ impl QueueRegistry {
                         reader,
                         limiter,
                         queue,
-                        pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
+                        pollers,
                         queries: Arc::new(crate::matching_query::QueryChannel::new()),
                         qps,
                         created: now,

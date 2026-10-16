@@ -98,6 +98,10 @@ pub fn integer(values: &[DynamicConfigValue], domain: Option<&str>, default: i64
         .unwrap_or(default)
 }
 
+pub fn boolean(values: &[DynamicConfigValue], domain: Option<&str>, default: bool) -> bool {
+    selected(values, domain).and_then(|value| value.as_bool()).unwrap_or(default)
+}
+
 pub fn duration(values: &[DynamicConfigValue], domain: Option<&str>, default: i64) -> i64 {
     selected(values, domain)
         .and_then(|value| {

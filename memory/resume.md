@@ -1,4 +1,15 @@
-Latest continuation (2026-10-16): read matching-isolation-next.md, then
+Latest verified continuation (2026-10-16): read
+matching-isolation-dispatch-next.md first. Group-aware backlog buffers/handoffs,
+Go-oracle policy/timing fixtures, live drain/recency checks implemented. A mixed
+probe exposed zero-metric protobuf map presence incompatibility with pinned Go;
+custom TaskListStatus encoding fixes it without IDL changes. Current workspace:
+401 tests (87 server) and strict all-target Clippy passed. Full30-stage runner
+PASSED: /tmp/opencode/isolation-final.log and .exit; artifacts
+matching-isolation-dispatch-final. Mixed probe isolationDispatch and Go SDK pass.
+Matching still incomplete; owner enable-toggle reload, metadata rewrite,
+forwarding/partition routing/scaling, semaphores/membership/standalone remain.
+
+Prior verified continuation (2026-10-16): read matching-isolation-next.md, then
 matching-config-next.md. BOTH full runners PASSED all29 stages. Latest frozen
 isolation reporting run:395 workspace tests,84 server lib tests, strict Clippy,
 Go SDK and mixed Go services/Rust Matching passed;

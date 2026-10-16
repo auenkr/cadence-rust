@@ -1,0 +1,408 @@
+{
+  "selection": [
+    {
+      "name": "isolated",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "a",
+        1000000000
+      ]
+    },
+    {
+      "name": "disabled",
+      "enabled": false,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "sticky",
+      "enabled": true,
+      "sticky": true,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "empty",
+      "enabled": true,
+      "sticky": false,
+      "group": "",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "unknown",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": false,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "drained",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": true,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "state-error",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": true,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "no-pollers",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": false,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "wrong-partition",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [
+        "b"
+      ],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "missing-partition",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": null,
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "assigned",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [
+        "a",
+        "b"
+      ],
+      "duration": 1000000000,
+      "latency": 0,
+      "expected": [
+        "a",
+        1000000000
+      ]
+    },
+    {
+      "name": "zero-duration",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 0,
+      "latency": 3600000000000,
+      "expected": [
+        "a",
+        0
+      ]
+    },
+    {
+      "name": "latency",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 300000000,
+      "expected": [
+        "a",
+        700000000
+      ]
+    },
+    {
+      "name": "minimum-boundary",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 950000000,
+      "expected": [
+        "",
+        0
+      ]
+    },
+    {
+      "name": "below-boundary",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": 949999999,
+      "expected": [
+        "a",
+        50000001
+      ]
+    },
+    {
+      "name": "future-task",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": 1000000000,
+      "latency": -1000000000,
+      "expected": [
+        "a",
+        2000000000
+      ]
+    },
+    {
+      "name": "negative-duration",
+      "enabled": true,
+      "sticky": false,
+      "group": "a",
+      "known": true,
+      "drained": false,
+      "state_error": false,
+      "recent": true,
+      "partition_groups": [],
+      "duration": -1,
+      "latency": 0,
+      "expected": [
+        "",
+        0
+      ]
+    }
+  ],
+  "timeouts": [
+    {
+      "buffers": 1,
+      "expected": 3000000000,
+      "isolation": 0,
+      "rps": 1000
+    },
+    {
+      "buffers": 1,
+      "expected": 1000000000,
+      "isolation": 1000000000,
+      "rps": 1000
+    },
+    {
+      "buffers": 1,
+      "expected": 3000000000,
+      "isolation": 5000000000,
+      "rps": 1000
+    },
+    {
+      "buffers": 1,
+      "expected": 10100000000,
+      "isolation": 0,
+      "rps": 0.1
+    },
+    {
+      "buffers": 1,
+      "expected": 10100000000,
+      "isolation": 1000000000,
+      "rps": 0.1
+    },
+    {
+      "buffers": 1,
+      "expected": 10100000000,
+      "isolation": 5000000000,
+      "rps": 0.1
+    },
+    {
+      "buffers": 1,
+      "expected": 3000000000,
+      "isolation": 0,
+      "rps": 0
+    },
+    {
+      "buffers": 1,
+      "expected": 1000000000,
+      "isolation": 1000000000,
+      "rps": 0
+    },
+    {
+      "buffers": 1,
+      "expected": 3000000000,
+      "isolation": 5000000000,
+      "rps": 0
+    },
+    {
+      "buffers": 5,
+      "expected": 3000000000,
+      "isolation": 0,
+      "rps": 1000
+    },
+    {
+      "buffers": 5,
+      "expected": 1000000000,
+      "isolation": 1000000000,
+      "rps": 1000
+    },
+    {
+      "buffers": 5,
+      "expected": 3000000000,
+      "isolation": 5000000000,
+      "rps": 1000
+    },
+    {
+      "buffers": 5,
+      "expected": 50100000000,
+      "isolation": 0,
+      "rps": 0.1
+    },
+    {
+      "buffers": 5,
+      "expected": 50100000000,
+      "isolation": 1000000000,
+      "rps": 0.1
+    },
+    {
+      "buffers": 5,
+      "expected": 50100000000,
+      "isolation": 5000000000,
+      "rps": 0.1
+    },
+    {
+      "buffers": 5,
+      "expected": 3000000000,
+      "isolation": 0,
+      "rps": 0
+    },
+    {
+      "buffers": 5,
+      "expected": 1000000000,
+      "isolation": 1000000000,
+      "rps": 0
+    },
+    {
+      "buffers": 5,
+      "expected": 3000000000,
+      "isolation": 5000000000,
+      "rps": 0
+    }
+  ]
+}

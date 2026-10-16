@@ -14,6 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     collect_protos(&shard_manager, &mut files)?;
     files.sort();
     tonic_build::configure()
+        .extern_path(".uber.cadence.api.v1.TaskListStatus", "crate::task_list_status::TaskListStatus")
         .generate_default_stubs(true)
         .file_descriptor_set_path(
             std::path::PathBuf::from(std::env::var("OUT_DIR")?).join("cadence.bin"),

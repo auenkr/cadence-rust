@@ -67,6 +67,7 @@ def main():
     run("matching-liveness-differential", [sys.executable, str(root / "tests/run-matching-liveness-compat.py")], timeout=300)
     run("matching-gc-differential", [sys.executable, str(root / "tests/run-matching-gc-compat.py")], timeout=300)
     run("matching-poller-differential", [sys.executable, str(root / "tests/run-matching-poller-compat.py")], timeout=300)
+    run("matching-isolation-differential", [sys.executable, str(root / "tests/run-matching-isolation-compat.py")], timeout=300)
     run("matching-queue-differential", [sys.executable, str(root / "tests/run-matching-queue-compat.py")])
     run("matching-storage-differential", [sys.executable, str(root / "tests/run-matching-storage-compat.py")])
     run("matching-differential", [sys.executable, str(root / "tests/run-matching-compat.py")])

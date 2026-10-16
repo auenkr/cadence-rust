@@ -3,7 +3,7 @@
 use crate::matching_limiter::{TaskListLimiter, WaitOutcome};
 use cadence_persistence::{matching_queue::DurableTaskQueue, matching_sqlite::AllocatedTask};
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     num::NonZeroU32,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -144,8 +144,10 @@ impl Drop for Completed {
 }
 struct Inner {
     matcher: Arc<Rendezvous<AllocatedTask>>,
+    isolated: HashMap<String, Arc<Rendezvous<AllocatedTask>>>,
     stop: watch::Sender<bool>,
     completion: Arc<Completion>,
+    loops: usize,
 }
 impl Drop for Inner {
     fn drop(&mut self) {
@@ -172,6 +174,23 @@ enum BufferSender {
 enum BufferReceiver {
     Buffered(mpsc::Receiver<AllocatedTask>),
     Unbuffered(Arc<Rendezvous<AllocatedTask>>),
+}
+/// Groups are snapshotted when a manager is created, as in Go. Selection is
+/// reevaluated before buffering and on every dispatch attempt.
+#[derive(Clone)]
+pub struct IsolationConfig {
+    pub groups: Vec<String>,
+    pub select: IsolationSelector,
+}
+pub type IsolationSelector =
+    Arc<dyn Fn(&cadence_persistence::matching_blob::TaskData) -> (String, i64) + Send + Sync>;
+impl Default for IsolationConfig {
+    fn default() -> Self {
+        Self {
+            groups: Vec::new(),
+            select: Arc::new(|_| (String::new(), 0)),
+        }
+    }
 }
 impl TaskReader {
     pub fn new(queue: Arc<DurableTaskQueue>, wake: Arc<Notify>, config: ReaderConfig) -> Self {
@@ -201,113 +220,159 @@ impl TaskReader {
         active: Arc<dyn Fn() -> bool + Send + Sync>,
         limiter: Arc<TaskListLimiter>,
     ) -> Self {
+        Self::with_isolation(
+            queue,
+            wake,
+            config,
+            active,
+            limiter,
+            IsolationConfig::default(),
+        )
+    }
+    pub fn with_isolation(
+        queue: Arc<DurableTaskQueue>,
+        wake: Arc<Notify>,
+        config: ReaderConfig,
+        active: Arc<dyn Fn() -> bool + Send + Sync>,
+        limiter: Arc<TaskListLimiter>,
+        isolation: IsolationConfig,
+    ) -> Self {
         let (stop, stopped) = watch::channel(false);
         let matcher = Arc::new(Rendezvous::default());
+        let isolated: HashMap<_, _> = isolation
+            .groups
+            .iter()
+            .filter(|g| !g.is_empty())
+            .map(|g| (g.clone(), Arc::new(Rendezvous::default())))
+            .collect();
+        let buffers = isolated.len() + 1;
         let completion = Arc::new(Completion::default());
         let inner = Arc::new(Inner {
             matcher: matcher.clone(),
+            isolated: isolated.clone(),
             stop,
             completion: completion.clone(),
+            loops: buffers + 1,
         });
-        let (buffer_send, mut buffer_receive) = if config.batch_size.get() == 1 {
-            let buffer = Arc::new(Rendezvous::default());
-            (
-                BufferSender::Unbuffered(buffer.clone()),
-                BufferReceiver::Unbuffered(buffer),
-            )
-        } else {
-            let (sender, receiver) = mpsc::channel(config.batch_size.get() as usize - 1);
-            (
-                BufferSender::Buffered(sender),
-                BufferReceiver::Buffered(receiver),
-            )
-        };
-        let dispatched = Completed(completion.clone());
-        let mut dispatch_stop = stopped.clone();
-        let dispatch_queue = queue.clone();
-        let dispatch_limiter = limiter;
-        let async_timeout = config.dispatch_timeout;
-        let timeout_buffer = config.dispatch_timeout_buffer;
-        tokio::spawn(async move {
-            let _completed = dispatched;
-            'dispatch: loop {
-                if *dispatch_stop.borrow() {
-                    break;
-                }
-                let task = match &mut buffer_receive {
-                    BufferReceiver::Buffered(receiver) => tokio::select! {
-                        task = receiver.recv() => task,
-                        _ = dispatch_stop.changed() => None,
-                    },
-                    BufferReceiver::Unbuffered(buffer) => buffer.poll(dispatch_stop.clone()).await,
-                };
-                let Some(task) = task else { break };
-                loop {
-                    // Go rechecks expiry at each dispatch attempt, including
-                    // after a row spent time waiting behind another head.
-                    if task.data.expiry_nanos > 0 && now() > task.data.expiry_nanos {
-                        let queue = dispatch_queue.clone();
-                        let id = task.task_id;
-                        let result = tokio::task::spawn_blocking(move || queue.complete(id)).await;
-                        if !matches!(result, Ok(Ok(_))) {
-                            dispatch_queue.stop();
-                            break 'dispatch;
-                        }
-                        // Expired buffered rows are acknowledged without an
-                        // immediate GC run, matching taskReader's expiry branch.
+        let mut buffer_senders = HashMap::new();
+        for buffer_group in std::iter::once(String::new()).chain(isolated.keys().cloned()) {
+            let (buffer_send, mut buffer_receive) = if config.batch_size.get() == 1 {
+                let buffer = Arc::new(Rendezvous::default());
+                (
+                    BufferSender::Unbuffered(buffer.clone()),
+                    BufferReceiver::Unbuffered(buffer),
+                )
+            } else {
+                let (sender, receiver) = mpsc::channel(config.batch_size.get() as usize - 1);
+                (
+                    BufferSender::Buffered(sender),
+                    BufferReceiver::Buffered(receiver),
+                )
+            };
+            buffer_senders.insert(buffer_group, buffer_send);
+            let dispatched = Completed(completion.clone());
+            let mut dispatch_stop = stopped.clone();
+            let dispatch_queue = queue.clone();
+            let dispatch_limiter = limiter.clone();
+            let active = active.clone();
+            let matcher = matcher.clone();
+            let isolated = isolated.clone();
+            let isolation = isolation.clone();
+            let async_timeout = config.dispatch_timeout;
+            let timeout_buffer = config.dispatch_timeout_buffer;
+            tokio::spawn(async move {
+                let _completed = dispatched;
+                'dispatch: loop {
+                    if *dispatch_stop.borrow() {
                         break;
                     }
-                    // Go `newDispatchContext`: the deadline only applies to an
-                    // active (or unknown) domain above the 1e-7 noise floor.
-                    let rps = dispatch_limiter.limit();
-                    let deadline = (rps > 1e-7 && active()).then(|| {
-                        let min_timeout =
-                            Duration::from_secs_f64(1.0 / rps) + timeout_buffer;
-                        let timeout = async_timeout.max(min_timeout);
-                        dispatch_limiter
-                            .now()
-                            .saturating_add(timeout.as_nanos() as i64)
-                    });
-                    let attempt = async {
-                        // Go `taskMatcher.ratelimit` maps ErrCannotWait (zero
-                        // burst or an unreachable deadline) to a throttled retry.
-                        match dispatch_limiter
-                            .wait_until(dispatch_stop.clone(), deadline)
-                            .await
-                        {
-                            WaitOutcome::Acquired => (),
-                            WaitOutcome::Stopped => return Attempt::Stopped,
-                            WaitOutcome::Throttled => return Attempt::Retry,
-                        }
-                        if matcher.offer(task.clone(), dispatch_stop.clone()).await {
-                            Attempt::Offered
-                        } else {
-                            Attempt::Stopped
+                    let task = match &mut buffer_receive {
+                        BufferReceiver::Buffered(receiver) => tokio::select! {
+                            task = receiver.recv() => task,
+                            _ = dispatch_stop.changed() => None,
+                        },
+                        BufferReceiver::Unbuffered(buffer) => {
+                            buffer.poll(dispatch_stop.clone()).await
                         }
                     };
-                    let outcome = match deadline {
-                        Some(deadline) => {
-                            let remaining =
-                                Duration::from_nanos(deadline.saturating_sub(dispatch_limiter.now()) as u64);
-                            tokio::time::timeout(remaining, attempt)
+                    let Some(task) = task else { break };
+                    loop {
+                        // Go rechecks expiry at each dispatch attempt, including
+                        // after a row spent time waiting behind another head.
+                        if task.data.expiry_nanos > 0 && now() > task.data.expiry_nanos {
+                            let queue = dispatch_queue.clone();
+                            let id = task.task_id;
+                            let result =
+                                tokio::task::spawn_blocking(move || queue.complete(id)).await;
+                            if !matches!(result, Ok(Ok(_))) {
+                                dispatch_queue.stop();
+                                break 'dispatch;
+                            }
+                            // Expired buffered rows are acknowledged without an
+                            // immediate GC run, matching taskReader's expiry branch.
+                            break;
+                        }
+                        // Go `newDispatchContext`: the deadline only applies to an
+                        // active (or unknown) domain above the 1e-7 noise floor.
+                        let (group, mut isolation_duration) = (isolation.select)(&task.data);
+                        let target = isolated.get(&group).unwrap_or_else(|| {
+                            isolation_duration = 0;
+                            &matcher
+                        });
+                        let rps = dispatch_limiter.limit();
+                        let deadline = ((isolated.contains_key(&group) || rps > 1e-7) && active())
+                            .then(|| {
+                                let timeout = cadence_common::task_isolation::dispatch_timeout(
+                                    rps,
+                                    buffers,
+                                    async_timeout.as_nanos() as i64,
+                                    isolation_duration,
+                                    timeout_buffer.as_nanos() as i64,
+                                );
+                                dispatch_limiter.now().saturating_add(timeout)
+                            });
+                        let attempt = async {
+                            // Go `taskMatcher.ratelimit` maps ErrCannotWait (zero
+                            // burst or an unreachable deadline) to a throttled retry.
+                            match dispatch_limiter
+                                .wait_until(dispatch_stop.clone(), deadline)
                                 .await
-                                .unwrap_or(Attempt::Retry)
-                        }
-                        None => attempt.await,
-                    };
-                    match outcome {
-                        Attempt::Offered => break,
-                        Attempt::Stopped => break 'dispatch,
-                        Attempt::Retry => {
-                            // Go yields before retrying a throttled/timeout head.
-                            tokio::task::yield_now().await;
-                            continue;
+                            {
+                                WaitOutcome::Acquired => (),
+                                WaitOutcome::Stopped => return Attempt::Stopped,
+                                WaitOutcome::Throttled => return Attempt::Retry,
+                            }
+                            if target.offer(task.clone(), dispatch_stop.clone()).await {
+                                Attempt::Offered
+                            } else {
+                                Attempt::Stopped
+                            }
+                        };
+                        let outcome = match deadline {
+                            Some(deadline) => {
+                                let remaining = Duration::from_nanos(
+                                    deadline.saturating_sub(dispatch_limiter.now()).max(0) as u64,
+                                );
+                                tokio::time::timeout(remaining, attempt)
+                                    .await
+                                    .unwrap_or(Attempt::Retry)
+                            }
+                            None => attempt.await,
+                        };
+                        match outcome {
+                            Attempt::Offered => break,
+                            Attempt::Stopped => break 'dispatch,
+                            Attempt::Retry => {
+                                // Go yields before retrying a throttled/timeout head.
+                                tokio::task::yield_now().await;
+                                continue;
+                            }
                         }
                     }
                 }
-            }
-            // Dropping the receiver releases a pump blocked on its next send.
-        });
+                // Dropping the receiver releases a pump blocked on its next send.
+            });
+        }
         let pumped = Completed(completion);
         let mut pump_stop = stopped;
         tokio::spawn(async move {
@@ -373,7 +438,11 @@ impl TaskReader {
                             break 'pump;
                         }
                     };
-                    let sent = match &buffer_send {
+                    let (group, _) = (isolation.select)(&task.data);
+                    let buffer_send = buffer_senders
+                        .get(&group)
+                        .unwrap_or_else(|| &buffer_senders[""]);
+                    let sent = match buffer_send {
                         BufferSender::Buffered(sender) => tokio::select! {
                             result = sender.send(task) => result.is_ok(),
                             _ = pump_stop.changed() => false,
@@ -402,6 +471,17 @@ impl TaskReader {
     pub async fn poll(&self) -> Option<AllocatedTask> {
         self.inner.matcher.poll(self.inner.stop.subscribe()).await
     }
+    /// Known pollers read their isolated channel and the shared channel. Unknown
+    /// or empty groups only read the shared channel, matching Go matcher.Poll.
+    pub async fn poll_group(&self, group: &str) -> Option<AllocatedTask> {
+        match self.inner.isolated.get(group) {
+            Some(channel) => tokio::select! {
+                task = channel.poll(self.inner.stop.subscribe()) => task,
+                task = self.poll() => task,
+            },
+            None => self.poll().await,
+        }
+    }
     pub fn stop_signal(&self) -> watch::Sender<bool> {
         self.inner.stop.clone()
     }
@@ -420,7 +500,7 @@ impl TaskReader {
                 .count
                 .lock()
                 .expect("Matching reader completion lock")
-                >= 2
+                >= self.inner.loops
             {
                 return;
             }
@@ -518,6 +598,109 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+    #[tokio::test]
+    async fn matching_reader_isolation_buffers_avoid_cross_group_head_blocking() {
+        let (_directory, queue, initial, wake) = fixture(0, 3);
+        initial.stop();
+        initial.wait_stopped().await;
+        let reader = TaskReader::with_isolation(
+            queue.clone(),
+            wake.clone(),
+            ReaderConfig {
+                batch_size: NonZeroU32::new(3).unwrap(),
+                ..Default::default()
+            },
+            Arc::new(|| true),
+            Arc::new(TaskListLimiter::with_defaults()),
+            IsolationConfig {
+                groups: vec!["a".into(), "b".into()],
+                select: Arc::new(|task| {
+                    (
+                        task.partition_config
+                            .as_ref()
+                            .and_then(|config| config.get("isolation-group"))
+                            .cloned()
+                            .unwrap_or_default(),
+                        0,
+                    )
+                }),
+            },
+        );
+        let task = |group: &str| TaskData {
+            partition_config: Some(std::collections::BTreeMap::from([(
+                "isolation-group".into(),
+                group.into(),
+            )])),
+            ..Default::default()
+        };
+        queue.append(&[task("a"), task("b")], now()).unwrap();
+        wake.notify_waiters();
+        wait_read(&queue, 2).await;
+        // A's head waits for A; it cannot block B's independent buffer.
+        let b = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("b"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(b.task_id, 2);
+        queue.append(&[task("")], now()).unwrap();
+        wake.notify_waiters();
+        let shared = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("unknown"))
+            .await
+            .unwrap();
+        assert_eq!(shared.unwrap().task_id, 3);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), reader.poll())
+                .await
+                .is_err()
+        );
+        assert_eq!(reader.poll_group("a").await.unwrap().task_id, 1);
+        stop(queue, reader).await;
+    }
+    #[tokio::test]
+    async fn matching_reader_isolation_timeout_reselects_without_rewriting_storage() {
+        let (_directory, queue, initial, wake) = fixture(0, 3);
+        initial.stop();
+        initial.wait_stopped().await;
+        let expires = now() + 200_000_000;
+        let reader = TaskReader::with_isolation(
+            queue.clone(),
+            wake.clone(),
+            ReaderConfig::default(),
+            Arc::new(|| true),
+            Arc::new(TaskListLimiter::with_defaults()),
+            IsolationConfig {
+                groups: vec!["a".into()],
+                select: Arc::new(move |_| {
+                    let remaining = expires - now();
+                    if remaining > 50_000_000 {
+                        ("a".into(), remaining)
+                    } else {
+                        (String::new(), 0)
+                    }
+                }),
+            },
+        );
+        queue.append(&[TaskData::default()], now()).unwrap();
+        wake.notify_waiters();
+        wait_read(&queue, 1).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), reader.poll_group("b"))
+                .await
+                .is_err()
+        );
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("b"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(delivered.task_id, 1);
+        assert_eq!(
+            queue.levels().0,
+            1,
+            "leaking a task must not allocate another ID"
+        );
+        assert!(queue.retry_data(1).is_ok());
+        stop(queue, reader).await;
     }
     #[tokio::test]
     async fn matching_reader_prefetch_backpressure_and_stop_preserve_unacked_rows() {

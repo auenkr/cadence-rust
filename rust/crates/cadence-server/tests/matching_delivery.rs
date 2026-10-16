@@ -39,6 +39,8 @@ struct Fixture {
     idle_trigger: Option<String>,
     #[serde(default)]
     idle_done: Option<String>,
+    #[serde(default)]
+    isolation_groups: Vec<String>,
 }
 #[tokio::test]
 #[ignore = "requires original Go History; run tests/run-go-service-baseline.py --matching-delivery"]
@@ -79,6 +81,16 @@ async fn matching_delivery_go_history() {
         NonZeroU32::new(100000).unwrap(),
     );
     let state = cadence_server::handlers::AppState::default();
+    if !fixture.isolation_groups.is_empty() {
+        let blob = |value: serde_json::Value| Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+        let mut config = state.admin.dynamic_config.lock().unwrap();
+        for (key, value) in [
+            ("system.allIsolationGroups", serde_json::json!(fixture.isolation_groups)),
+            ("system.enableTasklistIsolation", serde_json::json!(true)),
+        ] {
+            config.update(false, key, vec![cadence_api::admin::DynamicConfigValue { value: blob(value), filters: vec![] }]);
+        }
+    }
     state
         .domains
         .create(

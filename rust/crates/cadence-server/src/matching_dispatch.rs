@@ -101,10 +101,10 @@ impl TaskDispatcher {
     pub fn notify_new_tasks(&self) {
         self.wake.notify_waiters();
     }
-    async fn claim(&self) -> Result<(Option<AllocatedTask>, bool), ClaimError> {
+    async fn claim(&self, group: &str) -> Result<(Option<AllocatedTask>, bool), ClaimError> {
         if let Some(reader) = &self.reader {
             return reader
-                .poll()
+                .poll_group(group)
                 .await
                 .map(|task| (Some(task), false))
                 .ok_or(ClaimError::Queue(QueueError::Stopped));
@@ -343,10 +343,10 @@ impl TaskDispatcher {
                 tokio::select! {
                     biased;
                     _ = sender.closed() => return,
-                    result = self.claim() => result,
+                    result = self.claim(lifecycle.as_ref().map(|l| l.info.isolation_group.as_str()).unwrap_or_default()) => result,
                 }
             } else {
-                self.claim().await
+                self.claim("").await
             };
             let (task, scan_pending) = match claim {
                 Ok(value) => value,
@@ -477,7 +477,7 @@ mod tests {
     #[tokio::test]
     async fn matching_dispatch_writer_rewrite_retries_sql_before_acknowledging_original() {
         let (directory, store, key, dispatcher) = fixture(1);
-        let task = dispatcher.claim().await.ok().unwrap().0.unwrap();
+        let task = dispatcher.claim("").await.ok().unwrap().0.unwrap();
         let writer = crate::matching_writer::TaskWriter::new(
             dispatcher.queue.clone(),
             dispatcher.task_notification(),

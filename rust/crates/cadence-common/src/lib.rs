@@ -18,6 +18,7 @@ pub mod semaphore;
 pub use backoff::{ExponentialRetryPolicy, Retrier};
 
 pub mod task_list;
+pub mod task_isolation;
 pub mod ack_manager;
 
 pub mod poller;

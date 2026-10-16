@@ -171,7 +171,9 @@ impl Matching {
         };
         // Go `cfg.QPSTrackerInterval(domain, taskList, type)`
         // (`matching.qpsTrackerInterval`, default 10s in nanoseconds).
-        let qps_interval: crate::matching_registry::QpsIntervalProvider =
+        let qps_interval: crate::matching_registry::QpsIntervalProvider = {
+            let overlay = overlay.clone();
+            let domains = domains.clone();
             Arc::new(move |domain_id: &str, task_list: &str, task_type: i32| -> i64 {
                 let values = overlay
                     .lock()
@@ -185,10 +187,54 @@ impl Matching {
                     task_type,
                     crate::matching_registry::DEFAULT_QPS_TRACKER_INTERVAL_NANOS,
                 )
-            });
+            })
+        };
+        let executions = state.executions.clone();
+        let isolation: crate::matching_registry::IsolationProvider = Arc::new(move |domain_id, task_list, task_type, kind, pollers| {
+            let name = domain_name_for(&domains, domain_id);
+            let config = overlay.lock().expect("admin lock");
+            let enabled = cadence_persistence::dynamic_config::boolean(config.property_values("system.enableTasklistIsolation"), name.as_deref(), false);
+            let groups = if enabled && kind != 1 { cadence_persistence::dynamic_config::string_list(config.property_values("system.allIsolationGroups")) } else { Vec::new() };
+            drop(config);
+            let known = groups.clone();
+            let overlay = overlay.clone();
+            let domains = domains.clone();
+            let domain_id = domain_id.to_owned();
+            let task_list = task_list.to_owned();
+            let executions = executions.clone();
+            crate::matching_reader::IsolationConfig {
+                groups,
+                select: Arc::new(move |task| {
+                    let group = task.partition_config.as_ref().and_then(|map| map.get(ISOLATION_GROUP_KEY)).map(String::as_str).unwrap_or_default();
+                    let now = matching_now();
+                    let config = overlay.lock().expect("admin lock");
+                    let duration = |key, default| cadence_persistence::dynamic_config::task_list_duration(config.property_values(key), name.as_deref(), &task_list, task_type, default);
+                    let window = duration("matching.taskIsolationPollerWindow", 2_000_000_000);
+                    let total_duration = duration("matching.taskIsolationDuration", 200_000_000);
+                    drop(config);
+                    let drained = name.as_deref().ok_or(()).and_then(|name| domains.domain_isolation_groups(name).map_err(|_| ())).map(|config| {
+                        config.into_iter().flat_map(|config| config.isolation_groups).any(|partition| partition.name == group && partition.state == Some(cadence_api::enums::IsolationGroupState::Drained))
+                        || domains.global_isolation_groups().into_iter().flat_map(|config| config.isolation_groups).any(|partition| partition.name == group && partition.state == Some(cadence_api::enums::IsolationGroupState::Drained))
+                    });
+                    let partition = executions.partition_config(&domain_id, &task_list, task_type + 1);
+                    let partition_id = TaskListName::parse(&task_list).map(|name| name.partition() as i32).unwrap_or_default();
+                    let partition_groups = partition.as_ref().map(|config| config.read_partitions.get(&partition_id));
+                    let empty = Vec::new();
+                    let policy = cadence_common::task_isolation::TaskIsolation {
+                        enabled, sticky: kind == 1, group, known: known.iter().any(|known| known == group), drained,
+                        recent_poller: pollers.lock().expect("poller history lock").has_group_after(group, now.saturating_sub(window)),
+                        partition_groups: match partition_groups { None => Some(empty.as_slice()), Some(groups) => groups.map(Vec::as_slice) },
+                        total_duration, task_latency: now.saturating_sub(task.created_nanos),
+                    };
+                    let (group, duration) = policy.select();
+                    (group.to_owned(), duration)
+                }),
+            }
+        });
         let queues = queues
             .with_partition_count(provider.clone())
             .with_qps_interval(qps_interval)
+            .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
         let mut matching = Self::new(state);
         matching.queues = Some(queues);

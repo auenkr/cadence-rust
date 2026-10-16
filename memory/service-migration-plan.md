@@ -64,8 +64,12 @@ unless noted):
   configured isolation-group QPS and poller counts, and polls retain group
   attribution (matching-isolation-next.md). Latest full runner:29 stages and395
   workspace tests passed, strict all-target lint clean.
-- gate 4 still open: forwarding, partition routing/scaling, isolation-aware
-  dispatch/state/balancing and semaphores. Reporting is not dispatch isolation.
+- gate 4 backlog isolation: independent group buffers/handoffs, live drain and
+  poller-recency/age/partition checks, shared fallback verified by actual-Go
+  fixtures and mixed isolationDispatch probe. Full30 stages pass;401 workspace
+  tests and strict lint pass (matching-isolation-dispatch-next.md).
+- gate 4 still open: forwarding, partition routing/scaling, isolation enable
+  owner reload/state/balancing and semaphores. Backlog routing is not the full gate.
 - gate 6 still open: cancellations, retries/timeouts beyond the SDK probe,
   partitioned lists, concurrent pollers, crash/restart and failover, and the
   baseline history/error comparison.

@@ -77,6 +77,29 @@ fn list() -> Option<p::TaskList> {
     })
 }
 #[tokio::test]
+async fn matching_rpc_isolation_policy_rechecks_drains_and_poller_recency() {
+    let (_dir, _store, matching, key) = fixture();
+    use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
+    {
+        let mut config = matching.frontend.state.admin.dynamic_config.lock().unwrap();
+        for (name, value) in [("system.enableTasklistIsolation", "true"), ("system.allIsolationGroups", "[\"a\"]")] {
+            config.update(false, name, vec![DynamicConfigValue { value: Some(DataBlob::new(EncodingType::JSON, value.as_bytes().to_vec())), filters: vec![] }]);
+        }
+    }
+    let queue = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    let provider = matching.queues.as_ref().unwrap().isolation_provider_for_test();
+    let isolation = provider(&key.domain_id.to_string(), "queue", 0, 0, queue.pollers.clone());
+    let task = cadence_persistence::matching_blob::TaskData { created_nanos: matching_now(), partition_config: Some(std::collections::BTreeMap::from([("isolation-group".into(), "a".into())])), ..Default::default() };
+    assert_eq!((isolation.select)(&task).0, "", "no recent group poller leaks");
+    queue.pollers.lock().unwrap().start("id", cadence_common::poller::Info { identity: "worker".into(), rate_per_second: 1.0, isolation_group: "a".into() }, matching_now());
+    assert_eq!((isolation.select)(&task).0, "a");
+    matching.frontend.state.domains.update_domain_isolation_groups("domain", Some(cadence_api::types::IsolationGroupConfiguration { isolation_groups: vec![cadence_api::types::IsolationGroupPartition { name: "a".into(), state: Some(cadence_api::enums::IsolationGroupState::Drained) }] })).unwrap();
+    assert_eq!((isolation.select)(&task).0, "", "drain changes leak without restarting the owner");
+    let sticky = provider(&key.domain_id.to_string(), "queue", 0, 1, queue.pollers.clone());
+    assert!(sticky.groups.is_empty());
+    assert_eq!((sticky.select)(&task).0, "");
+}
+#[tokio::test]
 async fn matching_rpc_durable_add_does_not_require_local_workflow_state() {
     let (_dir, store, matching, key) = fixture();
     matching
