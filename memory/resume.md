@@ -1,3 +1,10 @@
+Latest continuation (2026-10-16): read matching-config-next.md. Task-list/type
+filtered partition-count and QPS providers implemented; 2 persistence tests,
+83 server lib tests and strict all-target workspace Clippy passed. Full runner
+running under tmux cadence-rust; /tmp/opencode/cadence-scoped-full.exit is the
+completion marker. No full pass claimed yet. Next isolation-group poller
+attribution/Describe metrics, then remaining Matching gates. No role complete.
+
 Latest scalar rate-report checkpoint:11 actual-Go sequences,30 common tests and
 strict all-target workspace Clippy passed. See matching-rate-next.md. New runner
 has28 stages; full runtime last passed367 tests/27 stages before scalar addition.

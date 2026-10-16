@@ -154,15 +154,17 @@ impl Matching {
         let provider: crate::matching_registry::PartitionCountProvider = {
             let domains = domains.clone();
             let overlay = overlay.clone();
-            Arc::new(move |domain_id: &str, _task_list: &str, _task_type: i32| -> i64 {
+            Arc::new(move |domain_id: &str, task_list: &str, task_type: i32| -> i64 {
                 let values = overlay
                     .lock()
                     .expect("admin lock")
                     .property_values("matching.numTasklistWritePartitions")
                     .to_vec();
-                cadence_persistence::dynamic_config::integer(
+                cadence_persistence::dynamic_config::task_list_integer(
                     &values,
                     domain_name_for(&domains, domain_id).as_deref(),
+                    task_list,
+                    task_type,
                     1,
                 )
             })
@@ -170,15 +172,17 @@ impl Matching {
         // Go `cfg.QPSTrackerInterval(domain, taskList, type)`
         // (`matching.qpsTrackerInterval`, default 10s in nanoseconds).
         let qps_interval: crate::matching_registry::QpsIntervalProvider =
-            Arc::new(move |domain_id: &str, _task_list: &str, _task_type: i32| -> i64 {
+            Arc::new(move |domain_id: &str, task_list: &str, task_type: i32| -> i64 {
                 let values = overlay
                     .lock()
                     .expect("admin lock")
                     .property_values("matching.qpsTrackerInterval")
                     .to_vec();
-                cadence_persistence::dynamic_config::duration(
+                cadence_persistence::dynamic_config::task_list_duration(
                     &values,
                     domain_name_for(&domains, domain_id).as_deref(),
+                    task_list,
+                    task_type,
                     crate::matching_registry::DEFAULT_QPS_TRACKER_INTERVAL_NANOS,
                 )
             });

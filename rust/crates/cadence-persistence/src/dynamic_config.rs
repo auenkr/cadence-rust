@@ -12,29 +12,82 @@ fn decode(blob: Option<&DataBlob>) -> Option<Value> {
 }
 
 pub fn filters_match(value: &DynamicConfigValue, domain: Option<&str>) -> bool {
-    if value.filters.len() > usize::from(domain.is_some()) {
+    filters_match_context(value, domain, None)
+}
+
+fn filters_match_context(
+    value: &DynamicConfigValue,
+    domain: Option<&str>,
+    task_list: Option<(&str, i32)>,
+) -> bool {
+    if value.filters.len() > usize::from(domain.is_some()) + 2 * usize::from(task_list.is_some()) {
         return false;
     }
     value.filters.iter().all(|filter| {
-        filter.name == "domainName"
-            && domain.is_some_and(|domain| {
-                decode(filter.value.as_ref()) == Some(Value::String(domain.into()))
-            })
+        let expected = match filter.name.as_str() {
+            "domainName" => domain.map(|name| Value::String(name.into())),
+            "taskListName" => task_list.map(|(name, _)| Value::String(name.into())),
+            "taskType" => task_list.map(|(_, kind)| Value::from(kind)),
+            _ => None,
+        };
+        expected.is_some() && decode(filter.value.as_ref()) == expected
     })
 }
 
 fn selected(values: &[DynamicConfigValue], domain: Option<&str>) -> Option<Value> {
+    selected_context(values, domain, None)
+}
+
+// Entries are ordered, not ranked by specificity: the first matching filtered
+// entry wins; the last decodable unfiltered entry is the fallback.
+fn selected_context(
+    values: &[DynamicConfigValue],
+    domain: Option<&str>,
+    task_list: Option<(&str, i32)>,
+) -> Option<Value> {
     let mut fallback = None;
     for value in values {
         if value.filters.is_empty() {
             if let Some(value) = decode(value.value.as_ref()) {
                 fallback = Some(value);
             }
-        } else if filters_match(value, domain) {
+        } else if filters_match_context(value, domain, task_list) {
             return decode(value.value.as_ref());
         }
     }
     fallback
+}
+
+/// Matching properties scoped by domain name, physical task-list name and the
+/// persistence task type (0 decision, 1 activity), not the public API enum.
+pub fn task_list_integer(
+    values: &[DynamicConfigValue],
+    domain: Option<&str>,
+    task_list: &str,
+    task_type: i32,
+    default: i64,
+) -> i64 {
+    selected_context(values, domain, Some((task_list, task_type)))
+        .and_then(|value| value.as_f64())
+        .filter(|value| value.is_finite() && value.trunc() == *value)
+        .map(|value| value as i64)
+        .unwrap_or(default)
+}
+
+pub fn task_list_duration(
+    values: &[DynamicConfigValue],
+    domain: Option<&str>,
+    task_list: &str,
+    task_type: i32,
+    default: i64,
+) -> i64 {
+    selected_context(values, domain, Some((task_list, task_type)))
+        .and_then(|value| {
+            value
+                .as_str()
+                .and_then(cadence_common::duration::parse_nanos)
+        })
+        .unwrap_or(default)
 }
 
 pub fn integer(values: &[DynamicConfigValue], domain: Option<&str>, default: i64) -> i64 {
@@ -53,4 +106,95 @@ pub fn duration(values: &[DynamicConfigValue], domain: Option<&str>, default: i6
                 .and_then(cadence_common::duration::parse_nanos)
         })
         .unwrap_or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadence_api::admin::DynamicConfigFilter;
+    use serde_json::json;
+
+    fn entry(value: Value, filters: &[(&str, Value)]) -> DynamicConfigValue {
+        let blob = |value: &Value| {
+            Some(DataBlob::new(
+                EncodingType::JSON,
+                serde_json::to_vec(value).unwrap(),
+            ))
+        };
+        DynamicConfigValue {
+            value: blob(&value),
+            filters: filters
+                .iter()
+                .map(|(name, value)| DynamicConfigFilter {
+                    name: (*name).into(),
+                    value: blob(value),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn task_list_filters_require_every_constraint_and_preserve_entry_order() {
+        let values = vec![
+            entry(json!(2), &[]),
+            entry(
+                json!(7),
+                &[
+                    ("domainName", json!("domain")),
+                    ("taskListName", json!("queue")),
+                    ("taskType", json!(0)),
+                ],
+            ),
+            entry(json!(5), &[("taskListName", json!("queue"))]),
+            entry(json!(3), &[]),
+        ];
+        for (domain, list, kind, expected) in [
+            (Some("domain"), "queue", 0, 7),
+            (Some("domain"), "queue", 1, 5),
+            (Some("other"), "queue", 0, 5),
+            (None, "queue", 0, 5),
+            (Some("domain"), "other", 0, 3),
+            (Some("domain"), "/__cadence_sys/queue/1", 0, 3),
+        ] {
+            assert_eq!(task_list_integer(&values, domain, list, kind, 1), expected);
+        }
+        assert_eq!(
+            integer(&values, Some("domain"), 1),
+            3,
+            "domain-only callers must not match task-list filters"
+        );
+        let broad_first = vec![values[2].clone(), values[1].clone()];
+        assert_eq!(
+            task_list_integer(&broad_first, Some("domain"), "queue", 0, 1),
+            5
+        );
+    }
+
+    #[test]
+    fn scoped_duration_and_invalid_values_fall_back_without_skipping_matches() {
+        let values = vec![
+            entry(json!("2s"), &[]),
+            entry(json!("50ms"), &[("taskType", json!(1))]),
+        ];
+        assert_eq!(
+            task_list_duration(&values, None, "queue", 1, 10),
+            50_000_000
+        );
+        assert_eq!(
+            task_list_duration(&values, None, "queue", 0, 10),
+            2_000_000_000
+        );
+        for filters in [vec![("taskType", json!("1"))], vec![("unknown", json!(1))]] {
+            assert_eq!(
+                task_list_integer(&[entry(json!(8), &filters)], None, "queue", 1, 4),
+                4
+            );
+        }
+        let values = vec![
+            entry(json!(9), &[]),
+            entry(json!(1.5), &[("taskType", json!(0))]),
+            entry(json!(6), &[("taskType", json!(0))]),
+        ];
+        assert_eq!(task_list_integer(&values, None, "queue", 0, 4), 4);
+    }
 }

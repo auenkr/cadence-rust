@@ -347,6 +347,36 @@ async fn matching_rpc_lists_configured_write_partitions() {
     );
 }
 
+#[tokio::test]
+async fn matching_rpc_scopes_partition_counts_to_task_list_and_type() {
+    let (_dir, _store, matching, key) = fixture();
+    use cadence_api::{admin::{DynamicConfigFilter, DynamicConfigValue}, enums::EncodingType, types::DataBlob};
+    let json_blob = |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(
+        false, "matching.numTasklistWritePartitions", vec![DynamicConfigValue {
+            value: json_blob(serde_json::json!(4)),
+            filters: vec![
+                DynamicConfigFilter { name: "domainName".into(), value: json_blob(serde_json::json!("domain")) },
+                DynamicConfigFilter { name: "taskListName".into(), value: json_blob(serde_json::json!("queue")) },
+                DynamicConfigFilter { name: "taskType".into(), value: json_blob(serde_json::json!(1)) },
+            ],
+        }],
+    );
+    let response = matching.list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
+        domain: "domain".into(), task_list: list(),
+    })).await.unwrap().into_inner();
+    assert_eq!(response.decision_task_list_partitions.len(), 1);
+    assert_eq!(response.activity_task_list_partitions.len(), 4);
+    let decision = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    let activity = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 1).await.unwrap();
+    assert_eq!(decision.limiter.partitions(), 1);
+    assert_eq!(activity.limiter.partitions(), 4);
+    let other = matching.list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
+        domain: "domain".into(), task_list: Some(p::TaskList { name: "other".into(), ..Default::default() }),
+    })).await.unwrap().into_inner();
+    assert_eq!(other.activity_task_list_partitions.len(), 1);
+}
+
 /// Minimal History used by the query test: only `GetMutableState` is
 /// overridden, every other RPC keeps the generated `unimplemented` default.
 struct FakeHistory {
@@ -529,7 +559,20 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
                     cadence_api::enums::EncodingType::JSON,
                     b"\"50ms\"".to_vec(),
                 )),
-                filters: vec![],
+                filters: vec![
+                    cadence_api::admin::DynamicConfigFilter {
+                        name: "taskListName".into(),
+                        value: Some(cadence_api::types::DataBlob::new(
+                            cadence_api::enums::EncodingType::JSON, b"\"queue\"".to_vec(),
+                        )),
+                    },
+                    cadence_api::admin::DynamicConfigFilter {
+                        name: "taskType".into(),
+                        value: Some(cadence_api::types::DataBlob::new(
+                            cadence_api::enums::EncodingType::JSON, b"0".to_vec(),
+                        )),
+                    },
+                ],
             }],
         );
     let add = |schedule_id: i64, partition_config: HashMap<String, String>| {
@@ -567,7 +610,10 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
     // arrivals are still invisible.
     assert_eq!(queue.qps.qps(), 0.0);
     assert_eq!(queue.qps.group_qps("z"), 0.0);
+    let activity = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 1).await.unwrap();
+    activity.qps.report_counter(1);
     tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(activity.qps.qps(), 0.0, "activity tracker retains the default 10s window");
     // Three root arrivals and two isolation-group arrivals were reported, and
     // the group counts toward the root as well.
     assert!(queue.qps.qps() > 0.0);
