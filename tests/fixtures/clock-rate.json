@@ -1,0 +1,1015 @@
+[
+  {
+    "name": "burst-replenishment",
+    "rate": "2",
+    "burst": 2,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "1",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 250000000,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 250000000,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 1000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "unused-restores-at-reserved-time",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "a",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 900000000,
+        "op": "used",
+        "id": "a",
+        "allowed": false,
+        "tokens": "1",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 900000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 900000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "interleaved-clock-prevents-restore",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "a",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "tokens",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "used",
+        "id": "a",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "denied-reserve-rolls-back",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "a",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "b",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "used",
+        "id": "b",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "used",
+        "id": "a",
+        "allowed": false,
+        "tokens": "1",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "c",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "used-token-not-returned",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "a",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "used",
+        "id": "a",
+        "used": true,
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "check",
+        "id": "a",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "repeated-unused",
+    "rate": "2",
+    "burst": 2,
+    "steps": [
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "a",
+        "allowed": true,
+        "tokens": "1",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "used",
+        "id": "a",
+        "allowed": false,
+        "tokens": "1",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "used",
+        "id": "a",
+        "allowed": false,
+        "tokens": "2",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "1",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "clock-does-not-rewind",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      },
+      {
+        "now": 1500000000,
+        "op": "tokens",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 2000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 2000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "setters-do-not-advance-clock",
+    "rate": "2",
+    "burst": 2,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "1",
+        "limit": "2",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "both",
+        "rate": "1",
+        "burst": 1,
+        "allowed": false,
+        "tokens": "1",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "tokens",
+        "allowed": false,
+        "tokens": "1",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 500000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "setters-before-first-use",
+    "rate": "2",
+    "burst": 2,
+    "steps": [
+      {
+        "now": 1000000000,
+        "op": "limit",
+        "rate": "10",
+        "allowed": false,
+        "tokens": "2",
+        "limit": "10",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": true
+      },
+      {
+        "now": 2000000000,
+        "op": "burst",
+        "burst": 5,
+        "allowed": false,
+        "tokens": "2",
+        "limit": "10",
+        "actual_burst": 5,
+        "latest": 0,
+        "latest_zero": true
+      },
+      {
+        "now": 2000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "4",
+        "limit": "10",
+        "actual_burst": 5,
+        "latest": 2000000000,
+        "latest_zero": false
+      },
+      {
+        "now": 2000000000,
+        "op": "tokens",
+        "allowed": false,
+        "tokens": "4",
+        "limit": "10",
+        "actual_burst": 5,
+        "latest": 2000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "zero-rate-positive-burst",
+    "rate": "0",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "0",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "a",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "0",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "tokens",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "0",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "0",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "zero-burst",
+    "rate": "1",
+    "burst": 0,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 0,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "reserve",
+        "id": "a",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 0,
+        "latest": 1000000000,
+        "latest_zero": false
+      },
+      {
+        "now": 2000000000,
+        "op": "used",
+        "id": "a",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 0,
+        "latest": 1000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "fractional-rate",
+    "rate": "0.3",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "0.3",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 3333333333,
+        "op": "reserve",
+        "id": "a",
+        "allowed": true,
+        "tokens": "-1.000000082740371e-10",
+        "limit": "0.3",
+        "actual_burst": 1,
+        "latest": 3333333333,
+        "latest_zero": false
+      },
+      {
+        "now": 3333333334,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "1.999999917259629e-10",
+        "limit": "0.3",
+        "actual_burst": 1,
+        "latest": 3333333334,
+        "latest_zero": false
+      },
+      {
+        "now": 6666666668,
+        "op": "tokens",
+        "allowed": false,
+        "tokens": "1",
+        "limit": "0.3",
+        "actual_burst": 1,
+        "latest": 6666666668,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "infinite-rate-zero-burst",
+    "rate": "1.7976931348623157e308",
+    "burst": 0,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1.7976931348623157e+308",
+        "actual_burst": 0,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "a",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1.7976931348623157e+308",
+        "actual_burst": 0,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 1,
+        "op": "used",
+        "id": "a",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1.7976931348623157e+308",
+        "actual_burst": 0,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 1,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1.7976931348623157e+308",
+        "actual_burst": 0,
+        "latest": 1,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "rate-change-before-unused",
+    "rate": "1",
+    "burst": 2,
+    "steps": [
+      {
+        "now": 0,
+        "op": "reserve",
+        "id": "a",
+        "allowed": true,
+        "tokens": "1",
+        "limit": "1",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "limit",
+        "rate": "10",
+        "allowed": false,
+        "tokens": "1",
+        "limit": "10",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "used",
+        "id": "a",
+        "allowed": false,
+        "tokens": "2",
+        "limit": "10",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "1",
+        "limit": "10",
+        "actual_burst": 2,
+        "latest": 0,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "negative-rate",
+    "rate": "-1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "-1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "reserve",
+        "id": "a",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "-1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "tokens",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "-1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "wait-immediate",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "wait_error": "ok",
+        "now": 0,
+        "op": "wait",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "wait-zero-burst",
+    "rate": "1",
+    "burst": 0,
+    "steps": [
+      {
+        "wait_error": "zero",
+        "now": 0,
+        "op": "wait",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 0,
+        "latest": 0,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "wait-deadline-return",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "deadline": 999999999,
+        "wait_error": "deadline",
+        "now": 0,
+        "op": "wait",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "wait-timer-completes",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "wait_advance": 1000000000,
+        "wait_error": "ok",
+        "wait_delay": 1000000000,
+        "now": 0,
+        "op": "wait",
+        "allowed": false,
+        "tokens": "-1",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      },
+      {
+        "now": 2000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 2000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "wait-cancellation-restores",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "wait_advance": 500000000,
+        "wait_cancel": true,
+        "wait_error": "cancelled",
+        "wait_delay": 1000000000,
+        "now": 0,
+        "op": "wait",
+        "allowed": false,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      }
+    ]
+  },
+  {
+    "name": "wait-cancel-after-observation",
+    "rate": "1",
+    "burst": 1,
+    "steps": [
+      {
+        "now": 0,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 0,
+        "latest_zero": false
+      },
+      {
+        "wait_advance": 500000000,
+        "wait_cancel": true,
+        "interleave": true,
+        "wait_error": "cancelled",
+        "wait_delay": 1000000000,
+        "now": 0,
+        "op": "wait",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 500000000,
+        "op": "allow",
+        "allowed": false,
+        "tokens": "0.5",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 500000000,
+        "latest_zero": false
+      },
+      {
+        "now": 1000000000,
+        "op": "allow",
+        "allowed": true,
+        "tokens": "0",
+        "limit": "1",
+        "actual_burst": 1,
+        "latest": 1000000000,
+        "latest_zero": false
+      }
+    ]
+  }
+]

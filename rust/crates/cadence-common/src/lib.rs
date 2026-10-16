@@ -25,3 +25,4 @@ pub mod poller;
 pub mod liveness;
 
 pub mod matching_rate;
+pub mod rate_limiter;

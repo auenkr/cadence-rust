@@ -60,6 +60,7 @@ def main():
         run("workspace-tests", ["cargo", "test", "--manifest-path", manifest, "--workspace"])
         run("workspace-clippy", ["cargo", "clippy", "--manifest-path", manifest,
                                  "--workspace", "--all-targets", "--", "-D", "warnings"])
+    run("clock-rate-differential", [sys.executable, str(root / "tests/run-clock-rate-compat.py")], timeout=300)
     run("matching-rate-differential", [sys.executable, str(root / "tests/run-matching-rate-compat.py")], timeout=300)
     run("matching-retry-differential", [sys.executable, str(root / "tests/run-matching-retry-compat.py")], timeout=300)
     run("matching-writer-differential", [sys.executable, str(root / "tests/run-matching-writer-compat.py")], timeout=300)
