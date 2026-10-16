@@ -28,6 +28,20 @@ See matching-reader-next.md. 349 tests, strict lint, all 27 compatibility stages
 including mixed Go services passed. User reconfirmed complete Matching before
 History; no service is complete. Next: background reader and matcher rendezvous.
 
+# Current resume checkpoint (2026-10-16) — arrival QPS tracker
+
+Read matching-qps-next.md first. Go's `common/stats` EMA fixed-window QPS tracker
+is ported (`cadence_common::qps::EmaQpsTracker`, clock-driven with per-window
+attribution) and wired into the durable matcher: non-forwarded
+`AddDecisionTask`/`AddActivityTask` report arrivals (grouped by the task's
+`isolation-group`), and durable `DescribeTaskList` reports
+`newTasksPerSecond`. Window length comes from `matching.qpsTrackerInterval`
+(default 10s). 35 cadence-common + 81 cadence-server lib tests and strict
+all-target Clippy pass. Next Matching gate items: `LoadBalancerHints`,
+`isolation_group_metrics`, forwarding, partition routing/scaling, isolation
+groups, semaphores, membership/ownership, standalone lifecycle, and wiring the
+durable matcher into the production standalone server.
+
 # Current resume checkpoint (2026-10-16) — sticky availability
 
 Read matching-sticky-next.md first. Sticky task lists now fail fast like Go: a

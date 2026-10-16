@@ -29,6 +29,7 @@ struct Owner {
     limiter: Arc<crate::matching_limiter::TaskListLimiter>,
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     queries: Arc<crate::matching_query::QueryChannel>,
+    qps: Arc<cadence_common::qps::EmaQpsTracker>,
     last_update: Mutex<tokio::time::Instant>,
     next_idle_check: Mutex<tokio::time::Instant>,
     liveness: Arc<cadence_common::liveness::Liveness>,
@@ -71,10 +72,21 @@ pub struct QueueRegistry {
     /// Go `cfg.NumTasklistWritePartitions(domain, taskList, type)`, clamped to
     /// >= 1 by the same caller. `None` keeps the single-partition default.
     partition_count: Option<PartitionCountProvider>,
+    /// Go `cfg.QPSTrackerInterval(domain, taskList, type)`. `None` uses the
+    /// dynamic-property default (10s).
+    qps_interval: Option<QpsIntervalProvider>,
 }
 /// Live write-partition-count provider used to size the dispatch limiter and to
 /// enumerate partitions, mirroring Go's `NumTasklistWritePartitions`.
 pub type PartitionCountProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
+/// Live QPS-tracker window per task list, mirroring Go's
+/// `cfg.QPSTrackerInterval(domain, taskList, type)` (`matching.qpsTrackerInterval`,
+/// default 10s). Returned in nanoseconds.
+pub type QpsIntervalProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
+/// Go `config.QPSTrackerInterval` default.
+pub const DEFAULT_QPS_TRACKER_INTERVAL_NANOS: i64 = 10_000_000_000;
+/// Go `taskListManagerImpl` constructs its tracker with `exp = 0.5`.
+const QPS_TRACKER_EXP: f64 = 0.5;
 #[derive(Clone)]
 pub struct QueueHandle {
     pub queue: Arc<DurableTaskQueue>,
@@ -83,6 +95,9 @@ pub struct QueueHandle {
     pub limiter: Arc<crate::matching_limiter::TaskListLimiter>,
     /// Go `matcher.queryTaskC` plus the engine's `lockableQueryTaskMap`.
     pub queries: Arc<crate::matching_query::QueryChannel>,
+    /// Go `taskListManagerImpl.qpsTracker`: arrival QPS reported through
+    /// `DescribeTaskList.newTasksPerSecond` and the isolation group metrics.
+    pub qps: Arc<cadence_common::qps::EmaQpsTracker>,
     liveness: Arc<cadence_common::liveness::Liveness>,
     writer: crate::matching_writer::TaskWriter,
 }
@@ -185,12 +200,19 @@ impl QueueRegistry {
             startups: Arc::new(Mutex::new(HashMap::new())),
             domain_metadata: None,
             partition_count: None,
+            qps_interval: None,
         }
     }
     /// Install Go's `NumTasklistWritePartitions` provider. The provider reads
     /// `matching.numTasklistWritePartitions`; the registry clamps to >= 1.
     pub fn with_partition_count(mut self, provider: PartitionCountProvider) -> Self {
         self.partition_count = Some(provider);
+        self
+    }
+    /// Install Go's `QPSTrackerInterval` provider. The provider reads
+    /// `matching.qpsTrackerInterval` (default 10s) in nanoseconds.
+    pub fn with_qps_interval(mut self, provider: QpsIntervalProvider) -> Self {
+        self.qps_interval = Some(provider);
         self
     }
     pub fn with_domain_metadata(
@@ -280,6 +302,26 @@ impl QueueRegistry {
                         registry_now(),
                         300_000_000_000,
                     ));
+                    // Go `stats.NewEmaFixedWindowQPSTracker(timeSource, 0.5,
+                    // cfg.QPSTrackerInterval(domain, taskList, type), ...)`.
+                    let qps = Arc::new(cadence_common::qps::EmaQpsTracker::new(
+                        QPS_TRACKER_EXP,
+                        std::time::Duration::from_nanos(
+                            registry
+                                .qps_interval
+                                .as_ref()
+                                .map(|provider| {
+                                    provider(
+                                        &lookup.0.to_string(),
+                                        &lookup.1,
+                                        lookup.2,
+                                    )
+                                })
+                                .unwrap_or(DEFAULT_QPS_TRACKER_INTERVAL_NANOS)
+                                .max(1) as u64,
+                        ),
+                        cadence_common::qps::system_clock(),
+                    ));
                     let activity_domain = domain.clone();
                     let metadata = registry.domain_metadata.clone();
                     let activity = Arc::new(move || {
@@ -325,6 +367,7 @@ impl QueueRegistry {
                         queue,
                         pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                         queries: Arc::new(crate::matching_query::QueryChannel::new()),
+                        qps,
                         last_update: Mutex::new(tokio::time::Instant::now()),
                         next_idle_check: Mutex::new(
                             tokio::time::Instant::now() + std::time::Duration::from_secs(150),
@@ -350,6 +393,7 @@ impl QueueRegistry {
                 pollers: owner.pollers.clone(),
                 limiter: owner.limiter.clone(),
                 queries: owner.queries.clone(),
+                qps: owner.qps.clone(),
                 liveness: owner.liveness.clone(),
                 writer: owner.writer.clone(),
             })

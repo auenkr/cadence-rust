@@ -7,6 +7,37 @@ use cadence_common::task_list::TaskListName;
 fn matching_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|time| time.as_nanos() as i64).unwrap_or_default()
 }
+/// Resolve a domain UUID to its name the way Go's domain cache does before
+/// applying a dynamic-property filter. Unknown or unnamed domains fall back to
+/// unfiltered values.
+fn domain_name_for(domains: &cadence_persistence::InMemoryDomainStore, domain_id: &str) -> Option<String> {
+    domains
+        .describe(&cadence_api::service_types::DescribeDomainRequest {
+            name: None,
+            uuid: Some(domain_id.to_owned()),
+        })
+        .ok()
+        .and_then(|response| response.domain_info.map(|info| info.name))
+        .filter(|name| !name.is_empty())
+}
+/// Go `taskListManagerImpl.AddTask` QPS reporting: an arrival counts toward the
+/// root, and toward its isolation group when the task carries one.
+fn report_arrival(
+    queue: &crate::matching_registry::QueueHandle,
+    data: &cadence_persistence::matching_blob::TaskData,
+) {
+    match data
+        .partition_config
+        .as_ref()
+        .and_then(|config| config.get(ISOLATION_GROUP_KEY))
+    {
+        Some(group) => queue.qps.report_group(group, 1),
+        None => queue.qps.report_counter(1),
+    }
+}
+/// Go `isolationgroup.GroupKey`: the task partition-config key carrying the
+/// task's isolation group.
+const ISOLATION_GROUP_KEY: &str = "isolation-group";
 fn task_list_name(name: &str) -> Result<TaskListName, Status> {
     TaskListName::parse(name).map_err(Status::invalid_argument)
 }
@@ -120,25 +151,40 @@ impl Matching {
         // its own dynamic properties from.
         let domains = state.domains.clone();
         let overlay = state.admin.dynamic_config.clone();
-        let provider: crate::matching_registry::PartitionCountProvider =
+        let provider: crate::matching_registry::PartitionCountProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
             Arc::new(move |domain_id: &str, _task_list: &str, _task_type: i32| -> i64 {
-                let domain_name = domains
-                    .describe(&cadence_api::service_types::DescribeDomainRequest {
-                        name: None,
-                        uuid: Some(domain_id.to_owned()),
-                    })
-                    .ok()
-                    .and_then(|response| response.domain_info.map(|info| info.name))
-                    .filter(|name| !name.is_empty());
                 let values = overlay
                     .lock()
                     .expect("admin lock")
                     .property_values("matching.numTasklistWritePartitions")
                     .to_vec();
-                cadence_persistence::dynamic_config::integer(&values, domain_name.as_deref(), 1)
+                cadence_persistence::dynamic_config::integer(
+                    &values,
+                    domain_name_for(&domains, domain_id).as_deref(),
+                    1,
+                )
+            })
+        };
+        // Go `cfg.QPSTrackerInterval(domain, taskList, type)`
+        // (`matching.qpsTrackerInterval`, default 10s in nanoseconds).
+        let qps_interval: crate::matching_registry::QpsIntervalProvider =
+            Arc::new(move |domain_id: &str, _task_list: &str, _task_type: i32| -> i64 {
+                let values = overlay
+                    .lock()
+                    .expect("admin lock")
+                    .property_values("matching.qpsTrackerInterval")
+                    .to_vec();
+                cadence_persistence::dynamic_config::duration(
+                    &values,
+                    domain_name_for(&domains, domain_id).as_deref(),
+                    crate::matching_registry::DEFAULT_QPS_TRACKER_INTERVAL_NANOS,
+                )
             });
         let queues = queues
             .with_partition_count(provider.clone())
+            .with_qps_interval(qps_interval)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
         let mut matching = Self::new(state);
         matching.queues = Some(queues);
@@ -345,6 +391,10 @@ impl m::matching_api_server::MatchingApi for Matching {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
             };
+            // Go `taskListManagerImpl.AddTask`: a non-forwarded add marks
+            // liveness and reports arrival QPS, grouped by the task's isolation
+            // group when it has one.
+            report_arrival(&queue, &data);
             queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
             return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: None }));
         }
@@ -392,6 +442,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
             };
+            report_arrival(&queue, &data);
             queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
             return Ok(Response::new(m::AddActivityTaskResponse { partition_config: None }));
         }
@@ -826,7 +877,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             }).collect();
             let task_list_status = if payload.include_task_list_status {
                 let (read_level, ack_level, backlog_count_hint, start_id, end_id, empty) = queue.queue.status();
-                Some(p::TaskListStatus { read_level, ack_level, backlog_count_hint, task_id_block: Some(p::TaskIdBlock { start_id, end_id }), empty, rate_per_second: queue.limiter.limit(), ..Default::default() })
+                Some(p::TaskListStatus { read_level, ack_level, backlog_count_hint, task_id_block: Some(p::TaskIdBlock { start_id, end_id }), empty, rate_per_second: queue.limiter.limit(), new_tasks_per_second: queue.qps.qps(), ..Default::default() })
             } else { None };
             let partition_config = self.frontend.state.executions.partition_config(&r.domain_id, &task_list_name, task_list_type).map(partition_config_to_proto);
             return Ok(Response::new(m::DescribeTaskListResponse { pollers, task_list_status, task_list, partition_config }));

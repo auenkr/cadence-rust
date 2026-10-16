@@ -510,6 +510,92 @@ async fn matching_rpc_delivers_query_to_decision_poller() {
 }
 
 #[tokio::test]
+async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
+    let (_dir, _store, matching, key) = fixture();
+    // Go `matching.qpsTrackerInterval` (default 10s; shortened here) is read
+    // when the task list manager is created, so it is updated first.
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin lock")
+        .update(
+            false,
+            "matching.qpsTrackerInterval",
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"\"50ms\"".to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
+    let add = |schedule_id: i64, partition_config: HashMap<String, String>| {
+        let matching = matching.clone();
+        let domain = key.domain_id.to_string();
+        async move {
+            matching
+                .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+                    domain_id: domain,
+                    workflow_execution: execution(),
+                    task_list: list(),
+                    schedule_id,
+                    partition_config,
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
+        }
+    };
+    for schedule_id in [1, 2, 3] {
+        add(schedule_id, HashMap::new()).await;
+    }
+    for schedule_id in [4, 5] {
+        add(
+            schedule_id,
+            HashMap::from([(ISOLATION_GROUP_KEY.to_string(), "z".to_string())]),
+        )
+        .await;
+    }
+    let queue = matching
+        .durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0)
+        .await
+        .unwrap();
+    // Go's tracker only reports when a window closes, so the open window's
+    // arrivals are still invisible.
+    assert_eq!(queue.qps.qps(), 0.0);
+    assert_eq!(queue.qps.group_qps("z"), 0.0);
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    // Three root arrivals and two isolation-group arrivals were reported, and
+    // the group counts toward the root as well.
+    assert!(queue.qps.qps() > 0.0);
+    assert!(queue.qps.group_qps("z") > 0.0);
+    let status = matching
+        .describe_task_list(Request::new(m::DescribeTaskListRequest {
+            domain_id: key.domain_id.to_string(),
+            request: Some(p::DescribeTaskListRequest {
+                task_list: list(),
+                task_list_type: 1,
+                include_task_list_status: true,
+                ..Default::default()
+            }),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    // DescribeTaskList reports the same arrival rate the tracker holds.
+    assert!(
+        status
+            .task_list_status
+            .expect("status requested")
+            .new_tasks_per_second
+            > 0.0
+    );
+}
+
+#[tokio::test]
 async fn matching_rpc_sticky_task_list_requires_a_recent_poller() {
     let (_dir, _store, matching, key) = fixture();
     let domain = key.domain_id.to_string();
