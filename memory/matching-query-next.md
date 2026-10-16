@@ -68,7 +68,10 @@ there, so a query would never reach the SDK worker polling Matching.
     `WorkerAPI.RespondQueryTaskCompleted`, and `queryResult.data === 'pong'`
     came back to the caller. The existing Go SDK run in the same probe also
     passed.
-- Full 29/30-stage runner: see `matching-query-full/results.json`.
+- **Full 29/29-stage runner PASSED** (exit 0, including workspace tests/clippy,
+  `public-grpc`, `internal-grpc`, `go-sdk-tchannel`,
+  `go-services-matching-delivery`, `go-services-rust-matching`):
+  `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-query-full/results.json`.
 
 ## Remaining limits (do NOT report as complete)
 

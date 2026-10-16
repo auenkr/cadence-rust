@@ -39,6 +39,8 @@ tests + strict all-target Clippy pass. Mixed Go Frontend/History/Worker ->
 Rust Matching PASSED with a new `queryDispatch` scenario (the existing Go SDK
 run in the same probe also passed):
 /home/ubuntu/.cache/cadence-rust-test-artifacts/matching-query-mixed/probe.log.
+The full 29/29-stage runner also passed:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-query-full/results.json.
 Next Matching gate items: forwarding, partition routing/scaling, isolation
 groups, semaphores, sticky availability, membership/ownership, standalone
 lifecycle, and wiring the durable matcher into the production standalone
