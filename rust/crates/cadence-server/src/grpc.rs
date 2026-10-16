@@ -29,12 +29,28 @@ pub(crate) fn detailed_status<M: Message>(
     name: &str,
     detail: M,
 ) -> Status {
+    detailed_status_type(
+        code,
+        message,
+        format!("type.googleapis.com/uber.cadence.api.v1.{name}"),
+        detail,
+    )
+}
+/// Go `types/mapper/proto.FromError` packs shared-v1 errors (for example
+/// `RemoteSyncMatchedError`, mapped to `CodeUnavailable`) with their own
+/// proto package URL instead of the api.v1 prefix above.
+pub(crate) fn detailed_status_type<M: Message>(
+    code: tonic::Code,
+    message: impl Into<String>,
+    type_url: String,
+    detail: M,
+) -> Status {
     let message = message.into();
     let status = RpcStatus {
         code: code as i32,
         message: message.clone(),
         details: vec![prost_types::Any {
-            type_url: format!("type.googleapis.com/uber.cadence.api.v1.{name}"),
+            type_url,
             value: detail.encode_to_vec(),
         }],
     };

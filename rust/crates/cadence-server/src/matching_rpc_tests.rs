@@ -531,6 +531,149 @@ async fn start_fake_history(state: h::GetMutableStateResponse) -> String {
     });
     format!("http://{address}")
 }
+
+struct StartingHistory;
+#[tonic::async_trait]
+impl h::history_api_server::HistoryApi for StartingHistory {
+    async fn record_decision_task_started(
+        &self,
+        request: Request<h::RecordDecisionTaskStartedRequest>,
+    ) -> Result<Response<h::RecordDecisionTaskStartedResponse>, Status> {
+        let request = request.into_inner();
+        Ok(Response::new(h::RecordDecisionTaskStartedResponse {
+            scheduled_event_id: request.schedule_id,
+            started_event_id: request.schedule_id + 1,
+            ..Default::default()
+        }))
+    }
+}
+
+async fn start_starting_history() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(h::history_api_server::HistoryApiServer::new(StartingHistory))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    format!("http://{address}")
+}
+
+#[tokio::test]
+async fn matching_rpc_sync_success_without_partition_metadata_does_not_persist() {
+    let address = start_starting_history().await;
+    let (_dir, store, matching, key) = fixture_with_history(&address);
+    let worker = matching.clone();
+    let domain = key.domain_id.to_string();
+    let poll = tokio::spawn(async move {
+        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain,
+            poller_id: "sync-worker".into(),
+            request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }),
+            ..Default::default()
+        })).await.unwrap().into_inner()
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while matching.polls.lock().unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    let response = matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(),
+        workflow_execution: execution(),
+        task_list: list(),
+        schedule_id: 31,
+        ..Default::default()
+    })).await.unwrap().into_inner();
+    assert!(response.partition_config.is_none());
+    assert_eq!(tokio::time::timeout(Duration::from_secs(2), poll).await.unwrap().unwrap().started_event_id, 32);
+    assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_child_poll_forwards_to_parent_backlog() {
+    let address = start_starting_history().await;
+    let (_dir, store, matching, key) = fixture_with_history(&address);
+    matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(),
+        workflow_execution: execution(), task_list: list(), schedule_id: 41,
+        ..Default::default()
+    })).await.unwrap();
+    assert_eq!(store.task_list_size(&key, 0).unwrap(), 1);
+    let response = tokio::time::timeout(Duration::from_secs(2), matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(), poller_id: "child-worker".into(),
+        request: Some(p::PollForDecisionTaskRequest {
+            task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }))).await.expect("child forwards instead of blocking on its empty reader").unwrap().into_inner();
+    assert_eq!(response.started_event_id, 42);
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_child_add_sync_matches_parent_without_duplicate_persistence() {
+    let address = start_starting_history().await;
+    let (_dir, store, matching, key) = fixture_with_history(&address);
+    let worker = matching.clone();
+    let domain = key.domain_id.to_string();
+    let poll = tokio::spawn(async move {
+        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain, poller_id: "parent-worker".into(),
+            request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }),
+            ..Default::default()
+        })).await.unwrap().into_inner()
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while matching.polls.lock().unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    let child_name = "/__cadence_sys/queue/1";
+    matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(), workflow_execution: execution(),
+        task_list: Some(p::TaskList { name: child_name.into(), kind: 1, ..Default::default() }),
+        schedule_id: 51, ..Default::default()
+    })).await.unwrap();
+    assert_eq!(tokio::time::timeout(Duration::from_secs(2), poll).await.unwrap().unwrap().started_event_id, 52);
+    assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
+    assert_eq!(store.task_list_size(&TaskListKey { name: child_name.into(), ..key }, 0).unwrap(), 0);
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_cancelled_forwarded_poll_unregisters_parent_waiter() {
+    let (_dir, _store, matching, key) = fixture();
+    let worker = matching.clone();
+    let domain = key.domain_id.to_string();
+    let poll = tokio::spawn(async move {
+        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain, poller_id: "cancel-forward".into(),
+            request: Some(p::PollForDecisionTaskRequest {
+                task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
+                identity: "cancel-forward".into(), ..Default::default()
+            }), ..Default::default()
+        })).await
+    });
+    let root = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root.pollers.lock().unwrap().contains_poll("cancel-forward") {
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("forward registers a parent waiter");
+    poll.abort();
+    assert!(poll.await.unwrap_err().is_cancelled());
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while root.pollers.lock().unwrap().contains_poll("cancel-forward") {
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("cancellation withdraws the forwarded waiter");
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
 /// Matches Go matching's query task metadata: the frontend loads history with
 /// `next_event_id`, and a sticky task list plus a supported client decides
 /// `sticky_execution_enabled`.
@@ -1053,4 +1196,101 @@ async fn matching_rpc_native_partition_cache_controls_dispatch_rate_and_drained_
     assert_eq!(child.qps.qps(), 0.0);
     assert!(store.get_tasks(&TaskListKey { name: "/__cadence_sys/queue/5".into(), ..key }, 0, i64::MAX, 10).unwrap().is_empty());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_forwarded_add_never_persists_and_reports_remote_failure() {
+    let (_dir, store, matching, key) = fixture();
+    // Skip the sync wait so the unmatched forward fails fast; the failure
+    // path itself is what this test covers.
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin lock")
+        .update(
+            false,
+            "matching.localTaskWaitTime",
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"\"0\"".to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
+    // Go `errRemoteSyncMatchFailed`: with no poller waiting, a forwarded add
+    // fails instead of persisting; the child partition keeps the task.
+    let error = matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: key.domain_id.to_string(),
+            workflow_execution: execution(),
+            task_list: list(),
+            schedule_id: 11,
+            forwarded_from: "/__cadence_sys/queue/1".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert_eq!(error.message(), "remote sync match failed");
+    let details = String::from_utf8_lossy(error.details());
+    assert!(
+        details.contains("uber.cadence.shared.v1.RemoteSyncMatchedError"),
+        "Go decodes the shared.v1 detail, got {details:?}"
+    );
+    assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
+    // A forwarded add reports neither liveness nor arrival QPS.
+    let queue = matching
+        .durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0)
+        .await
+        .unwrap();
+    assert_eq!(queue.qps.qps(), 0.0);
+}
+
+#[tokio::test]
+async fn matching_rpc_child_partition_add_falls_back_to_local_persist() {
+    let (_dir, store, matching, key) = fixture();
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin lock")
+        .update(
+            false,
+            "matching.localTaskWaitTime",
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"\"0\"".to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
+    // Go `Offer` falls back to the child partition when no poller takes the
+    // task locally or at the root: the child persists and dispatches it.
+    let child_name = "/__cadence_sys/queue/1".to_string();
+    matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: key.domain_id.to_string(),
+            workflow_execution: execution(),
+            task_list: Some(p::TaskList {
+                name: child_name.clone(),
+                kind: 1,
+                ..Default::default()
+            }),
+            schedule_id: 12,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    let child_key = TaskListKey {
+        name: child_name,
+        ..key
+    };
+    assert_eq!(store.task_list_size(&child_key, 0).unwrap(), 1);
 }

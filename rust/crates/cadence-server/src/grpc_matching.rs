@@ -1,7 +1,7 @@
 //! Native internal MatchingAPI adapters and outstanding-poll cancellation.
 //! Queue storage currently shares the single-process Rust execution engine.
 use crate::{grpc::Frontend, grpc_internal::History};
-use cadence_proto::{api as p, matching as m};
+use cadence_proto::{api as p, matching as m, shared};
 use cadence_common::task_list::TaskListName;
 
 fn matching_now() -> i64 {
@@ -115,7 +115,18 @@ struct PollGuard {
     key: PollKey,
     cancel: Arc<Notify>,
 }
-impl Drop for PollGuard {
+/// Parameters for the sync-match partition walk shared by decision and
+/// activity adds.
+struct ForwardedAdd<'a> {
+    domain_id: &'a str,
+    list: &'a p::TaskList,
+    task_type: i32,
+    data: &'a cadence_persistence::matching_blob::TaskData,
+    source: uuid::Uuid,
+    entry: &'a crate::matching_registry::QueueHandle,
+    deadline: tokio::time::Instant,
+    forwarded: bool,
+}impl Drop for PollGuard {
     fn drop(&mut self) {
         let mut polls = self.polls.lock().expect("poll cancellation lock");
         if polls
@@ -220,6 +231,22 @@ impl Matching {
                 )
             })
         };
+        let forward_degree: crate::matching_registry::ForwardDegreeProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.forwarderMaxChildrenPerNode"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 20)
+            })
+        };
+        let forward_polls: crate::matching_registry::ForwardPollsProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.forwarderMaxOutstandingPolls"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 1)
+            })
+        };
         let isolation: crate::matching_registry::IsolationProvider = Arc::new(move |domain_id, task_list, task_type, kind, pollers, partitions| {
             let name = domain_name_for(&domains, domain_id);
             let config = overlay.lock().expect("admin lock");
@@ -269,6 +296,8 @@ impl Matching {
             .with_partition_count(read_provider)
             .with_partition_cache_enabled(cache_enabled)
             .with_sync_wait(sync_wait)
+            .with_forward_degree(forward_degree)
+            .with_forward_polls(forward_polls)
             .with_qps_interval(qps_interval)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
@@ -295,6 +324,80 @@ impl Matching {
             return Err(crate::grpc::detailed_status(tonic::Code::Aborted, "Current partition is drained.", "ReadOnlyPartitionError", p::ReadOnlyPartitionError {}));
         }
         Ok(())
+    }
+    /// Go `types/mapper/proto.fromRemoteSyncMatchedErr`: `CodeUnavailable`
+    /// carrying an empty `uber.cadence.shared.v1.RemoteSyncMatchedError`
+    /// detail with the engine message. A child partition receiving it persists
+    /// the task itself instead of retrying.
+    fn remote_sync_failed() -> Status {
+        crate::grpc::detailed_status_type(
+            tonic::Code::Unavailable,
+            "remote sync match failed",
+            "type.googleapis.com/uber.cadence.shared.v1.RemoteSyncMatchedError".to_string(),
+            shared::RemoteSyncMatchedError {},
+        )
+    }
+    /// Go `taskListManagerImpl.AddTask` sync flow with in-process partition
+    /// forwarding. The entry partition tries its own pollers first (dispatch
+    /// limited unless the add already arrived forwarded), then each ancestor
+    /// up to the root tries its pollers with forwarded semantics, mirroring
+    /// `matcher.Offer` chaining `ForwardTask` to the parent. Returns the
+    /// entry owner's partition config when some level sync-matches. The outer
+    /// option records success independently of optional partition metadata.
+    /// A drained ancestor aborts the chain like Go's parent `AddTask`
+    /// rejecting the forward; the caller then falls back to the entry queue.
+    async fn sync_match_chain(&self, add: ForwardedAdd<'_>) -> Result<Option<Option<m::TaskListPartitionConfig>>, Status> {
+        let ForwardedAdd {
+            domain_id,
+            list,
+            task_type,
+            data,
+            source,
+            entry,
+            deadline,
+            forwarded,
+        } = add;
+        let name = task_list_name(&list.name)?;
+        let degree = {
+            let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+            cadence_persistence::dynamic_config::task_list_integer(
+                config.property_values("matching.forwarderMaxChildrenPerNode"),
+                domain_name_for(&self.frontend.state.domains, domain_id).as_deref(),
+                name.root(),
+                task_type,
+                20,
+            )
+        };
+        let mut list = list.clone();
+        let mut handle = entry.clone();
+        let mut ancestor = false;
+        loop {
+            let matched = if ancestor || forwarded {
+                handle.try_sync_match_forwarded(data, source, deadline).await
+            } else {
+                handle.try_sync_match(data, source, deadline).await
+            };
+            if matched {
+                return Ok(Some(entry.partitions.get().map(partition_config_to_internal)));
+            }
+            let name = TaskListName::parse(&list.name).map_err(|_| Status::invalid_argument("TaskList is not valid."))?;
+            if name.is_root() || list.kind == 2 || degree <= 0 || tokio::time::Instant::now() >= deadline {
+                return Ok(None);
+            }
+            let parent = name.parent(degree);
+            if parent.is_empty() {
+                return Ok(None);
+            }
+            list.name = parent;
+            handle = match self.durable_queue(domain_id, &list, task_type).await {
+                Ok(handle) => handle,
+                Err(_) => return Ok(None),
+            };
+            if handle.stop_if_isolation_changed() || self.check_write_partition(domain_id, &list, task_type, &handle).is_err() {
+                return Ok(None);
+            }
+            ancestor = true;
+        }
     }
     fn domain_name(&self, id: &str) -> Result<String, Status> {
         History {
@@ -494,7 +597,6 @@ impl m::matching_api_server::MatchingApi for Matching {
         task_list_name(r.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default())?;
         let domain = self.domain_name(&r.domain_id)?;
         if self.queues.is_some() {
-            if !r.forwarded_from.is_empty() { return Err(Status::unimplemented("Durable forwarded sync matching is not migrated yet.")); }
             let list = r.task_list.as_ref().ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
             let execution = r.workflow_execution.as_ref().ok_or_else(|| Status::invalid_argument("WorkflowExecution is not set."))?;
             let run = uuid::Uuid::parse_str(&execution.run_id).map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
@@ -507,15 +609,44 @@ impl m::matching_api_server::MatchingApi for Matching {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
             }.at_creation(matching_now(), 0);
-            // Go `taskListManagerImpl.AddTask`: a non-forwarded add marks
+            let forwarded = !r.forwarded_from.is_empty();
+            // Go `taskListManagerImpl.AddTask`: only a non-forwarded add marks
             // liveness and reports arrival QPS, grouped by the task's isolation
             // group when it has one.
-            report_arrival(&queue, &data);
-            let remaining = parent_deadline.map(|deadline| deadline.saturating_duration_since(tokio::time::Instant::now()));
-            let deadline = tokio::time::Instant::now() + crate::matching_sync::sync_match_budget(remaining);
+            if !forwarded {
+                report_arrival(&queue, &data);
+            }
+            // Go `trySyncMatch`: a non-forwarded add spends at most 200ms
+            // keeping 1s of tailroom, while a forwarded add trusts the incoming
+            // context as is.
+            let deadline = if forwarded {
+                parent_deadline.unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_millis(200))
+            } else {
+                let remaining = parent_deadline.map(|deadline| deadline.saturating_duration_since(tokio::time::Instant::now()));
+                tokio::time::Instant::now() + crate::matching_sync::sync_match_budget(remaining)
+            };
             let active = self.frontend.state.domains.is_active_in(&source.to_string(), &self.frontend.state.current_cluster_name).map_err(|error| Status::not_found(error.message))?;
-            if active && queue.try_sync_match(&data, source, deadline).await {
-                return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
+            if active {
+                let matched = self
+                    .sync_match_chain(ForwardedAdd {
+                        domain_id: &r.domain_id,
+                        list,
+                        task_type: 0,
+                        data: &data,
+                        source,
+                        entry: &queue,
+                        deadline,
+                        forwarded,
+                    })
+                    .await?;
+                if let Some(partition_config) = matched {
+                    return Ok(Response::new(m::AddDecisionTaskResponse { partition_config }));
+                }
+            }
+            // Go `errRemoteSyncMatchFailed`: a forwarded add never persists;
+            // the child partition keeps the task when sync matching fails.
+            if forwarded {
+                return Err(Self::remote_sync_failed());
             }
             queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
             return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
@@ -554,7 +685,6 @@ impl m::matching_api_server::MatchingApi for Matching {
         task_list_name(r.task_list.as_ref().map(|t| t.name.as_str()).unwrap_or_default())?;
         let domain = self.domain_name(&r.domain_id)?;
         if self.queues.is_some() {
-            if !r.forwarded_from.is_empty() { return Err(Status::unimplemented("Durable forwarded sync matching is not migrated yet.")); }
             let list = r.task_list.as_ref().ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
             let execution = r.workflow_execution.as_ref().ok_or_else(|| Status::invalid_argument("WorkflowExecution is not set."))?;
             let run = uuid::Uuid::parse_str(&execution.run_id).map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
@@ -567,12 +697,36 @@ impl m::matching_api_server::MatchingApi for Matching {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
             }.at_creation(matching_now(), 0);
-            report_arrival(&queue, &data);
-            let remaining = parent_deadline.map(|deadline| deadline.saturating_duration_since(tokio::time::Instant::now()));
-            let deadline = tokio::time::Instant::now() + crate::matching_sync::sync_match_budget(remaining);
+            let forwarded = !r.forwarded_from.is_empty();
+            if !forwarded {
+                report_arrival(&queue, &data);
+            }
+            let deadline = if forwarded {
+                parent_deadline.unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_millis(200))
+            } else {
+                let remaining = parent_deadline.map(|deadline| deadline.saturating_duration_since(tokio::time::Instant::now()));
+                tokio::time::Instant::now() + crate::matching_sync::sync_match_budget(remaining)
+            };
             let active = self.frontend.state.domains.is_active_in(&source.to_string(), &self.frontend.state.current_cluster_name).map_err(|error| Status::not_found(error.message))?;
-            if active && queue.try_sync_match(&data, source, deadline).await {
-                return Ok(Response::new(m::AddActivityTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));
+            if active {
+                let matched = self
+                    .sync_match_chain(ForwardedAdd {
+                        domain_id: &r.domain_id,
+                        list,
+                        task_type: 1,
+                        data: &data,
+                        source,
+                        entry: &queue,
+                        deadline,
+                        forwarded,
+                    })
+                    .await?;
+                if let Some(partition_config) = matched {
+                    return Ok(Response::new(m::AddActivityTaskResponse { partition_config }));
+                }
+            }
+            if forwarded {
+                return Err(Self::remote_sync_failed());
             }
             queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
             return Ok(Response::new(m::AddActivityTaskResponse { partition_config: queue.partitions.get().map(partition_config_to_internal) }));

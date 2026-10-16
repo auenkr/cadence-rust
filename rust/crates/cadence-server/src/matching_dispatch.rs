@@ -54,6 +54,34 @@ pub struct TaskDispatcher {
     writer: Option<crate::matching_writer::TaskWriter>,
     reader: Option<crate::matching_reader::TaskReader>,
     sync_matcher: Option<Arc<crate::matching_sync::SyncMatcher>>,
+    forward: Option<ForwardState>,
+    pollers: Option<Arc<std::sync::Mutex<cadence_common::poller::Manager>>>,
+}
+/// Go `forwarder.ForwardPoll`: a child partition with no local task hands its
+/// poll to the parent partition, which runs its full poll (History start
+/// included) and returns the started response. Resolution is lazy so parent
+/// reloads are picked up on the next forward; permits bound concurrent
+/// forwarded polls like Go's `ForwarderMaxOutstandingPolls`.
+#[derive(Clone)]
+pub(crate) struct ForwardState {
+    resolve: Arc<ParentResolver>,
+    permits: Arc<tokio::sync::Semaphore>,
+}
+type ParentFuture = std::pin::Pin<Box<dyn Future<Output = Option<TaskDispatcher>> + Send>>;
+type ParentResolver = dyn Fn() -> ParentFuture + Send + Sync;
+impl ForwardState {
+    pub(crate) fn new(
+        resolve: impl Fn() -> std::pin::Pin<Box<dyn Future<Output = Option<TaskDispatcher>> + Send>>
+            + Send
+            + Sync
+            + 'static,
+        max_outstanding: usize,
+    ) -> Self {
+        Self {
+            resolve: Arc::new(resolve),
+            permits: Arc::new(tokio::sync::Semaphore::new(max_outstanding)),
+        }
+    }
 }
 fn now() -> i64 {
     SystemTime::now()
@@ -68,6 +96,7 @@ struct DeliveryTask {
 enum ClaimError {
     Queue(QueueError),
     Join(tokio::task::JoinError),
+    Forward(tokio::sync::OwnedSemaphorePermit),
 }
 fn queue_status(error: QueueError) -> Status {
     Status::unavailable(error.to_string())
@@ -92,6 +121,8 @@ impl TaskDispatcher {
             writer: None,
             reader: None,
             sync_matcher: None,
+            forward: None,
+            pollers: None,
         }
     }
     pub fn with_liveness(mut self, liveness: Arc<cadence_common::liveness::Liveness>) -> Self {
@@ -108,6 +139,14 @@ impl TaskDispatcher {
     }
     pub fn with_sync_matcher(mut self, matcher: Arc<crate::matching_sync::SyncMatcher>) -> Self {
         self.sync_matcher = Some(matcher);
+        self
+    }
+    pub(crate) fn with_forward(mut self, forward: ForwardState) -> Self {
+        self.forward = Some(forward);
+        self
+    }
+    pub(crate) fn with_pollers(mut self, pollers: Arc<std::sync::Mutex<cadence_common::poller::Manager>>) -> Self {
+        self.pollers = Some(pollers);
         self
     }
     pub fn task_notification(&self) -> Arc<Notify> {
@@ -223,6 +262,59 @@ impl TaskDispatcher {
                 self.queue.stop();
             }
         }
+    }
+    /// Go `pollOrForward`'s forward leg: with no local task, run the parent
+    /// partition's delivery loop through this same poll. The parent claims
+    /// from its own queue and this poll reports the parent's started task;
+    /// the response channel is shared, so a sent parent response ends this
+    /// poll. Returns true when polling is done (response sent or poll dead).
+    /// A missing parent, an exhausted permit budget, or no remaining time
+    /// returns false so the caller falls back to the local wait, mirroring
+    /// Go recursing into the local poll when forwarding is unavailable.
+    /// Boxed (not `async`) to break the `delivery_loop` recursion cycle:
+    /// child loops delegate to parent loops through this future.
+    fn forward_poll<'a, Q, R, F, Fut>(
+        &'a self,
+        poll: Q,
+        sender: &'a mut Option<oneshot::Sender<Result<R, Status>>>,
+        deliver: &'a mut F,
+        budget: (tokio::time::Instant, tokio::sync::OwnedSemaphorePermit),
+        lifecycle: Option<PollLifecycle>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + 'a>>
+    where
+        Q: Clone + Send + 'a,
+        R: Default + Send + 'a,
+        F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send + 'a,
+        Fut: Future<Output = Result<R, Status>> + Send + 'a,
+    {
+        Box::pin(async move {
+            let (deadline, _permit) = budget;
+            let Some(forward) = self.forward.as_ref() else {
+                return false;
+            };
+            if sender.as_ref().is_some_and(|sender| sender.is_closed()) {
+                return true;
+            }
+            if deadline.saturating_duration_since(tokio::time::Instant::now()).is_zero() {
+                return false;
+            }
+            let Some(parent) = (forward.resolve)().await else {
+                return false;
+            };
+            // The parent loop governs its own lifecycle chain; this poll keeps
+            // its own waiter registration while forwarded, as in Go where the
+            // child poller stays registered during `ForwardPoll`.
+            let lifecycle = lifecycle.and_then(|mut lifecycle| {
+                lifecycle.manager = parent.pollers.clone()?;
+                // ForwardPoll rebuilds the request without the worker's rate.
+                lifecycle.info.rate_per_second = crate::matching_limiter::TASK_DISPATCH_RPS;
+                Some(lifecycle)
+            });
+            parent
+                .delivery_loop(poll, sender, deliver, lifecycle, deadline)
+                .await;
+            true
+        })
     }
     /// Caller/controller supplies the configured long-poll expiration. Dropping
     /// this future closes the receiver; the worker rewrites any claimed task.
@@ -351,9 +443,10 @@ impl TaskDispatcher {
     {
         let (sender, receiver) = oneshot::channel();
         let worker = self.clone();
+        let deadline = tokio::time::Instant::now() + expiration;
         tokio::spawn(async move {
             worker
-                .delivery_worker(poll, sender, deliver, lifecycle)
+                .delivery_worker(poll, sender, deliver, lifecycle, deadline)
                 .await;
         });
         match tokio::time::timeout(expiration, receiver).await {
@@ -365,9 +458,31 @@ impl TaskDispatcher {
     async fn delivery_worker<Q, R, F, Fut>(
         &self,
         poll: Q,
-        mut sender: oneshot::Sender<Result<R, Status>>,
+        sender: oneshot::Sender<Result<R, Status>>,
         mut deliver: F,
         lifecycle: Option<PollLifecycle>,
+        deadline: tokio::time::Instant,
+    ) where
+        Q: Clone + Send,
+        R: Default + Send,
+        F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send,
+        Fut: Future<Output = Result<R, Status>> + Send,
+    {
+        let mut sender = Some(sender);
+        self.delivery_loop(poll, &mut sender, &mut deliver, lifecycle, deadline)
+            .await;
+    }
+    /// The loop borrows the response channel and the History starter so a
+    /// forwarded parent poll can deliver through this same poll: the parent
+    /// claims from its own queue and this poll reports the parent's started
+    /// task, exactly like Go's `ForwardPoll` returning a started task.
+    async fn delivery_loop<Q, R, F, Fut>(
+        &self,
+        poll: Q,
+        sender: &mut Option<oneshot::Sender<Result<R, Status>>>,
+        deliver: &mut F,
+        lifecycle: Option<PollLifecycle>,
+        deadline: tokio::time::Instant,
     ) where
         Q: Clone + Send,
         R: Default + Send,
@@ -376,8 +491,9 @@ impl TaskDispatcher {
     {
         let mut waiting = None;
         let mut waiting_started = false;
+        let mut forward_failed = false;
         loop {
-            if sender.is_closed() {
+            if sender.as_ref().is_some_and(|sender| sender.is_closed()) {
                 return;
             }
             if !waiting_started {
@@ -392,24 +508,51 @@ impl TaskDispatcher {
             let notification = self.wake.notified();
             tokio::pin!(notification);
             notification.as_mut().enable();
-            let claim = if self.reader.is_some() {
-                // Waiting on the rendezvous owns no task. Cancellation can
-                // withdraw this poll without stealing a later backlog row.
-                tokio::select! {
-                    biased;
-                    _ = sender.closed() => return,
-                    result = self.claim_delivery(lifecycle.as_ref().map(|l| l.info.isolation_group.as_str()).unwrap_or_default()) => result,
+            let claim = {
+                let closed = async {
+                    match sender.as_mut() {
+                        Some(sender) => sender.closed().await,
+                        None => std::future::pending().await,
+                    }
+                };
+                tokio::pin!(closed);
+                if self.reader.is_some() {
+                    // Waiting on the rendezvous owns no task. Cancellation can
+                    // withdraw this poll without stealing a later backlog row.
+                    tokio::select! {
+                        biased;
+                        _ = &mut closed => return,
+                        result = self.claim_delivery(lifecycle.as_ref().map(|l| l.info.isolation_group.as_str()).unwrap_or_default()) => result,
+                        permit = async {
+                            match &self.forward {
+                                Some(forward) if !forward_failed => forward.permits.clone().acquire_owned().await.ok(),
+                                _ => std::future::pending().await,
+                            }
+                        } => match permit {
+                            Some(permit) => Err(ClaimError::Forward(permit)),
+                            None => Err(ClaimError::Queue(QueueError::Stopped)),
+                        },
+                    }
+                } else {
+                    self.claim_delivery("").await
                 }
-            } else {
-                self.claim_delivery("").await
             };
             let (task, scan_pending) = match claim {
                 Ok(value) => value,
+                Err(ClaimError::Forward(permit)) => {
+                    if self.forward_poll(poll.clone(), sender, deliver, (deadline, permit), lifecycle.clone()).await {
+                        return;
+                    }
+                    forward_failed = true;
+                    continue;
+                }
                 Err(ClaimError::Queue(QueueError::Stopped)) => {
                     drop(waiting.take());
                     // Go maps a closed task-list pump to an empty successful
                     // poll, allowing workers to poll its replacement normally.
-                    let _ = sender.send(Ok(R::default()));
+                    if let Some(sender) = sender.take() {
+                        let _ = sender.send(Ok(R::default()));
+                    }
                     return;
                 }
                 Err(error) => {
@@ -417,8 +560,11 @@ impl TaskDispatcher {
                     let status = match error {
                         ClaimError::Queue(error) => queue_status(error),
                         ClaimError::Join(error) => Status::internal(error.to_string()),
+                        ClaimError::Forward(_) => unreachable!("handled above"),
                     };
-                    let _ = sender.send(Err(status));
+                    if let Some(sender) = sender.take() {
+                        let _ = sender.send(Err(status));
+                    }
                     return;
                 }
             };
@@ -427,25 +573,53 @@ impl TaskDispatcher {
                     tokio::task::yield_now().await;
                     continue;
                 }
-                tokio::select! {_=sender.closed()=>return,_=notification=>(),_=tokio::time::sleep(Duration::from_millis(100))=>()};
+                if sender.is_none()
+                    || sender.as_ref().is_some_and(|sender| sender.is_closed())
+                {
+                    return;
+                }
+                let waited = {
+                    let closed = async {
+                        match sender.as_mut() {
+                            Some(sender) => sender.closed().await,
+                            None => std::future::pending().await,
+                        }
+                    };
+                    tokio::pin!(closed);
+                    tokio::select! {_=&mut closed=>true,_=notification=>false,_=tokio::time::sleep(Duration::from_millis(100))=>false}
+                };
+                if waited {
+                    return;
+                }
                 continue;
             };
             drop(waiting.take());
             waiting_started = false;
-            if sender.is_closed() {
+            if sender.as_ref().is_some_and(|sender| sender.is_closed()) {
                 self.finish_delivery(task, Err(Status::cancelled("Poll cancelled before start.")))
                     .await;
                 return;
             }
-            let result = tokio::select! {
-                biased;
-                _=sender.closed()=>{self.finish_delivery(task, Err(Status::cancelled("Poll cancelled during start."))).await;return;},
-                result=deliver(task.task.clone(),poll.clone(),task.sync.as_ref().map(|sync| sync.source_domain.clone()))=>result,
+            let result = {
+                let closed = async {
+                    match sender.as_mut() {
+                        Some(sender) => sender.closed().await,
+                        None => std::future::pending().await,
+                    }
+                };
+                tokio::pin!(closed);
+                tokio::select! {
+                    biased;
+                    _=&mut closed=>{self.finish_delivery(task, Err(Status::cancelled("Poll cancelled during start."))).await;return;},
+                    result=deliver(task.task.clone(),poll.clone(),Some(task.sync.as_ref().map(|sync| sync.source_domain.clone()).unwrap_or_else(|| self.domain_id.clone())))=>result,
+                }
             };
             match result {
                 Ok(response) => {
                     self.finish_delivery(task, Ok(())).await;
-                    let _ = sender.send(Ok(response));
+                    if let Some(sender) = sender.take() {
+                        let _ = sender.send(Ok(response));
+                    }
                     return;
                 }
                 Err(error) => match start_error_kind(&error) {
@@ -845,5 +1019,56 @@ mod tests {
         assert!(!liveness.is_alive(now()));
         poll.abort();
         assert!(poll.await.unwrap_err().is_cancelled());
+    }
+    #[tokio::test]
+    async fn matching_dispatch_sync_offer_delivers_without_durable_claim() {
+        let (_directory, store, key, dispatcher) = fixture(0);
+        let reader = crate::matching_reader::TaskReader::new(
+            dispatcher.queue.clone(),
+            dispatcher.task_notification(),
+            crate::matching_reader::ReaderConfig::default(),
+        );
+        let matcher = Arc::new(crate::matching_sync::SyncMatcher::new(
+            &[],
+            reader.stop_signal().subscribe(),
+        ));
+        let dispatcher = dispatcher.with_reader(reader).with_sync_matcher(matcher.clone());
+        let data = TaskData {
+            workflow_id: "sync".into(),
+            ..Default::default()
+        };
+        let producer = tokio::spawn(async move {
+            matcher
+                .offer(
+                    data,
+                    "",
+                    &Uuid::from_u128(1).to_string(),
+                    Duration::from_secs(10),
+                    tokio::time::Instant::now() + Duration::from_secs(10),
+                )
+                .await
+        });
+        // Go `matcher.Offer` with a response channel succeeds only when the
+        // poller reports delivery success; nothing is claimed from SQLite.
+        let response = dispatcher
+            .poll((), Duration::from_secs(10), |task, _| {
+                assert_eq!(task.task_id, 0, "sync tasks carry no durable ID");
+                std::future::ready(Ok(m::PollForDecisionTaskResponse {
+                    task_token: vec![7],
+                    ..Default::default()
+                }))
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.task_token, vec![7]);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), producer)
+                .await
+                .expect("producer resolves")
+                .unwrap(),
+            "History-gated handoff reports success to the adder"
+        );
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
+        assert_eq!(dispatcher.queue.levels(), (0, 0, 0));
     }
 }

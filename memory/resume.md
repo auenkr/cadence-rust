@@ -1,3 +1,11 @@
+Latest sync/local-forwarding continuation (2026-10-16): read
+matching-sync-forwarding-next.md first. Sync committed a9531588d; uncommitted
+local forwarding draft passed workspace tests (105 server unit tests including
+cancellation regression) and workspace strict Clippy. Full runner now on Go
+differential stages, cadence-rust:forward-gates,
+/tmp/opencode/forward-gates.log and .exit. Check outcome; no complete-service
+claim. Cross-host routing, backlog/query forwarding and remaining gates open.
+
 Latest partition protobuf follow-up (2026-10-16): read
 matching-native-partition-next.md. Public/internal partition config map encoders
 now preserve explicit empty message presence for pinned Go. Exact-byte Rust

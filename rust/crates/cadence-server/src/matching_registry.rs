@@ -82,6 +82,12 @@ pub struct QueueRegistry {
     partition_count: Option<PartitionCountProvider>,
     cache_enabled: Option<PartitionCacheEnabledProvider>,
     sync_wait: Option<SyncWaitProvider>,
+    /// Go `cfg.ForwarderMaxChildrenPerNode(domain, taskList, type)`
+    /// (`matching.forwarderMaxChildrenPerNode`, default 20). `None` uses the default.
+    forward_degree: Option<ForwardDegreeProvider>,
+    /// Go `cfg.ForwarderMaxOutstandingPolls(domain, taskList, type)`
+    /// (`matching.forwarderMaxOutstandingPolls`, default 1). `None` uses the default.
+    forward_polls: Option<ForwardPollsProvider>,
     /// Go `cfg.QPSTrackerInterval(domain, taskList, type)`. `None` uses the
     /// dynamic-property default (10s).
     qps_interval: Option<QpsIntervalProvider>,
@@ -91,6 +97,12 @@ pub type IsolationProvider = Arc<dyn Fn(&str, &str, i32, i16, Arc<Mutex<cadence_
 /// Live read-partition-count provider used to size the dispatch limiter and to
 /// divide dispatch rate, mirroring Go's `NumTasklistReadPartitions`.
 pub type SyncWaitProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
+/// Partition-tree degree used to resolve a child partition's parent for
+/// add/poll forwarding, mirroring Go's `ForwarderMaxChildrenPerNode`.
+pub type ForwardDegreeProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
+/// Bound on concurrent forwarded polls per child partition, mirroring Go's
+/// `ForwarderMaxOutstandingPolls`.
+pub type ForwardPollsProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 pub type PartitionCacheEnabledProvider = Arc<dyn Fn(&str, &str, i32) -> bool + Send + Sync>;
 pub type PartitionCountProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 /// Live QPS-tracker window per task list, mirroring Go's
@@ -133,13 +145,24 @@ impl QueueHandle {
     }
     pub fn mark_alive(&self) { self.liveness.mark_alive(registry_now()); }
     pub async fn try_sync_match(&self, data: &TaskData, source_domain: Uuid, deadline: tokio::time::Instant) -> bool {
+        self.offer_sync(data, source_domain, deadline, true).await
+    }
+    /// Go `TaskMatcher.Offer` skips the dispatch rate limiter for tasks
+    /// already forwarded from a child partition; the entry partition limited
+    /// them before forwarding.
+    pub async fn try_sync_match_forwarded(&self, data: &TaskData, source_domain: Uuid, deadline: tokio::time::Instant) -> bool {
+        self.offer_sync(data, source_domain, deadline, false).await
+    }
+    async fn offer_sync(&self, data: &TaskData, source_domain: Uuid, deadline: tokio::time::Instant, limit: bool) -> bool {
         use crate::matching_limiter::WaitOutcome;
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() || self.queue.is_stopped() { return false; }
-        let limiter_deadline = self.limiter.now().saturating_add(remaining.as_nanos().min(i64::MAX as u128) as i64);
-        let stop = self.sync_matcher.stop_signal();
-        let acquired = tokio::time::timeout_at(deadline, self.limiter.wait_until(stop, Some(limiter_deadline))).await;
-        if !matches!(acquired, Ok(WaitOutcome::Acquired)) { return false; }
+        if limit {
+            let limiter_deadline = self.limiter.now().saturating_add(remaining.as_nanos().min(i64::MAX as u128) as i64);
+            let stop = self.sync_matcher.stop_signal();
+            let acquired = tokio::time::timeout_at(deadline, self.limiter.wait_until(stop, Some(limiter_deadline))).await;
+            if !matches!(acquired, Ok(WaitOutcome::Acquired)) { return false; }
+        }
         let group = (self.isolation_select)(data).0;
         self.sync_matcher.offer(data.clone(), &group, &source_domain.to_string(), (self.sync_wait)(), deadline).await
     }
@@ -257,6 +280,8 @@ impl QueueRegistry {
             partition_count: None,
             cache_enabled: None,
             sync_wait: None,
+            forward_degree: None,
+            forward_polls: None,
             qps_interval: None,
             isolation: None,
         }
@@ -269,6 +294,14 @@ impl QueueRegistry {
     }
     pub fn with_sync_wait(mut self, provider: SyncWaitProvider) -> Self {
         self.sync_wait = Some(provider);
+        self
+    }
+    pub fn with_forward_degree(mut self, provider: ForwardDegreeProvider) -> Self {
+        self.forward_degree = Some(provider);
+        self
+    }
+    pub fn with_forward_polls(mut self, provider: ForwardPollsProvider) -> Self {
+        self.forward_polls = Some(provider);
         self
     }
     pub fn with_partition_cache_enabled(mut self, provider: PartitionCacheEnabledProvider) -> Self {
@@ -298,7 +331,8 @@ impl QueueRegistry {
         self
     }
     /// task_type is the persistence enum (decision 0, activity 1).
-    pub async fn get(&self, key: TaskListKey, kind: i16, now: i64) -> Result<QueueHandle, Status> {
+    pub fn get(&self, key: TaskListKey, kind: i16, now: i64) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<QueueHandle, Status>> + Send + '_>> {
+        Box::pin(async move {
         if !(0..=1).contains(&key.task_type) {
             return Err(Status::invalid_argument("Unknown persistence task type."));
         }
@@ -416,7 +450,7 @@ impl QueueRegistry {
                         })
                     });
                     let dispatcher =
-                        TaskDispatcher::new(queue.clone(), registry.history.clone(), domain)
+                        TaskDispatcher::new(queue.clone(), registry.history.clone(), domain.clone())
                             .with_liveness(liveness.clone());
                     let writer = crate::matching_writer::TaskWriter::new(
                         queue.clone(),
@@ -447,6 +481,65 @@ impl QueueRegistry {
                     );
                     let read_stop = reader.stop_signal();
                     let sync_matcher = Arc::new(crate::matching_sync::SyncMatcher::new(&sync_groups, read_stop.subscribe()));
+                    let forward = {
+                        // Go `forwarder` refuses sticky task lists; only a
+                        // real child partition forwards polls to its parent.
+                        // Sticky names never carry a partition suffix, so the
+                        // root check subsumes the kind refusal below.
+                        let name = cadence_common::task_list::TaskListName::parse(&lookup.1).map_err(Status::invalid_argument)?;
+                        if kind == 1 || name.is_root() {
+                            None
+                        } else {
+                            let degree = registry
+                                .forward_degree
+                                .as_ref()
+                                .map(|provider| provider(&domain, &lookup.1, lookup.2))
+                                .unwrap_or(20)
+                                .max(0);
+                            let parent = name.parent(degree);
+                            if parent.is_empty() {
+                                None
+                            } else {
+                                let max_outstanding = registry
+                                    .forward_polls
+                                    .as_ref()
+                                    .map(|provider| provider(&domain, &lookup.1, lookup.2))
+                                    .unwrap_or(1)
+                                    .max(0) as usize;
+                                let parent_key = TaskListKey {
+                                    domain_id: key.domain_id,
+                                    name: parent,
+                                    task_type: key.task_type,
+                                };
+                                // Owners live in registry.state; retaining that
+                                // same Arc here would form an owner/registry cycle.
+                                let resolve_state = Arc::downgrade(&registry.state);
+                                let mut resolve_registry = registry.clone();
+                                resolve_registry.state = Arc::new(Mutex::new(State::default()));
+                                Some(crate::matching_dispatch::ForwardState::new(
+                                    move || {
+                                        let mut resolve_registry = resolve_registry.clone();
+                                        let state = resolve_state.upgrade();
+                                        let parent_key = parent_key.clone();
+                                        Box::pin(async move {
+                                            resolve_registry.state = state?;
+                                            resolve_parent_dispatcher(resolve_registry, parent_key, kind).await
+                                        })
+                                            as std::pin::Pin<
+                                                Box<
+                                                    dyn std::future::Future<
+                                                            Output = Option<
+                                crate::matching_dispatch::TaskDispatcher,
+                                                            >,
+                                                        > + Send,
+                                                >,
+                                            >
+                                    },
+                                    max_outstanding,
+                                ))
+                            }
+                        }
+                    };
                     let wake = registry.changed.clone();
                     let stopped = writer.stop_signal();
                     queue.set_stop_waker(Arc::new(move || {
@@ -454,11 +547,16 @@ impl QueueRegistry {
                         read_stop.send_replace(true);
                         wake.notify_waiters();
                     }));
+                    let mut dispatcher = dispatcher
+                        .with_writer(writer.clone())
+                        .with_reader(reader.clone())
+                        .with_sync_matcher(sync_matcher.clone())
+                        .with_pollers(pollers.clone());
+                    if let Some(forward) = forward {
+                        dispatcher = dispatcher.with_forward(forward);
+                    }
                     let owner = Arc::new(Owner {
-                        dispatcher: dispatcher
-                            .with_writer(writer.clone())
-                            .with_reader(reader.clone())
-                            .with_sync_matcher(sync_matcher.clone()),
+                        dispatcher,
                         writer,
                         reader,
                         limiter,
@@ -524,6 +622,7 @@ impl QueueRegistry {
             })
         })
         .await
+        })
     }
     pub async fn update_partition_config(
         &self,
@@ -795,6 +894,19 @@ impl QueueRegistry {
         })
         .await
     }
+}
+
+/// Resolve the current parent owner for poll forwarding.
+async fn resolve_parent_dispatcher(
+    registry: QueueRegistry,
+    key: TaskListKey,
+    kind: i16,
+) -> Option<crate::matching_dispatch::TaskDispatcher> {
+    let handle = registry.get(key, kind, registry_now()).await.ok()?;
+    if handle.stop_if_isolation_changed() {
+        return None;
+    }
+    Some(handle.dispatcher)
 }
 
 #[cfg(test)]
