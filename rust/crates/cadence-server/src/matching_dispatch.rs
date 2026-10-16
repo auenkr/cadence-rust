@@ -51,6 +51,7 @@ pub struct TaskDispatcher {
     domain_id: String,
     wake: Arc<Notify>,
     liveness: Option<Arc<cadence_common::liveness::Liveness>>,
+    writer: Option<crate::matching_writer::TaskWriter>,
 }
 fn now() -> i64 {
     SystemTime::now()
@@ -77,11 +78,19 @@ impl TaskDispatcher {
             domain_id,
             wake: Arc::new(Notify::new()),
             liveness: None,
+            writer: None,
         }
     }
     pub fn with_liveness(mut self, liveness: Arc<cadence_common::liveness::Liveness>) -> Self {
         self.liveness = Some(liveness);
         self
+    }
+    pub fn with_writer(mut self, writer: crate::matching_writer::TaskWriter) -> Self {
+        self.writer = Some(writer);
+        self
+    }
+    pub fn task_notification(&self) -> Arc<Notify> {
+        self.wake.clone()
     }
     pub fn notify_new_tasks(&self) {
         self.wake.notify_waiters();
@@ -101,6 +110,31 @@ impl TaskDispatcher {
         .map_err(ClaimError::Queue)
     }
     async fn rewrite(&self, task: i64) {
+        if let Some(writer) = &self.writer {
+            let queue = self.queue.clone();
+            let data = tokio::task::spawn_blocking(move || queue.retry_data(task)).await;
+            let result = match data {
+                Ok(Ok(data)) => writer
+                    .append(crate::matching_writer::WriteTask {
+                        data,
+                        source_domain: uuid::Uuid::parse_str(&self.domain_id)
+                            .expect("validated Matching domain"),
+                        schedule_to_start_seconds: 0,
+                    })
+                    .await
+                    .map(|_| ()),
+                Ok(Err(error)) => Err(queue_status(error)),
+                Err(error) => Err(Status::internal(error.to_string())),
+            };
+            if let Err(error) = result {
+                eprintln!("Matching task rewrite failed: {error}");
+                self.queue.stop();
+            } else {
+                self.complete(task).await;
+            }
+            self.wake.notify_waiters();
+            return;
+        }
         let queue = self.queue.clone();
         let result = tokio::task::spawn_blocking(move || {
             if let Err(error) = queue.rewrite_failed(task, now()) {

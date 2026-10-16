@@ -1642,3 +1642,15 @@ Source audit clarified that manager stopWG waits for partition notification, not
 all History RPCs; reader stopWg tracks background reader loops. Full reader/writer
 pipelines, startup/concurrency, dynamic config, transport drain, sync/query and
 remaining service gates are still incomplete. No complete service is claimed.
+
+## 2026-10-16: Matching sequential append writer
+
+See matching-writer-next.md. Native AddTask and delivery rewrites now use bounded
+sequential batching, Go's additional-request batch limit, differentiated enqueue/
+response timeouts, cancellation-independent persistence and source-domain batch
+fencing. Actual-Go batch oracle plus three Rust actor tests pass. Full regression
+PASSED 345 workspace tests, strict lint and all 26 compatibility stages, including
+mixed Go services/Rust Matching SDK validation. Evidence:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-writer-verified/results.json;
+/tmp/cadence-writer-full.exit = 0. Reader, startup, dynamic configuration, lease
+retry and remaining Matching service gates are still incomplete.

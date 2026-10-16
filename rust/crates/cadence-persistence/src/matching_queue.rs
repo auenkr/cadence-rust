@@ -27,6 +27,12 @@ pub enum QueueError {
     ReaderState(String),
 }
 pub type Result<T> = std::result::Result<T, QueueError>;
+#[derive(Clone)]
+pub struct PendingTask {
+    pub data: TaskData,
+    pub source_domain: uuid::Uuid,
+    pub schedule_to_start_seconds: i32,
+}
 struct State {
     range_id: i64,
     next_id: i64,
@@ -142,13 +148,13 @@ impl DurableTaskQueue {
     fn append_locked(
         &self,
         state: &mut State,
-        data: &[TaskData],
-        source_domain: uuid::Uuid,
+        data: &[(uuid::Uuid, TaskData)],
         now: i64,
+        timeouts: Option<&[i32]>,
     ) -> Result<Vec<AllocatedTask>> {
         self.active()?;
         let mut tasks = Vec::with_capacity(data.len());
-        for data in data {
+        for (_, data) in data {
             if state.next_id > state.block_end {
                 let result = self
                     .store
@@ -163,10 +169,22 @@ impl DurableTaskQueue {
             });
             state.next_id = state.next_id.wrapping_add(1);
         }
+        if let Some(timeouts) = timeouts {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|time| time.as_nanos() as i64)
+                .unwrap_or_default();
+            for (task, timeout) in tasks.iter_mut().zip(timeouts) {
+                task.data = task.data.clone().at_creation(timestamp, *timeout);
+            }
+        }
         let result = self.store.create_tasks_with_domains(
             &self.key,
             state.range_id,
-            tasks.iter().map(|task| (source_domain, task)),
+            tasks
+                .iter()
+                .zip(data)
+                .map(|(task, (domain, _))| (*domain, task)),
         );
         // Go advances the read boundary after the write returns, even on error.
         // Allocated IDs are never reused after an uncertain persistence outcome.
@@ -181,9 +199,13 @@ impl DurableTaskQueue {
     pub fn append(&self, data: &[TaskData], now: i64) -> Result<Vec<AllocatedTask>> {
         self.append_locked(
             &mut self.state.lock().expect("matching queue lock"),
-            data,
-            self.key.domain_id,
+            &data
+                .iter()
+                .cloned()
+                .map(|task| (self.key.domain_id, task))
+                .collect::<Vec<_>>(),
             now,
+            None,
         )
     }
     /// Preserve Go SQL's source-domain row keys for cross-domain activities.
@@ -196,10 +218,64 @@ impl DurableTaskQueue {
     ) -> Result<Vec<AllocatedTask>> {
         self.append_locked(
             &mut self.state.lock().expect("matching queue lock"),
-            data,
-            source_domain,
+            &data
+                .iter()
+                .cloned()
+                .map(|task| (source_domain, task))
+                .collect::<Vec<_>>(),
             now,
+            None,
         )
+    }
+    /// One Go CreateTasks transaction may contain source domains from multiple
+    /// append requests while fencing the target task-list lease once.
+    pub fn append_mixed(
+        &self,
+        data: &[(uuid::Uuid, TaskData)],
+        now: i64,
+    ) -> Result<Vec<AllocatedTask>> {
+        self.append_locked(
+            &mut self.state.lock().expect("matching queue lock"),
+            data,
+            now,
+            None,
+        )
+    }
+    pub fn append_pending(&self, pending: &[PendingTask]) -> Result<Vec<AllocatedTask>> {
+        let data = pending
+            .iter()
+            .map(|task| (task.source_domain, task.data.clone()))
+            .collect::<Vec<_>>();
+        let timeouts = pending
+            .iter()
+            .map(|task| task.schedule_to_start_seconds)
+            .collect::<Vec<_>>();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|time| time.as_nanos() as i64)
+            .unwrap_or_default();
+        self.append_locked(
+            &mut self.state.lock().expect("matching queue lock"),
+            &data,
+            now,
+            Some(&timeouts),
+        )
+    }
+    pub fn task_list_kind(&self) -> i16 {
+        self.state
+            .lock()
+            .expect("matching queue lock")
+            .metadata
+            .kind
+    }
+    pub fn retry_data(&self, task_id: i64) -> Result<TaskData> {
+        self.state
+            .lock()
+            .expect("matching queue lock")
+            .in_flight
+            .get(&task_id)
+            .map(|task| task.data.clone())
+            .ok_or(QueueError::NotInFlight(task_id))
     }
     /// Go scans at most ten bounded ID ranges per pump turn. Expired tasks
     /// advance the read level without becoming in-flight acknowledgements.
@@ -268,7 +344,8 @@ impl DurableTaskQueue {
             .ok_or(QueueError::NotInFlight(task_id))?
             .clone();
         let data = original.data.at_creation(now, 0);
-        let mut written = self.append_locked(&mut state, &[data], self.key.domain_id, now)?;
+        let mut written =
+            self.append_locked(&mut state, &[(self.key.domain_id, data)], now, None)?;
         state.in_flight.remove(&task_id);
         self.ack.ack_item(task_id);
         Ok(written.remove(0))

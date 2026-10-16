@@ -318,6 +318,7 @@ dependencies = [
  "prost",
  "prost-types",
  "rand",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",

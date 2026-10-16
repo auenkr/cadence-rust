@@ -23,7 +23,7 @@ struct RpcStatus {
     #[prost(message, repeated, tag = "3")]
     details: Vec<prost_types::Any>,
 }
-fn detailed_status<M: Message>(
+pub(crate) fn detailed_status<M: Message>(
     code: tonic::Code,
     message: impl Into<String>,
     name: &str,

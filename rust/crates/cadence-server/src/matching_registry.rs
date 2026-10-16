@@ -23,6 +23,7 @@ type Key = (Uuid, String, i32);
 struct Owner {
     queue: Arc<DurableTaskQueue>,
     dispatcher: TaskDispatcher,
+    writer: crate::matching_writer::TaskWriter,
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     last_update: Mutex<tokio::time::Instant>,
     next_idle_check: Mutex<tokio::time::Instant>,
@@ -30,6 +31,7 @@ struct Owner {
 }
 impl Owner {
     fn stop(&self) {
+        self.writer.stop();
         self.queue.stop();
         self.dispatcher.notify_new_tasks();
     }
@@ -62,8 +64,24 @@ pub struct QueueHandle {
     pub dispatcher: TaskDispatcher,
     pub pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     liveness: Arc<cadence_common::liveness::Liveness>,
+    writer: crate::matching_writer::TaskWriter,
 }
 impl QueueHandle {
+    pub async fn enqueue(
+        &self,
+        data: TaskData,
+        source_domain: Uuid,
+        schedule_to_start_seconds: i32,
+    ) -> Result<AllocatedTask, Status> {
+        self.liveness.mark_alive(registry_now());
+        self.writer
+            .append(crate::matching_writer::WriteTask {
+                data,
+                source_domain,
+                schedule_to_start_seconds,
+            })
+            .await
+    }
     /// Notification remains in the persistence worker if the AddTask RPC is
     /// cancelled while SQLite is writing. History may safely retry the request.
     pub async fn append(
@@ -160,19 +178,27 @@ impl QueueRegistry {
                         )
                         .map_err(|error| Status::unavailable(error.to_string()))?,
                     );
-                    let wake = registry.changed.clone();
-                    queue.set_stop_waker(Arc::new(move || wake.notify_waiters()));
                     let liveness = Arc::new(cadence_common::liveness::Liveness::new(
                         registry_now(),
                         300_000_000_000,
                     ));
+                    let dispatcher =
+                        TaskDispatcher::new(queue.clone(), registry.history.clone(), domain)
+                            .with_liveness(liveness.clone());
+                    let writer = crate::matching_writer::TaskWriter::new(
+                        queue.clone(),
+                        dispatcher.task_notification(),
+                        crate::matching_writer::WriterConfig::default(),
+                    );
+                    let wake = registry.changed.clone();
+                    let stopped = writer.stop_signal();
+                    queue.set_stop_waker(Arc::new(move || {
+                        let _ = stopped.send(true);
+                        wake.notify_waiters();
+                    }));
                     let owner = Arc::new(Owner {
-                        dispatcher: TaskDispatcher::new(
-                            queue.clone(),
-                            registry.history.clone(),
-                            domain,
-                        )
-                        .with_liveness(liveness.clone()),
+                        dispatcher: dispatcher.with_writer(writer.clone()),
+                        writer,
                         queue,
                         pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                         last_update: Mutex::new(tokio::time::Instant::now()),
@@ -191,6 +217,7 @@ impl QueueRegistry {
                 dispatcher: owner.dispatcher.clone(),
                 pollers: owner.pollers.clone(),
                 liveness: owner.liveness.clone(),
+                writer: owner.writer.clone(),
             })
         })
         .await

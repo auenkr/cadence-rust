@@ -6,6 +6,19 @@ incomplete. Keep working autonomously; use tmux session cadence-rust for long
 processes. After compaction save progress, commit and push. Never equate adapter
 coverage or a boundary probe with complete service parity.
 
+## Latest writer checkpoint
+
+Read matching-writer-next.md first. Sequential bounded writer now owns native
+AddTask and failed-delivery rewrite persistence, Go batch semantics, per-request
+source domains/timestamps, timeout errors and cancellation-independent completion.
+PASSED 345 workspace tests, strict all-target lint and all 26 compatibility stages:
+/tmp/cadence-writer-full.exit = 0;
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-writer-verified/results.json.
+Actual mixed Go services/Rust Matching and seven SDK scenarios pass.
+Next: per-owner startup/map-lock concurrency, reader buffering, dynamic config,
+lease retry policy, then sync/query/forwarding and remaining Matching gates.
+All four service roles remain incomplete. Preserve the entire rewrite goal.
+
 ## Teardown/idle liveness continuation
 
 Read matching-idle-next.md first. Prior cbd02ab7c is pushed. New atomic queue stop,

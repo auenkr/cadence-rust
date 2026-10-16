@@ -250,12 +250,11 @@ impl m::matching_api_server::MatchingApi for Matching {
             let run = uuid::Uuid::parse_str(&execution.run_id).map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
             let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
             let queue = self.durable_queue(&r.domain_id, list, 0).await?;
-            let now = matching_now();
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
-            }.at_creation(now, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default());
-            queue.append_in_domain(vec![data], source, now).await?;
+            };
+            queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
             return Ok(Response::new(m::AddDecisionTaskResponse { partition_config: None }));
         }
         let execution = r.workflow_execution.unwrap_or_default();
@@ -298,12 +297,11 @@ impl m::matching_api_server::MatchingApi for Matching {
             self.domain_name(&r.source_domain_id)?;
             let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| Status::invalid_argument("Source domain UUID is not valid."))?;
             let queue = self.durable_queue(&r.domain_id, list, 1).await?;
-            let now = matching_now();
             let data = cadence_persistence::matching_blob::TaskData {
                 workflow_id: execution.workflow_id.clone(), run_id: Some(run.as_bytes().to_vec()), schedule_id: r.schedule_id,
                 partition_config: if r.partition_config.is_empty() { None } else { Some(r.partition_config.into_iter().collect()) }, ..Default::default()
-            }.at_creation(now, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default());
-            queue.append_in_domain(vec![data], source, now).await?;
+            };
+            queue.enqueue(data, source, r.schedule_to_start_timeout.map(|timeout| timeout.seconds as i32).unwrap_or_default()).await?;
             return Ok(Response::new(m::AddActivityTaskResponse { partition_config: None }));
         }
         let execution = r.workflow_execution.unwrap_or_default();

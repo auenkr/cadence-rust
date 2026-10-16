@@ -34,6 +34,7 @@ uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
 
 [dev-dependencies]
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 base64 = "0.22"
 tempfile = "3"
 axum = { version = "0.8", features = ["json"] }
