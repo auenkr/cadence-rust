@@ -1724,3 +1724,14 @@ actual mixed Go services/Rust Matching SDK cases. Latest focused41 Matching test
 and domain helper test passed; actual Go activity tests and buffered admission
 comparison passed. /tmp/cadence-background-checked.exit = 0 and
 /tmp/cadence-background-acceptance.exit = 0. Full Matching remains incomplete.
+
+## 2026-10-16: Matching failed-delivery rewrite retry
+
+Writer preserves private typed transient classification while append public
+Status behavior stays unchanged. Rewrites use50ms/10s/30s persistence retry and
+1s/10s Busy throttle, retaining Go previous-error semantics. Normal AddTask stays
+one append. Ten actual-Go outcomes and SQLite insert-trigger failure/recovery
+verify retry before ack and gap IDs. 366 workspace tests, strict lint and all27
+compatibility stages incl mixed Go services/Rust Matching PASSED;
+/tmp/cadence-rewrite-full.exit = 0. See matching-rewrite-next.md.
+Further source audits saved in matching-db-lock-next.md and matching-rate-next.md.

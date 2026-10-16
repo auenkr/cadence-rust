@@ -1,6 +1,7 @@
 //! Sequential Go-style Matching append actor. Caller cancellation does not
 //! withdraw an enqueued request or block the writer's buffered response.
 use cadence_persistence::{matching_queue::DurableTaskQueue, matching_sqlite::AllocatedTask};
+use rand::SeedableRng;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -24,9 +25,44 @@ impl Default for WriterConfig {
     }
 }
 pub use cadence_persistence::matching_queue::PendingTask as WriteTask;
+#[derive(Clone, Debug)]
+struct WriteError {
+    status: Status,
+    retryable: bool,
+}
+impl From<Status> for WriteError {
+    fn from(status: Status) -> Self {
+        // Queue saturation is Go ServiceBusyError. Shutdown and a plain
+        // append context deadline are not persistence transient errors.
+        let retryable = status.code() == tonic::Code::ResourceExhausted;
+        Self { status, retryable }
+    }
+}
+async fn retry_write<T, F: std::future::Future<Output = Result<T, WriteError>>>(
+    mut operation: impl FnMut() -> F,
+    mut next_delay: impl FnMut(usize, &WriteError) -> Option<Duration>,
+) -> Result<T, WriteError> {
+    let mut previous = None;
+    let mut attempt = 0;
+    loop {
+        let error = match operation().await {
+            Ok(value) => return Ok(value),
+            Err(error) => error,
+        };
+        if !error.retryable {
+            return Err(previous.unwrap_or(error));
+        }
+        let Some(delay) = next_delay(attempt, &error) else {
+            return Err(previous.unwrap_or(error));
+        };
+        previous = Some(error);
+        attempt += 1;
+        tokio::time::sleep(delay).await;
+    }
+}
 struct Request {
     task: WriteTask,
-    response: oneshot::Sender<Result<AllocatedTask, Status>>,
+    response: oneshot::Sender<Result<AllocatedTask, WriteError>>,
 }
 struct Inner {
     sender: mpsc::Sender<Request>,
@@ -108,17 +144,22 @@ impl TaskWriter {
                         use cadence_persistence::{
                             matching_queue::QueueError, matching_sqlite::StorageError,
                         };
+                        let retryable = matches!(&error, QueueError::Storage(StorageError::Sql(_)))
+                            || matches!(
+                                (&error, kind),
+                                (QueueError::Storage(StorageError::ConditionFailed(_)), 1)
+                            );
                         let status = match (&error, kind) {
                             (QueueError::Storage(StorageError::ConditionFailed(_)), 1) => {
                                 Status::internal("StickyTaskConditionFailedError")
                             }
                             _ => Status::unavailable(error.to_string()),
                         };
-                        Err(status)
+                        Err(WriteError { status, retryable })
                     }
                     Err(error) => {
                         queue.stop();
-                        Err(Status::internal(error.to_string()))
+                        Err(Status::internal(error.to_string()).into())
                     }
                 };
                 if result.is_ok() {
@@ -150,26 +191,60 @@ impl TaskWriter {
         let _ = self.inner.stop.send(true);
     }
     pub async fn append(&self, task: WriteTask) -> Result<AllocatedTask, Status> {
+        self.append_inner(task).await.map_err(|error| error.status)
+    }
+    /// Only failed-delivery rewrites use this outer retry. Each individual
+    /// CreateTasks transaction, including normal AddTask, stays single-attempt.
+    pub async fn append_rewrite(&self, task: WriteTask) -> Result<AllocatedTask, Status> {
+        use cadence_common::ExponentialRetryPolicy;
+        let policy = ExponentialRetryPolicy::new(Duration::from_millis(50))
+            .with_maximum_interval(Duration::from_secs(10))
+            .with_expiration_interval(Duration::from_secs(30));
+        let throttle = ExponentialRetryPolicy::new(Duration::from_secs(1))
+            .with_maximum_interval(Duration::from_secs(10))
+            .with_expiration_interval(Duration::ZERO);
+        let started = std::time::Instant::now();
+        let mut rng = rand::rngs::StdRng::from_entropy();
+        let mut throttles = 0;
+        retry_write(
+            || self.append_inner(task.clone()),
+            |attempt, error| {
+                let mut delay = policy.compute_next_delay(&mut rng, started.elapsed(), attempt)?;
+                if error.status.code() == tonic::Code::ResourceExhausted {
+                    if let Some(throttled) =
+                        throttle.compute_next_delay(&mut rng, started.elapsed(), throttles)
+                    {
+                        delay = delay.max(throttled);
+                    }
+                    throttles += 1;
+                }
+                Some(delay)
+            },
+        )
+        .await
+        .map_err(|error| error.status)
+    }
+    async fn append_inner(&self, task: WriteTask) -> Result<AllocatedTask, WriteError> {
         if self.inner.queue.is_stopped() || *self.inner.stop.borrow() {
-            return Err(stopped());
+            return Err(stopped().into());
         }
         let deadline = tokio::time::Instant::now() + self.inner.config.append_timeout;
         let (response, receiver) = oneshot::channel();
         match tokio::time::timeout_at(deadline, self.inner.sender.send(Request { task, response }))
             .await
         {
-            Err(_) => return Err(full()),
-            Ok(Err(_)) => return Err(stopped()),
+            Err(_) => return Err(full().into()),
+            Ok(Err(_)) => return Err(stopped().into()),
             Ok(Ok(())) => (),
         }
         let mut stopped_rx = self.inner.stop.subscribe();
         if *stopped_rx.borrow() {
-            return Err(stopped());
+            return Err(stopped().into());
         }
         tokio::select! {
-            result = receiver => result.unwrap_or_else(|_| Err(stopped())),
-            _ = stopped_rx.changed() => Err(stopped()),
-            _ = tokio::time::sleep_until(deadline) => Err(Status::deadline_exceeded("failed to receive a success response from the channel within a timeout threshold: context deadline exceeded")),
+            result = receiver => result.unwrap_or_else(|_| Err(stopped().into())),
+            _ = stopped_rx.changed() => Err(stopped().into()),
+            _ = tokio::time::sleep_until(deadline) => Err(Status::deadline_exceeded("failed to receive a success response from the channel within a timeout threshold: context deadline exceeded").into()),
         }
     }
 }
@@ -184,6 +259,57 @@ mod tests {
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
+    #[tokio::test]
+    async fn matching_writer_rewrite_retry_uses_original_go_outcomes() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/matching-retry.json"
+        ))
+        .unwrap();
+        for case in cases.as_array().unwrap() {
+            let errors = case["errors"].as_array().unwrap();
+            let mut calls = 0;
+            let mut pauses = 0;
+            let result = retry_write(
+                || {
+                    let name = errors
+                        .get(calls)
+                        .map(|value| value.as_str().unwrap())
+                        .unwrap_or("success");
+                    calls += 1;
+                    std::future::ready(if name == "success" {
+                        Ok(())
+                    } else {
+                        Err(WriteError {
+                            status: Status::unavailable(name),
+                            retryable: !matches!(name, "condition" | "not-found"),
+                        })
+                    })
+                },
+                |attempt, _| {
+                    if attempt < case["retries"].as_u64().unwrap() as usize {
+                        pauses += 1;
+                        Some(Duration::from_nanos(1))
+                    } else {
+                        None
+                    }
+                },
+            )
+            .await;
+            assert_eq!(calls, case["calls"].as_u64().unwrap() as usize);
+            assert_eq!(pauses, case["pauses"].as_u64().unwrap() as usize);
+            assert_eq!(
+                result
+                    .map(|_| "success".to_owned())
+                    .unwrap_or_else(|error| error.status.message().to_owned()),
+                case["outcome"].as_str().unwrap()
+            );
+        }
+        assert!(WriteError::from(full()).retryable);
+        assert!(!WriteError::from(stopped()).retryable);
+        assert!(
+            !WriteError::from(Status::deadline_exceeded("context deadline exceeded")).retryable
+        );
+    }
     #[test]
     fn matching_writer_original_go_batches() {
         let cases: serde_json::Value = serde_json::from_str(include_str!(

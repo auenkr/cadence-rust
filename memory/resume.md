@@ -1,3 +1,9 @@
+Latest: Matching rewrite retry validated (366 tests, strict lint, all27 stages;
+/tmp/cadence-rewrite-full.exit=0). See matching-rewrite-next.md. Next concrete gap:
+queue state lock spans lease backoff, blocking existing-task admission; source
+audit and planned correction in matching-db-lock-next.md. Then rate limiter
+port (matching-rate-next.md) and remaining Matching gates. No role complete.
+
 Latest: Matching background reader/local backlog handoff validated and connected
 to native owners. See matching-background-next.md. 364 tests, strict Clippy,
 all27 compatibility stages incl mixed Go services passed. No role complete.

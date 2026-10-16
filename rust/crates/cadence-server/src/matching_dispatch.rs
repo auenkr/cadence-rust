@@ -128,7 +128,7 @@ impl TaskDispatcher {
             let data = tokio::task::spawn_blocking(move || queue.retry_data(task)).await;
             let result = match data {
                 Ok(Ok(data)) => writer
-                    .append(crate::matching_writer::WriteTask {
+                    .append_rewrite(crate::matching_writer::WriteTask {
                         data,
                         source_domain: uuid::Uuid::parse_str(&self.domain_id)
                             .expect("validated Matching domain"),
@@ -464,6 +464,70 @@ mod tests {
             key,
             TaskDispatcher::new(queue, history, Uuid::from_u128(1).to_string()),
         )
+    }
+    #[tokio::test]
+    async fn matching_dispatch_writer_rewrite_retries_sql_before_acknowledging_original() {
+        let (directory, store, key, dispatcher) = fixture(1);
+        let task = dispatcher.claim().await.ok().unwrap().0.unwrap();
+        let writer = crate::matching_writer::TaskWriter::new(
+            dispatcher.queue.clone(),
+            dispatcher.task_notification(),
+            crate::matching_writer::WriterConfig::default(),
+        );
+        let connection = rusqlite::Connection::open(directory.path().join("tasks.db")).unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_rewrite BEFORE INSERT ON tasks BEGIN SELECT RAISE(FAIL, 'temporary outage'); END;").unwrap();
+        // A normal AddTask still gets its first failure, without outer retry.
+        assert!(writer
+            .append(crate::matching_writer::WriteTask {
+                data: task.data.clone(),
+                source_domain: key.domain_id,
+                schedule_to_start_seconds: 0,
+            })
+            .await
+            .is_err());
+        assert!(!dispatcher.queue.is_stopped());
+        let dispatcher = dispatcher.with_writer(writer.clone());
+        let copy = dispatcher.clone();
+        let rewrite = tokio::spawn(async move { copy.rewrite(task.task_id).await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            // Failed writes still reserve IDs. Seeing read level >2 proves
+            // an actual rewrite transaction failed before recovery is enabled.
+            while dispatcher.queue.levels().0 <= 2 {
+                assert!(dispatcher
+                    .queue
+                    .read_batch(
+                        NonZeroU32::new(100).unwrap(),
+                        NonZeroU32::new(1).unwrap(),
+                        now()
+                    )
+                    .unwrap()
+                    .tasks
+                    .is_empty());
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(store.get_tasks(&key, 0, 100, 10).unwrap().len(), 1);
+        assert_eq!(
+            dispatcher.queue.levels().1,
+            0,
+            "original must remain unacknowledged"
+        );
+        connection
+            .execute_batch("DROP TRIGGER reject_rewrite")
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), rewrite)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!dispatcher.queue.is_stopped());
+        let rows = store.get_tasks(&key, 0, 100, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].task_id > 3);
+        assert_eq!(dispatcher.queue.levels().1, 1);
+        writer.stop();
+        dispatcher.queue.stop();
     }
     #[tokio::test]
     async fn matching_dispatch_cancelled_poll_rewrites_claim_before_worker_exits() {
