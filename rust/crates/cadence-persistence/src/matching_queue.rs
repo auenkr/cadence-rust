@@ -299,6 +299,17 @@ impl DurableTaskQueue {
         batch_size: NonZeroU32,
         now: i64,
     ) -> Result<ReadBatch> {
+        self.read_batch_with_clock(read_range_size, batch_size, || now)
+    }
+
+    /// Read expiry time at admission, after persistence retries. The fixed-time
+    /// wrapper remains useful for replaying deterministic Go scan fixtures.
+    pub fn read_batch_with_clock(
+        &self,
+        read_range_size: NonZeroU32,
+        batch_size: NonZeroU32,
+        mut clock: impl FnMut() -> i64,
+    ) -> Result<ReadBatch> {
         // Go has one reader pump, independent of the writer's lease mutex.
         // Serialize claims while allowing appends/completions during retries.
         let _reader = self.reader.lock().expect("matching reader lock");
@@ -331,7 +342,7 @@ impl DurableTaskQueue {
         }
         let mut ready = Vec::new();
         for task in scanned.tasks {
-            if expired(task.data.expiry_nanos, now) {
+            if expired(task.data.expiry_nanos, clock()) {
                 self.ack.set_read_level(task.task_id);
             } else {
                 self.ack
@@ -653,6 +664,28 @@ mod tests {
             assert_eq!(serde_json::json!(actual.read_level), case["expected_read"]);
             assert_eq!(serde_json::json!(actual.finished), case["finished"]);
         }
+    }
+    #[test]
+    fn matching_queue_expiry_clock_advances_between_row_admissions() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
+        let mut task = data();
+        task.expiry_nanos = 100;
+        let written = queue.append(&[task.clone(), task], 2).unwrap();
+        let mut times = [100, 101].into_iter();
+        let loaded = queue
+            .read_batch_with_clock(n(100), n(10), || times.next().unwrap())
+            .unwrap();
+        // Equality is still deliverable; the next row expires at its own admission.
+        assert_eq!(loaded.tasks, written[..1]);
+        let (read, _, backlog) = queue.levels();
+        assert_eq!(read, written[1].task_id);
+        assert_eq!(backlog, 1);
+        assert!(times.next().is_none());
     }
     #[test]
     fn matching_queue_original_go_expiry_fixtures() {

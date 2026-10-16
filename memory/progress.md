@@ -1694,3 +1694,10 @@ table outage/recovery test verifies no task loss and completion concurrency.
 Validation PASSED 349 workspace tests, strict lint and all 27 compatibility stages
 including mixed Go services/Rust Matching; /tmp/cadence-reader-full.exit = 0 and
 /tmp/cadence-reader-final.exit = 0. Matching completion gates remain open.
+
+## 2026-10-16: Matching expiry checks use admission time
+
+Queue accepts injectable per-row clock; production dispatcher reads wall time
+after storage retries. Equality/later boundary tested across consecutive rows.
+11 queue tests, strict lint, and mixed Go services/Rust Matching passed.
+See matching-reader-next.md; active service remains Matching.

@@ -29,3 +29,14 @@ rewrite retry classification, reader stop waits, injectable clocks/dynamic confi
 sync/query/forwarding/rate limiting, partition routing/membership, internal Thrift,
 and production backend selection. Current RPC dispatcher still reads batch=1 per
 poll, with 100ms fallback. This is incomplete service migration.
+
+## Admission clock follow-up
+
+Dispatcher uses read_batch_with_clock so expiry checks read time after retries and
+for each row. Fixed-time read_batch remains for deterministic fixture callers.
+New boundary test advances time between two rows with identical expiry: equality
+is deliverable, strictly later admission skips the row. All 11 queue tests and
+strict workspace lint passed (/tmp/cadence-reader-clock.exit = 0). Mixed Go
+Frontend/History/Worker + Rust Matching with SDK cases passed:
+/tmp/cadence-reader-clock-mixed.exit = 0; artifacts matching-reader-clock-mixed
+under /home/ubuntu/.cache/cadence-rust-test-artifacts.

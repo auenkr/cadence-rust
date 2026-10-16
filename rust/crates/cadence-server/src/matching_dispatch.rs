@@ -98,10 +98,10 @@ impl TaskDispatcher {
     async fn claim(&self) -> Result<(Option<AllocatedTask>, bool), ClaimError> {
         let queue = self.queue.clone();
         tokio::task::spawn_blocking(move || {
-            queue.read_batch(
+            queue.read_batch_with_clock(
                 NonZeroU32::new(100000).unwrap(),
                 NonZeroU32::new(1).unwrap(),
-                now(),
+                now,
             )
         })
         .await
