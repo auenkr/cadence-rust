@@ -33,3 +33,10 @@ queued under tmux cadence-rust:isolation-full after the scoped run ends:
 Open: isolation-aware task selection, duration fallback, isolation state,
 balancer/partition assignments, forwarding, semaphores, membership and standalone
 durable service wiring. Observation support does not complete the isolation gate.
+
+Final frozen-source validation CONFIRMED PASSED: all 29 full-runner stages,
+395 workspace tests (84 server lib tests), strict workspace all-target Clippy,
+Go SDK TChannel, Go History delivery, and mixed Go services/Rust Matching.
+`/tmp/opencode/cadence-isolation-full.exit` = 0; artifacts above include
+`results.json` with all exitCode=0. Both decision and activity attribution tests,
+live group replacement and completed-poller window exclusion passed.

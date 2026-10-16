@@ -1,8 +1,9 @@
 Latest continuation (2026-10-16): read matching-isolation-next.md, then
-matching-config-next.md. Scoped-config full runner PASSED all29 stages (marker
-/tmp/opencode/cadence-scoped-full.exit=0). Isolation poller attribution and
-Describe group metrics implemented; initial tests/lint passed, but final tests
-need queued fresh full runner /tmp/opencode/cadence-isolation-full.exit.
+matching-config-next.md. BOTH full runners PASSED all29 stages. Latest frozen
+isolation reporting run:395 workspace tests,84 server lib tests, strict Clippy,
+Go SDK and mixed Go services/Rust Matching passed;
+/tmp/opencode/cadence-isolation-full.exit=0. Commits f4bb9a5d5 and e57d4c077.
+Task-list/type config scoping and isolation group observations implemented.
 No role complete; continue remaining Matching gates before History.
 
 Prior continuation: Task-list/type

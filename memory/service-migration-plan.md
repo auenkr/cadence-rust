@@ -58,8 +58,14 @@ unless noted):
   mixed `queryDispatch` scenario (matching-query-next.md), sticky availability
   fail-fast (matching-sticky-next.md), arrival QPS tracker and
   `DescribeTaskList.newTasksPerSecond` (matching-qps-next.md).
-- gate 4 still open: forwarding, partition routing/scaling, isolation groups
-  (and `TaskListStatus.isolationGroupMetrics`), semaphores, `LoadBalancerHints`.
+- gate 1 config: taskListName/taskType scoping now supported for write-partition
+  counts and QPS windows (matching-config-next.md).
+- gate 4 observations: durable polls return LoadBalancerHints; Describe returns
+  configured isolation-group QPS and poller counts, and polls retain group
+  attribution (matching-isolation-next.md). Latest full runner:29 stages and395
+  workspace tests passed, strict all-target lint clean.
+- gate 4 still open: forwarding, partition routing/scaling, isolation-aware
+  dispatch/state/balancing and semaphores. Reporting is not dispatch isolation.
 - gate 6 still open: cancellations, retries/timeouts beyond the SDK probe,
   partitioned lists, concurrent pollers, crash/restart and failover, and the
   baseline history/error comparison.
