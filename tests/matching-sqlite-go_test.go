@@ -95,6 +95,16 @@ func TestRustMatchingSQLiteInterop(t *testing.T) {
 		if config == nil || config.Version != 4 || len(config.ReadPartitions) != 2 || len(config.WritePartitions) != 1 {
 			t.Fatalf("bad Rust partition config: %+v", config)
 		}
+		native, err := store.GetTaskList(ctx, &p.GetTaskListRequest{DomainID: domain, TaskList: "native-queue-config"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		nativeConfig := native.TaskListInfo.AdaptivePartitionConfig
+		if nativeConfig == nil || nativeConfig.Version != 11 || len(nativeConfig.ReadPartitions) != 2 || len(nativeConfig.WritePartitions) != 1 ||
+			len(nativeConfig.ReadPartitions[0].IsolationGroups) != 2 || nativeConfig.ReadPartitions[0].IsolationGroups[1] != "b" || nativeConfig.ReadPartitions[5] == nil || len(nativeConfig.ReadPartitions[5].IsolationGroups) != 0 ||
+			native.TaskListInfo.AckLevel != 0 || native.TaskListInfo.RangeID != 1 {
+			t.Fatalf("bad native Rust queue config: %+v", native.TaskListInfo)
+		}
 		tasks, err := store.GetTasks(ctx, &p.GetTasksRequest{DomainID: domain, TaskList: name, ReadLevel: 0, BatchSize: 10})
 		if err != nil {
 			t.Fatal(err)

@@ -1,0 +1,62 @@
+# Native Matching partition metadata (2026-10-16)
+
+Continuation after verified dispatch metadata commit 73e1dcc6a. No service role
+is complete. Matching remains active before History, Frontend, Worker.
+
+## Implemented storage increment
+
+DurableTaskQueue now exposes partition_config and update_partition_config.
+The latter ports tasklist/db.go UpdateTaskListPartitionConfig: serialize with
+the database gate shared by lease renewal and ack persistence, preserve the last
+persisted ack cursor, fence the SQL write by range ID, and publish the new cached
+metadata only after persistence succeeds. ConditionFailed stops/wakes the owner;
+other errors are returned without changing cached config (manager retry/stop
+policy remains a separate layer, as in Go). Version assignment is deliberately
+left to the manager.
+
+Three regressions cover both blob encodings, config retention across rollover,
+ack writes and reopen, explicit clearing, stopped/stale owners, and an injected
+SQL trigger failure followed by recovery. The existing bidirectional Go SQLite
+interop now also writes sparse partition metadata through this native owner API
+and asks actual Go persistence to read it after an ack flush.
+
+## Validation
+
+Final workspace passed 406 tests, including all three new regressions. Strict
+workspace/all-target Clippy passed. These ran in tmux cadence-rust:
+/tmp/opencode/partition-storage-workspace.log,
+/tmp/opencode/partition-storage-clippy-final.log,
+/tmp/opencode/partition-storage-verify.exit.
+Serialized Go storage differential follows it:
+/tmp/opencode/partition-native-interop.log and .exit.
+Both final markers are 0. Go verified all eight blob fixtures and bidirectional
+SQLite persistence including the new native queue configuration. Full 30-stage
+service runner was not repeated for this storage-only API increment; previous
+73e1dcc6a full pass remains the last mixed-service verification. RPC storage
+selection is unchanged by this increment.
+
+## Next coordinated increment
+
+Do not switch only the Update RPC to native storage: Describe, refresh, isolation
+selection and partition-count/routing readers currently still use execution
+metadata. A split source would silently make updates stale to dispatch readers.
+
+Port manager partition cache and its lock first. Go startup loads root config
+from its leased DB metadata; normal nonroot owners load the root row (missing
+root is tolerated, other read errors stop startup). Sticky owners have no config.
+Root updates validate maps, compare ignoring request version, no-op when initial
+config has one read/one write partition, assign previous version+1, persist with
+throttle retry, stop owner on terminal/ambiguous failure, and notify the union
+of old/new nonroot read/write partitions. Notifications only replace older cache
+versions; explicit nil refresh reloads root storage without the version gate.
+See go/service/matching/tasklist/task_list_manager.go lines 265-302, 364-540.
+Existing executions.rs update/refresh logic has much of the scalar policy, but
+must cease being the durable Matching source after the coordinated change.
+
+Then sync matching: taskListManager AddTask -> trySyncMatch -> matcher.Offer.
+Rate-limit nonforwarded offers, preserve parent deadline tailroom (1s, max sync
+wait), respect local wait config, coordinate poller History-start response before
+claiming sync success, persist only unmatched original adds; forwarded adds must
+never persist at receiving owner. Cancellation/History errors must retain task
+responsibility. Forwarding, routing/scaling, membership, semaphores and production
+standalone lifecycle remain open. No complete migration claim is justified.

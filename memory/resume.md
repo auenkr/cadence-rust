@@ -1,3 +1,14 @@
+Latest native partition storage continuation (2026-10-16): read
+matching-native-partition-next.md first. DurableTaskQueue partition config
+read/update API now serializes with ack/lease writes and only publishes after
+fenced persistence succeeds. Three new regression tests and extended actual-Go
+SQLite interop passed; 406 workspace tests and strict all-target Clippy passed.
+/tmp/opencode/partition-storage-verify.exit=0 and
+/tmp/opencode/partition-native-interop.exit=0. RPCs still use executions metadata;
+next migrate manager caches, startup/refresh/notifications and all consumers
+together before switching native RPC storage. Sync matching/forwarding and all
+remaining service gates remain incomplete. No complete migration claim.
+
 Latest verified continuation (2026-10-16): read
 matching-isolation-dispatch-next.md first. Group-aware backlog buffers/handoffs,
 Go-oracle policy/timing fixtures, live drain/recency checks implemented. A mixed

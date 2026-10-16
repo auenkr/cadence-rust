@@ -479,6 +479,38 @@ impl DurableTaskQueue {
     pub fn persist_ack(&self, now: i64) -> Result<()> {
         self.persist_ack_impl(now, false)
     }
+    /// The owner's last successfully persisted partition configuration. Like
+    /// Go taskListDB, readers never observe an update that failed persistence.
+    pub fn partition_config(&self) -> Option<crate::matching_blob::PartitionConfig> {
+        self.state
+            .lock()
+            .expect("matching queue lock")
+            .metadata
+            .adaptive_partition_config
+            .clone()
+    }
+    /// Persist native task-list partition metadata under the current lease.
+    /// Version validation and assignment belong to the manager. Preserve the
+    /// persisted ack level, rather than publishing unflushed reader progress.
+    pub fn update_partition_config(
+        &self,
+        config: Option<crate::matching_blob::PartitionConfig>,
+        now: i64,
+    ) -> Result<()> {
+        let _database = self.database.lock().expect("matching database gate");
+        self.active()?;
+        let (range, mut metadata) = {
+            let state = self.state.lock().expect("matching queue lock");
+            (state.range_id, state.metadata.clone())
+        };
+        metadata.adaptive_partition_config = config;
+        self.check(
+            self.store
+                .update_task_list(&self.key, range, metadata.clone(), now),
+        )?;
+        self.state.lock().expect("matching queue lock").metadata = metadata;
+        Ok(())
+    }
     /// Go reader.Stop persists its final cursor even after the writer stopped.
     /// The database lease fence remains authoritative for this final write.
     pub fn persist_final_ack(&self, now: i64) -> Result<()> {
@@ -594,6 +626,132 @@ mod tests {
             ..Default::default()
         }
         .at_creation(100, 0)
+    }
+    #[test]
+    fn matching_queue_partition_metadata_survives_ack_rollover_and_reopen() {
+        use crate::matching_blob::{Partition, PartitionConfig};
+        for encoding in [BlobEncoding::ThriftRW, BlobEncoding::ThriftRWSnappy] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = Arc::new(
+                SqliteTaskStore::create(directory.path().join("tasks.db"), encoding).unwrap(),
+            );
+            let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(1), 1).unwrap();
+            let config = PartitionConfig {
+                version: 7,
+                num_read_partitions: 1,
+                num_write_partitions: 1,
+                read_partitions: Some(std::collections::BTreeMap::from([(
+                    0,
+                    Partition {
+                        isolation_groups: Some(vec!["A".into()]),
+                    },
+                )])),
+                write_partitions: Some(std::collections::BTreeMap::new()),
+            };
+            queue
+                .update_partition_config(Some(config.clone()), 2)
+                .unwrap();
+            let tasks = queue.append(&[data(), data()], 3).unwrap();
+            queue.read_batch(n(100), n(10), 4).unwrap();
+            for task in tasks {
+                queue.complete(task.task_id).unwrap();
+            }
+            // A config write must retain the DB cursor until ack persistence.
+            let old_ack = store.get_task_list(&key()).unwrap().data.ack_level;
+            queue
+                .update_partition_config(Some(config.clone()), 5)
+                .unwrap();
+            assert_eq!(store.get_task_list(&key()).unwrap().data.ack_level, old_ack);
+            queue.persist_ack(6).unwrap();
+            assert_eq!(queue.partition_config(), Some(config.clone()));
+            queue.stop();
+            let reopened = DurableTaskQueue::open(store, key(), 0, n(1), 7).unwrap();
+            assert_eq!(reopened.partition_config(), Some(config));
+            reopened.update_partition_config(None, 8).unwrap();
+            assert_eq!(reopened.partition_config(), None);
+        }
+    }
+    #[test]
+    fn matching_queue_partition_storage_failure_keeps_previous_metadata() {
+        use crate::matching_blob::PartitionConfig;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tasks.db");
+        let store = Arc::new(SqliteTaskStore::create(&path, BlobEncoding::ThriftRW).unwrap());
+        let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 1).unwrap();
+        let original = PartitionConfig {
+            version: 1,
+            ..Default::default()
+        };
+        queue
+            .update_partition_config(Some(original.clone()), 2)
+            .unwrap();
+        let connection = rusqlite::Connection::open(path).unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_config_update BEFORE UPDATE ON task_lists BEGIN SELECT RAISE(FAIL, 'injected write failure'); END").unwrap();
+        assert!(queue.update_partition_config(None, 3).is_err());
+        assert!(!queue.is_stopped());
+        assert_eq!(queue.partition_config(), Some(original.clone()));
+        assert_eq!(
+            store
+                .get_task_list(&key())
+                .unwrap()
+                .data
+                .adaptive_partition_config,
+            Some(original)
+        );
+        connection
+            .execute_batch("DROP TRIGGER reject_config_update")
+            .unwrap();
+        queue.update_partition_config(None, 4).unwrap();
+        queue.persist_ack(5).unwrap();
+        assert_eq!(
+            store
+                .get_task_list(&key())
+                .unwrap()
+                .data
+                .adaptive_partition_config,
+            None
+        );
+    }
+    #[test]
+    fn matching_queue_partition_update_fences_stale_owner_without_publishing() {
+        use crate::matching_blob::PartitionConfig;
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let stale = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 1).unwrap();
+        let original = PartitionConfig {
+            version: 1,
+            ..Default::default()
+        };
+        stale
+            .update_partition_config(Some(original.clone()), 2)
+            .unwrap();
+        let current = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 3).unwrap();
+        let replacement = PartitionConfig {
+            version: 2,
+            ..Default::default()
+        };
+        assert!(matches!(
+            stale.update_partition_config(Some(replacement), 4),
+            Err(QueueError::Storage(StorageError::ConditionFailed(_)))
+        ));
+        assert!(stale.is_stopped());
+        assert_eq!(stale.partition_config(), Some(original.clone()));
+        assert_eq!(current.partition_config(), Some(original.clone()));
+        assert_eq!(
+            store
+                .get_task_list(&key())
+                .unwrap()
+                .data
+                .adaptive_partition_config,
+            Some(original)
+        );
+        assert!(matches!(
+            stale.update_partition_config(None, 5),
+            Err(QueueError::Stopped)
+        ));
     }
     #[test]
     fn matching_queue_reader_retries_transient_query_without_losing_task() {

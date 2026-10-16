@@ -414,13 +414,64 @@ mod interop_tests {
     fn matching_sqlite_go_database_interop() {
         let path = std::env::var("CADENCE_MATCHING_SQLITE_DB").expect("Go fixture DB path");
         let phase = std::env::var("CADENCE_MATCHING_SQLITE_PHASE").unwrap();
-        let store = SqliteTaskStore::open(path, BlobEncoding::ThriftRWSnappy).unwrap();
+        let store = SqliteTaskStore::open(&path, BlobEncoding::ThriftRWSnappy).unwrap();
         let key = TaskListKey {
             domain_id: Uuid::from_u128(1),
             name: "go-to-rust".into(),
             task_type: 0,
         };
         let now = 1_700_000_000_123_456_789;
+        let native_key = TaskListKey {
+            name: "native-queue-config".into(),
+            ..key.clone()
+        };
+        if phase == "verify" {
+            let native = store.get_task_list(&native_key).unwrap();
+            assert_eq!(native.data.adaptive_partition_config.unwrap().version, 11);
+        } else {
+            let native_store = std::sync::Arc::new(
+                SqliteTaskStore::open(&path, BlobEncoding::ThriftRWSnappy).unwrap(),
+            );
+            let native = crate::matching_queue::DurableTaskQueue::open(
+                native_store,
+                native_key,
+                0,
+                std::num::NonZeroU32::new(100).unwrap(),
+                now,
+            )
+            .unwrap();
+            native
+                .update_partition_config(
+                    Some(PartitionConfig {
+                        version: 11,
+                        num_read_partitions: 2,
+                        num_write_partitions: 1,
+                        read_partitions: Some(BTreeMap::from([
+                            (
+                                0,
+                                Partition {
+                                    isolation_groups: Some(vec!["a".into(), "b".into()]),
+                                },
+                            ),
+                            (
+                                5,
+                                Partition {
+                                    isolation_groups: None,
+                                },
+                            ),
+                        ])),
+                        write_partitions: Some(BTreeMap::from([(
+                            0,
+                            Partition {
+                                isolation_groups: Some(vec!["a".into()]),
+                            },
+                        )])),
+                    }),
+                    now + 2000,
+                )
+                .unwrap();
+            native.persist_ack(now + 3000).unwrap();
+        }
         let mut cross_target = key.clone();
         cross_target.name = "cross-domain".into();
         let mut cross_source = cross_target.clone();
