@@ -49,8 +49,12 @@ standalone durable wiring.
 - Standalone smoke with `--data-dir`: `matching.db` created,
   `service-workflow-compat.cjs` (decision + activity to completion) PASSED,
   restart on the same dir reopens the DB and passes again.
-- Full 30+1-stage compatibility run: PENDING — rerun on the committed tree
-  and record outcome here before claiming completion.
+- FULL compatibility run on committed `d501f3779`: **31/31 stages pass**
+  (`matching-complete` artifacts, `/tmp/opencode/full-compat.exit=0`),
+  including the new `matching-forward-differential` stage, workspace tests,
+  strict Clippy, all Go differentials, server build, listener/config checks,
+  service workflow probe, public/internal gRPC, Go SDK TChannel, Go-service
+  matching delivery, and mixed Go/Rust matching.
 
 ## Remaining (explicitly out of single-node scope)
 

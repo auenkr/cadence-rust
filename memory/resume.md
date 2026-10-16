@@ -1,4 +1,13 @@
-Latest sync/local-forwarding continuation (2026-10-16): read
+Matching completion (2026-10-16): read matching-sync-forwarding-next.md first.
+Committed d501f3779 (forward limits, backlog waits, query walk, standalone
+durable wiring) on top of ca062c861/a9531588d. FULL 31-stage compatibility
+passes on the committed tree (matching-complete artifacts,
+/tmp/opencode/full-compat.exit=0), 92 focused matching tests + strict Clippy
+clean, standalone --data-dir smoke + restart pass. Single-node matching is
+done; only multi-host membership/routing and partition autoscaling remain
+(explicitly out of single-node scope). Next: History service.
+
+Previous sync/local-forwarding continuation (2026-10-16): read
 matching-sync-forwarding-next.md first. Sync committed a9531588d; uncommitted
 local forwarding draft passed workspace tests (105 server unit tests including
 cancellation regression) and workspace strict Clippy. Full runner now on Go
