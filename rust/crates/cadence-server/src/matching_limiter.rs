@@ -78,31 +78,53 @@ pub enum WaitOutcome {
 /// queue owner, exactly like Go's per-`taskListManager` limiter.
 pub struct TaskListLimiter {
     clock: Clock,
+    /// Go `taskListLimiter.countPartitions`: read at construction and whenever
+    /// `tryUpdate` re-snapshots the partition count. The caller is responsible
+    /// for Go's `max(1, cfg.NumTasklistWritePartitions(...))` clamp.
+    count_partitions: PartitionCount,
     inner: Mutex<Limiter>,
 }
+/// Live partition-count provider, mirroring Go's `numPartitions func() int`
+/// handed to `newTaskListLimiter`.
+pub type PartitionCount = Arc<dyn Fn() -> i64 + Send + Sync>;
 impl TaskListLimiter {
     /// Build the limiter Go creates in `newTaskListLimiter`: initial value is
     /// `TaskDispatchRPS`, and the backing bucket is sized from the initial
     /// partition-divided rate/burst.
-    pub fn new(clock: Clock, rps: f64, ttl: i64, min_burst: i64, partitions: i64) -> Self {
+    pub fn new(
+        clock: Clock,
+        rps: f64,
+        ttl: i64,
+        min_burst: i64,
+        count_partitions: PartitionCount,
+    ) -> Self {
         let now = clock();
+        let partitions = count_partitions();
         let rate = TaskListRate::new(rps, ttl, min_burst, partitions, now);
         let snapshot = rate.snapshot();
         Self {
             clock,
+            count_partitions,
             inner: Mutex::new(Limiter {
                 rate,
                 bucket: RateLimiter::new(snapshot.limit, snapshot.burst),
             }),
         }
     }
+    /// A single-partition limiter, matching the default
+    /// `MatchingNumTasklistWritePartitions` of one.
     pub fn with_defaults() -> Self {
+        Self::with_partitions(Arc::new(|| 1))
+    }
+    /// Build a limiter whose partition divisor is re-read live, matching Go's
+    /// `countPartitions` func used by `tryUpdate`.
+    pub fn with_partitions(count_partitions: PartitionCount) -> Self {
         Self::new(
             real_clock(),
             TASK_DISPATCH_RPS,
             TASK_DISPATCH_RPS_TTL_NANOS,
             MIN_TASK_THROTTLING_BURST_SIZE,
-            1,
+            count_partitions,
         )
     }
     /// Current backing limit, reported by `DescribeTaskList.status.rate_per_second`.
@@ -113,15 +135,28 @@ impl TaskListLimiter {
     pub fn now(&self) -> i64 {
         (self.clock)()
     }
-    /// Go `taskListLimiter.ReportLimit`. `partitions` stays at one until real
-    /// partition state is wired; do not claim partition scaling from a constant.
+    /// Go `taskListLimiter.ReportLimit`. The partition divisor is re-read from
+    /// the live provider exactly when Go's `tryUpdate` re-snapshots it.
     pub fn report_limit(&self, rps: f64) {
         let clock = self.clock.clone();
+        let count_partitions = self.count_partitions.clone();
         let mut inner = self.inner.lock().expect("matching limiter lock");
-        if inner.rate.report_with_clock(rps, || clock(), || 1) {
+        if inner
+            .rate
+            .report_with_clock(rps, || clock(), || count_partitions())
+        {
             let snapshot = inner.rate.snapshot();
             inner.bucket.set_limit_and_burst(snapshot.limit, snapshot.burst);
         }
+    }
+    /// Current partition divisor used by the backing limit.
+    pub fn partitions(&self) -> i64 {
+        self.inner
+            .lock()
+            .expect("matching limiter lock")
+            .rate
+            .snapshot()
+            .partitions
     }
     /// Await one limiter token under the reader's dispatch deadline, matching
     /// Go `Ratelimiter.Wait` reachable through `taskMatcher.ratelimit`.
@@ -199,8 +234,29 @@ mod tests {
             rps,
             TASK_DISPATCH_RPS_TTL_NANOS,
             MIN_TASK_THROTTLING_BURST_SIZE,
-            1,
+            Arc::new(|| 1),
         )
+    }
+    #[test]
+    fn report_divides_by_live_partition_count() {
+        let now = Arc::new(AtomicI64::new(0));
+        let partitions = Arc::new(AtomicI64::new(1));
+        let count = partitions.clone();
+        let limiter = TaskListLimiter::new(
+            fake_clock(&now),
+            TASK_DISPATCH_RPS,
+            TASK_DISPATCH_RPS_TTL_NANOS,
+            MIN_TASK_THROTTLING_BURST_SIZE,
+            Arc::new(move || count.load(Ordering::SeqCst)),
+        );
+        assert_eq!(limiter.limit(), TASK_DISPATCH_RPS);
+        assert_eq!(limiter.partitions(), 1);
+        // Go `tryUpdate` re-snapshots the live partition count on an accepted
+        // lower report; the backing limit is the reported rate divided by it.
+        partitions.store(4, Ordering::SeqCst);
+        limiter.report_limit(8.0);
+        assert_eq!(limiter.partitions(), 4);
+        assert_eq!(limiter.limit(), 2.0);
     }
     #[test]
     fn default_limit_and_report_divide_by_partitions() {

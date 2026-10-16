@@ -268,3 +268,68 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
             >= timestamp(&active.pollers[0].last_access_time)
     );
 }
+
+#[tokio::test]
+async fn matching_rpc_lists_configured_write_partitions() {
+    let (_dir, _store, matching, _key) = fixture();
+    let request = || {
+        Request::new(m::ListTaskListPartitionsRequest {
+            domain: "domain".into(),
+            task_list: list(),
+        })
+    };
+    // Default dynamic property is a single write partition: just the root.
+    let single = matching
+        .list_task_list_partitions(request())
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(single.decision_task_list_partitions.len(), 1);
+    assert_eq!(single.decision_task_list_partitions[0].key, "queue");
+    // Go `getAllPartitions` enumerates the root plus `__cadence|<root>/<i>`
+    // children up to the configured `matching.numTasklistWritePartitions`.
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin lock")
+        .update(
+            false,
+            "matching.numTasklistWritePartitions",
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"3".to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
+    let partitioned = matching
+        .list_task_list_partitions(request())
+        .await
+        .unwrap()
+        .into_inner();
+    let keys: Vec<String> = partitioned
+        .decision_task_list_partitions
+        .iter()
+        .map(|partition| partition.key.clone())
+        .collect();
+    assert_eq!(
+        keys,
+        vec![
+            "queue".to_string(),
+            "/__cadence_sys/queue/1".to_string(),
+            "/__cadence_sys/queue/2".to_string()
+        ]
+    );
+    assert_eq!(
+        partitioned
+            .activity_task_list_partitions
+            .iter()
+            .map(|partition| partition.key.clone())
+            .collect::<Vec<_>>(),
+        keys
+    );
+}

@@ -67,7 +67,13 @@ pub struct QueueRegistry {
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
     domain_metadata: Option<(cadence_persistence::InMemoryDomainStore, String)>,
+    /// Go `cfg.NumTasklistWritePartitions(domain, taskList, type)`, clamped to
+    /// >= 1 by the same caller. `None` keeps the single-partition default.
+    partition_count: Option<PartitionCountProvider>,
 }
+/// Live write-partition-count provider used to size the dispatch limiter and to
+/// enumerate partitions, mirroring Go's `NumTasklistWritePartitions`.
+pub type PartitionCountProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 #[derive(Clone)]
 pub struct QueueHandle {
     pub queue: Arc<DurableTaskQueue>,
@@ -166,7 +172,14 @@ impl QueueRegistry {
             changed: Arc::new(tokio::sync::Notify::new()),
             startups: Arc::new(Mutex::new(HashMap::new())),
             domain_metadata: None,
+            partition_count: None,
         }
+    }
+    /// Install Go's `NumTasklistWritePartitions` provider. The provider reads
+    /// `matching.numTasklistWritePartitions`; the registry clamps to >= 1.
+    pub fn with_partition_count(mut self, provider: PartitionCountProvider) -> Self {
+        self.partition_count = Some(provider);
+        self
     }
     pub fn with_domain_metadata(
         mut self,
@@ -228,6 +241,19 @@ impl QueueRegistry {
                 None => {
                     drop(state);
                     let domain = key.domain_id.to_string();
+                    let count_partitions: crate::matching_limiter::PartitionCount = {
+                        let provider = registry.partition_count.clone();
+                        let domain_id = key.domain_id.to_string();
+                        let task_list = key.name.clone();
+                        let task_type = key.task_type;
+                        Arc::new(move || {
+                            provider
+                                .as_ref()
+                                .map(|provider| provider(&domain_id, &task_list, task_type))
+                                .unwrap_or(1)
+                                .max(1)
+                        })
+                    };
                     let queue = Arc::new(
                         DurableTaskQueue::open(
                             registry.store.clone(),
@@ -259,7 +285,9 @@ impl QueueRegistry {
                         dispatcher.task_notification(),
                         crate::matching_writer::WriterConfig::default(),
                     );
-                    let limiter = Arc::new(crate::matching_limiter::TaskListLimiter::with_defaults());
+                    let limiter = Arc::new(
+                        crate::matching_limiter::TaskListLimiter::with_partitions(count_partitions),
+                    );
                     let reader = crate::matching_reader::TaskReader::with_domain_activity_and_limiter(
                         queue.clone(),
                         dispatcher.task_notification(),

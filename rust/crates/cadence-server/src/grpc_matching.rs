@@ -63,6 +63,8 @@ pub struct Matching {
     pub frontend: Frontend,
     polls: Polls,
     queues: Option<crate::matching_registry::QueueRegistry>,
+    /// Go `cfg.NumTasklistWritePartitions`, shared with the registry limiter.
+    partition_count: Option<crate::matching_registry::PartitionCountProvider>,
     poll_expiration: std::time::Duration,
 }
 impl Matching {
@@ -71,6 +73,7 @@ impl Matching {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
             queues: None,
+            partition_count: None,
             poll_expiration: std::time::Duration::from_secs(60),
         }
     }
@@ -81,9 +84,35 @@ impl Matching {
         queues: crate::matching_registry::QueueRegistry,
         poll_expiration: std::time::Duration,
     ) -> Self {
-        let queues = queues.with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
+        // Go `cfg.NumTasklistWritePartitions(domain, taskList, type)` reads the
+        // dynamic properties `matching.numTasklistWritePartitions` (default 1)
+        // and clamps to >= 1. The overlay is the same source the frontend reads
+        // its own dynamic properties from.
+        let domains = state.domains.clone();
+        let overlay = state.admin.dynamic_config.clone();
+        let provider: crate::matching_registry::PartitionCountProvider =
+            Arc::new(move |domain_id: &str, _task_list: &str, _task_type: i32| -> i64 {
+                let domain_name = domains
+                    .describe(&cadence_api::service_types::DescribeDomainRequest {
+                        name: None,
+                        uuid: Some(domain_id.to_owned()),
+                    })
+                    .ok()
+                    .and_then(|response| response.domain_info.map(|info| info.name))
+                    .filter(|name| !name.is_empty());
+                let values = overlay
+                    .lock()
+                    .expect("admin lock")
+                    .property_values("matching.numTasklistWritePartitions")
+                    .to_vec();
+                cadence_persistence::dynamic_config::integer(&values, domain_name.as_deref(), 1)
+            });
+        let queues = queues
+            .with_partition_count(provider.clone())
+            .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
         let mut matching = Self::new(state);
         matching.queues = Some(queues);
+        matching.partition_count = Some(provider);
         matching.poll_expiration = poll_expiration;
         matching
     }
@@ -438,26 +467,40 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::ListTaskListPartitionsRequest>,
     ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
         let r = request.into_inner();
-        // Single-host deployment: every list has exactly its root partition,
-        // mirroring Go's `getAllPartitions` without a partition config.
         let task_list = r.task_list.unwrap_or_default();
-        self.frontend
+        // Go resolves `request.GetDomain()` through the domain cache; the
+        // single-process store is keyed by name and yields the UUID.
+        let domain_id = self
+            .frontend
             .state
-            .execution_store(&r.domain)
+            .domains
+            .domain_id(&r.domain)
             .map_err(|e| Status::not_found(e.message))?;
         if task_list.name.is_empty() {
             return Err(Status::invalid_argument("TaskList is not set."));
         }
-        // Single process: report this host like Go's `getHostInfo`.
-        let hostname = std::env::var("HOSTNAME").unwrap_or_default();
         let name = task_list_name(&task_list.name)?;
-        let partition = p::TaskListPartitionMetadata {
-            key: name.root().to_owned(),
-            owner_host_name: hostname,
+        // Single process: report this host like Go's `getHostInfo`, but
+        // enumerate every write partition like Go's `getAllPartitions` (root
+        // first, then `__cadence|<root>/<i>`).
+        let hostname = std::env::var("HOSTNAME").unwrap_or_default();
+        let partitions = |task_type: i32| -> Vec<p::TaskListPartitionMetadata> {
+            let count = self
+                .partition_count
+                .as_ref()
+                .map(|provider| provider(&domain_id, name.root(), task_type))
+                .unwrap_or(1)
+                .max(1);
+            (0..count)
+                .map(|partition| p::TaskListPartitionMetadata {
+                    key: name.partition_name(partition),
+                    owner_host_name: hostname.clone(),
+                })
+                .collect()
         };
         Ok(Response::new(m::ListTaskListPartitionsResponse {
-            activity_task_list_partitions: vec![partition.clone()],
-            decision_task_list_partitions: vec![partition],
+            activity_task_list_partitions: partitions(1),
+            decision_task_list_partitions: partitions(0),
         }))
     }
     async fn acquire_semaphore(
