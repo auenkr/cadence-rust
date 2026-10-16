@@ -47,8 +47,27 @@ No gate is complete solely because a listener or adapter exists. Original-Go
 function differential fixtures complement mixed-service tests; they do not replace
 mixed-service integration. The full compatibility runner now includes a real
 mixed Go Frontend/History/Worker + Rust Matching stage with seven SDK scenarios.
-Its discovery override and seeded domain metadata are test-only; remaining gate 6
-scenarios (queries, sticky/partitions, crash/failover and others) are still open.
+Its discovery override and seeded domain metadata are test-only.
+
+Gate-item progress recorded in memory (all validated by the full 29-stage runner
+unless noted):
+
+- gate 1: write-partition count from `matching.numTasklistWritePartitions`
+  (matching-partitions-next.md).
+- gate 4: rate limits (matching-rate-next.md), durable query delivery with a
+  mixed `queryDispatch` scenario (matching-query-next.md), sticky availability
+  fail-fast (matching-sticky-next.md), arrival QPS tracker and
+  `DescribeTaskList.newTasksPerSecond` (matching-qps-next.md).
+- gate 4 still open: forwarding, partition routing/scaling, isolation groups
+  (and `TaskListStatus.isolationGroupMetrics`), semaphores, `LoadBalancerHints`.
+- gate 6 still open: cancellations, retries/timeouts beyond the SDK probe,
+  partitioned lists, concurrent pollers, crash/restart and failover, and the
+  baseline history/error comparison.
+- gate 5 open: membership/ownership, standalone Matching lifecycle; the
+  production standalone server still serves Matching from the in-memory engine
+  (`Matching::new`), and the durable matcher is wired only in the test/mixed
+  harness. Wiring the durable matcher into the standalone server is the end-state
+  requirement.
 
 ## Next: History
 
