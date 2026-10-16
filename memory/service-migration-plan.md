@@ -43,8 +43,10 @@ Completion gates:
 
 No gate is complete solely because a listener or adapter exists. Original-Go
 function differential fixtures complement mixed-service tests; they do not replace
-mixed-service integration. The existing full compatibility runner boots only a
-Rust server and SDK clients, so its pass does not meet gate 6.
+mixed-service integration. The full compatibility runner now includes a real
+mixed Go Frontend/History/Worker + Rust Matching stage with seven SDK scenarios.
+Its discovery override and seeded domain metadata are test-only; remaining gate 6
+scenarios (queries, sticky/partitions, crash/failover and others) are still open.
 
 ## Next: History
 

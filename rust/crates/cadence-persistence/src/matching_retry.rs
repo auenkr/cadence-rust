@@ -1,4 +1,4 @@
-//! Matching lease retry rules from Go's ThrottleRetry and persistence policy.
+//! Matching persistence retry rules from Go's ThrottleRetry and persistence policy.
 //! SQLite never classifies errors as throttling, so only the main policy applies.
 use crate::matching_sqlite::{Result, StorageError};
 use cadence_common::ExponentialRetryPolicy;
@@ -30,28 +30,33 @@ fn run<T>(
     }
 }
 
-pub(crate) fn lease<T>(now: i64, mut operation: impl FnMut(i64) -> Result<T>) -> Result<T> {
+pub(crate) fn persistence<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
     let policy = ExponentialRetryPolicy::new(Duration::from_millis(50))
         .with_maximum_interval(Duration::from_secs(10))
         .with_expiration_interval(Duration::from_secs(30));
     let started = Instant::now();
     let mut rng = rand::thread_rng();
-    let mut first = true;
     run(
-        || {
-            // Keep the supplied initial timestamp exact for the caller's clock;
-            // later attempts advance with elapsed time, as Go RenewLease does.
-            let attempt_now = if first {
-                first = false;
-                now
-            } else {
-                now.wrapping_add(started.elapsed().as_nanos() as i64)
-            };
-            operation(attempt_now)
-        },
+        &mut operation,
         |attempt| policy.compute_next_delay(&mut rng, started.elapsed(), attempt),
         std::thread::sleep,
     )
+}
+
+pub(crate) fn lease<T>(now: i64, mut operation: impl FnMut(i64) -> Result<T>) -> Result<T> {
+    let started = Instant::now();
+    let mut first = true;
+    persistence(|| {
+        // Keep the supplied initial timestamp exact for the caller's clock;
+        // later attempts advance with elapsed time, as Go RenewLease does.
+        let attempt_now = if first {
+            first = false;
+            now
+        } else {
+            now.wrapping_add(started.elapsed().as_nanos() as i64)
+        };
+        operation(attempt_now)
+    })
 }
 
 #[cfg(test)]

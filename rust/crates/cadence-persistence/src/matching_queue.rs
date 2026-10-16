@@ -46,6 +46,7 @@ pub struct DurableTaskQueue {
     key: TaskListKey,
     range_size: NonZeroU32,
     state: Mutex<State>,
+    reader: Mutex<()>,
     ack: AckManager,
     gc: crate::matching_gc::TaskGarbageCollector,
     stopped: AtomicBool,
@@ -75,7 +76,11 @@ fn scan_batch(
             break;
         }
         let upper = read.wrapping_add(i64::from(range.get())).min(max);
-        let tasks = store.get_tasks(key, read, upper, i64::from(batch.get()))?;
+        // Go taskReader retries each individual bounded query, rather than
+        // restarting the ten-range scan after a transient driver failure.
+        let tasks = crate::matching_retry::persistence(|| {
+            store.get_tasks(key, read, upper, i64::from(batch.get()))
+        })?;
         if !tasks.is_empty() {
             return Ok(ScannedBatch {
                 tasks,
@@ -124,6 +129,7 @@ impl DurableTaskQueue {
             gc: crate::matching_gc::TaskGarbageCollector::default(),
             stopped: AtomicBool::new(false),
             stop_waker: Mutex::new(None),
+            reader: Mutex::new(()),
             state: Mutex::new(State {
                 range_id: lease.range_id,
                 next_id,
@@ -293,20 +299,29 @@ impl DurableTaskQueue {
         batch_size: NonZeroU32,
         now: i64,
     ) -> Result<ReadBatch> {
-        let mut state = self.state.lock().expect("matching queue lock");
+        // Go has one reader pump, independent of the writer's lease mutex.
+        // Serialize claims while allowing appends/completions during retries.
+        let _reader = self.reader.lock().expect("matching reader lock");
         self.active()?;
-        let (initial_read, initial_ack, _) = self.ack.levels();
+        let max_read_level = self
+            .state
+            .lock()
+            .expect("matching queue lock")
+            .max_read_level;
+        let (initial_read, _, _) = self.ack.levels();
         let scanned = scan_batch(
             &self.store,
             &self.key,
             initial_read,
-            state.max_read_level,
+            max_read_level,
             read_range_size,
             batch_size,
         )?;
+        let mut state = self.state.lock().expect("matching queue lock");
+        self.active()?;
         if scanned.tasks.is_empty() {
             self.ack.set_read_level(scanned.read_level);
-            if initial_ack == initial_read {
+            if self.ack.levels().1 == initial_read {
                 self.ack.set_ack_level(scanned.read_level);
             }
             return Ok(ReadBatch {
@@ -472,6 +487,48 @@ mod tests {
             ..Default::default()
         }
         .at_creation(100, 0)
+    }
+    #[test]
+    fn matching_queue_reader_retries_transient_query_without_losing_task() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tasks.db");
+        let store = Arc::new(SqliteTaskStore::create(&path, BlobEncoding::ThriftRW).unwrap());
+        let queue = Arc::new(DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap());
+        let first = queue.append(&[data()], 2).unwrap();
+        queue.read_batch(n(100), n(1), 3).unwrap();
+        let written = queue.append(&[data()], 4).unwrap();
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch("ALTER TABLE tasks RENAME TO temporarily_unavailable_tasks")
+            .unwrap();
+        let copy = queue.clone();
+        let reader = std::thread::spawn(move || copy.read_batch(n(100), n(1), 5));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while queue.reader.try_lock().is_ok() {
+            assert!(std::time::Instant::now() < deadline, "reader did not start");
+            std::thread::yield_now();
+        }
+        // Completion needs the state mutex: retrying reads must leave it free.
+        let copy = queue.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let completion = std::thread::spawn(move || {
+            sender.send(copy.complete(first[0].task_id)).unwrap();
+        });
+        let completed = receiver.recv_timeout(std::time::Duration::from_secs(2));
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(!reader.is_finished(), "query must wait for table recovery");
+        connection
+            .execute_batch("ALTER TABLE temporarily_unavailable_tasks RENAME TO tasks")
+            .unwrap();
+        let loaded = reader.join().unwrap().unwrap();
+        completion.join().unwrap();
+        completed
+            .expect("reader retries must not block completion")
+            .unwrap();
+        assert_eq!(loaded.tasks, written);
+        assert!(queue.read_batch(n(100), n(1), 4).unwrap().tasks.is_empty());
+        queue.complete(written[0].task_id).unwrap();
+        assert!(!queue.is_stopped());
     }
     #[test]
     fn matching_queue_stop_does_not_wait_for_inflight_state_lock() {

@@ -1684,3 +1684,13 @@ service migration: finish Matching and validate against Go Frontend, History and
 Worker before moving on. Latest full validation is 348 workspace tests and all
 27 compatibility stages. Next scoped gap is reader persistence retry, followed
 by background reader/matcher coordination. Full migration remains incomplete.
+
+## 2026-10-16: Matching bounded reader persistence retry
+
+See matching-reader-next.md. Bounded reader SQL queries share the Go retry policy;
+reader claims serialize independently from queue state, allowing completions and
+appends during backoff. Empty scans compare current ack after SQL. Real SQLite
+table outage/recovery test verifies no task loss and completion concurrency.
+Validation PASSED 349 workspace tests, strict lint and all 27 compatibility stages
+including mixed Go services/Rust Matching; /tmp/cadence-reader-full.exit = 0 and
+/tmp/cadence-reader-final.exit = 0. Matching completion gates remain open.

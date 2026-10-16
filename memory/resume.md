@@ -1,3 +1,8 @@
+Latest checkpoint: Matching reader query retry and independent reader lock.
+See matching-reader-next.md. 349 tests, strict lint, all 27 compatibility stages
+including mixed Go services passed. User reconfirmed complete Matching before
+History; no service is complete. Next: background reader and matcher rendezvous.
+
 # Current resume checkpoint (2026-10-16)
 
 Follow root AGENTS.md. The user requires continuing the entire Go-to-Rust rewrite,
