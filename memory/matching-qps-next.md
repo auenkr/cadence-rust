@@ -76,8 +76,10 @@ per-window attribution across an idle span.
 - strict all-target Clippy clean.
 - **Full 29/29-stage runner PASSED** (exit 0, including `workspace-tests`,
   `workspace-clippy`, `go-sdk-tchannel`, `go-services-matching-delivery` and
-  `go-services-rust-matching`):
-  `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-qps-full/results.json`.
+  `go-services-rust-matching`), both for the tracker/`newTasksPerSecond` change
+  and again after `LoadBalancerHints` was added:
+  `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-qps-full/results.json`
+  and `.../matching-lbhints-full/results.json`.
 
 ## Remaining limits
 
