@@ -6,6 +6,22 @@ incomplete. Keep working autonomously; use tmux session cadence-rust for long
 processes. After compaction save progress, commit and push. Never equate adapter
 coverage or a boundary probe with complete service parity.
 
+## Latest lease retry checkpoint
+
+Read matching-retry-next.md first. Initial/rollover lease operations now use Go's
+persistence retry policy and previous-error return convention. Every terminal
+renewal failure stops writer admission; CreateTasks remains single-attempt.
+Retry timestamps advance after the exact initial caller timestamp. Ten actual-Go
+retry outcomes and real SQLite transient/terminal tests pass.
+Final full regression PASSED: 348 workspace tests, strict all-target Clippy and
+all 27 compatibility stages, including mixed Go services/Rust Matching SDK cases:
+/tmp/cadence-retry-full.exit = 0;
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-retry-verified/results.json.
+Next: matcher rendezvous + reader buffering/stop coordination, reader/rewrite
+transient retries, injectable clocks, dynamic config; then query/sync/forwarding,
+isolation/rates, production routing/discovery/transports and remaining role gates.
+All four service roles remain incomplete. Preserve the whole rewrite objective.
+
 ## Latest startup concurrency checkpoint
 
 Read matching-startup-next.md first. Per-key startup gates keep lease I/O and

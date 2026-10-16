@@ -1,0 +1,104 @@
+[
+  {
+    "errors": [
+      "success"
+    ],
+    "retries": 0,
+    "calls": 1,
+    "pauses": 0,
+    "outcome": "success"
+  },
+  {
+    "errors": [
+      "condition"
+    ],
+    "retries": 3,
+    "calls": 1,
+    "pauses": 0,
+    "outcome": "condition"
+  },
+  {
+    "errors": [
+      "not-found"
+    ],
+    "retries": 3,
+    "calls": 1,
+    "pauses": 0,
+    "outcome": "not-found"
+  },
+  {
+    "errors": [
+      "first",
+      "success"
+    ],
+    "retries": 1,
+    "calls": 2,
+    "pauses": 1,
+    "outcome": "success"
+  },
+  {
+    "errors": [
+      "first",
+      "second",
+      "success"
+    ],
+    "retries": 2,
+    "calls": 3,
+    "pauses": 2,
+    "outcome": "success"
+  },
+  {
+    "errors": [
+      "first",
+      "second",
+      "third"
+    ],
+    "retries": 0,
+    "calls": 1,
+    "pauses": 0,
+    "outcome": "first"
+  },
+  {
+    "errors": [
+      "first",
+      "second",
+      "third"
+    ],
+    "retries": 1,
+    "calls": 2,
+    "pauses": 1,
+    "outcome": "first"
+  },
+  {
+    "errors": [
+      "first",
+      "second",
+      "third"
+    ],
+    "retries": 2,
+    "calls": 3,
+    "pauses": 2,
+    "outcome": "second"
+  },
+  {
+    "errors": [
+      "first",
+      "condition"
+    ],
+    "retries": 3,
+    "calls": 2,
+    "pauses": 1,
+    "outcome": "first"
+  },
+  {
+    "errors": [
+      "first",
+      "second",
+      "not-found"
+    ],
+    "retries": 3,
+    "calls": 3,
+    "pauses": 2,
+    "outcome": "second"
+  }
+]

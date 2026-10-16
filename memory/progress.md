@@ -1663,3 +1663,16 @@ cleans its unpublished owner and returns Unavailable. Weak gates avoid retaining
 all previously seen identities. Real SQLite contention, 15 registry tests, strict
 workspace lint and mixed Go services/Rust Matching with seven SDK cases PASSED.
 /tmp/cadence-startup-{check,lint,mixed}.exit = 0. No complete role is claimed.
+
+## 2026-10-16: Matching lease retry and terminal writer failure
+
+See matching-retry-next.md. Startup/rollover lease retry now uses Go's 50ms/10s/
+30s policy, transient driver classification, previous-error convention and
+advancing attempt timestamps. Terminal rollover failures stop admission even for
+non-condition errors. CreateTasks stays single-attempt. Ten actual-Go outcomes
+and real SQLite temporary trigger failure/corrupt metadata tests pass.
+Final full validation PASSED 348 workspace tests, strict lint, all 27 compatibility
+stages including mixed Go services/Rust Matching and seven SDK scenarios:
+/tmp/cadence-retry-full.exit = 0;
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-retry-verified/results.json.
+Reader/matcher pipeline, dynamic config and all remaining service gates stay open.

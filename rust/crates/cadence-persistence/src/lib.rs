@@ -30,3 +30,5 @@ pub mod matching_sqlite;
 pub mod matching_queue;
 
 pub mod matching_gc;
+
+mod matching_retry;

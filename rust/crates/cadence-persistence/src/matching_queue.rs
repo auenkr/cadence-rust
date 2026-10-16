@@ -110,7 +110,9 @@ impl DurableTaskQueue {
         range_size: NonZeroU32,
         now: i64,
     ) -> Result<Self> {
-        let lease = store.lease(&key, kind, 0, now)?;
+        let lease = crate::matching_retry::lease(now, |attempt_now| {
+            store.lease(&key, kind, 0, attempt_now)
+        })?;
         let (next_id, block_end) = block(lease.range_id, range_size);
         let ack = AckManager::default();
         ack.set_ack_level(lease.data.ack_level);
@@ -156,10 +158,16 @@ impl DurableTaskQueue {
         let mut tasks = Vec::with_capacity(data.len());
         for (_, data) in data {
             if state.next_id > state.block_end {
-                let result = self
-                    .store
-                    .lease(&self.key, state.metadata.kind, state.range_id, now);
-                let lease = self.check(result)?;
+                let result = crate::matching_retry::lease(now, |attempt_now| {
+                    self.store
+                        .lease(&self.key, state.metadata.kind, state.range_id, attempt_now)
+                });
+                // Go stops the writer on every terminal renewal failure,
+                // including exhausted transient errors, not only lost leases.
+                if result.is_err() {
+                    self.stop();
+                }
+                let lease = result?;
                 state.range_id = lease.range_id;
                 (state.next_id, state.block_end) = block(lease.range_id, self.range_size);
             }
@@ -488,6 +496,43 @@ mod tests {
         worker.join().unwrap();
         assert!(queue.append(&[data()], 2).is_err());
     }
+    #[test]
+    fn matching_queue_lease_retries_sql_failure_and_stops_on_terminal_renewal() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tasks.db");
+        let store = Arc::new(SqliteTaskStore::create(&path, BlobEncoding::ThriftRW).unwrap());
+        let control = rusqlite::Connection::open(&path).unwrap();
+        control.execute_batch("CREATE TRIGGER reject_lease BEFORE UPDATE ON task_lists BEGIN SELECT RAISE(FAIL, 'temporary lease failure'); END").unwrap();
+        let release_path = path.clone();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            rusqlite::Connection::open(release_path)
+                .unwrap()
+                .execute_batch("DROP TRIGGER reject_lease")
+                .unwrap();
+        });
+        let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(1), 1).unwrap();
+        release.join().unwrap();
+        let leased = store.get_task_list(&key()).unwrap();
+        assert_eq!(leased.range_id, 1);
+        assert!(leased.data.last_updated_nanos > 1);
+        assert_eq!(queue.append(&[data()], 2).unwrap()[0].task_id, 1);
+        // A corrupt persisted blob is a non-transient serializer error. Failed
+        // renewal must stop admission even though this is not a condition error.
+        control
+            .execute_batch("UPDATE task_lists SET data=x'ff'")
+            .unwrap();
+        assert!(matches!(
+            queue.append(&[data()], 3),
+            Err(QueueError::Storage(StorageError::Blob(_)))
+        ));
+        assert!(queue.is_stopped());
+        assert!(matches!(
+            queue.append(&[data()], 4),
+            Err(QueueError::Stopped)
+        ));
+    }
+
     #[test]
     fn matching_queue_cross_domain_rows_keep_source_key_and_target_fence() {
         let directory = tempfile::tempdir().unwrap();
