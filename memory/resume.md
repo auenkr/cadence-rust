@@ -30,7 +30,8 @@ History; no service is complete. Next: background reader and matcher rendezvous.
 
 # Current resume checkpoint (2026-10-16)
 
-Read matching-limiter-next.md and matching-rate-mixed.md first. The wired dispatch
+Read matching-partitions-next.md first (latest: write-partition provider from
+dynamic config), then matching-limiter-next.md and matching-rate-mixed.md. The wired dispatch
 limiter passed all 30 full-runner stages (incl. Go Frontend/History/Worker routed
 to Rust Matching). A mixed activity-pacing scenario was added to
 tests/matching-service-compat.cjs (`taskListMetadata.maxTasksPerSecond = 1`,
