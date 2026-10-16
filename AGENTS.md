@@ -20,4 +20,6 @@ The existing sdk should work for this.
 
 Use tmux session: cadence-rust for running long process
 
-After each compaction, save the progress in memory and commit and push changes to origin
+After each compaction(let compaction be at 230k token, do not execed this), save the progress in memory and commit and push changes to origin
+
+

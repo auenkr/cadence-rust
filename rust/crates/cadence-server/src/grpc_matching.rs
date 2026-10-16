@@ -253,7 +253,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 0).await?;
-            let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: crate::matching_limiter::TASK_DISPATCH_RPS, isolation_group: String::new() } };
+            let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: crate::matching_limiter::TASK_DISPATCH_RPS, isolation_group: r.isolation_group } };
             // Go's matcher serves `queryTaskC` on the same long poll as the
             // decision backlog; a ready query is handed to this poller instead
             // of waiting for a durable task. Racing is safe: dropping the
@@ -353,7 +353,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 }
                 None => crate::matching_limiter::TASK_DISPATCH_RPS,
             };
-            let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: rate, isolation_group: String::new() } };
+            let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: rate, isolation_group: r.isolation_group } };
             return tokio::select! {
                 result=queue.dispatcher.poll_activity_with_poller(payload, self.poll_expiration, lifecycle)=>
                     result.map(|mut response| {
@@ -893,7 +893,28 @@ impl m::matching_api_server::MatchingApi for Matching {
             }).collect();
             let task_list_status = if payload.include_task_list_status {
                 let (read_level, ack_level, backlog_count_hint, start_id, end_id, empty) = queue.queue.status();
-                Some(p::TaskListStatus { read_level, ack_level, backlog_count_hint, task_id_block: Some(p::TaskIdBlock { start_id, end_id }), empty, rate_per_second: queue.limiter.limit(), new_tasks_per_second: queue.qps.qps(), ..Default::default() })
+                // Go reads the configured group universe and the live poller
+                // history window on every Describe, even with isolation off.
+                let (groups, window) = {
+                    let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+                    (
+                        cadence_persistence::dynamic_config::string_list(config.property_values("system.allIsolationGroups")),
+                        cadence_persistence::dynamic_config::task_list_duration(
+                            config.property_values("matching.taskIsolationPollerWindow"),
+                            Some(&payload.domain), &task_list_name, task_list_type - 1, 2_000_000_000,
+                        ),
+                    )
+                };
+                let now = matching_now();
+                let counts = queue.pollers.lock().expect("poller history lock").count_by_group(now, now.saturating_sub(window));
+                let isolation_group_metrics = groups.into_iter().map(|group| {
+                    let metrics = p::IsolationGroupMetrics {
+                        new_tasks_per_second: queue.qps.group_qps(&group),
+                        poller_count: counts.get(&group).copied().unwrap_or_default() as i64,
+                    };
+                    (group, metrics)
+                }).collect();
+                Some(p::TaskListStatus { read_level, ack_level, backlog_count_hint, task_id_block: Some(p::TaskIdBlock { start_id, end_id }), empty, rate_per_second: queue.limiter.limit(), new_tasks_per_second: queue.qps.qps(), isolation_group_metrics })
             } else { None };
             let partition_config = self.frontend.state.executions.partition_config(&r.domain_id, &task_list_name, task_list_type).map(partition_config_to_proto);
             return Ok(Response::new(m::DescribeTaskListResponse { pollers, task_list_status, task_list, partition_config }));

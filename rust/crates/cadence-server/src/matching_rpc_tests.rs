@@ -200,8 +200,42 @@ async fn matching_rpc_durable_cancel_unregisters_waiting_poller() {
 }
 
 #[tokio::test]
+async fn matching_rpc_decision_poll_preserves_isolation_group_history() {
+    let (_dir, _store, matching, key) = fixture();
+    let queue = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    let worker = matching.clone();
+    let domain = key.domain_id.to_string();
+    let poll = tokio::spawn(async move {
+        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain, poller_id: "group-poller".into(), isolation_group: "zone-decision".into(),
+            request: Some(p::PollForDecisionTaskRequest { task_list: list(), identity: "decision-worker".into(), ..Default::default() }),
+            ..Default::default()
+        })).await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let now = matching_now();
+            let counts = queue.pollers.lock().unwrap().count_by_group(now, now + 1_000_000_000);
+            if counts.get("zone-decision") == Some(&1) { break; }
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("outstanding decision poller retains its group outside the recent window");
+    matching.cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+        domain_id: key.domain_id.to_string(), task_list: list(), task_list_type: 1, poller_id: "group-poller".into(),
+    })).await.unwrap();
+    assert_eq!(poll.await.unwrap().unwrap_err().code(), tonic::Code::Cancelled);
+    let now = matching_now();
+    let mut pollers = queue.pollers.lock().unwrap();
+    assert_eq!(pollers.count_by_group(now, now - 2_000_000_000).get("zone-decision"), Some(&1));
+    assert!(pollers.count_by_group(now, now + 1_000_000_000).is_empty());
+}
+
+#[tokio::test]
 async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status() {
     let (_dir, _store, matching, key) = fixture();
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "system.allIsolationGroups", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#"["zone-a","zone-b"]"#.to_vec())), filters: vec![],
+    }]);
     let worker = matching.clone();
     let domain = key.domain_id.to_string();
     let poll_domain = domain.clone();
@@ -210,6 +244,7 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
             .poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
                 domain_id: poll_domain,
                 poller_id: "activity-poller".into(),
+                isolation_group: "zone-a".into(),
                 request: Some(p::PollForActivityTaskRequest {
                     task_list: list(),
                     identity: "sdk-worker".into(),
@@ -251,6 +286,9 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
     assert_eq!(status.read_level, 0);
     assert_eq!(status.ack_level, 0);
     assert!(status.empty);
+    assert_eq!(status.isolation_group_metrics.len(), 2);
+    assert_eq!(status.isolation_group_metrics["zone-a"].poller_count, 1);
+    assert_eq!(status.isolation_group_metrics["zone-b"].poller_count, 0);
     assert_eq!(
         status.task_id_block,
         Some(p::TaskIdBlock {
@@ -273,6 +311,13 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
     );
     let ended = describe().await.unwrap().into_inner();
     assert_eq!(ended.pollers.len(), 1);
+    assert_eq!(ended.task_list_status.unwrap().isolation_group_metrics["zone-a"].poller_count, 1);
+    // A live negative window excludes completed polls, but never outstanding
+    // polls. This avoids sleeping and verifies the task-list window is read live.
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.taskIsolationPollerWindow", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#""-1s""#.to_vec())), filters: vec![],
+    }]);
+    assert_eq!(describe().await.unwrap().into_inner().task_list_status.unwrap().isolation_group_metrics["zone-a"].poller_count, 0);
     let timestamp = |time: &Option<prost_types::Timestamp>| {
         time.as_ref().map(|time| (time.seconds, time.nanos))
     };
@@ -542,6 +587,9 @@ async fn matching_rpc_delivers_query_to_decision_poller() {
 #[tokio::test]
 async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
     let (_dir, _store, matching, key) = fixture();
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "system.allIsolationGroups", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#"["z","unused"]"#.to_vec())), filters: vec![],
+    }]);
     // Go `matching.qpsTrackerInterval` (default 10s; shortened here) is read
     // when the task list manager is created, so it is updated first.
     matching
@@ -632,13 +680,22 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
         .unwrap()
         .into_inner();
     // DescribeTaskList reports the same arrival rate the tracker holds.
-    assert!(
-        status
-            .task_list_status
-            .expect("status requested")
-            .new_tasks_per_second
-            > 0.0
-    );
+    let status = status.task_list_status.expect("status requested");
+    assert!(status.new_tasks_per_second > 0.0);
+    assert!(status.isolation_group_metrics["z"].new_tasks_per_second > 0.0);
+    assert_eq!(status.isolation_group_metrics["unused"].new_tasks_per_second, 0.0);
+    assert_eq!(status.isolation_group_metrics["z"].poller_count, 0);
+    // Group enumeration is live, and does not leak unconfigured tracker groups.
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "system.allIsolationGroups", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#"["new-group"]"#.to_vec())), filters: vec![],
+    }]);
+    let status = matching.describe_task_list(Request::new(m::DescribeTaskListRequest {
+        domain_id: key.domain_id.to_string(), request: Some(p::DescribeTaskListRequest {
+            task_list: list(), task_list_type: 1, include_task_list_status: true, ..Default::default()
+        }),
+    })).await.unwrap().into_inner().task_list_status.unwrap();
+    assert_eq!(status.isolation_group_metrics.len(), 1);
+    assert_eq!(status.isolation_group_metrics["new-group"].new_tasks_per_second, 0.0);
 }
 
 #[tokio::test]

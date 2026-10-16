@@ -29,7 +29,10 @@ all-target workspace Clippy. Full runner is running in tmux `cadence-rust`:
 `/tmp/opencode/cadence-scoped-full.exit`, artifacts
 `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-scoped-config-full`.
 The full runner includes the additional scoped-QPS assertions added after the
-initial focused run. Do not claim a full pass until confirmed.
+initial focused run. CONFIRMED PASS: exit marker = 0, all 29 stages passed,
+including Go SDK and mixed Go Frontend/History/Worker + Rust Matching. Isolation
+reporting was being developed during later stages; this run's initial workspace
+checks cover scoped-config, not the final isolation reporting changes.
 
 Next: isolation-group reporting and poller attribution. Go obtains the available
 group names from `system.allIsolationGroups` (NOT the global admin group-state

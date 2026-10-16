@@ -1,4 +1,11 @@
-Latest continuation (2026-10-16): read matching-config-next.md. Task-list/type
+Latest continuation (2026-10-16): read matching-isolation-next.md, then
+matching-config-next.md. Scoped-config full runner PASSED all29 stages (marker
+/tmp/opencode/cadence-scoped-full.exit=0). Isolation poller attribution and
+Describe group metrics implemented; initial tests/lint passed, but final tests
+need queued fresh full runner /tmp/opencode/cadence-isolation-full.exit.
+No role complete; continue remaining Matching gates before History.
+
+Prior continuation: Task-list/type
 filtered partition-count and QPS providers implemented; 2 persistence tests,
 83 server lib tests and strict all-target workspace Clippy passed. Full runner
 running under tmux cadence-rust; /tmp/opencode/cadence-scoped-full.exit is the

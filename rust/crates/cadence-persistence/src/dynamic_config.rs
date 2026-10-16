@@ -108,6 +108,21 @@ pub fn duration(values: &[DynamicConfigValue], domain: Option<&str>, default: i6
         .unwrap_or(default)
 }
 
+/// Go `MapAllIsolationGroupsResponse`: one non-string rejects the whole list.
+pub fn string_list(values: &[DynamicConfigValue]) -> Vec<String> {
+    selected(values, None)
+        .and_then(|value| {
+            value.as_array().map(|items| {
+                items
+                    .iter()
+                    .map(|item| item.as_str().map(str::to_owned))
+                    .collect::<Option<Vec<_>>>()
+            })
+        })
+        .flatten()
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +211,17 @@ mod tests {
             entry(json!(6), &[("taskType", json!(0))]),
         ];
         assert_eq!(task_list_integer(&values, None, "queue", 0, 4), 4);
+    }
+
+    #[test]
+    fn isolation_group_list_rejects_partial_decoding_and_filtered_entries() {
+        assert_eq!(
+            string_list(&[entry(json!(["a", "b", "a"]), &[])]),
+            vec!["a", "b", "a"]
+        );
+        for value in [json!(["a", 1]), json!({"a": true}), json!(null)] {
+            assert!(string_list(&[entry(value, &[])]).is_empty());
+        }
+        assert!(string_list(&[entry(json!(["a"]), &[("domainName", json!("domain"))])]).is_empty());
     }
 }
