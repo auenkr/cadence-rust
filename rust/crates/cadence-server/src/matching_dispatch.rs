@@ -52,6 +52,7 @@ pub struct TaskDispatcher {
     wake: Arc<Notify>,
     liveness: Option<Arc<cadence_common::liveness::Liveness>>,
     writer: Option<crate::matching_writer::TaskWriter>,
+    reader: Option<crate::matching_reader::TaskReader>,
 }
 fn now() -> i64 {
     SystemTime::now()
@@ -79,6 +80,7 @@ impl TaskDispatcher {
             wake: Arc::new(Notify::new()),
             liveness: None,
             writer: None,
+            reader: None,
         }
     }
     pub fn with_liveness(mut self, liveness: Arc<cadence_common::liveness::Liveness>) -> Self {
@@ -89,6 +91,10 @@ impl TaskDispatcher {
         self.writer = Some(writer);
         self
     }
+    pub fn with_reader(mut self, reader: crate::matching_reader::TaskReader) -> Self {
+        self.reader = Some(reader);
+        self
+    }
     pub fn task_notification(&self) -> Arc<Notify> {
         self.wake.clone()
     }
@@ -96,6 +102,13 @@ impl TaskDispatcher {
         self.wake.notify_waiters();
     }
     async fn claim(&self) -> Result<(Option<AllocatedTask>, bool), ClaimError> {
+        if let Some(reader) = &self.reader {
+            return reader
+                .poll()
+                .await
+                .map(|task| (Some(task), false))
+                .ok_or(ClaimError::Queue(QueueError::Stopped));
+        }
         let queue = self.queue.clone();
         tokio::task::spawn_blocking(move || {
             queue.read_batch_with_clock(
@@ -315,7 +328,18 @@ impl TaskDispatcher {
             let notification = self.wake.notified();
             tokio::pin!(notification);
             notification.as_mut().enable();
-            let (task, scan_pending) = match self.claim().await {
+            let claim = if self.reader.is_some() {
+                // Waiting on the rendezvous owns no task. Cancellation can
+                // withdraw this poll without stealing a later backlog row.
+                tokio::select! {
+                    biased;
+                    _ = sender.closed() => return,
+                    result = self.claim() => result,
+                }
+            } else {
+                self.claim().await
+            };
+            let (task, scan_pending) = match claim {
                 Ok(value) => value,
                 Err(ClaimError::Queue(QueueError::Stopped)) => {
                     drop(waiting.take());
@@ -543,6 +567,63 @@ mod tests {
                 .task_id,
             3
         );
+    }
+    #[tokio::test]
+    async fn matching_dispatch_background_timeout_unregisters_wait_before_next_task() {
+        let (_directory, _store, _key, dispatcher) = fixture(0);
+        let reader = crate::matching_reader::TaskReader::new(
+            dispatcher.queue.clone(),
+            dispatcher.task_notification(),
+            crate::matching_reader::ReaderConfig::default(),
+        );
+        let dispatcher = dispatcher.with_reader(reader.clone());
+        let manager = Arc::new(Mutex::new(cadence_common::poller::Manager::default()));
+        let response = dispatcher
+            .poll_with_lifecycle(
+                (),
+                Duration::from_millis(10),
+                |_, _| -> std::future::Ready<Result<m::PollForDecisionTaskResponse, Status>> {
+                    panic!("empty poll must not deliver")
+                },
+                Some(PollLifecycle {
+                    manager: manager.clone(),
+                    id: "expired".into(),
+                    info: cadence_common::poller::Info {
+                        identity: "worker".into(),
+                        rate_per_second: 1.0,
+                        isolation_group: String::new(),
+                    },
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(response.task_token.is_empty());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while manager.lock().unwrap().contains_poll("expired") {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        dispatcher
+            .queue
+            .append(&[TaskData::default()], now())
+            .unwrap();
+        dispatcher.notify_new_tasks();
+        dispatcher
+            .poll((), Duration::from_secs(2), |task, _| {
+                assert_eq!(
+                    task.task_id, 1,
+                    "cancelled waiter must not claim/rewrite this task"
+                );
+                std::future::ready(Ok(m::PollForDecisionTaskResponse::default()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(dispatcher.queue.levels().1, 1);
+        reader.stop();
+        dispatcher.queue.stop();
+        reader.wait_stopped().await;
     }
     #[tokio::test]
     async fn matching_dispatch_empty_long_poll_expires_without_delivery() {

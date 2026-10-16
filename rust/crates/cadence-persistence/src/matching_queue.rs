@@ -7,11 +7,11 @@ use crate::{
 };
 use cadence_common::ack_manager::AckManager;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     num::NonZeroU32,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
     },
 };
 
@@ -46,12 +46,65 @@ pub struct DurableTaskQueue {
     key: TaskListKey,
     range_size: NonZeroU32,
     state: Mutex<State>,
-    reader: Mutex<()>,
+    reader: Arc<ReaderGate>,
     ack: AckManager,
     gc: crate::matching_gc::TaskGarbageCollector,
     stopped: AtomicBool,
     stop_waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
+#[derive(Default)]
+struct ReaderGate {
+    held: Mutex<bool>,
+    changed: Condvar,
+}
+impl ReaderGate {
+    fn lock(self: &Arc<Self>) -> ReaderPermit {
+        let mut held = self.held.lock().expect("matching reader gate lock");
+        while *held {
+            held = self.changed.wait(held).expect("matching reader gate lock");
+        }
+        *held = true;
+        ReaderPermit(self.clone())
+    }
+    #[cfg(test)]
+    fn try_lock(self: &Arc<Self>) -> std::result::Result<ReaderPermit, ()> {
+        let mut held = self.held.lock().unwrap();
+        if *held {
+            return Err(());
+        }
+        *held = true;
+        Ok(ReaderPermit(self.clone()))
+    }
+}
+struct ReaderPermit(Arc<ReaderGate>);
+impl Drop for ReaderPermit {
+    fn drop(&mut self) {
+        *self.0.held.lock().expect("matching reader gate lock") = false;
+        self.0.changed.notify_one();
+    }
+}
+/// One fetched batch with exclusive ownership of the read cursor. Dropping it
+/// leaves rows not yet admitted unread, so a replacement pump can fetch them.
+pub struct ReaderTurn {
+    queue: Arc<DurableTaskQueue>,
+    _permit: ReaderPermit,
+    tasks: VecDeque<AllocatedTask>,
+    pending: bool,
+}
+impl ReaderTurn {
+    pub fn next(&mut self, mut clock: impl FnMut() -> i64) -> Result<Option<AllocatedTask>> {
+        while let Some(task) = self.tasks.pop_front() {
+            if let Some(task) = self.queue.register_read(task, &mut clock)? {
+                return Ok(Some(task));
+            }
+        }
+        Ok(None)
+    }
+    pub fn scan_pending(&self) -> bool {
+        self.pending
+    }
+}
+
 #[derive(Debug)]
 pub struct ReadBatch {
     pub tasks: Vec<AllocatedTask>,
@@ -129,7 +182,7 @@ impl DurableTaskQueue {
             gc: crate::matching_gc::TaskGarbageCollector::default(),
             stopped: AtomicBool::new(false),
             stop_waker: Mutex::new(None),
-            reader: Mutex::new(()),
+            reader: Arc::new(ReaderGate::default()),
             state: Mutex::new(State {
                 range_id: lease.range_id,
                 next_id,
@@ -321,11 +374,8 @@ impl DurableTaskQueue {
         })
     }
 
-    /// Admit one row at a time to the reader's buffer. The callback may block;
-    /// that row is already registered, but later rows stay unread until it
-    /// returns. Returning false stops admission without acknowledging the row.
-    /// This mirrors Go's ReadItem immediately before its cancellable buffer send.
-    /// Returns whether another scan may be needed.
+    /// Admit one row at a time. The callback may block without holding queue
+    /// state; false retains the current in-flight row and leaves later rows unread.
     pub fn read_batch_into(
         &self,
         read_range_size: NonZeroU32,
@@ -333,51 +383,73 @@ impl DurableTaskQueue {
         mut clock: impl FnMut() -> i64,
         mut admit: impl FnMut(AllocatedTask) -> bool,
     ) -> Result<bool> {
-        // Go has one reader pump, independent of the writer's lease mutex.
-        // Serialize claims while allowing appends/completions during retries.
-        let _reader = self.reader.lock().expect("matching reader lock");
+        let (_permit, scanned) = self.load_reader_turn(read_range_size, batch_size)?;
+        let pending = !scanned.tasks.is_empty() || !scanned.finished;
+        for task in scanned.tasks {
+            if let Some(task) = self.register_read(task, &mut clock)? {
+                if !admit(task) {
+                    break;
+                }
+            }
+        }
+        Ok(pending)
+    }
+
+    /// SQL-only phase for an asynchronous pump. The owned permit keeps the
+    /// cursor exclusive across async buffer waits without holding a thread/lock.
+    pub fn reader_turn(
+        self: &Arc<Self>,
+        read_range_size: NonZeroU32,
+        batch_size: NonZeroU32,
+    ) -> Result<ReaderTurn> {
+        let (permit, scanned) = self.load_reader_turn(read_range_size, batch_size)?;
+        Ok(ReaderTurn {
+            queue: self.clone(),
+            _permit: permit,
+            pending: !scanned.tasks.is_empty() || !scanned.finished,
+            tasks: scanned.tasks.into(),
+        })
+    }
+    fn load_reader_turn(
+        &self,
+        range: NonZeroU32,
+        batch: NonZeroU32,
+    ) -> Result<(ReaderPermit, ScannedBatch)> {
+        let permit = self.reader.lock();
         self.active()?;
-        let max_read_level = self
+        let max = self
             .state
             .lock()
             .expect("matching queue lock")
             .max_read_level;
         let (initial_read, _, _) = self.ack.levels();
-        let scanned = scan_batch(
-            &self.store,
-            &self.key,
-            initial_read,
-            max_read_level,
-            read_range_size,
-            batch_size,
-        )?;
-        let state = self.state.lock().expect("matching queue lock");
+        let scanned = scan_batch(&self.store, &self.key, initial_read, max, range, batch)?;
+        let _state = self.state.lock().expect("matching queue lock");
         self.active()?;
         if scanned.tasks.is_empty() {
             self.ack.set_read_level(scanned.read_level);
             if self.ack.levels().1 == initial_read {
                 self.ack.set_ack_level(scanned.read_level);
             }
-            return Ok(!scanned.finished);
         }
-        drop(state);
-        for task in scanned.tasks {
-            let mut state = self.state.lock().expect("matching queue lock");
-            self.active()?;
-            if expired(task.data.expiry_nanos, clock()) {
-                self.ack.set_read_level(task.task_id);
-            } else {
-                self.ack
-                    .read_item(task.task_id)
-                    .map_err(QueueError::ReaderState)?;
-                state.in_flight.insert(task.task_id, task.clone());
-                drop(state);
-                if !admit(task) {
-                    return Ok(true);
-                }
-            }
+        Ok((permit, scanned))
+    }
+    fn register_read(
+        &self,
+        task: AllocatedTask,
+        clock: impl FnOnce() -> i64,
+    ) -> Result<Option<AllocatedTask>> {
+        let mut state = self.state.lock().expect("matching queue lock");
+        self.active()?;
+        if expired(task.data.expiry_nanos, clock()) {
+            self.ack.set_read_level(task.task_id);
+            return Ok(None);
         }
-        Ok(true)
+        self.ack
+            .read_item(task.task_id)
+            .map_err(QueueError::ReaderState)?;
+        state.in_flight.insert(task.task_id, task.clone());
+        Ok(Some(task))
     }
 
     /// Acknowledge only after History accepted start or Go's terminal-error
@@ -700,8 +772,9 @@ mod tests {
                     .unwrap(),
             );
             let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
-            queue.append(&vec![data(); 3], 2).unwrap();
-            let mut remaining = case["consumed"].as_u64().unwrap();
+            queue.append(&vec![data(); 6], 2).unwrap();
+            let mut remaining =
+                case["consumed"].as_u64().unwrap() + case["capacity"].as_u64().unwrap();
             let mut completed = true;
             queue
                 .read_batch_into(
@@ -724,6 +797,26 @@ mod tests {
             assert_eq!(backlog, case["backlog"].as_i64().unwrap());
             assert_eq!(completed, case["completed"].as_bool().unwrap());
         }
+    }
+    #[test]
+    fn matching_queue_owned_turn_retains_unadmitted_rows_across_threads() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = Arc::new(DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap());
+        let written = queue.append(&vec![data(); 3], 2).unwrap();
+        let turn = queue.reader_turn(n(100), n(10)).unwrap();
+        let mut turn = std::thread::spawn(move || turn).join().unwrap();
+        assert_eq!(queue.levels().2, 0, "fetching is not admission");
+        assert_eq!(turn.next(|| 3).unwrap(), Some(written[0].clone()));
+        queue.complete(written[0].task_id).unwrap();
+        drop(turn);
+        assert_eq!(
+            queue.read_batch(n(100), n(10), 4).unwrap().tasks,
+            written[1..]
+        );
     }
     #[test]
     fn matching_queue_cancelled_admission_leaves_later_batch_rows_unread() {

@@ -1709,3 +1709,18 @@ registering the rest of a fetched batch. Actual Go buffer-cancellation oracle
 verifies three blocked-row/backlog outcomes. 13 queue tests, strict lint, all Go
 reader differential groups and mixed Go services/Rust Matching SDK run passed.
 See matching-reader-next.md. Background pump/matcher integration remains next.
+
+## 2026-10-16: Matching background backlog reader and local handoff
+
+See matching-background-next.md. Native owners now prefetch through a batch-1
+buffer and separate dispatch head, using Go default1000 batch/50000 range, owned
+reader turns with per-row registration and asynchronous buffer waits. Local
+rendezvous handles cancellation without losing tasks. Teardown joins reader
+loops outside blocking pool after final ack/GC. Expiry is rechecked at dispatch,
+with active-domain deadlines and passive-domain indefinite heads based on live
+seeded metadata, including failover/attribute activity rules.
+Validation PASSED: 364 workspace tests, strict lint, all27 compatibility stages,
+actual mixed Go services/Rust Matching SDK cases. Latest focused41 Matching tests
+and domain helper test passed; actual Go activity tests and buffered admission
+comparison passed. /tmp/cadence-background-checked.exit = 0 and
+/tmp/cadence-background-acceptance.exit = 0. Full Matching remains incomplete.

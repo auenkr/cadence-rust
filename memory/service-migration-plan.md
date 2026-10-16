@@ -22,6 +22,8 @@ Independent components now verified: Go-format SQLite store, durable queue core,
 Go History client, cancellation-safe delivery worker and basic queue registry.
 Both RPC/History boundary and actual Go Frontend/History/Worker routing probes
 now exercise the Rust Matching listener. The latter includes the existing SDK.
+Native owners now have a background reader, bounded local buffer, cancellation-safe
+local backlog handoff and reader-loop shutdown joins (matching-background-next.md).
 These basic workflows do not satisfy all replacement gates below.
 Source-domain SQL writes are now checked against the original Go TaskStore.
 

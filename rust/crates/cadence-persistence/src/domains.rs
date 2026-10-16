@@ -192,6 +192,21 @@ impl InMemoryDomainStore {
         ))
     }
 
+    /// Go DomainCacheEntry.IsActiveIn: local domains are always active,
+    /// pending failover is passive, and any active-active attribute may own work.
+    pub fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError> {
+        let inner = self.inner.read().expect("domain store lock");
+        let record = inner.by_id.get(uuid).and_then(|name| inner.by_name.get(name))
+            .ok_or_else(|| EntityNotExistsError::new(format!("Domain {uuid} does not exist.")))?;
+        if !record.is_global_domain { return Ok(true); }
+        if record.failover_end_time.is_some() { return Ok(false); }
+        if record.replication.active_cluster_name == cluster { return Ok(true); }
+        Ok(record.replication.active_clusters.as_ref()
+            .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
+            .is_some_and(|scopes| scopes.values().any(|scope| scope.cluster_attributes.as_ref()
+                .is_some_and(|attributes| attributes.values().any(|attribute| attribute.active_cluster_name == cluster)))))
+    }
+
     pub fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError> {
         let inner = self.inner.read().expect("domain store lock");
         inner
@@ -735,6 +750,35 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    #[test]
+    fn matching_domain_activity_follows_local_failover_and_attribute_rules() {
+        let store = InMemoryDomainStore::new();
+        let (info, cfg, rep) = sample("d", "id");
+        store.create(info, cfg, rep, false).unwrap();
+        assert!(store.is_active_in("id", "passive").unwrap());
+        {
+            let mut inner = store.inner.write().unwrap();
+            let record = inner.by_name.get_mut("d").unwrap();
+            record.is_global_domain = true;
+        }
+        assert!(store.is_active_in("id", "active").unwrap());
+        assert!(!store.is_active_in("id", "passive").unwrap());
+        {
+            let mut inner = store.inner.write().unwrap();
+            let record = inner.by_name.get_mut("d").unwrap();
+            record.replication.active_clusters = Some(serde_json::from_value(serde_json::json!({
+                "activeClustersByClusterAttribute": {"region": {"clusterAttributes": {
+                    "r": {"activeClusterName": "passive"}
+                }}}
+            })).unwrap());
+        }
+        assert!(store.is_active_in("id", "passive").unwrap());
+        store.inner.write().unwrap().by_name.get_mut("d").unwrap().failover_end_time = Some(0);
+        assert!(!store.is_active_in("id", "active").unwrap());
+        assert!(!store.is_active_in("id", "passive").unwrap());
+        assert!(store.is_active_in("missing", "active").is_err());
     }
 
     #[test]

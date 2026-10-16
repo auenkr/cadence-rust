@@ -81,6 +81,7 @@ impl Matching {
         queues: crate::matching_registry::QueueRegistry,
         poll_expiration: std::time::Duration,
     ) -> Self {
+        let queues = queues.with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
         let mut matching = Self::new(state);
         matching.queues = Some(queues);
         matching.poll_expiration = poll_expiration;

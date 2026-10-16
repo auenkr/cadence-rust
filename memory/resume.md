@@ -1,3 +1,8 @@
+Latest: Matching background reader/local backlog handoff validated and connected
+to native owners. See matching-background-next.md. 364 tests, strict Clippy,
+all27 compatibility stages incl mixed Go services passed. No role complete.
+Next: writer-backed rewrite retry, then rate/isolation/sync/query/forwarding gates.
+
 Latest checkpoint: Matching reader query retry and independent reader lock.
 See matching-reader-next.md. 349 tests, strict lint, all 27 compatibility stages
 including mixed Go services passed. User reconfirmed complete Matching before

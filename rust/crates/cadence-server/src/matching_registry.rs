@@ -25,6 +25,7 @@ struct Owner {
     queue: Arc<DurableTaskQueue>,
     dispatcher: TaskDispatcher,
     writer: crate::matching_writer::TaskWriter,
+    reader: crate::matching_reader::TaskReader,
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     last_update: Mutex<tokio::time::Instant>,
     next_idle_check: Mutex<tokio::time::Instant>,
@@ -33,11 +34,17 @@ struct Owner {
 impl Owner {
     fn stop(&self) {
         self.writer.stop();
+        self.reader.stop();
         self.queue.stop();
         self.dispatcher.notify_new_tasks();
     }
-    fn finish(&self, now: i64) -> Result<(), Status> {
+    fn finish(
+        &self,
+        now: i64,
+        readers: &mut Vec<crate::matching_reader::TaskReader>,
+    ) -> Result<(), Status> {
         self.stop();
+        readers.push(self.reader.clone());
         let ack = self.queue.persist_final_ack(now);
         let garbage = self.queue.run_garbage_collection(true);
         ack.and(garbage.map(|_| ()))
@@ -59,6 +66,7 @@ pub struct QueueRegistry {
     state: Arc<Mutex<State>>,
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
+    domain_metadata: Option<(cadence_persistence::InMemoryDomainStore, String)>,
 }
 #[derive(Clone)]
 pub struct QueueHandle {
@@ -124,6 +132,25 @@ impl QueueHandle {
         .map_err(|error| Status::internal(error.to_string()))?
     }
 }
+// SQL cleanup runs on the blocking pool; joining async loops must release that
+// worker first, so simultaneous owner unloads cannot starve their own readers.
+async fn owner_work<T: Send + 'static>(
+    operation: impl FnOnce(&mut Vec<crate::matching_reader::TaskReader>) -> Result<T, Status>
+        + Send
+        + 'static,
+) -> Result<T, Status> {
+    let (result, readers) = tokio::task::spawn_blocking(move || {
+        let mut readers = Vec::new();
+        let result = operation(&mut readers);
+        (result, readers)
+    })
+    .await
+    .map_err(|error| Status::internal(error.to_string()))?;
+    for reader in readers {
+        reader.wait_stopped().await;
+    }
+    result
+}
 impl QueueRegistry {
     pub fn new(
         store: Arc<SqliteTaskStore>,
@@ -137,7 +164,16 @@ impl QueueRegistry {
             state: Arc::new(Mutex::new(State::default())),
             changed: Arc::new(tokio::sync::Notify::new()),
             startups: Arc::new(Mutex::new(HashMap::new())),
+            domain_metadata: None,
         }
+    }
+    pub fn with_domain_metadata(
+        mut self,
+        domains: cadence_persistence::InMemoryDomainStore,
+        cluster: String,
+    ) -> Self {
+        self.domain_metadata = Some((domains, cluster));
+        self
     }
     /// task_type is the persistence enum (decision 0, activity 1).
     pub async fn get(&self, key: TaskListKey, kind: i16, now: i64) -> Result<QueueHandle, Status> {
@@ -145,7 +181,7 @@ impl QueueRegistry {
             return Err(Status::invalid_argument("Unknown persistence task type."));
         }
         let registry = self.clone();
-        tokio::task::spawn_blocking(move || {
+        owner_work(move |readers| {
             let lookup = (key.domain_id, key.name.clone(), key.task_type);
             // Go registers a manager before Start performs lease I/O. Serialize
             // startup by queue identity while keeping unrelated owners usable.
@@ -177,7 +213,7 @@ impl QueueRegistry {
             {
                 if let Some(owner) = state.owners.remove(&lookup) {
                     drop(state);
-                    if let Err(error) = owner.finish(now) {
+                    if let Err(error) = owner.finish(now, readers) {
                         eprintln!("Matching stopped owner cleanup failed: {error}");
                     }
                     state = registry.state.lock().expect("Matching registry lock");
@@ -205,6 +241,15 @@ impl QueueRegistry {
                         registry_now(),
                         300_000_000_000,
                     ));
+                    let activity_domain = domain.clone();
+                    let metadata = registry.domain_metadata.clone();
+                    let activity = Arc::new(move || {
+                        metadata.as_ref().is_none_or(|(domains, cluster)| {
+                            domains
+                                .is_active_in(&activity_domain, cluster)
+                                .unwrap_or(true)
+                        })
+                    });
                     let dispatcher =
                         TaskDispatcher::new(queue.clone(), registry.history.clone(), domain)
                             .with_liveness(liveness.clone());
@@ -213,15 +258,26 @@ impl QueueRegistry {
                         dispatcher.task_notification(),
                         crate::matching_writer::WriterConfig::default(),
                     );
+                    let reader = crate::matching_reader::TaskReader::with_domain_activity(
+                        queue.clone(),
+                        dispatcher.task_notification(),
+                        crate::matching_reader::ReaderConfig::default(),
+                        activity,
+                    );
+                    let read_stop = reader.stop_signal();
                     let wake = registry.changed.clone();
                     let stopped = writer.stop_signal();
                     queue.set_stop_waker(Arc::new(move || {
                         let _ = stopped.send(true);
+                        read_stop.send_replace(true);
                         wake.notify_waiters();
                     }));
                     let owner = Arc::new(Owner {
-                        dispatcher: dispatcher.with_writer(writer.clone()),
+                        dispatcher: dispatcher
+                            .with_writer(writer.clone())
+                            .with_reader(reader.clone()),
                         writer,
+                        reader,
                         queue,
                         pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                         last_update: Mutex::new(tokio::time::Instant::now()),
@@ -233,7 +289,7 @@ impl QueueRegistry {
                     state = registry.state.lock().expect("Matching registry lock");
                     if state.stopped {
                         drop(state);
-                        if let Err(error) = owner.finish(now) {
+                        if let Err(error) = owner.finish(now, readers) {
                             eprintln!("Matching startup shutdown cleanup failed: {error}");
                         }
                         return Err(Status::unavailable("Matching registry stopped."));
@@ -252,7 +308,6 @@ impl QueueRegistry {
             })
         })
         .await
-        .map_err(|error| Status::internal(error.to_string()))?
     }
     /// An old manager's teardown must never unregister its replacement.
     pub async fn unload(
@@ -262,7 +317,7 @@ impl QueueRegistry {
         now: i64,
     ) -> Result<bool, Status> {
         let registry = self.clone();
-        tokio::task::spawn_blocking(move || {
+        owner_work(move |readers| {
             let mut state = registry.state.lock().expect("Matching registry lock");
             let lookup = (key.domain_id, key.name, key.task_type);
             let Some(owner) = state.owners.get(&lookup) else {
@@ -273,11 +328,10 @@ impl QueueRegistry {
             }
             let owner = state.owners.remove(&lookup).expect("checked owner");
             drop(state);
-            owner.finish(now)?;
+            owner.finish(now, readers)?;
             Ok(true)
         })
         .await
-        .map_err(|error| Status::internal(error.to_string()))?
     }
     /// Called by the service's configured ack timer. Fenced owners stop in the
     /// queue layer; report errors rather than silently accepting stale ownership.
@@ -339,7 +393,7 @@ impl QueueRegistry {
     }
     async fn reap_stopped(&self, now: i64) -> Result<(), Status> {
         let registry = self.clone();
-        tokio::task::spawn_blocking(move || {
+        owner_work(move |readers| {
             let candidates = registry
                 .state
                 .lock()
@@ -352,7 +406,7 @@ impl QueueRegistry {
             let mut failure = None;
             for (key, owner) in candidates {
                 if registry.detach(&key, &owner) {
-                    if let Err(error) = owner.finish(now) {
+                    if let Err(error) = owner.finish(now, readers) {
                         failure.get_or_insert(error);
                     }
                 }
@@ -360,13 +414,12 @@ impl QueueRegistry {
             failure.map_or(Ok(()), Err)
         })
         .await
-        .map_err(|error| Status::internal(error.to_string()))?
     }
     /// Check idleness using the caller's wall-clock time source. Scheduled
     /// ticks use due_only; an explicit controller scan may check every owner.
     pub async fn sweep_idle(&self, now: i64, due_only: bool) -> Result<(), Status> {
         let registry = self.clone();
-        tokio::task::spawn_blocking(move || {
+        owner_work(move |readers| {
             let candidates = {
                 let state = registry.state.lock().expect("Matching registry lock");
                 state
@@ -391,7 +444,7 @@ impl QueueRegistry {
             let mut failure = None;
             for (key, owner) in candidates {
                 if registry.detach(&key, &owner) {
-                    if let Err(error) = owner.finish(now) {
+                    if let Err(error) = owner.finish(now, readers) {
                         failure.get_or_insert(error);
                     }
                 }
@@ -399,7 +452,6 @@ impl QueueRegistry {
             failure.map_or(Ok(()), Err)
         })
         .await
-        .map_err(|error| Status::internal(error.to_string()))?
     }
     fn detach(&self, key: &Key, expected: &Arc<Owner>) -> bool {
         let mut state = self.state.lock().expect("Matching registry lock");
@@ -421,7 +473,7 @@ impl QueueRegistry {
         due: Option<std::time::Duration>,
     ) -> Result<(), Status> {
         let registry = self.clone();
-        tokio::task::spawn_blocking(move || {
+        owner_work(move |readers| {
             let owners = {
                 let mut state = registry.state.lock().expect("Matching registry lock");
                 if state.stopped {
@@ -449,7 +501,7 @@ impl QueueRegistry {
             let mut failure = None;
             for (key, owner) in owners {
                 if stop {
-                    if let Err(error) = owner.finish(now) {
+                    if let Err(error) = owner.finish(now, readers) {
                         failure.get_or_insert(error);
                     }
                     continue;
@@ -475,7 +527,7 @@ impl QueueRegistry {
                 if owner.queue.is_stopped() {
                     let detached = registry.detach(&key, &owner);
                     if detached {
-                        if let Err(error) = owner.finish(now) {
+                        if let Err(error) = owner.finish(now, readers) {
                             failure.get_or_insert(error);
                         }
                     }
@@ -485,7 +537,6 @@ impl QueueRegistry {
             failure.map_or(Ok(()), Err)
         })
         .await
-        .map_err(|error| Status::internal(error.to_string()))?
     }
 }
 
@@ -494,6 +545,22 @@ mod tests {
     use super::*;
     use cadence_persistence::matching_blob::BlobEncoding;
     use std::time::Duration;
+    async fn take(registry: &QueueRegistry, handle: &QueueHandle) -> AllocatedTask {
+        let reader = registry
+            .state
+            .lock()
+            .unwrap()
+            .owners
+            .values()
+            .find(|owner| Arc::ptr_eq(&owner.queue, &handle.queue))
+            .unwrap()
+            .reader
+            .clone();
+        tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap()
+    }
     fn fixture() -> (
         tempfile::TempDir,
         Arc<SqliteTaskStore>,
@@ -595,21 +662,40 @@ mod tests {
         let other = registry.get(activity, 0, 1).await.unwrap();
         assert!(!Arc::ptr_eq(&first.queue, &other.queue));
     }
+    #[test]
+    fn shutdown_joins_readers_with_one_blocking_worker() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (_directory, _store, registry, key) = fixture();
+            let mut handles = Vec::new();
+            for index in 0..10 {
+                let mut key = key.clone();
+                key.name = format!("shutdown-{index}");
+                let handle = registry.get(key, 0, 1).await.unwrap();
+                handle
+                    .append(vec![TaskData::default(); 3], 1)
+                    .await
+                    .unwrap();
+                handles.push(handle);
+            }
+            tokio::time::timeout(Duration::from_secs(2), registry.shutdown(2))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(handles.iter().all(|handle| handle.queue.is_stopped()));
+        });
+    }
     #[tokio::test]
     async fn shutdown_persists_ack_and_stops_previously_returned_handles() {
         let (_dir, store, registry, key) = fixture();
         let handle = registry.get(key.clone(), 0, 1).await.unwrap();
-        handle.queue.append(&[TaskData::default()], 1).unwrap();
-        let task = handle
-            .queue
-            .read_batch(
-                NonZeroU32::new(100).unwrap(),
-                NonZeroU32::new(1).unwrap(),
-                1,
-            )
-            .unwrap()
-            .tasks
-            .remove(0);
+        handle.append(vec![TaskData::default()], 1).await.unwrap();
+        let task = take(&registry, &handle).await;
         handle.queue.complete(task.task_id).unwrap();
         registry.shutdown(2).await.unwrap();
         assert_eq!(
@@ -628,16 +714,7 @@ mod tests {
         other_key.name = "other".into();
         let other = registry.get(other_key.clone(), 0, 1).await.unwrap();
         other.append(vec![TaskData::default()], 1).await.unwrap();
-        let task = other
-            .queue
-            .read_batch(
-                NonZeroU32::new(100).unwrap(),
-                NonZeroU32::new(1).unwrap(),
-                1,
-            )
-            .unwrap()
-            .tasks
-            .remove(0);
+        let task = take(&registry, &other).await;
         other.queue.complete(task.task_id).unwrap();
         store.lease(&key, 0, 0, 2).unwrap();
         assert!(registry.persist_acks(3).await.is_err());
@@ -665,32 +742,15 @@ mod tests {
         let same = registry.get(key.clone(), 0, 4).await.unwrap();
         assert!(Arc::ptr_eq(&new.queue, &same.queue));
         assert_eq!(store.get_task_list(&key).unwrap().range_id, 2);
-        let recovered = new
-            .queue
-            .read_batch(
-                NonZeroU32::new(100).unwrap(),
-                NonZeroU32::new(1).unwrap(),
-                4,
-            )
-            .unwrap();
-        assert_eq!(recovered.tasks.len(), 1);
-        assert_eq!(recovered.tasks[0].task_id, 1);
+        let recovered = take(&registry, &new).await;
+        assert_eq!(recovered.task_id, 1);
     }
     #[tokio::test]
     async fn maintenance_persists_live_ack_and_shutdown_stops_handles() {
         let (_dir, store, registry, key) = fixture();
         let handle = registry.get(key.clone(), 0, 1).await.unwrap();
         handle.append(vec![TaskData::default()], 1).await.unwrap();
-        let task = handle
-            .queue
-            .read_batch(
-                NonZeroU32::new(100).unwrap(),
-                NonZeroU32::new(1).unwrap(),
-                1,
-            )
-            .unwrap()
-            .tasks
-            .remove(0);
+        let task = take(&registry, &handle).await;
         handle.queue.complete(task.task_id).unwrap();
         assert_eq!(store.get_task_list(&key).unwrap().data.ack_level, 0);
         let (stop, shutdown) = tokio::sync::oneshot::channel();
@@ -721,16 +781,7 @@ mod tests {
         let (_dir, store, registry, key) = fixture();
         let old = registry.get(key.clone(), 0, 1).await.unwrap();
         old.append(vec![TaskData::default()], 1).await.unwrap();
-        let task = old
-            .queue
-            .read_batch(
-                NonZeroU32::new(100).unwrap(),
-                NonZeroU32::new(1).unwrap(),
-                1,
-            )
-            .unwrap()
-            .tasks
-            .remove(0);
+        let task = take(&registry, &old).await;
         old.queue.complete(task.task_id).unwrap();
         old.queue.stop();
         let new = registry.get(key.clone(), 0, 2).await.unwrap();
@@ -817,16 +868,7 @@ mod tests {
         let (_dir, store, registry, key) = fixture();
         let old = registry.get(key.clone(), 0, 1).await.unwrap();
         old.append(vec![TaskData::default()], 1).await.unwrap();
-        let task = old
-            .queue
-            .read_batch(
-                NonZeroU32::new(100).unwrap(),
-                NonZeroU32::new(1).unwrap(),
-                1,
-            )
-            .unwrap()
-            .tasks
-            .remove(0);
+        let task = take(&registry, &old).await;
         old.queue.complete(task.task_id).unwrap();
         let lookup = (key.domain_id, key.name.clone(), key.task_type);
         let owner = registry.state.lock().unwrap().owners[&lookup].clone();
@@ -835,7 +877,13 @@ mod tests {
         let new = registry.get(key.clone(), 0, 2).await.unwrap();
         let added = new.append(vec![TaskData::default()], 2).await.unwrap();
         assert_eq!(added[0].task_id, 101);
-        assert!(owner.finish(3).is_err(), "old final ack must be fenced");
+        let finishing = owner.clone();
+        assert!(
+            owner_work(move |readers| finishing.finish(3, readers))
+                .await
+                .is_err(),
+            "old final ack must be fenced"
+        );
         assert!(!registry.detach(&lookup, &owner));
         assert!(Arc::ptr_eq(
             &new.queue,
@@ -865,15 +913,8 @@ mod tests {
         assert_eq!(store.task_list_size(&key, 0).unwrap(), 1);
         let new = registry.get(key.clone(), 0, 300_000_000_001).await.unwrap();
         assert_eq!(store.get_task_list(&key).unwrap().range_id, 2);
-        let recovered = new
-            .queue
-            .read_batch(
-                NonZeroU32::new(100).unwrap(),
-                NonZeroU32::new(1).unwrap(),
-                300_000_000_001,
-            )
-            .unwrap();
-        assert_eq!(recovered.tasks[0].task_id, 1);
+        let recovered = take(&registry, &new).await;
+        assert_eq!(recovered.task_id, 1);
     }
     #[tokio::test]
     async fn describe_lookup_does_not_refresh_liveness_but_append_does() {

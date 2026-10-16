@@ -107,6 +107,7 @@ func TestRustMatchingQueueExpiry(t *testing.T) {
 func TestRustMatchingQueueAdmission(t *testing.T) {
 	type fixture struct {
 		Consumed  int   `json:"consumed"`
+		Capacity  int   `json:"capacity"`
 		Read      int64 `json:"read"`
 		Backlog   int64 `json:"backlog"`
 		Completed bool  `json:"completed"`
@@ -127,12 +128,12 @@ func TestRustMatchingQueueAdmission(t *testing.T) {
 		}
 		manager, _ := setupMocksForTaskListManager(t, id, types.TaskListKindNormal)
 		reader := manager.taskReader
-		buffer := make(chan *persistence.TaskInfo)
+		buffer := make(chan *persistence.TaskInfo, c.Capacity)
 		reader.taskBuffers = map[string]chan *persistence.TaskInfo{"": buffer}
 		reader.getIsolationGroupForTask = func(context.Context, *persistence.TaskInfo) (string, time.Duration) { return "", 0 }
 		result := make(chan bool, 1)
 		go func() {
-			result <- reader.addTasksToBuffer([]*persistence.TaskInfo{{TaskID: 1}, {TaskID: 2}, {TaskID: 3}})
+			result <- reader.addTasksToBuffer([]*persistence.TaskInfo{{TaskID: 1}, {TaskID: 2}, {TaskID: 3}, {TaskID: 4}, {TaskID: 5}, {TaskID: 6}})
 		}()
 		for j := 0; j < c.Consumed; j++ {
 			select {
@@ -142,7 +143,7 @@ func TestRustMatchingQueueAdmission(t *testing.T) {
 			}
 		}
 		deadline := time.Now().Add(time.Second)
-		for reader.taskAckManager.GetReadLevel() < int64(c.Consumed+1) {
+		for reader.taskAckManager.GetReadLevel() < int64(c.Consumed+c.Capacity+1) {
 			if time.Now().After(deadline) {
 				t.Fatal("blocked row was not registered")
 			}
