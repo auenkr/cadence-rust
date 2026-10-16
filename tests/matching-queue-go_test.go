@@ -103,3 +103,65 @@ func TestRustMatchingQueueExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRustMatchingQueueAdmission(t *testing.T) {
+	type fixture struct {
+		Consumed  int   `json:"consumed"`
+		Read      int64 `json:"read"`
+		Backlog   int64 `json:"backlog"`
+		Completed bool  `json:"completed"`
+	}
+	data, err := os.ReadFile(os.Getenv("CADENCE_MATCHING_QUEUE_INPUT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []fixture
+	if err = json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for i := range cases {
+		c := &cases[i]
+		id, err := NewIdentifier("domain", "queue", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager, _ := setupMocksForTaskListManager(t, id, types.TaskListKindNormal)
+		reader := manager.taskReader
+		buffer := make(chan *persistence.TaskInfo)
+		reader.taskBuffers = map[string]chan *persistence.TaskInfo{"": buffer}
+		reader.getIsolationGroupForTask = func(context.Context, *persistence.TaskInfo) (string, time.Duration) { return "", 0 }
+		result := make(chan bool, 1)
+		go func() {
+			result <- reader.addTasksToBuffer([]*persistence.TaskInfo{{TaskID: 1}, {TaskID: 2}, {TaskID: 3}})
+		}()
+		for j := 0; j < c.Consumed; j++ {
+			select {
+			case <-buffer:
+			case <-time.After(time.Second):
+				t.Fatal("buffer admission stalled")
+			}
+		}
+		deadline := time.Now().Add(time.Second)
+		for reader.taskAckManager.GetReadLevel() < int64(c.Consumed+1) {
+			if time.Now().After(deadline) {
+				t.Fatal("blocked row was not registered")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		reader.cancelFunc()
+		select {
+		case c.Completed = <-result:
+		case <-time.After(time.Second):
+			t.Fatal("cancelled reader did not exit")
+		}
+		c.Read = reader.taskAckManager.GetReadLevel()
+		c.Backlog = reader.taskAckManager.GetBacklogCount()
+	}
+	data, err = json.MarshalIndent(cases, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(os.Getenv("CADENCE_MATCHING_QUEUE_OUTPUT"), append(data, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -308,8 +308,31 @@ impl DurableTaskQueue {
         &self,
         read_range_size: NonZeroU32,
         batch_size: NonZeroU32,
-        mut clock: impl FnMut() -> i64,
+        clock: impl FnMut() -> i64,
     ) -> Result<ReadBatch> {
+        let mut tasks = Vec::new();
+        let scan_pending = self.read_batch_into(read_range_size, batch_size, clock, |task| {
+            tasks.push(task);
+            true
+        })?;
+        Ok(ReadBatch {
+            tasks,
+            scan_pending,
+        })
+    }
+
+    /// Admit one row at a time to the reader's buffer. The callback may block;
+    /// that row is already registered, but later rows stay unread until it
+    /// returns. Returning false stops admission without acknowledging the row.
+    /// This mirrors Go's ReadItem immediately before its cancellable buffer send.
+    /// Returns whether another scan may be needed.
+    pub fn read_batch_into(
+        &self,
+        read_range_size: NonZeroU32,
+        batch_size: NonZeroU32,
+        mut clock: impl FnMut() -> i64,
+        mut admit: impl FnMut(AllocatedTask) -> bool,
+    ) -> Result<bool> {
         // Go has one reader pump, independent of the writer's lease mutex.
         // Serialize claims while allowing appends/completions during retries.
         let _reader = self.reader.lock().expect("matching reader lock");
@@ -328,20 +351,19 @@ impl DurableTaskQueue {
             read_range_size,
             batch_size,
         )?;
-        let mut state = self.state.lock().expect("matching queue lock");
+        let state = self.state.lock().expect("matching queue lock");
         self.active()?;
         if scanned.tasks.is_empty() {
             self.ack.set_read_level(scanned.read_level);
             if self.ack.levels().1 == initial_read {
                 self.ack.set_ack_level(scanned.read_level);
             }
-            return Ok(ReadBatch {
-                tasks: Vec::new(),
-                scan_pending: !scanned.finished,
-            });
+            return Ok(!scanned.finished);
         }
-        let mut ready = Vec::new();
+        drop(state);
         for task in scanned.tasks {
+            let mut state = self.state.lock().expect("matching queue lock");
+            self.active()?;
             if expired(task.data.expiry_nanos, clock()) {
                 self.ack.set_read_level(task.task_id);
             } else {
@@ -349,13 +371,13 @@ impl DurableTaskQueue {
                     .read_item(task.task_id)
                     .map_err(QueueError::ReaderState)?;
                 state.in_flight.insert(task.task_id, task.clone());
-                ready.push(task);
+                drop(state);
+                if !admit(task) {
+                    return Ok(true);
+                }
             }
         }
-        Ok(ReadBatch {
-            tasks: ready,
-            scan_pending: true,
-        })
+        Ok(true)
     }
 
     /// Acknowledge only after History accepted start or Go's terminal-error
@@ -664,6 +686,78 @@ mod tests {
             assert_eq!(serde_json::json!(actual.read_level), case["expected_read"]);
             assert_eq!(serde_json::json!(actual.finished), case["finished"]);
         }
+    }
+    #[test]
+    fn matching_queue_original_go_blocked_admission_fixtures() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/matching-queue-admission.json"
+        ))
+        .unwrap();
+        for case in cases.as_array().unwrap() {
+            let directory = tempfile::tempdir().unwrap();
+            let store = Arc::new(
+                SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                    .unwrap(),
+            );
+            let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
+            queue.append(&vec![data(); 3], 2).unwrap();
+            let mut remaining = case["consumed"].as_u64().unwrap();
+            let mut completed = true;
+            queue
+                .read_batch_into(
+                    n(100),
+                    n(10),
+                    || 3,
+                    |_| {
+                        if remaining == 0 {
+                            completed = false;
+                            false
+                        } else {
+                            remaining -= 1;
+                            true
+                        }
+                    },
+                )
+                .unwrap();
+            let (read, _, backlog) = queue.levels();
+            assert_eq!(read, case["read"].as_i64().unwrap());
+            assert_eq!(backlog, case["backlog"].as_i64().unwrap());
+            assert_eq!(completed, case["completed"].as_bool().unwrap());
+        }
+    }
+    #[test]
+    fn matching_queue_cancelled_admission_leaves_later_batch_rows_unread() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
+        let written = queue.append(&vec![data(); 3], 2).unwrap();
+        let initial_ack = queue.levels().1;
+        let pending = queue
+            .read_batch_into(
+                n(100),
+                n(10),
+                || 3,
+                |task| {
+                    assert_eq!(task, written[0]);
+                    // Registered before the send; inspecting state also checks
+                    // that the callback does not hold the producer state mutex.
+                    assert_eq!(queue.status().0, task.task_id);
+                    assert_eq!(queue.levels().2, 1);
+                    false
+                },
+            )
+            .unwrap();
+        assert!(pending);
+        assert_eq!(queue.levels(), (written[0].task_id, initial_ack, 1));
+        assert_eq!(
+            queue.retry_data(written[0].task_id).unwrap(),
+            written[0].data
+        );
+        let rest = queue.read_batch(n(100), n(10), 4).unwrap();
+        assert_eq!(rest.tasks, written[1..]);
     }
     #[test]
     fn matching_queue_expiry_clock_advances_between_row_admissions() {

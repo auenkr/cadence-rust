@@ -40,3 +40,23 @@ strict workspace lint passed (/tmp/cadence-reader-clock.exit = 0). Mixed Go
 Frontend/History/Worker + Rust Matching with SDK cases passed:
 /tmp/cadence-reader-clock-mixed.exit = 0; artifacts matching-reader-clock-mixed
 under /home/ubuntu/.cache/cadence-rust-test-artifacts.
+
+## Incremental buffer admission follow-up
+
+read_batch_into now registers rows one at a time immediately before a potentially
+blocking callback. State mutex is released during callback; reader mutex retains
+one pump's exclusive cursor. Callback false leaves its current row in-flight and
+later fetched rows unread. Existing read_batch wrappers collect through this
+path; production still uses batch=1 per poll. Background buffers/matcher remain
+unconnected, and no claim of complete pump is made.
+
+Actual-Go addTasksToBuffer oracle uses unbuffered buffer, consumes zero/one/two
+rows, then cancels while the next row is blocked. Three fixtures verify the
+blocked row is registered (read/backlog consumed+1), later rows remain unread and
+admission returns false. Rust consumes the same fixtures. A separate test checks
+callback state access, retained in-flight row and subsequent scan of remaining
+rows. Validation: 13 queue tests + three actual-Go differential groups + strict
+workspace all-target Clippy passed (/tmp/cadence-admit-oracle.exit = 0). Actual
+mixed Go services/Rust Matching SDK run passed (/tmp/cadence-admit-final.exit = 0;
+matching-admission-mixed artifacts); final oracle-only additions followed that
+mixed run and do not change runtime code.

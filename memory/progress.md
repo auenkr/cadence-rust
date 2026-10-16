@@ -1701,3 +1701,11 @@ Queue accepts injectable per-row clock; production dispatcher reads wall time
 after storage retries. Equality/later boundary tested across consecutive rows.
 11 queue tests, strict lint, and mixed Go services/Rust Matching passed.
 See matching-reader-next.md; active service remains Matching.
+
+## 2026-10-16: Matching incremental reader admission
+
+Persistence reader now supports blocking/cancellable per-row admission without
+registering the rest of a fetched batch. Actual Go buffer-cancellation oracle
+verifies three blocked-row/backlog outcomes. 13 queue tests, strict lint, all Go
+reader differential groups and mixed Go services/Rust Matching SDK run passed.
+See matching-reader-next.md. Background pump/matcher integration remains next.

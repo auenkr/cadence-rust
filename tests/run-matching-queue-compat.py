@@ -10,7 +10,7 @@ root=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--regenerate',action='store_true')
 args=parser.parse_args()
-for name,test in [('reader','Reader'),('expiry','Expiry')]:
+for name,test in [('reader','Reader'),('expiry','Expiry'),('admission','Admission')]:
     fixture=root/f'tests/fixtures/matching-queue-{name}.json'
     with tempfile.TemporaryDirectory(prefix='cadence-queue-') as directory:
         overlay=Path(directory)/'overlay.json'
