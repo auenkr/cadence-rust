@@ -35,6 +35,11 @@ task_list_limiter.go` (`countPartitions`), and dynamic property
   `matching_limiter::tests::report_divides_by_live_partition_count` and
   `matching_rpc_lists_configured_write_partitions`).
 - `cargo clippy -p cadence-server --all-targets -- -D warnings` clean.
+- Full runner CONFIRMED PASSING (2026-10-16): `tests/run-compatibility.py
+  --artifacts-dir .../matching-partitions-full --go-mixed-server-bin
+  .../matching-mixed-20261016/cadence-server` exit 0, all 29 stages incl.
+  `go-services-matching-delivery` and `go-services-rust-matching`. Results:
+  `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-partitions-full/results.json`.
 
 ## Known limit / still open
 
