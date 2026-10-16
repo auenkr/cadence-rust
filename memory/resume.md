@@ -28,6 +28,22 @@ See matching-reader-next.md. 349 tests, strict lint, all 27 compatibility stages
 including mixed Go services passed. User reconfirmed complete Matching before
 History; no service is complete. Next: background reader and matcher rendezvous.
 
+# Current resume checkpoint (2026-10-16) — durable query delivery
+
+Read matching-query-next.md first. The durable matcher now delivers Go-style
+direct queries: `QueryWorkflow` offers an ephemeral query task, a decision
+`PollForDecisionTask` receives it on the same long poll (ahead of the durable
+backlog) with a query task token and mutable-state metadata, and
+`RespondQueryTaskCompleted` completes the waiting call. 79 cadence-server lib
+tests + strict all-target Clippy pass. Mixed Go Frontend/History/Worker ->
+Rust Matching PASSED with a new `queryDispatch` scenario (the existing Go SDK
+run in the same probe also passed):
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-query-mixed/probe.log.
+Next Matching gate items: forwarding, partition routing/scaling, isolation
+groups, semaphores, sticky availability, membership/ownership, standalone
+lifecycle, and wiring the durable matcher into the production standalone
+server. All four roles remain incomplete.
+
 # Current resume checkpoint (2026-10-16)
 
 Read matching-partitions-next.md first (latest: write-partition provider from

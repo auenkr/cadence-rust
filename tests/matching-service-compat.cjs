@@ -157,10 +157,39 @@ async function run() {
   assert(pacedLatency.at(-1) >= 500, `paced activity dispatch was not rate limited: ${JSON.stringify(pacedLatency)}`);
   const pacedDescribe = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: pacedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
   assert.equal(pacedDescribe.taskListStatus.ratePerSecond, 1, 'DescribeTaskList must report the reported backing rate');
+  // Query dispatched directly through matching: the workflow is open with no
+  // pending decision, so Go History routes the query to Rust Matching, which
+  // offers it to a waiting decision poller on the same long poll.
+  const queryList = { name: `query-${id}` };
+  const queryStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
+    ...startRequest, workflowId: `query-${id}`, taskList: queryList, requestId: randomUUID(),
+  });
+  const queryDecision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: queryList, identity: 'query-probe' });
+  assert.equal(queryDecision.workflowExecution.runId, queryStart.runId);
+  await call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: queryDecision.taskToken, identity: 'query-probe', decisions: [] });
+  const pendingQuery = call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: queryList, identity: 'query-probe' });
+  const queryPollDeadline = Date.now() + 10000;
+  for (;;) {
+    const info = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: queryList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+    if (info.pollers.some(poller => poller.identity === 'query-probe')) break;
+    if (Date.now() > queryPollDeadline) throw new Error('query probe poll was not registered');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  const pendingAnswer = call('WorkflowAPI', 'QueryWorkflow', {
+    domain, workflowExecution: { workflowId: `query-${id}`, runId: queryStart.runId },
+    query: { queryType: 'probe' }, queryConsistencyLevel: 'QUERY_CONSISTENCY_LEVEL_EVENTUAL',
+  });
+  const queryTask = await pendingQuery;
+  assert.equal(queryTask.query?.queryType, 'probe', 'Rust Matching must deliver the query to a decision poller');
+  assert.equal(queryTask.workflowExecution.runId, queryStart.runId);
+  assert(queryTask.history.events.length > 0, 'a non-sticky query poll must carry history');
+  assert(!queryTask.queries || Object.keys(queryTask.queries).length === 0, 'direct queries must not use the buffered query map');
+  await call('WorkerAPI', 'RespondQueryTaskCompleted', { taskToken: queryTask.taskToken, result: { resultType: 'QUERY_RESULT_TYPE_ANSWERED', answer: payload('pong') } });
+  assert.equal((await pendingAnswer).queryResult.data.toString(), 'pong');
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: 'passed', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: 'passed', queryDispatch: 'passed', peer, domain, execution, attributes }));
   } finally {
     fs.writeFileSync(stop, 'stop');
     let shutdownTimer;
