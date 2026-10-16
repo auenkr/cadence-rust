@@ -37,7 +37,9 @@ attribution) and wired into the durable matcher: non-forwarded
 `isolation-group`), and durable `DescribeTaskList` reports
 `newTasksPerSecond`. Window length comes from `matching.qpsTrackerInterval`
 (default 10s). 35 cadence-common + 81 cadence-server lib tests and strict
-all-target Clippy pass. Next Matching gate items: `LoadBalancerHints`,
+all-target Clippy pass. The full 29/29-stage runner passed:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-qps-full/results.json.
+Next Matching gate items: `LoadBalancerHints`,
 `isolation_group_metrics`, forwarding, partition routing/scaling, isolation
 groups, semaphores, membership/ownership, standalone lifecycle, and wiring the
 durable matcher into the production standalone server.

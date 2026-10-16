@@ -58,7 +58,10 @@ per-window attribution across an idle span.
   isolation-group arrivals, nothing reported inside an open window, and
   `DescribeTaskList.new_tasks_per_second` following the tracker).
 - strict all-target Clippy clean.
-- Full runner: see `matching-qps-full/results.json`.
+- **Full 29/29-stage runner PASSED** (exit 0, including `workspace-tests`,
+  `workspace-clippy`, `go-sdk-tchannel`, `go-services-matching-delivery` and
+  `go-services-rust-matching`):
+  `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-qps-full/results.json`.
 
 ## Remaining limits
 
