@@ -1654,3 +1654,12 @@ mixed Go services/Rust Matching SDK validation. Evidence:
 /home/ubuntu/.cache/cadence-rust-test-artifacts/matching-writer-verified/results.json;
 /tmp/cadence-writer-full.exit = 0. Reader, startup, dynamic configuration, lease
 retry and remaining Matching service gates are still incomplete.
+
+## 2026-10-16: Per-queue startup serialization
+
+See matching-startup-next.md. Queue creation/cleanup now holds only a per-key gate
+through lease I/O; loaded owners remain accessible. Delayed startup after shutdown
+cleans its unpublished owner and returns Unavailable. Weak gates avoid retaining
+all previously seen identities. Real SQLite contention, 15 registry tests, strict
+workspace lint and mixed Go services/Rust Matching with seven SDK cases PASSED.
+/tmp/cadence-startup-{check,lint,mixed}.exit = 0. No complete role is claimed.

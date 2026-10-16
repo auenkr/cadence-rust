@@ -8,7 +8,7 @@ use cadence_persistence::{
 use std::{
     collections::HashMap,
     num::NonZeroU32,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 use tonic::Status;
 use uuid::Uuid;
@@ -20,6 +20,7 @@ fn registry_now() -> i64 {
         .unwrap_or_default()
 }
 type Key = (Uuid, String, i32);
+type StartupGates = HashMap<Key, Weak<Mutex<()>>>;
 struct Owner {
     queue: Arc<DurableTaskQueue>,
     dispatcher: TaskDispatcher,
@@ -57,6 +58,7 @@ pub struct QueueRegistry {
     range_size: NonZeroU32,
     state: Arc<Mutex<State>>,
     changed: Arc<tokio::sync::Notify>,
+    startups: Arc<Mutex<StartupGates>>,
 }
 #[derive(Clone)]
 pub struct QueueHandle {
@@ -134,6 +136,7 @@ impl QueueRegistry {
             range_size,
             state: Arc::new(Mutex::new(State::default())),
             changed: Arc::new(tokio::sync::Notify::new()),
+            startups: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     /// task_type is the persistence enum (decision 0, activity 1).
@@ -143,11 +146,30 @@ impl QueueRegistry {
         }
         let registry = self.clone();
         tokio::task::spawn_blocking(move || {
+            let lookup = (key.domain_id, key.name.clone(), key.task_type);
+            // Go registers a manager before Start performs lease I/O. Serialize
+            // startup by queue identity while keeping unrelated owners usable.
+            // Weak entries cannot retain every task-list name ever encountered.
+            let startup = {
+                let mut gates = registry
+                    .startups
+                    .lock()
+                    .expect("Matching startup gates lock");
+                gates.retain(|_, gate| gate.strong_count() > 0);
+                match gates.get(&lookup).and_then(Weak::upgrade) {
+                    Some(gate) => gate,
+                    None => {
+                        let gate = Arc::new(Mutex::new(()));
+                        gates.insert(lookup.clone(), Arc::downgrade(&gate));
+                        gate
+                    }
+                }
+            };
+            let _starting = startup.lock().expect("Matching queue startup lock");
             let mut state = registry.state.lock().expect("Matching registry lock");
             if state.stopped {
                 return Err(Status::unavailable("Matching registry stopped."));
             }
-            let lookup = (key.domain_id, key.name.clone(), key.task_type);
             if state
                 .owners
                 .get(&lookup)
@@ -167,6 +189,7 @@ impl QueueRegistry {
             let owner = match state.owners.get(&lookup) {
                 Some(owner) => owner.clone(),
                 None => {
+                    drop(state);
                     let domain = key.domain_id.to_string();
                     let queue = Arc::new(
                         DurableTaskQueue::open(
@@ -207,6 +230,14 @@ impl QueueRegistry {
                         ),
                         liveness,
                     });
+                    state = registry.state.lock().expect("Matching registry lock");
+                    if state.stopped {
+                        drop(state);
+                        if let Err(error) = owner.finish(now) {
+                            eprintln!("Matching startup shutdown cleanup failed: {error}");
+                        }
+                        return Err(Status::unavailable("Matching registry stopped."));
+                    }
                     state.owners.insert(lookup, owner.clone());
                     registry.changed.notify_waiters();
                     owner
@@ -486,6 +517,63 @@ mod tests {
         };
         (dir, store, registry, key)
     }
+    #[tokio::test]
+    async fn slow_startup_does_not_block_loaded_owner_or_shutdown() {
+        let (directory, _store, registry, key) = fixture();
+        let loaded = registry.get(key.clone(), 0, 1).await.unwrap();
+        let connection = rusqlite::Connection::open(directory.path().join("tasks.db")).unwrap();
+        connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let mut new_key = key.clone();
+        new_key.name = "slow-startup".into();
+        let lookup = (new_key.domain_id, new_key.name.clone(), new_key.task_type);
+        let worker = registry.clone();
+        let loading = tokio::spawn(async move { worker.get(new_key, 0, 2).await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let gate = registry
+                    .startups
+                    .lock()
+                    .unwrap()
+                    .get(&lookup)
+                    .and_then(Weak::upgrade);
+                if gate.is_some_and(|gate| gate.try_lock().is_err()) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // Let the lease call enter SQLite's busy wait behind our transaction.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let again = tokio::time::timeout(Duration::from_millis(500), registry.get(key, 0, 3))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(Arc::ptr_eq(&loaded.queue, &again.queue));
+        // Shutdown stops admission without waiting for a lease that has not yet
+        // been registered. The loader must fence its eventual publication.
+        let shutdown = registry.clone();
+        let stopped = tokio::spawn(async move { shutdown.shutdown(4).await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if registry.state.lock().unwrap().stopped {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        connection.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            loading.await.unwrap().err().unwrap().code(),
+            tonic::Code::Unavailable
+        );
+        stopped.await.unwrap().unwrap();
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+
     #[tokio::test]
     async fn concurrent_load_acquires_one_lease_and_isolates_task_types() {
         let (_dir, store, registry, key) = fixture();

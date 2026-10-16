@@ -6,6 +6,18 @@ incomplete. Keep working autonomously; use tmux session cadence-rust for long
 processes. After compaction save progress, commit and push. Never equate adapter
 coverage or a boundary probe with complete service parity.
 
+## Latest startup concurrency checkpoint
+
+Read matching-startup-next.md first. Per-key startup gates keep lease I/O and
+stopped-owner cleanup outside the registry map lock. Shutdown prevents publication
+of a delayed startup. Real SQLite contention, all 15 registry tests, strict lint,
+and mixed Go services/Rust Matching with seven SDK scenarios PASSED:
+/tmp/cadence-startup-check.exit, /tmp/cadence-startup-lint.exit,
+/tmp/cadence-startup-mixed.exit = 0. Artifacts:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-startup-mixed/results.json.
+Next: lease renewal retry policy, reader buffering, dynamic config, sync/query/
+forwarding and remaining Matching service gates. All four roles incomplete.
+
 ## Latest writer checkpoint
 
 Read matching-writer-next.md first. Sequential bounded writer now owns native
