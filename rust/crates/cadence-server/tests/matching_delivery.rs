@@ -105,12 +105,22 @@ async fn matching_delivery_go_history() {
             .unwrap();
     });
     if fixture.kind == "server" {
+        let (stop_pump, shutdown) = tokio::sync::oneshot::channel();
+        let controller = registry.clone();
+        let pump = tokio::spawn(async move {
+            controller
+                .maintain_until(Duration::from_secs(60), async {
+                    let _ = shutdown.await;
+                })
+                .await
+        });
         std::fs::write(&fixture.output, address.to_string()).unwrap();
         let stop = fixture.stop_file.expect("server stop file");
         while !Path::new(&stop).exists() {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        registry.shutdown(now).await.unwrap();
+        stop_pump.send(()).unwrap();
+        pump.await.unwrap().unwrap();
         server.abort();
         return;
     }

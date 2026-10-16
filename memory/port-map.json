@@ -259,7 +259,8 @@
       "rust/crates/cadence-persistence/src/matching_queue.rs"
     ],
     "evidence": [
-      "Actual-Go differential fixtures cover 10-range scan budget and expiry rules. Durable reader/ack/rewrite core passes recovery, concurrent claim and rewrite-failure retention tests. Dispatch pump, throttling/isolation, scheduling and operational lifecycle remain incomplete."
+      "Actual-Go differential fixtures cover 10-range scan budget and expiry rules. Durable reader/ack/rewrite core passes recovery, concurrent claim and rewrite-failure retention tests. Dispatch pump, throttling/isolation, scheduling and operational lifecycle remain incomplete.",
+      "Per-owner ack deadlines and post-update resets, periodic database ack persistence, fenced-owner eviction and surviving healthy owners; focused Matching tests and actual mixed Go-services/SDK probe passed. Full GC/shutdown/config parity remains."
     ]
   },
   "go/service/matching/handler/engine.go": {

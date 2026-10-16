@@ -13,11 +13,18 @@ use std::{
 use tonic::Status;
 use uuid::Uuid;
 
+fn registry_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|time| time.as_nanos() as i64)
+        .unwrap_or_default()
+}
 type Key = (Uuid, String, i32);
 struct Owner {
     queue: Arc<DurableTaskQueue>,
     dispatcher: TaskDispatcher,
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
+    last_update: Mutex<tokio::time::Instant>,
 }
 #[derive(Default)]
 struct State {
@@ -103,6 +110,15 @@ impl QueueRegistry {
                 return Err(Status::unavailable("Matching registry stopped."));
             }
             let lookup = (key.domain_id, key.name.clone(), key.task_type);
+            if state
+                .owners
+                .get(&lookup)
+                .is_some_and(|owner| owner.queue.is_stopped())
+            {
+                if let Some(owner) = state.owners.remove(&lookup) {
+                    owner.dispatcher.notify_new_tasks();
+                }
+            }
             let owner = match state.owners.get(&lookup) {
                 Some(owner) => owner.clone(),
                 None => {
@@ -125,6 +141,7 @@ impl QueueRegistry {
                         ),
                         queue,
                         pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
+                        last_update: Mutex::new(tokio::time::Instant::now()),
                     });
                     state.owners.insert(lookup, owner.clone());
                     owner
@@ -158,6 +175,7 @@ impl QueueRegistry {
             }
             let result = owner.queue.persist_ack(now);
             owner.queue.stop();
+            owner.dispatcher.notify_new_tasks();
             state.owners.remove(&lookup);
             result.map_err(|error| Status::unavailable(error.to_string()))?;
             Ok(true)
@@ -168,14 +186,52 @@ impl QueueRegistry {
     /// Called by the service's configured ack timer. Fenced owners stop in the
     /// queue layer; report errors rather than silently accepting stale ownership.
     pub async fn persist_acks(&self, now: i64) -> Result<(), Status> {
-        self.flush(now, false).await
+        self.flush(now, false, None).await
     }
     /// All handles become unusable after shutdown. Persist every owner even if
     /// another owner fails, and return the first failure for service diagnostics.
     pub async fn shutdown(&self, now: i64) -> Result<(), Status> {
-        self.flush(now, true).await
+        self.flush(now, true, None).await
     }
-    async fn flush(&self, now: i64, stop: bool) -> Result<(), Status> {
+    /// Fixed-interval controller. Reset after each completed update, as Go's
+    /// task reader does; a transient persistence error does not kill the pump.
+    /// The caller supplies the configured interval and owns the shutdown signal.
+    pub async fn maintain_until<F>(
+        &self,
+        interval: std::time::Duration,
+        shutdown: F,
+    ) -> Result<(), Status>
+    where
+        F: std::future::Future<Output = ()> + Send,
+    {
+        tokio::pin!(shutdown);
+        loop {
+            let deadline = self
+                .state
+                .lock()
+                .expect("Matching registry lock")
+                .owners
+                .values()
+                .map(|owner| *owner.last_update.lock().expect("Matching ack timer lock") + interval)
+                .min()
+                .unwrap_or_else(|| tokio::time::Instant::now() + interval);
+            tokio::select! {
+                biased;
+                _ = &mut shutdown => return self.shutdown(registry_now()).await,
+                _ = tokio::time::sleep_until(deadline) => {
+                    if let Err(error) = self.flush(registry_now(), false, Some(interval)).await {
+                        eprintln!("Matching acknowledgement update failed: {error}");
+                    }
+                }
+            }
+        }
+    }
+    async fn flush(
+        &self,
+        now: i64,
+        stop: bool,
+        due: Option<std::time::Duration>,
+    ) -> Result<(), Status> {
         let registry = self.clone();
         tokio::task::spawn_blocking(move || {
             let mut state = registry.state.lock().expect("Matching registry lock");
@@ -184,13 +240,29 @@ impl QueueRegistry {
             }
             let mut failure = None;
             for owner in state.owners.values() {
+                if due.is_some_and(|interval| {
+                    owner
+                        .last_update
+                        .lock()
+                        .expect("Matching ack timer lock")
+                        .elapsed()
+                        < interval
+                }) {
+                    continue;
+                }
                 if let Err(error) = owner.queue.persist_ack(now) {
                     failure.get_or_insert_with(|| Status::unavailable(error.to_string()));
                 }
+                *owner.last_update.lock().expect("Matching ack timer lock") =
+                    tokio::time::Instant::now();
                 if stop {
                     owner.queue.stop();
                 }
+                owner.dispatcher.notify_new_tasks();
             }
+            // Go's fatal reader/writer watcher unregisters stopped managers.
+            // Keep healthy queues alive when another owner loses its lease.
+            state.owners.retain(|_, owner| !owner.queue.is_stopped());
             if stop {
                 state.stopped = true;
                 state.owners.clear();
@@ -302,7 +374,12 @@ mod tests {
             store.get_task_list(&other_key).unwrap().data.ack_level,
             task.task_id
         );
-        assert!(registry.shutdown(4).await.is_err());
+        assert!(!registry.state.lock().unwrap().owners.contains_key(&(
+            key.domain_id,
+            key.name.clone(),
+            key.task_type
+        )));
+        registry.shutdown(4).await.unwrap();
         assert!(other.append(vec![TaskData::default()], 4).await.is_err());
     }
     #[tokio::test]
@@ -326,5 +403,123 @@ mod tests {
             .unwrap();
         assert_eq!(recovered.tasks.len(), 1);
         assert_eq!(recovered.tasks[0].task_id, 1);
+    }
+    #[tokio::test]
+    async fn maintenance_persists_live_ack_and_shutdown_stops_handles() {
+        let (_dir, store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        handle.append(vec![TaskData::default()], 1).await.unwrap();
+        let task = handle
+            .queue
+            .read_batch(
+                NonZeroU32::new(100).unwrap(),
+                NonZeroU32::new(1).unwrap(),
+                1,
+            )
+            .unwrap()
+            .tasks
+            .remove(0);
+        handle.queue.complete(task.task_id).unwrap();
+        assert_eq!(store.get_task_list(&key).unwrap().data.ack_level, 0);
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
+        let worker = registry.clone();
+        let pump = tokio::spawn(async move {
+            worker
+                .maintain_until(Duration::from_millis(10), async {
+                    let _ = shutdown.await;
+                })
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while store.get_task_list(&key).unwrap().data.ack_level != task.task_id {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(store.get_task_list(&key).unwrap().data.last_updated_nanos > 1);
+        stop.send(()).unwrap();
+        pump.await.unwrap().unwrap();
+        assert!(handle.queue.is_stopped());
+        assert!(handle.append(vec![TaskData::default()], 2).await.is_err());
+    }
+    #[tokio::test]
+    async fn stopped_writer_is_replaced_without_waiting_for_ack_timer() {
+        let (_dir, store, registry, key) = fixture();
+        let old = registry.get(key.clone(), 0, 1).await.unwrap();
+        old.queue.stop();
+        let new = registry.get(key.clone(), 0, 2).await.unwrap();
+        assert!(!Arc::ptr_eq(&old.queue, &new.queue));
+        assert_eq!(store.get_task_list(&key).unwrap().range_id, 2);
+        assert!(!registry.unload(key, old, 3).await.unwrap());
+    }
+    #[tokio::test]
+    async fn shutdown_wakes_blocked_dispatcher() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key, 0, 1).await.unwrap();
+        let poll = tokio::spawn(async move {
+            handle
+                .dispatcher
+                .poll_decision(
+                    cadence_proto::api::PollForDecisionTaskRequest::default(),
+                    Duration::from_secs(10),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        registry.shutdown(2).await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), poll)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Unavailable);
+    }
+    #[tokio::test]
+    async fn maintenance_deadlines_are_per_owner_and_reset_after_update() {
+        let (_dir, store, registry, first) = fixture();
+        registry.get(first.clone(), 0, 1).await.unwrap();
+        let mut second = first.clone();
+        second.name = "later".into();
+        registry.get(second.clone(), 0, 1).await.unwrap();
+        {
+            let state = registry.state.lock().unwrap();
+            let owner = &state.owners[&(first.domain_id, first.name.clone(), first.task_type)];
+            *owner.last_update.lock().unwrap() =
+                tokio::time::Instant::now() - Duration::from_secs(120);
+        }
+        registry
+            .flush(100, false, Some(Duration::from_secs(60)))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get_task_list(&first).unwrap().data.last_updated_nanos,
+            100
+        );
+        assert_eq!(
+            store
+                .get_task_list(&second)
+                .unwrap()
+                .data
+                .last_updated_nanos,
+            1
+        );
+        registry
+            .flush(101, false, Some(Duration::from_secs(60)))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get_task_list(&first).unwrap().data.last_updated_nanos,
+            100
+        );
+        assert_eq!(
+            store
+                .get_task_list(&second)
+                .unwrap()
+                .data
+                .last_updated_nanos,
+            1
+        );
+        registry.shutdown(102).await.unwrap();
     }
 }

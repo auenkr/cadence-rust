@@ -6,6 +6,28 @@ incomplete. Keep working autonomously; use tmux session cadence-rust for long
 processes. After compaction save progress, commit and push. Never equate adapter
 coverage or a boundary probe with complete service parity.
 
+## Latest queue maintenance checkpoint
+
+Read matching-maintenance-next.md first. Prior checkpoint 0e7dbae0e is pushed.
+New native registry controller persists due acknowledgements with per-owner
+load/update-based deadlines, resets after operations, keeps healthy queues alive
+on another owner's fencing, removes stopped owners, replaces stopped writers
+on the next get, and wakes dispatchers on unload/shutdown. The live fixture owns
+a maintenance pump using Go's 60-second default and awaits its final shutdown.
+
+PASSED: /tmp/cadence-maintenance-final.exit = 0 (20 focused Matching tests plus
+strict workspace all-target lint); /tmp/cadence-maintenance-mixed.exit = 0 (actual
+mixed Go services + Rust Matching, status probe and seven existing SDK scenarios).
+Artifacts: /home/ubuntu/.cache/cadence-rust-test-artifacts/matching-maintenance-mixed.
+This incremental checkpoint is being committed/pushed with the notes. Full prior
+workspace/23-stage validation is documented below, not rerun for this increment.
+
+Next implement Go task_gc.go cursor/threshold/try-lock/drain behavior and reader
+shutdown GC ordering; then idle unload, in-flight shutdown coordination, dynamic
+per-task-list configuration, queries and sync delivery/forwarding. Preserve the
+whole four-role rewrite goal. No role is complete and no production native
+Matching selection/membership is available yet.
+
 ## Poller state continuation
 
 Read matching-pollers-next.md first. Prior RPC/mixed SDK checkpoint ad9ebf44a is

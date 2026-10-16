@@ -298,6 +298,9 @@ impl DurableTaskQueue {
         let (start, end) = block(state.range_id, self.range_size);
         (read, ack, backlog, start, end, ack == state.max_read_level)
     }
+    pub fn is_stopped(&self) -> bool {
+        self.state.lock().expect("matching queue lock").stopped
+    }
     pub fn stop(&self) {
         self.state.lock().expect("matching queue lock").stopped = true;
     }

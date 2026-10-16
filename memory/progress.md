@@ -1591,3 +1591,16 @@ Full 23-stage compatibility runner PASSED:
 /home/ubuntu/.cache/cadence-rust-test-artifacts/matching-poller-final-20261016/results.json.
 All four deployment roles remain incomplete. Continue Matching with configured
 ack maintenance/ownership unload, queries and sync matching before moving roles.
+
+## 2026-10-16: Per-owner acknowledgement pump and fenced-owner lifecycle
+
+See matching-maintenance-next.md. Native registry maintains independent per-owner
+ack deadlines, resets after updates, survives individual failures and unregisters
+stopped/fenced owners. Stopped writers reload on next get; unload/shutdown wake
+blocked dispatchers. Mixed fixture owns the pump with Go's one-minute default and
+awaits final shutdown. All 20 focused Matching tests and strict workspace lint
+passed (/tmp/cadence-maintenance-final.exit = 0); mixed Go Frontend/History/Worker
+with Rust Matching and seven SDK scenarios passed
+(/tmp/cadence-maintenance-mixed.exit = 0). Full prior 327-test/23-stage checkpoint
+is separate. GC/controller shutdown sequencing, idle unload, dynamic per-list
+configuration, ownership discovery and query/sync matching gates remain open.
