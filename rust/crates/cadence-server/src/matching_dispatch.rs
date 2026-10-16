@@ -6,7 +6,7 @@ use cadence_persistence::{
     matching_queue::{DurableTaskQueue, QueueError},
     matching_sqlite::AllocatedTask,
 };
-use cadence_proto::{api as p, matching as m};
+use cadence_proto::{api as p, history as h, matching as m};
 use std::{
     future::Future,
     num::NonZeroU32,
@@ -24,9 +24,9 @@ pub struct PollLifecycle {
     pub id: String,
     pub info: cadence_common::poller::Info,
 }
-struct PollWaitGuard(PollLifecycle);
+pub(crate) struct PollWaitGuard(PollLifecycle);
 impl PollLifecycle {
-    fn begin(&self) -> PollWaitGuard {
+    pub(crate) fn begin(&self) -> PollWaitGuard {
         self.manager
             .lock()
             .expect("poller history lock")
@@ -187,6 +187,15 @@ impl TaskDispatcher {
     }
     /// Caller/controller supplies the configured long-poll expiration. Dropping
     /// this future closes the receiver; the worker rewrites any claimed task.
+    /// Go matching query polling: History `GetMutableState` for a query task,
+    /// so the frontend can load history for the non-sticky query.
+    pub async fn query_mutable_state(
+        &self,
+        execution: &p::WorkflowExecution,
+    ) -> Result<h::GetMutableStateResponse, Status> {
+        self.history.mutable_state(&self.domain_id, execution).await
+    }
+
     pub async fn poll_decision(
         &self,
         poll: p::PollForDecisionTaskRequest,

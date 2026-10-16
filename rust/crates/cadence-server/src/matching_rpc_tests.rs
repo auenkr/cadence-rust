@@ -4,10 +4,21 @@ use cadence_persistence::{
     matching_blob::BlobEncoding,
     matching_sqlite::{SqliteTaskStore, TaskListKey},
 };
+use cadence_proto::history as h;
 use m::matching_api_server::MatchingApi;
 use std::{num::NonZeroU32, time::Duration};
 use uuid::Uuid;
 fn fixture() -> (
+    tempfile::TempDir,
+    Arc<SqliteTaskStore>,
+    Matching,
+    TaskListKey,
+) {
+    fixture_with_history("http://127.0.0.1:1")
+}
+fn fixture_with_history(
+    history_peer: &str,
+) -> (
     tempfile::TempDir,
     Arc<SqliteTaskStore>,
     Matching,
@@ -33,7 +44,9 @@ fn fixture() -> (
         )
         .unwrap();
     let history = MatchingHistoryClient::new(
-        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        tonic::transport::Endpoint::from_shared(history_peer.to_string())
+            .unwrap()
+            .connect_lazy(),
         Duration::from_secs(1),
         4 * 1024 * 1024,
     );
@@ -331,5 +344,167 @@ async fn matching_rpc_lists_configured_write_partitions() {
             .map(|partition| partition.key.clone())
             .collect::<Vec<_>>(),
         keys
+    );
+}
+
+/// Minimal History used by the query test: only `GetMutableState` is
+/// overridden, every other RPC keeps the generated `unimplemented` default.
+struct FakeHistory {
+    state: h::GetMutableStateResponse,
+}
+#[tonic::async_trait]
+impl h::history_api_server::HistoryApi for FakeHistory {
+    async fn get_mutable_state(
+        &self,
+        _request: tonic::Request<h::GetMutableStateRequest>,
+    ) -> Result<tonic::Response<h::GetMutableStateResponse>, tonic::Status> {
+        Ok(tonic::Response::new(self.state.clone()))
+    }
+}
+async fn start_fake_history(state: h::GetMutableStateResponse) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(h::history_api_server::HistoryApiServer::new(FakeHistory { state }))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    format!("http://{address}")
+}
+/// Matches Go matching's query task metadata: the frontend loads history with
+/// `next_event_id`, and a sticky task list plus a supported client decides
+/// `sticky_execution_enabled`.
+fn mutable_state() -> h::GetMutableStateResponse {
+    h::GetMutableStateResponse {
+        workflow_execution: execution(),
+        workflow_type: Some(p::WorkflowType {
+            name: "service-compat".into(),
+        }),
+        next_event_id: 12,
+        previous_started_event_id: Some(5),
+        task_list: list(),
+        client_impl: "uber-go".into(),
+        client_feature_version: "1.0.0".into(),
+        current_branch_token: vec![7, 8],
+        history_size: 1234,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_delivers_query_to_decision_poller() {
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, matching, key) = fixture_with_history(&peer);
+    let domain = key.domain_id.to_string();
+    let worker = matching.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move {
+        worker
+            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+                domain_id: poll_domain,
+                poller_id: "sdk-worker".into(),
+                request: Some(p::PollForDecisionTaskRequest {
+                    task_list: list(),
+                    identity: "sdk-worker".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }))
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !matching.polls.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // The query waits on the poller, like Go's `matcher.OfferQuery`.
+    let querier = matching.clone();
+    let query_domain = domain.clone();
+    let query = tokio::spawn(async move {
+        querier
+            .query_workflow(Request::new(m::QueryWorkflowRequest {
+                request: Some(p::QueryWorkflowRequest {
+                    domain: "domain".into(),
+                    workflow_execution: execution(),
+                    query: Some(p::WorkflowQuery {
+                        query_type: "ping".into(),
+                        query_args: None,
+                    }),
+                    ..Default::default()
+                }),
+                domain_id: query_domain,
+                task_list: list(),
+                forwarded_from: String::new(),
+            }))
+            .await
+    });
+    let delivered = tokio::time::timeout(Duration::from_secs(5), poll)
+        .await
+        .expect("query should reach the decision poller")
+        .unwrap()
+        .expect("poll should succeed")
+        .into_inner();
+    assert_eq!(
+        delivered.query.as_ref().map(|q| q.query_type.clone()),
+        Some("ping".to_string())
+    );
+    assert_eq!(
+        delivered
+            .workflow_execution
+            .as_ref()
+            .map(|e| e.workflow_id.clone()),
+        Some("remote-workflow".to_string())
+    );
+    // History's mutable state feeds the response so the frontend can load
+    // history for the non-sticky query; no sticky task list means no sticky.
+    assert_eq!(delivered.next_event_id, 12);
+    assert_eq!(delivered.previous_started_event_id, Some(5));
+    assert_eq!(delivered.total_history_bytes, 1234);
+    assert!(!delivered.sticky_execution_enabled);
+    assert_eq!(
+        delivered.workflow_type.as_ref().map(|t| t.name.clone()),
+        Some("service-compat".to_string())
+    );
+    let token =
+        cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
+            &delivered.task_token,
+        )
+        .expect("poll should carry a query task token");
+    assert_eq!(token.task_list, "queue");
+    matching
+        .respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+            request: Some(p::RespondQueryTaskCompletedRequest {
+                task_token: Vec::new(),
+                result: Some(p::WorkflowQueryResult {
+                    result_type: p::QueryResultType::Answered as i32,
+                    answer: Some(p::Payload {
+                        data: b"pong".to_vec(),
+                    }),
+                    error_message: String::new(),
+                }),
+                worker_version_info: None,
+            }),
+            domain_id: domain,
+            task_list: list(),
+            task_id: token.task_id,
+        }))
+        .await
+        .unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(5), query)
+        .await
+        .expect("query should complete")
+        .unwrap()
+        .expect("query should succeed")
+        .into_inner();
+    assert_eq!(
+        response.query_result.map(|payload| payload.data),
+        Some(b"pong".to_vec())
     );
 }

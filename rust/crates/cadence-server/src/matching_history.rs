@@ -151,6 +151,33 @@ impl MatchingHistoryClient {
         }
     }
 
+    /// Go matching query polling: `historyService.GetMutableState`. A query
+    /// task is delivered without recording a decision task started, but the
+    /// frontend still needs the next event id and workflow metadata to load
+    /// history for the non-sticky query.
+    pub async fn mutable_state(
+        &self,
+        domain_id: &str,
+        execution: &p::WorkflowExecution,
+    ) -> Result<h::GetMutableStateResponse, Status> {
+        let payload = h::GetMutableStateRequest {
+            domain_id: domain_id.into(),
+            workflow_execution: Some(execution.clone()),
+            ..Default::default()
+        };
+        let client = self.history.clone();
+        self.retry(payload, move |request| {
+            let mut client = client.clone();
+            async move {
+                client
+                    .get_mutable_state(request)
+                    .await
+                    .map(tonic::Response::into_inner)
+            }
+        })
+        .await
+    }
+
     pub async fn start_decision(
         &self,
         domain_id: &str,

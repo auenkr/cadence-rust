@@ -174,7 +174,25 @@ impl m::matching_api_server::MatchingApi for Matching {
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 0).await?;
             let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: crate::matching_limiter::TASK_DISPATCH_RPS, isolation_group: String::new() } };
+            // Go's matcher serves `queryTaskC` on the same long poll as the
+            // decision backlog; a ready query is handed to this poller instead
+            // of waiting for a durable task. Racing is safe: dropping the
+            // dispatch future makes its worker rewrite any claimed task.
+            let query_lifecycle = lifecycle.clone();
             return tokio::select! {
+                biased;
+                query=queue.queries.next()=>{
+                    let _wait=query_lifecycle.begin();
+                    let execution=query.request.workflow_execution.clone().unwrap_or_default();
+                    match queue.dispatcher.query_mutable_state(&execution).await {
+                        Ok(state)=>Ok(Response::new(crate::matching_query::query_response(query, &state))),
+                        // Go fails the waiting query and returns an empty poll.
+                        Err(error)=>{
+                            let _=queue.queries.complete(&query.task_id, crate::matching_query::QueryOutcome::Internal(error));
+                            Ok(Response::new(m::PollForDecisionTaskResponse::default()))
+                        }
+                    }
+                }
                 result=queue.dispatcher.poll_decision_with_poller(payload, self.poll_expiration, lifecycle)=>result.map(Response::new),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
@@ -380,6 +398,34 @@ impl m::matching_api_server::MatchingApi for Matching {
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         payload.domain = self.domain_name(&r.domain_id)?;
+        if self.queues.is_some() {
+            // Go `QueryWorkflow`: queries are decision task-list scoped and
+            // delivered to a decision poller through the matcher's query
+            // channel, not answered in-process.
+            let task_list = r
+                .task_list
+                .clone()
+                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+            let name = task_list_name(&task_list.name)?;
+            let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
+            let task_id = uuid::Uuid::new_v4().to_string();
+            let receiver = queue.queries.register(crate::matching_query::PendingQuery {
+                task_id: task_id.clone(),
+                domain_id: r.domain_id.clone(),
+                task_list: name.root().to_owned(),
+                request: payload,
+            });
+            return match tokio::time::timeout(self.poll_expiration, receiver).await {
+                Ok(Ok(result)) => crate::matching_query::query_outcome(result).map(Response::new),
+                Ok(Err(_)) => Err(Status::unavailable("Matching query channel closed.")),
+                Err(_) => {
+                    queue.queries.withdraw(&task_id);
+                    Err(Status::deadline_exceeded(
+                        "Query task not completed before the deadline.",
+                    ))
+                }
+            };
+        }
         let v = p::workflow_api_server::WorkflowApi::query_workflow(
             &self.frontend,
             Request::new(payload),
@@ -694,12 +740,30 @@ impl m::matching_api_server::MatchingApi for Matching {
                 domain_id: r.domain_id.clone(),
                 workflow_id: String::new(),
                 run_id: String::new(),
-                task_list: r.task_list.map(|t| t.name).unwrap_or_default(),
+                task_list: r
+                    .task_list
+                    .as_ref()
+                    .map(|t| t.name.clone())
+                    .unwrap_or_default(),
                 task_id: r.task_id.clone(),
             };
             payload.task_token =
                 cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
                     .map_err(|_| Status::internal("Failed to encode query task token."))?;
+        }
+        if self.queues.is_some() {
+            // Go `RespondQueryTaskCompleted` -> `deliverQueryResult`: hand the
+            // worker's result to the waiting `QueryWorkflow` call.
+            let task_list = r
+                .task_list
+                .clone()
+                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+            let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
+            let result = payload.result.clone().unwrap_or_default();
+            queue
+                .queries
+                .complete(&r.task_id, crate::matching_query::QueryOutcome::Worker(result))?;
+            return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
         }
         let input = cv::query_completed(payload)?;
         let _ = p::worker_api_server::WorkerApi::respond_query_task_completed(

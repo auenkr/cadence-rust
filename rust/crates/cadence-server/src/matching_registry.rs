@@ -28,6 +28,7 @@ struct Owner {
     reader: crate::matching_reader::TaskReader,
     limiter: Arc<crate::matching_limiter::TaskListLimiter>,
     pollers: Arc<Mutex<cadence_common::poller::Manager>>,
+    queries: Arc<crate::matching_query::QueryChannel>,
     last_update: Mutex<tokio::time::Instant>,
     next_idle_check: Mutex<tokio::time::Instant>,
     liveness: Arc<cadence_common::liveness::Liveness>,
@@ -80,6 +81,8 @@ pub struct QueueHandle {
     pub dispatcher: TaskDispatcher,
     pub pollers: Arc<Mutex<cadence_common::poller::Manager>>,
     pub limiter: Arc<crate::matching_limiter::TaskListLimiter>,
+    /// Go `matcher.queryTaskC` plus the engine's `lockableQueryTaskMap`.
+    pub queries: Arc<crate::matching_query::QueryChannel>,
     liveness: Arc<cadence_common::liveness::Liveness>,
     writer: crate::matching_writer::TaskWriter,
 }
@@ -312,6 +315,7 @@ impl QueueRegistry {
                         limiter,
                         queue,
                         pollers: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
+                        queries: Arc::new(crate::matching_query::QueryChannel::new()),
                         last_update: Mutex::new(tokio::time::Instant::now()),
                         next_idle_check: Mutex::new(
                             tokio::time::Instant::now() + std::time::Duration::from_secs(150),
@@ -336,6 +340,7 @@ impl QueueRegistry {
                 dispatcher: owner.dispatcher.clone(),
                 pollers: owner.pollers.clone(),
                 limiter: owner.limiter.clone(),
+                queries: owner.queries.clone(),
                 liveness: owner.liveness.clone(),
                 writer: owner.writer.clone(),
             })
