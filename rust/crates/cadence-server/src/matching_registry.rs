@@ -94,6 +94,7 @@ pub struct QueueRegistry {
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
     standby_enabled: Option<crate::matching_standby::Enabled>,
+    membership: Option<crate::matching_membership::Membership>,
     domain_metadata: Option<(cadence_persistence::InMemoryDomainStore, String)>,
     /// Go `cfg.NumTasklistReadPartitions(domain, taskList, type)`, clamped to
     /// >= 1 by the same caller. `None` keeps the single-partition default.
@@ -350,6 +351,7 @@ impl QueueRegistry {
             startups: Arc::new(Mutex::new(HashMap::new())),
             domain_metadata: None,
             standby_enabled: None,
+            membership: None,
             partition_count: None,
             cache_enabled: None,
             sync_wait: None,
@@ -361,6 +363,33 @@ impl QueueRegistry {
             qps_interval: None,
             isolation: None,
         }
+    }
+    pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
+        self.membership = Some(membership);
+        self
+    }
+    /// Like Go's membership watcher, detach obsolete owners before doing I/O.
+    /// Unknown placement leaves existing readers intact until membership recovers.
+    pub async fn unload_non_owned(&self, now: i64) -> Result<(), Status> {
+        let Some(membership) = self.membership.clone() else { return Ok(()); };
+        let registry = self.clone();
+        owner_work(move |readers| {
+            let candidates = {
+                let state = registry.state.lock().expect("Matching registry lock");
+                let mut candidates = Vec::new();
+                for (key, owner) in &state.owners {
+                    if !membership.owns(&key.1)? { candidates.push((key.clone(), owner.clone())); }
+                }
+                candidates
+            };
+            let mut failure = None;
+            for (key, owner) in candidates {
+                if registry.detach(&key, &owner) {
+                    if let Err(error) = owner.finish(now, readers) { failure.get_or_insert(error); }
+                }
+            }
+            failure.map_or(Ok(()), Err)
+        }).await
     }
     pub fn with_standby_enabled(mut self, enabled: crate::matching_standby::Enabled) -> Self {
         self.standby_enabled = Some(enabled);
@@ -449,6 +478,7 @@ impl QueueRegistry {
                 }
             };
             let _starting = startup.lock().expect("Matching queue startup lock");
+            if let Some(membership) = &registry.membership { membership.check_task_list(&key.name)?; }
             let mut state = registry.state.lock().expect("Matching registry lock");
             if state.stopped {
                 return Err(Status::unavailable("Matching registry stopped."));
@@ -619,12 +649,13 @@ impl QueueRegistry {
                                         as std::pin::Pin<
                                             Box<
                                                 dyn std::future::Future<
-                                                        Output = Option<(crate::matching_dispatch::TaskDispatcher, String)>,
+                                                        Output = Option<(crate::matching_dispatch::Parent, String)>,
                                                     > + Send,
                                             >,
                                         >
                                 },
                                 max_outstanding,
+                                lookup.1.clone(),
                             ))
                         }
                     };
@@ -685,6 +716,13 @@ impl QueueRegistry {
                             eprintln!("Matching startup shutdown cleanup failed: {error}");
                         }
                         return Err(Status::unavailable("Matching registry stopped."));
+                    }
+                    if let Some(membership) = &registry.membership {
+                        if let Err(error) = membership.check_task_list(&key.name) {
+                            drop(state);
+                            let _ = owner.finish(now, readers);
+                            return Err(error);
+                        }
                     }
                     // Reconcile publication with concurrent root updates. A
                     // nonroot startup may have read SQL before the root wrote
@@ -1180,12 +1218,17 @@ async fn resolve_parent_dispatcher(
     registry: QueueRegistry,
     key: TaskListKey,
     kind: i16,
-) -> Option<crate::matching_dispatch::TaskDispatcher> {
+) -> Option<crate::matching_dispatch::Parent> {
+    if let Some(membership) = &registry.membership {
+        if let Some(channel) = membership.remote_channel(&key.name).ok()? {
+            return Some(crate::matching_dispatch::Parent::Remote(channel));
+        }
+    }
     let handle = registry.get(key, kind, registry_now()).await.ok()?;
     if handle.stop_if_isolation_changed() {
         return None;
     }
-    Some(handle.dispatcher)
+    Some(crate::matching_dispatch::Parent::Local(Box::new(handle.dispatcher)))
 }
 
 #[cfg(test)]
@@ -1231,6 +1274,32 @@ mod tests {
             task_type: 0,
         };
         (dir, store, registry, key)
+    }
+    #[tokio::test]
+    async fn matching_membership_guards_creation_and_unloads_moved_owners() {
+        use cadence_common::membership::Host;
+        let (_dir, _store, registry, key) = fixture();
+        let host = |identity: &str| Host { address: format!("{identity}:7935"), identity: identity.into(), grpc_address: format!("{identity}:7835") };
+        let membership = crate::matching_membership::Membership::new("self", vec![host("other")]);
+        let registry = registry.with_membership(membership.clone());
+        let error = registry.get(key.clone(), 0, 1).await.err().unwrap();
+        assert_eq!(error.code(), tonic::Code::Aborted);
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+        membership.replace(vec![host("self")]);
+        let old = registry.get(key.clone(), 0, 2).await.unwrap();
+        membership.replace(Vec::new());
+        assert!(registry.unload_non_owned(3).await.is_err());
+        assert!(!old.queue.is_stopped(), "unknown placement must retain the owner");
+        membership.replace(vec![host("other")]);
+        registry.unload_non_owned(4).await.unwrap();
+        assert!(old.queue.is_stopped());
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+        assert_eq!(registry.get(key.clone(), 0, 5).await.err().unwrap().code(), tonic::Code::Aborted);
+        membership.replace(vec![host("self")]);
+        let replacement = registry.get(key.clone(), 0, 6).await.unwrap();
+        assert!(!replacement.queue.is_stopped());
+        assert!(!Arc::ptr_eq(&old.queue, &replacement.queue));
+        registry.shutdown(7).await.unwrap();
     }
     #[tokio::test]
     async fn slow_startup_does_not_block_loaded_owner_or_shutdown() {

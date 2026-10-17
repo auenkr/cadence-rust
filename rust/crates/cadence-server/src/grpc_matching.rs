@@ -155,6 +155,8 @@ struct ForwardedAdd<'a> {
     deadline: tokio::time::Instant,
     forwarded: bool,
     backlog: bool,
+    task_source: i32,
+    schedule_to_start_timeout: Option<prost_types::Duration>,
 }impl Drop for PollGuard {
     fn drop(&mut self) {
         let mut polls = self.polls.lock().expect("poll cancellation lock");
@@ -177,6 +179,7 @@ pub struct Matching {
     scaler_config: Option<crate::matching_registry::ScalerConfigProvider>,
     /// Go `semaphoreRegistry`: one manager per semaphore bucket, in-memory.
     semaphores: crate::matching_semaphore::Registry,
+    membership: Option<crate::matching_membership::Membership>,
     pub(crate) poll_expiration: std::time::Duration,
 }
 impl Matching {
@@ -189,6 +192,7 @@ impl Matching {
             partition_count: None,
             scaler_config: None,
             semaphores,
+            membership: None,
             poll_expiration: std::time::Duration::from_secs(60),
         }
     }
@@ -439,6 +443,38 @@ impl Matching {
         matching.poll_expiration = poll_expiration;
         matching
     }
+    pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
+        self.queues = self.queues.map(|queues| queues.with_membership(membership.clone()));
+        self.membership = Some(membership);
+        self
+    }
+    /// The service owns this future and cancels it during shutdown. Watch
+    /// coalescing is safe: cleanup always consults the latest complete ring.
+    pub async fn maintain_membership_until<F>(&self, shutdown: F) -> Result<(), Status>
+    where F: std::future::Future<Output = ()> + Send {
+        let Some(membership) = &self.membership else { return Ok(()); };
+        let mut changes = membership.subscribe();
+        tokio::pin!(shutdown);
+        loop {
+            let queues = match &self.queues {
+                Some(queues) => queues.unload_non_owned(matching_now()).await,
+                None => Ok(()),
+            };
+            // Do not let a SQL cleanup failure prevent semaphore cleanup.
+            for manager in self.semaphores.all_managers() {
+                match membership.owns(&manager.identifier().ring_key()) {
+                    Ok(false) => { manager.stop(); self.semaphores.unregister(&manager); },
+                    Ok(true) => {},
+                    Err(error) => { eprintln!("Matching semaphore membership lookup failed: {error}"); break; },
+                }
+            }
+            if let Err(error) = queues { eprintln!("Matching membership cleanup failed: {error}"); }
+            tokio::select! {
+                _ = &mut shutdown => return Ok(()),
+                result = changes.changed() => if result.is_err() { return Ok(()); },
+            }
+        }
+    }
     async fn durable_queue(&self, domain: &str, list: &p::TaskList, task_type: i32) -> Result<crate::matching_registry::QueueHandle, Status> {
         task_list_name(&list.name)?;
         let domain_id = uuid::Uuid::parse_str(domain).map_err(|_| Status::invalid_argument("Domain UUID is not valid."))?;
@@ -489,6 +525,8 @@ impl Matching {
             deadline,
             forwarded,
             backlog,
+            task_source,
+            schedule_to_start_timeout,
         } = add;
         let name = task_list_name(&list.name)?;
         let degree = {
@@ -527,7 +565,32 @@ impl Matching {
             }
             let Some(permit) = handle.try_forward_task() else { return Ok(None); };
             permits.push(permit);
+            let forwarded_from = list.name.clone();
             list.name = parent;
+            if let Some(membership) = &self.membership {
+                if let Ok(Some(channel)) = membership.remote_channel(&list.name) {
+                    let execution = Some(p::WorkflowExecution { workflow_id: data.workflow_id.clone(),
+                        run_id: data.run_id.as_deref().and_then(|id| uuid::Uuid::from_slice(id).ok()).map(|id| id.to_string()).unwrap_or_default() });
+                    let partition_config = data.partition_config.clone().unwrap_or_default().into_iter().collect();
+                    let mut client = m::matching_api_client::MatchingApiClient::new(channel);
+                    let timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    let result = if task_type == 0 {
+                        let mut request = Request::new(m::AddDecisionTaskRequest { domain_id: source.to_string(),
+                            workflow_execution: execution, task_list: Some(list.clone()), schedule_id: data.schedule_id,
+                            schedule_to_start_timeout, source: task_source, forwarded_from, partition_config });
+                        request.set_timeout(timeout);
+                        client.add_decision_task(request).await.map(|response| response.into_inner().partition_config)
+                    } else {
+                        let mut request = Request::new(m::AddActivityTaskRequest { domain_id: domain_id.into(), source_domain_id: source.to_string(),
+                            workflow_execution: execution, task_list: Some(list.clone()), schedule_id: data.schedule_id,
+                            schedule_to_start_timeout, source: task_source, forwarded_from, partition_config,
+                            activity_task_dispatch_info: None });
+                        request.set_timeout(timeout);
+                        client.add_activity_task(request).await.map(|response| response.into_inner().partition_config)
+                    };
+                    return Ok(result.ok().map(|_| entry.partitions.get().map(partition_config_to_internal)));
+                }
+            }
             handle = match self.durable_queue(domain_id, &list, task_type).await {
                 Ok(handle) => handle,
                 Err(_) => return Ok(None),
@@ -811,6 +874,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                         deadline,
                         forwarded,
                         backlog: r.source == 2,
+                        task_source: r.source,
+                        schedule_to_start_timeout: r.schedule_to_start_timeout,
                     })
                     .await?;
                 if let Some(partition_config) = matched {
@@ -894,6 +959,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                         deadline,
                         forwarded,
                         backlog: r.source == 2,
+                        task_source: r.source,
+                        schedule_to_start_timeout: r.schedule_to_start_timeout,
                     })
                     .await?;
                 if let Some(partition_config) = matched {
@@ -935,6 +1002,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::QueryWorkflowRequest>,
     ) -> Result<Response<m::QueryWorkflowResponse>, Status> {
+        let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         let mut payload = r
             .request
@@ -969,7 +1037,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     20,
                 )
             };
-            let deadline = tokio::time::Instant::now() + self.poll_expiration;
+            let deadline = incoming_deadline.unwrap_or_else(|| tokio::time::Instant::now() + self.poll_expiration);
             let mut list = task_list.clone();
             let mut handle = queue;
             let mut permits = Vec::new();
@@ -1010,7 +1078,18 @@ impl m::matching_api_server::MatchingApi for Matching {
                 match handle.try_forward_query() {
                     Some(permit) => {
                         permits.push(permit);
+                        let forwarded_from = list.name.clone();
                         list.name = parent;
+                        if let Some(membership) = &self.membership {
+                            if let Some(channel) = membership.remote_channel(&list.name)? {
+                                let mut request = Request::new(m::QueryWorkflowRequest {
+                                    domain_id: r.domain_id.clone(), request: Some(payload.clone()),
+                                    task_list: Some(list.clone()), forwarded_from,
+                                });
+                                request.set_timeout(deadline.saturating_duration_since(tokio::time::Instant::now()));
+                                return m::matching_api_client::MatchingApiClient::new(channel).query_workflow(request).await;
+                            }
+                        }
                         handle = self.durable_queue(&r.domain_id, &list, 0).await?;
                     }
                     // Go blocks on the token while racing a local match; with
@@ -1141,9 +1220,12 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .unwrap_or(1)
                 .max(1);
             (0..count)
-                .map(|partition| p::TaskListPartitionMetadata {
-                    key: name.partition_name(partition),
-                    owner_host_name: hostname.clone(),
+                .map(|partition| {
+                    let key = name.partition_name(partition);
+                    let owner_host_name = self.membership.as_ref().map(|membership| {
+                        membership.owner(&key).map(|host| host.address).unwrap_or_default()
+                    }).unwrap_or_else(|| hostname.clone());
+                    p::TaskListPartitionMetadata { key, owner_host_name }
                 })
                 .collect()
         };
@@ -1173,8 +1255,8 @@ impl m::matching_api_server::MatchingApi for Matching {
         // host reads one global toggle, matching the rest of the server.
         let identifier = Identifier::new(&r.domain_id, &r.semaphore_name, r.bucket)
             .map_err(semaphore_status)?;
-        // Single host owns every bucket: no membership ring check needed, but
-        // idle buckets still unload like Go's liveness callback.
+        if let Some(membership) = &self.membership { membership.check_semaphore(&identifier)?; }
+        // Idle buckets unload like Go's liveness callback.
         self.semaphores.sweep_idle(semaphore_now());
         let manager = self
             .semaphores

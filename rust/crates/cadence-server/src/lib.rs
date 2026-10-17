@@ -51,3 +51,6 @@ pub mod matching_reader;
 
 #[allow(clippy::result_large_err)]
 pub mod thrift_matching;
+
+#[allow(clippy::result_large_err)]
+pub mod matching_membership;

@@ -1971,3 +1971,75 @@ async fn matching_rpc_domain_failover_releases_blocked_polls() {
     assert!(!queue.queue.is_stopped(), "failover disconnect must retain the manager");
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
+
+#[tokio::test]
+async fn matching_rpc_cross_host_poll_add_and_cancellation() {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+    let history = start_starting_history().await;
+    let (_root_dir, root_store, root, key) = fixture_with_history(&history);
+    let (_child_dir, child_store, child, _) = fixture_with_history(&history);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = listener.local_addr().unwrap().to_string();
+    let mut hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: String::new() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: String::new() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let root_id = ring.lookup("queue").unwrap().identity().to_owned();
+    let child_name = (1..=20).map(|id| format!("/__cadence_sys/queue/{id}")).find(|name| ring.lookup(name).unwrap().identity() != root_id).unwrap();
+    let child_id = ring.lookup(&child_name).unwrap().identity().to_owned();
+    for host in &mut hosts { host.grpc_address = endpoint.clone(); }
+    let root = root.with_membership(Membership::new(root_id, hosts.clone()));
+    let child = child.with_membership(Membership::new(child_id, hosts));
+    let service = root.clone();
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder().add_service(m::matching_api_server::MatchingApiServer::new(service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+    });
+    let domain = key.domain_id.to_string();
+    let child_list = || Some(p::TaskList { name: child_name.clone(), kind: 1, ..Default::default() });
+    assert_eq!(child.durable_queue(&domain, &list().unwrap(), 0).await.err().unwrap().code(), tonic::Code::Aborted);
+    root.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: domain.clone(), workflow_execution: execution(), task_list: list(), schedule_id: 41, ..Default::default()
+    })).await.unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(3), child.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: domain.clone(), poller_id: "remote-backlog".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: child_list(), ..Default::default() }), ..Default::default()
+    }))).await.unwrap().unwrap().into_inner();
+    assert_eq!(response.started_event_id, 42);
+    let root_queue = root.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    let worker = root.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: poll_domain, poller_id: "remote-sync".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+    })).await.unwrap().into_inner() });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root_queue.pollers.lock().unwrap().contains_poll("remote-sync") { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    child.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: domain.clone(), workflow_execution: execution(), task_list: child_list(), schedule_id: 51, ..Default::default()
+    })).await.unwrap();
+    assert_eq!(tokio::time::timeout(Duration::from_secs(3), poll).await.unwrap().unwrap().started_event_id, 52);
+    assert_eq!(root_store.task_list_size(&key, 0).unwrap(), 0);
+    assert_eq!(child_store.task_list_size(&TaskListKey { name: child_name.clone(), ..key.clone() }, 0).unwrap(), 0);
+    let worker = child.clone();
+    let poll_domain = domain.clone();
+    let poll_list = child_list();
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: poll_domain, poller_id: "remote-cancel".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: poll_list, ..Default::default() }), ..Default::default()
+    })).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root_queue.pollers.lock().unwrap().contains_poll("remote-cancel") { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    poll.abort();
+    assert!(poll.await.unwrap_err().is_cancelled());
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while root_queue.pollers.lock().unwrap().contains_poll("remote-cancel") { tokio::task::yield_now().await; }
+    }).await.expect("HTTP/2 cancellation withdraws the upstream waiter");
+    child.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    root.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    server.abort();
+}

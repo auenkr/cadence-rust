@@ -28,3 +28,5 @@ pub mod liveness;
 pub mod matching_rate;
 pub mod qps;
 pub mod rate_limiter;
+
+pub mod membership;

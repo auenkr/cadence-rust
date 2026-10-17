@@ -65,14 +65,30 @@ pub struct TaskDispatcher {
 #[derive(Clone)]
 pub(crate) struct ForwardState {
     resolve: Arc<ParentResolver>,
+    source: String,
     permits: Arc<crate::matching_forward::RequestTokens>,
 }
-type ParentFuture = std::pin::Pin<Box<dyn Future<Output = Option<(TaskDispatcher, String)>> + Send>>;
-type ParentResolver = dyn Fn() -> ParentFuture + Send + Sync;
-trait ForwardPollRequest: Clone + Send {
-    fn for_parent(&self, name: &str) -> Self;
+pub(crate) enum Parent {
+    Local(Box<TaskDispatcher>),
+    Remote(tonic::transport::Channel),
 }
-impl ForwardPollRequest for p::PollForDecisionTaskRequest {
+type ParentFuture = std::pin::Pin<Box<dyn Future<Output = Option<(Parent, String)>> + Send>>;
+type ParentResolver = dyn Fn() -> ParentFuture + Send + Sync;
+struct RemotePoll {
+    channel: tonic::transport::Channel,
+    domain_id: String,
+    parent_name: String,
+    forwarded_from: String,
+    poller_id: String,
+    isolation_group: String,
+    deadline: tokio::time::Instant,
+}
+type RemoteResult<R> = std::pin::Pin<Box<dyn Future<Output = Result<R, Status>> + Send>>;
+trait ForwardPollRequest<R>: Clone + Send {
+    fn for_parent(&self, name: &str) -> Self;
+    fn remote(self, target: RemotePoll) -> RemoteResult<R>;
+}
+impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTaskRequest {
     fn for_parent(&self, name: &str) -> Self {
         Self {
             task_list: Some(p::TaskList { name: name.into(), kind: self.task_list.as_ref().map(|list| list.kind).unwrap_or_default(), ..Default::default() }),
@@ -80,19 +96,44 @@ impl ForwardPollRequest for p::PollForDecisionTaskRequest {
             ..Default::default()
         }
     }
+    fn remote(self, target: RemotePoll) -> RemoteResult<m::PollForDecisionTaskResponse> {
+        Box::pin(async move {
+            let payload = self.for_parent(&target.parent_name);
+            let mut request = tonic::Request::new(m::PollForDecisionTaskRequest {
+                domain_id: target.domain_id, poller_id: target.poller_id,
+                request: Some(payload), forwarded_from: target.forwarded_from,
+                isolation_group: target.isolation_group,
+            });
+            request.set_timeout(target.deadline.saturating_duration_since(tokio::time::Instant::now()));
+            m::matching_api_client::MatchingApiClient::new(target.channel).poll_for_decision_task(request).await.map(tonic::Response::into_inner)
+        })
+    }
 }
-impl ForwardPollRequest for p::PollForActivityTaskRequest {
+impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTaskRequest {
     fn for_parent(&self, name: &str) -> Self {
         Self {
             task_list: Some(p::TaskList { name: name.into(), kind: self.task_list.as_ref().map(|list| list.kind).unwrap_or_default(), ..Default::default() }),
             identity: self.identity.clone(),
             ..Default::default()
         }
+    }
+    fn remote(self, target: RemotePoll) -> RemoteResult<m::PollForActivityTaskResponse> {
+        Box::pin(async move {
+            let payload = self.for_parent(&target.parent_name);
+            let mut request = tonic::Request::new(m::PollForActivityTaskRequest {
+                domain_id: target.domain_id, poller_id: target.poller_id,
+                request: Some(payload), forwarded_from: target.forwarded_from,
+                isolation_group: target.isolation_group,
+            });
+            request.set_timeout(target.deadline.saturating_duration_since(tokio::time::Instant::now()));
+            m::matching_api_client::MatchingApiClient::new(target.channel).poll_for_activity_task(request).await.map(tonic::Response::into_inner)
+        })
     }
 }
 #[cfg(test)]
-impl ForwardPollRequest for () {
+impl<R: Send + 'static> ForwardPollRequest<R> for () {
     fn for_parent(&self, _name: &str) -> Self {}
+    fn remote(self, _target: RemotePoll) -> RemoteResult<R> { Box::pin(async { Err(Status::unimplemented("test poll")) }) }
 }
 impl ForwardState {
     pub(crate) fn new(
@@ -101,9 +142,11 @@ impl ForwardState {
             + Sync
             + 'static,
         max_outstanding: crate::matching_forward::Count,
+        source: String,
     ) -> Self {
         Self {
             resolve: Arc::new(resolve),
+            source,
             permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding)),
         }
     }
@@ -307,7 +350,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
     ) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + 'a>>
     where
-        Q: ForwardPollRequest + 'a,
+        Q: ForwardPollRequest<R> + 'a,
         R: Default + Send + 'a,
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send + 'a,
         Fut: Future<Output = Result<R, Status>> + Send + 'a,
@@ -325,6 +368,27 @@ impl TaskDispatcher {
             }
             let Some((parent, parent_name)) = (forward.resolve)().await else {
                 return false;
+            };
+            let parent = match parent {
+                Parent::Local(parent) => parent,
+                Parent::Remote(channel) => {
+                    let (poller_id, isolation_group) = lifecycle.as_ref().map(|poll| (poll.id.clone(), poll.info.isolation_group.clone())).unwrap_or_default();
+                    let target = RemotePoll { channel, domain_id: self.domain_id.clone(),
+                        parent_name, forwarded_from: forward.source.clone(),
+                        poller_id, isolation_group, deadline };
+                    // A cancelled child RPC must drop the upstream RPC as well.
+                    // The dispatcher owns the response channel, so watch it
+                    // directly rather than waiting out a full parent long poll.
+                    let Some(response) = sender.as_mut() else { return true; };
+                    let result = tokio::select! {
+                        result = poll.remote(target) => result,
+                        _ = response.closed() => return true,
+                    };
+                    return match result {
+                        Ok(value) => { if let Some(sender) = sender.take() { let _ = sender.send(Ok(value)); } true },
+                        Err(_) => false,
+                    };
+                }
             };
             // The parent loop governs its own lifecycle chain; this poll keeps
             // its own waiter registration while forwarded, as in Go where the
@@ -440,7 +504,7 @@ impl TaskDispatcher {
         mut deliver: F,
     ) -> Result<R, Status>
     where
-        Q: ForwardPollRequest + 'static,
+        Q: ForwardPollRequest<R> + 'static,
         R: Default + Send + 'static,
         F: FnMut(AllocatedTask, Q) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
@@ -461,7 +525,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
     ) -> Result<R, Status>
     where
-        Q: ForwardPollRequest + 'static,
+        Q: ForwardPollRequest<R> + 'static,
         R: Default + Send + 'static,
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
@@ -488,7 +552,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
         deadline: tokio::time::Instant,
     ) where
-        Q: ForwardPollRequest,
+        Q: ForwardPollRequest<R>,
         R: Default + Send,
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
@@ -509,7 +573,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
         deadline: tokio::time::Instant,
     ) where
-        Q: ForwardPollRequest,
+        Q: ForwardPollRequest<R>,
         R: Default + Send,
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,

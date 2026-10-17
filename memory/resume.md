@@ -1,3 +1,15 @@
+## Current Matching continuation (2026-10-17)
+
+Native Matching Thrift is implemented and original Go clients pass all ten
+methods via TChannel, /matching and /matching/. Commits 6eed2c7ef and 027792fb1.
+See matching-thrift-native.md.
+
+Membership placement, ownership guards/unloading and cross-host forwarding are
+being implemented; see matching-membership-next.md for exact status, live test
+handles and required remaining work. Whole Matching is NOT complete. Important:
+new dynamic-config audit found 29 unwired keys previously assumed covered.
+The injected membership implementation is NOT configured by main yet.
+
 ## Matching whole-service continuation (2026-10-17, current)
 
 Read `matching-standby-failover-query.md` before older Matching completion notes.
