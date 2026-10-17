@@ -1,3 +1,31 @@
+## Live Matching reader/dispatch config checkpoint (2026-10-17)
+
+Pushed 11a6cbc4a. The native Matching owner now reads Go's live
+`matching.getTasksBatchSize` (with the non-positive fallback to 1000),
+`matching.readRangeSize` (unfiltered integer) and
+`matching.asyncTaskDispatchTimeout` where Go's `taskReader` reads them, and
+`matching.minTaskThrottlingBurstSize` once per owner dispatch limiter. The
+persistence scan range signature is now `u32` so a non-positive configured
+range makes no progress in the bounded ten-step scan, like Go.
+
+FULL compatibility runner PASSED all stages including Go differentials, public/
+internal gRPC, the Go SDK over TChannel, Go-services matching delivery and the
+mixed Go Frontend/History/Worker + Rust Matching probe:
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-reader-config/results.json
+and /tmp/compat-reader-cfg.exit = 0. Workspace tests (161 server lib) and strict
+workspace/all-target Clippy pass. This run also covers the two preceding
+commits (membership channel cache and live override-RPS), which had only unit
+validation before.
+
+Whole Matching remains incomplete. Next candidates: remaining live config
+(`matching.updateAckInterval`, `matching.idleTasklistCheckInterval`,
+`matching.maxTasklistIdleTime`, `matching.maxTaskDeleteBatchSize`,
+`matching.maxTaskBatchSize`, `matching.outstandingTaskAppendsThreshold`,
+`matching.appendTaskTimeout`, `matching.recordTaskStartedTimeout`,
+`matching.enableClientAutoConfig`), production membership discovery/runtime
+wiring in main, dedicated Matching HTTP listener, and the shard-distributor
+integration. See matching-config-next.md.
+
 ## Live override-RPS / membership channel cache checkpoint (2026-10-17)
 
 Pushed 5db03a5eb and 88abc0766. Matching now caches one lazy gRPC channel per
