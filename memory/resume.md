@@ -1,3 +1,22 @@
+## Live override-RPS / membership channel cache checkpoint (2026-10-17)
+
+Pushed 5db03a5eb and 88abc0766. Matching now caches one lazy gRPC channel per
+owner address (retained only while the address stays in the ring) and honors
+Go's live `matching.overrideTaskListRps` precedence on both decision and
+activity polls, reporting the worker rate to the shared dispatch limiter.
+
+A re-entrancy defect was found during validation: the first `poll_rate`
+implementation held the admin dynamic-config mutex while calling
+`limiter.report_limit`, but the owner's live partition-count provider locks the
+same mutex, so every poll self-deadlocked and the full unit suite hung. The
+override read is now scoped to a block; a new regression uses a
+`try_lock`-based partition provider so the bug fails loudly instead of hanging.
+All 159 server lib tests and strict workspace/all-target Clippy pass. The broad
+compatibility runner has NOT been rerun for these two commits. Whole Matching
+remains incomplete; next scoped gap is live reader/dispatch configuration
+(getTasksBatchSize, readRangeSize, asyncTaskDispatchTimeout,
+minTaskThrottlingBurstSize). See matching-config-next.md.
+
 ## Verified Matching transport / membership checkpoint (2026-10-17)
 
 Current implementation commit ce242f295 is pushed. All 154 server tests and
