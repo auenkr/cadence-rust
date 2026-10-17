@@ -3,6 +3,7 @@
 //! and github.com/uber/tchannel-go v1.34.4. Calls share the Rust YARPC dispatcher.
 //! No Go process or HTTP proxy is used.
 use crate::handlers::AppState;
+use crate::ringpop_tchannel::{RingpopError, RingpopHandler};
 use anyhow::{anyhow, bail, Context, Result};
 use cadence_thrift::{
     protocol::{Reader, Writer},
@@ -111,6 +112,9 @@ fn headers16(headers: &[(&str, String)]) -> Result<Vec<u8>> {
 }
 fn transport_headers() -> Vec<u8> {
     vec![1, 2, b'a', b's', 6, b't', b'h', b'r', b'i', b'f', b't']
+}
+fn json_transport_headers() -> Vec<u8> {
+    vec![1, 2, b'a', b's', 4, b'j', b's', b'o', b'n']
 }
 
 #[derive(Clone)]
@@ -306,6 +310,7 @@ fn response_frames(
     id: u32,
     trace: [u8; 25],
     application_error: bool,
+    json: bool,
     args: [Vec<u8>; 3],
     mut checksum: Checksum,
 ) -> Result<Vec<Frame>> {
@@ -319,7 +324,12 @@ fn response_frames(
         if first {
             payload.push(u8::from(application_error));
             payload.extend_from_slice(&trace);
-            payload.extend_from_slice(&transport_headers());
+            let transport_headers = if json {
+                json_transport_headers()
+            } else {
+                transport_headers()
+            };
+            payload.extend_from_slice(&transport_headers);
         }
         payload.push(checksum.kind());
         let checksum_at = payload.len();
@@ -367,7 +377,107 @@ fn response_frames(
         }
     }
 }
-async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState, matching: Option<crate::grpc_matching::Matching>) -> Result<()> {
+async fn handle_call(
+    writer: SharedWriter,
+    id: u32,
+    call: Call,
+    state: AppState,
+    matching: Option<crate::grpc_matching::Matching>,
+    ringpop: Option<RingpopHandler>,
+) -> Result<()> {
+    if call.service == "ringpop" {
+        let Some(handler) = ringpop else {
+            return error(&writer, id, 6, &call.trace, "Unknown TChannel service").await;
+        };
+        if call.headers.get("as").map(String::as_str) != Some("json") {
+            return error(
+                &writer,
+                id,
+                6,
+                &call.trace,
+                "Cadence TChannel requires json encoding",
+            )
+            .await;
+        }
+        let method = match String::from_utf8(call.args[0].clone()) {
+            Ok(method) => method,
+            Err(_) => {
+                return error(&writer, id, 6, &call.trace, "Malformed TChannel method").await
+            }
+        };
+        let request_headers: Option<std::collections::HashMap<String, String>> =
+            match serde_json::from_slice(&call.args[1]) {
+                Ok(value) => value,
+                Err(err) => {
+                    return error(
+                        &writer,
+                        id,
+                        6,
+                        &call.trace,
+                        &format!("Malformed TChannel JSON headers: {err}"),
+                    )
+                    .await
+                }
+            };
+        let result = handler
+            .call(method.clone(), request_headers, call.args[2].clone())
+            .await;
+        return match result {
+            Ok(response) => {
+                let arg2 = match response.headers {
+                    None => b"null\n".to_vec(),
+                    Some(headers) => {
+                        let mut bytes = serde_json::to_vec(&headers)
+                            .map_err(|err| anyhow!("JSON header encoding failed: {err}"))?;
+                        bytes.push(b'\n');
+                        bytes
+                    }
+                };
+                let mut body = response.body;
+                // Preserve a trailing newline like tchannel-go's json.Encoder, but
+                // only when the handler did not already include one.
+                if !body.is_empty() && !body.ends_with(b"\n") {
+                    body.push(b'\n');
+                }
+                let frames = response_frames(
+                    id,
+                    call.trace,
+                    false,
+                    true,
+                    [Vec::new(), arg2, body],
+                    Checksum::new(call.checksum.kind())?,
+                )?;
+                let mut writer = writer.lock().await;
+                for frame in frames {
+                    write_frame(&mut writer, frame).await?;
+                }
+                Ok(())
+            }
+            Err(RingpopError::Application(message)) => {
+                let error_body = serde_json::json!({"type": "error", "message": message});
+                let mut body = serde_json::to_vec(&error_body)
+                    .map_err(|err| anyhow!("JSON error encoding failed: {err}"))?;
+                body.push(b'\n');
+                let frames = response_frames(
+                    id,
+                    call.trace,
+                    true,
+                    true,
+                    [Vec::new(), b"null\n".to_vec(), body],
+                    Checksum::new(call.checksum.kind())?,
+                )?;
+                let mut writer = writer.lock().await;
+                for frame in frames {
+                    write_frame(&mut writer, frame).await?;
+                }
+                Ok(())
+            }
+            Err(RingpopError::System(message)) => {
+                return error(&writer, id, 6, &call.trace, &message).await
+            }
+        }
+    }
+
     let expected_service = if matching.is_some() { "cadence-matching" } else { "cadence-frontend" };
     if call.service != expected_service {
         return error(&writer, id, 6, &call.trace, "Unknown TChannel service").await;
@@ -432,6 +542,7 @@ async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState,
         id,
         call.trace,
         application_error.is_some(),
+        false,
         [Vec::new(), headers16(&meta)?, body.into_bytes()],
         Checksum::new(call.checksum.kind())?,
     )?;
@@ -442,7 +553,12 @@ async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState,
     Ok(())
 }
 
-async fn connection(stream: TcpStream, state: AppState, matching: Option<crate::grpc_matching::Matching>) -> Result<()> {
+async fn connection(
+    stream: TcpStream,
+    state: AppState,
+    matching: Option<crate::grpc_matching::Matching>,
+    ringpop: Option<RingpopHandler>,
+) -> Result<()> {
     stream.set_nodelay(true)?;
     let local = stream.local_addr()?.to_string();
     let (mut reader, writer) = stream.into_split();
@@ -510,9 +626,9 @@ async fn connection(stream: TcpStream, state: AppState, matching: Option<crate::
                             !call.continuation(&frame.payload,state.grpc_max_message_size)?
                         };
                         if complete {
-                            let call=calls.remove(&frame.id).expect("assembled call");let id=frame.id;let writer=writer.clone();let state=state.clone();let matching=matching.clone();
+                            let call=calls.remove(&frame.id).expect("assembled call");let id=frame.id;let writer=writer.clone();let state=state.clone();let matching=matching.clone();let ringpop=ringpop.clone();
                             let abort=tasks.spawn(async move {
-                                let trace=call.trace;let result=handle_call(writer.clone(),id,call,state,matching).await;
+                                let trace=call.trace;let result=handle_call(writer.clone(),id,call,state,matching,ringpop).await;
                                 let result=if let Err(e)=result {error(&writer,id,6,&trace,&e.to_string()).await} else {Ok(())};
                                 (id,result)
                             });aborts.insert(id,abort);
@@ -526,12 +642,27 @@ async fn connection(stream: TcpStream, state: AppState, matching: Option<crate::
     }
 }
 pub async fn serve(addr: std::net::SocketAddr, state: AppState) -> Result<()> {
-    serve_with(addr, state, None).await
+    serve_with(addr, state, None, None).await
 }
 pub async fn serve_matching(addr: std::net::SocketAddr, matching: crate::grpc_matching::Matching) -> Result<()> {
-    serve_with(addr, matching.frontend.state.clone(), Some(matching)).await
+    serve_with(addr, matching.frontend.state.clone(), Some(matching), None).await
 }
-async fn serve_with(addr: std::net::SocketAddr, state: AppState, matching: Option<crate::grpc_matching::Matching>) -> Result<()> {
+pub async fn serve_ringpop(addr: std::net::SocketAddr, handler: RingpopHandler) -> Result<()> {
+    serve_with(addr, AppState::default(), None, Some(handler)).await
+}
+pub async fn serve_ringpop_with(
+    addr: std::net::SocketAddr,
+    state: AppState,
+    handler: RingpopHandler,
+) -> Result<()> {
+    serve_with(addr, state, None, Some(handler)).await
+}
+async fn serve_with(
+    addr: std::net::SocketAddr,
+    state: AppState,
+    matching: Option<crate::grpc_matching::Matching>,
+    ringpop: Option<RingpopHandler>,
+) -> Result<()> {
     let listener = TcpListener::bind(addr)
         .await
         .context("bind TChannel frontend")?;
@@ -539,8 +670,9 @@ async fn serve_with(addr: std::net::SocketAddr, state: AppState, matching: Optio
         let (stream, _) = listener.accept().await?;
         let state = state.clone();
         let matching = matching.clone();
+        let ringpop = ringpop.clone();
         tokio::spawn(async move {
-            let _ = connection(stream, state, matching).await;
+            let _ = connection(stream, state, matching, ringpop).await;
         });
     }
 }
@@ -589,7 +721,7 @@ mod tests {
                 vec![b'b'; 4],
                 vec![b'c'; 150000],
             ];
-            let frames = response_frames(42, [7; 25], false, args.clone(), checksum).unwrap();
+            let frames = response_frames(42, [7; 25], false, false, args.clone(), checksum).unwrap();
             assert!(frames.len() > 2);
             assert_eq!(assemble(frames, kind).unwrap(), args);
         }
@@ -599,6 +731,7 @@ mod tests {
         let mut frames = response_frames(
             42,
             [0; 25],
+            false,
             false,
             [vec![], vec![0, 0], b"body".to_vec()],
             Checksum::new(1).unwrap(),

@@ -54,8 +54,21 @@ workflow whose activity fails once and succeeds on retry, then checks the retry
 history has one Scheduled event and only the final Started event. Sticky execution is
 explicitly disabled because the full sticky task lifecycle is not ported yet.
 
-Both drivers leave completed workflows and their domains available in the web
-UI for inspection. They create unique IDs so repeated runs are isolated.
+## Ringpop JSON over TChannel boundary
+
+```sh
+python3 tests/run-ringpop-tchannel-compat.py
+```
+
+This starts a test-only Rust listener with an injected typed handler and calls it
+using the pinned Go `tchannel-go/json.Client`. It checks join, ping, ping-req,
+application errors, malformed JSON, and unknown method/service behavior. It
+validates transport interop only; it does not implement production Ringpop or
+SWIM membership.
+
+The gRPC and SDK workflow drivers leave completed workflows and their domains
+available in the web UI for inspection. They create unique IDs so repeated runs
+are isolated.
 
 Rust unit/integration checks also run with `cargo test --workspace` in `rust/`.
 See `memory/migration-inventory.md` for unported capabilities; these checks are

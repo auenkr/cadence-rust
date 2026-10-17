@@ -20,6 +20,7 @@ pub mod grpc_shard;
 pub mod handlers;
 pub mod service;
 pub mod tchannel;
+pub mod ringpop_tchannel;
 pub mod yarpc;
 
 #[allow(clippy::result_large_err)]
