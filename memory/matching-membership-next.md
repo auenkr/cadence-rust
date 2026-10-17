@@ -98,3 +98,18 @@ Current all-server-unit + strict Clippy rerun: /tmp/matching-final-unit.log and
 /tmp/matching-final-unit.exit. Full suite continues with the latest build.
 Latest local-wait tree: all 151 server unit tests and strict workspace/all-target
 Clippy pass (`/tmp/matching-final-unit.exit` = 0).
+
+Remote query follow-up: a real root Matching gRPC listener accepts a forwarded
+query from a separately owned child, delivers it to a root worker, and returns
+completion to the child. Token names root, not child. Both cross-host tests pass
+(/tmp/matching-remote-query.exit = 0). All 152 server tests and strict workspace
+Clippy pass in /tmp/matching-live-recheck.log.
+
+Broad run found an expected isolation-test adjustment: Matching's POST-only HTTP
+wildcard returns 405 for unknown GET paths. Isolation test now accepts 404/405
+and additionally sends a frontend Thrift call to prove rejection (404).
+Focused matching/history listener isolation passes (/tmp/matching-listeners.exit=0).
+Latest broad rerun uses --skip-rust-checks after the explicit 152-test/Clippy run:
+artifacts matching-transport-membership-verified, /tmp/matching-live-recheck.log,
+/tmp/matching-live-recheck.exit. Previous full workspace run already passed all
+workspace tests; no shared-crate changes since that run.

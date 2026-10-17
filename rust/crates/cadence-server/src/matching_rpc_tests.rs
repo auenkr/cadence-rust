@@ -2079,3 +2079,65 @@ async fn matching_rpc_local_poll_wait_delays_forwarding_and_reloads() {
     assert!(immediate.await.unwrap_err().is_cancelled());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
+
+#[tokio::test]
+async fn matching_rpc_cross_host_query_completes_on_accepting_host() {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+    let history = start_fake_history(mutable_state()).await;
+    let (_root_dir, _root_store, root, key) = fixture_with_history(&history);
+    let (_child_dir, _child_store, child, _) = fixture_with_history(&history);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = listener.local_addr().unwrap().to_string();
+    let hosts: Vec<_> = ["node-0", "node-1"].into_iter().map(|id| Host {
+        address: format!("{id}:7935"), identity: id.into(), grpc_address: endpoint.clone(),
+    }).collect();
+    let ring = Ring::new(hosts.clone());
+    let root_id = ring.lookup("queue").unwrap().identity().to_owned();
+    let child_name = (1..=20).map(|id| format!("/__cadence_sys/queue/{id}")).find(|name| ring.lookup(name).unwrap().identity() != root_id).unwrap();
+    let child_id = ring.lookup(&child_name).unwrap().identity().to_owned();
+    let root = root.with_membership(Membership::new(root_id, hosts.clone()));
+    let child = child.with_membership(Membership::new(child_id, hosts));
+    let service = root.clone();
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder().add_service(m::matching_api_server::MatchingApiServer::new(service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+    });
+    let domain = key.domain_id.to_string();
+    let queue = root.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    let worker = root.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: poll_domain, poller_id: "remote-query-worker".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+    })).await.unwrap().into_inner() });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !queue.queries.has_waiters() { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    let caller = child.clone();
+    let query_domain = domain.clone();
+    let query = tokio::spawn(async move {
+        let mut request = Request::new(m::QueryWorkflowRequest {
+            domain_id: query_domain, task_list: Some(p::TaskList { name: child_name, kind: 1, ..Default::default() }),
+            request: Some(p::QueryWorkflowRequest { domain: "domain".into(), workflow_execution: execution(),
+                query: Some(p::WorkflowQuery { query_type: "ping".into(), query_args: None }), ..Default::default() }), ..Default::default()
+        });
+        request.set_timeout(Duration::from_secs(3));
+        caller.query_workflow(request).await.unwrap().into_inner()
+    });
+    let delivered = tokio::time::timeout(Duration::from_secs(2), poll).await.unwrap().unwrap();
+    assert_eq!(delivered.query.unwrap().query_type, "ping");
+    let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(&delivered.task_token).unwrap();
+    assert_eq!(token.task_list, "queue");
+    root.respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+        domain_id: domain, task_list: list(), task_id: token.task_id,
+        request: Some(p::RespondQueryTaskCompletedRequest { result: Some(p::WorkflowQueryResult {
+            result_type: p::QueryResultType::Answered as i32, answer: Some(p::Payload { data: b"pong".to_vec() }), error_message: String::new(),
+        }), ..Default::default() }),
+    })).await.unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(2), query).await.unwrap().unwrap();
+    assert_eq!(result.query_result.unwrap().data, b"pong");
+    child.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    root.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    server.abort();
+}

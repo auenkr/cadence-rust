@@ -54,6 +54,17 @@ for role in ["matching", "history"]:
                     urllib.request.urlopen(f"http://127.0.0.1:{http}/api/v1/domains/list", timeout=1)
                     raise AssertionError(f"{role} exposes frontend HTTP routes")
                 except urllib.error.HTTPError as error:
+                    # Matching's POST-only Thrift wildcard returns 405 for a
+                    # GET on an unknown path. Prove it cannot dispatch a
+                    # frontend procedure rather than relying only on routing.
+                    assert error.code in (404, 405)
+                request = urllib.request.Request(f"http://127.0.0.1:{http}/api/v1/domains/list",
+                    data=b"\0", headers={"Rpc-Service": "cadence-frontend",
+                    "Rpc-Procedure": "WorkflowService::ListDomains", "Rpc-Encoding": "thrift"})
+                try:
+                    urllib.request.urlopen(request, timeout=1)
+                    raise AssertionError(f"{role} dispatches frontend Thrift procedures")
+                except urllib.error.HTTPError as error:
                     assert error.code == 404
                 # Allow asynchronous failed binds to surface before success.
                 time.sleep(0.25)
