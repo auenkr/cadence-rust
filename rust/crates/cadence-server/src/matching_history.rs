@@ -429,7 +429,7 @@ mod tests {
     }
     #[tokio::test]
     async fn matching_history_retries_preserve_request_id_and_yarpc_metadata() {
-        let client = client();
+        let history_client = client();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let copy = seen.clone();
         let request = h::RecordDecisionTaskStartedRequest {
@@ -437,7 +437,7 @@ mod tests {
             ..Default::default()
         };
         let expected = request.request_id.clone();
-        let result = client
+        let result = history_client
             .retry(request, None, move |request| {
                 assert_eq!(
                     request.metadata().get("rpc-service").unwrap(),
@@ -464,10 +464,10 @@ mod tests {
     }
     #[tokio::test]
     async fn matching_history_terminal_errors_and_cancellation_stop_retries() {
-        let client = client();
+        let history_client = client();
         let calls = Arc::new(AtomicUsize::new(0));
         let copy = calls.clone();
-        let result: Result<(), _> = client
+        let result: Result<(), _> = history_client
             .retry((), None, move |_| {
                 copy.fetch_add(1, Ordering::Relaxed);
                 std::future::ready(Err(typed(
@@ -482,7 +482,7 @@ mod tests {
         let copy = calls.clone();
         let result = tokio::time::timeout(
             Duration::from_millis(20),
-            client.retry((), None, move |_| {
+            history_client.retry((), None, move |_| {
                 copy.fetch_add(1, Ordering::Relaxed);
                 std::future::ready(Err::<(), _>(Status::unavailable("temporary")))
             }),
@@ -493,13 +493,13 @@ mod tests {
     }
     #[tokio::test]
     async fn matching_history_record_started_timeout_reads_live_per_domain() {
-        let client = client();
+        let history_client = client();
         let default = Duration::from_secs(1);
         // Without a provider the client keeps its configured operation timeout.
-        assert_eq!(client.record_started_timeout("domain-a"), None);
+        assert_eq!(history_client.record_started_timeout("domain-a"), None);
         assert_eq!(
-            client.request(()).metadata().get("grpc-timeout"),
-            grpc_timeout(default).as_ref()
+            client().request(()).metadata().get("grpc-timeout"),
+            Some(&grpc_timeout(default))
         );
         // Go reads `matching.recordTaskStartedTimeout(domain)` per attempt.
         let client = client().with_record_started_timeout(Arc::new(|domain_id: &str| {
@@ -521,7 +521,7 @@ mod tests {
             client.request_with_timeout((), client.record_started_timeout("domain-a"));
         assert_eq!(
             request.metadata().get("grpc-timeout"),
-            grpc_timeout(Duration::from_millis(250)).as_ref()
+            Some(&grpc_timeout(Duration::from_millis(250)))
         );
     }
     fn grpc_timeout(duration: Duration) -> tonic::metadata::MetadataValue<tonic::metadata::Ascii> {
