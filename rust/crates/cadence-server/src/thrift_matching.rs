@@ -315,7 +315,6 @@ async fn invoke(
                     task_list: v.task_list.map(cv::task_list_out),
                     identity: v.identity,
                     binary_checksum: v.binary_checksum,
-                    ..Default::default()
                 }
             });
             let v = matching
@@ -721,6 +720,18 @@ pub fn router(matching: Matching) -> axum::Router {
         .route("/{*rest}", axum::routing::post(http_handler))
         .layer(axum::extract::DefaultBodyLimit::max(limit))
         .with_state(std::sync::Arc::new(matching))
+}
+/// Mount both spellings explicitly: Axum's nested root only matches the
+/// prefix without a trailing slash; otherwise the frontend wildcard wins.
+pub fn combined_router(matching: Matching) -> axum::Router {
+    let limit = matching.frontend.state.grpc_max_message_size;
+    axum::Router::new()
+        .nest("/matching", router(matching.clone()))
+        .route(
+            "/matching/",
+            axum::routing::post(http_handler).with_state(std::sync::Arc::new(matching)),
+        )
+        .layer(axum::extract::DefaultBodyLimit::max(limit))
 }
 async fn http_handler(
     axum::extract::State(matching): axum::extract::State<std::sync::Arc<Matching>>,

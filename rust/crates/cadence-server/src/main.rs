@@ -353,7 +353,7 @@ async fn main() -> anyhow::Result<()> {
             };
             let app = if run_matching {
                 let matching_http = cadence_server::thrift_matching::router(matching_service.clone());
-                let app = app.nest("/matching", matching_http.clone());
+                let app = app.merge(cadence_server::thrift_matching::combined_router(matching_service.clone()));
                 if run_frontend { app } else { app.merge(matching_http) }
             } else { app };
             let matching_tchannel_service = matching_service.clone();

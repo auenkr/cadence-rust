@@ -80,6 +80,8 @@ def main():
     run("active-active-differential", [sys.executable, str(root / "tests/run-active-active-compat.py")])
     run("domain-update-differential", [sys.executable, str(root / "tests/run-domain-update-compat.py")])
     run("server-build", ["cargo", "build", "--manifest-path", manifest, "-p", "cadence-server"])
+    run("matching-native-thrift", [sys.executable, str(root / "tests/run-matching-thrift-compat.py"),
+        "--artifacts-dir", str(artifacts / "matching-native-thrift")], timeout=300)
     # Reserve all six ports together to avoid selecting the same port twice.
     reservations = [socket.socket() for _ in range(6)]
     try:

@@ -26,15 +26,19 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 	if os.Getenv("CADENCE_MATCHING_TCHANNEL") == "" {
 		t.Skip("requires native Rust Matching")
 	}
-	for _, mode := range []string{"tchannel", "http"} {
+	for _, mode := range []string{"tchannel", "http", "http-trailing-slash"} {
 		t.Run(mode, func(t *testing.T) {
 			tr, err := tchannel.NewTransport(tchannel.ServiceName("matching-thrift-compat"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			var outbound transport.UnaryOutbound = tr.NewSingleOutbound(os.Getenv("CADENCE_MATCHING_TCHANNEL"))
-			if mode == "http" {
-				outbound = yhttp.NewTransport().NewSingleOutbound(os.Getenv("CADENCE_MATCHING_HTTP"))
+			if mode != "tchannel" {
+				endpoint := os.Getenv("CADENCE_MATCHING_HTTP")
+				if mode == "http-trailing-slash" {
+					endpoint += "/"
+				}
+				outbound = yhttp.NewTransport().NewSingleOutbound(endpoint)
 			}
 			dispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-thrift-compat", Outbounds: yarpc.Outbounds{
 				"cadence-matching": {Unary: outbound}, "cadence-frontend": {Unary: tr.NewSingleOutbound(os.Getenv("CADENCE_FRONTEND_TCHANNEL"))},

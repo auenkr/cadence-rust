@@ -45,7 +45,7 @@ with (artifacts / 'server.log').open('w') as log:
                         '-run', '^TestRustMatchingNativeThrift$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=180,
                        env={**os.environ, 'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
                             'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
-                            'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{http}/matching/'})
+                            'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{http}/matching'})
     finally:
         server.terminate()
         try:

@@ -54,4 +54,4 @@ mod tests {
 path=ROOT/'rust/crates/cadence-thrift/src/service.rs'
 path.write_text('\n'.join(output)+'\n')
 subprocess.run(['rustfmt','--edition','2021',str(path)],check=True)
-print(f'Generated {len(methods)} WorkflowService definitions plus Meta::health')
+print(f'Generated {len(methods)} WorkflowService/MatchingService definitions plus Meta::health')
