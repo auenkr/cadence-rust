@@ -361,6 +361,24 @@ impl Matching {
                 }
             })
         };
+        // Go `cfg.RecordTaskStartedTimeout(domain)` (`matching.recordTaskStartedTimeout`,
+        // Domain filter only, default 1s): the operation timeout of each
+        // Record*TaskStarted attempt.
+        let record_started_timeout: crate::matching_history::RecordStartedTimeout = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id: &str| {
+                let nanos = {
+                    let config = overlay.lock().expect("admin lock");
+                    cadence_persistence::dynamic_config::duration(
+                        config.property_values("matching.recordTaskStartedTimeout"),
+                        domain_name_for(&domains, domain_id).as_deref(),
+                        crate::matching_history::DEFAULT_RECORD_TASK_STARTED_TIMEOUT_NANOS,
+                    )
+                };
+                std::time::Duration::from_nanos(nanos.max(0) as u64)
+            })
+        };
         // Go `cfg.MinTaskThrottlingBurstSize(domain, taskList, type)`, default 1.
         let min_burst: crate::matching_registry::SyncWaitProvider = {
             let domains = domains.clone();
@@ -510,6 +528,7 @@ impl Matching {
             .with_qps_interval(qps_interval)
             .with_reader_live(reader_live)
             .with_min_burst(min_burst)
+            .with_record_started_timeout(record_started_timeout)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
         let mut matching = Self::new(state);

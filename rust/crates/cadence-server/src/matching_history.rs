@@ -5,7 +5,7 @@ use cadence_common::{backoff::NO_INTERVAL, ExponentialRetryPolicy, Retrier};
 use cadence_persistence::matching_sqlite::AllocatedTask;
 use cadence_proto::{api as p, history as h, matching as m};
 use prost::Message;
-use std::{future::Future, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 use tonic::{transport::Channel, Code, Request, Status};
 use uuid::Uuid;
 
@@ -68,7 +68,17 @@ fn retryable(error: &Status) -> bool {
 pub struct MatchingHistoryClient {
     history: h::history_api_client::HistoryApiClient<Channel>,
     operation_timeout: Duration,
+    /// Go `cfg.RecordTaskStartedTimeout(domain)` (`matching.recordTaskStartedTimeout`,
+    /// a domain-filtered duration, default 1s): the operation timeout of each
+    /// RecordDecisionTaskStarted/RecordActivityTaskStarted attempt. It is read
+    /// per call because a running owner keeps its client.
+    record_started_timeout: Option<RecordStartedTimeout>,
 }
+/// Live per-domain `matching.recordTaskStartedTimeout` read, in nanoseconds.
+pub type RecordStartedTimeout = Arc<dyn Fn(&str) -> Duration + Send + Sync>;
+/// Go `matching.recordTaskStartedTimeout` property default (1s), shared with the
+/// Matching -> History client's configured operation timeout.
+pub const DEFAULT_RECORD_TASK_STARTED_TIMEOUT_NANOS: i64 = 1_000_000_000;
 impl MatchingHistoryClient {
     pub fn new(channel: Channel, operation_timeout: Duration, max_message_size: usize) -> Self {
         Self {
@@ -76,9 +86,24 @@ impl MatchingHistoryClient {
                 .max_decoding_message_size(max_message_size)
                 .max_encoding_message_size(max_message_size),
             operation_timeout,
+            record_started_timeout: None,
         }
     }
+    /// Install Go's live `matching.recordTaskStartedTimeout` provider.
+    pub fn with_record_started_timeout(mut self, provider: RecordStartedTimeout) -> Self {
+        self.record_started_timeout = Some(provider);
+        self
+    }
+    /// Go `recordDecisionTaskStarted`/`recordActivityTaskStarted`: the live
+    /// domain-filtered timeout for each Record*TaskStarted attempt, falling back
+    /// to the client's configured operation timeout.
+    pub(crate) fn record_started_timeout(&self, domain_id: &str) -> Option<Duration> {
+        self.record_started_timeout.as_ref().map(|provider| provider(domain_id))
+    }
     fn request<T>(&self, payload: T) -> Request<T> {
+        self.request_with_timeout(payload, None)
+    }
+    fn request_with_timeout<T>(&self, payload: T, timeout: Option<Duration>) -> Request<T> {
         let mut request = Request::new(payload);
         request.metadata_mut().insert(
             "rpc-service",
@@ -92,10 +117,15 @@ impl MatchingHistoryClient {
             "rpc-encoding",
             tonic::metadata::MetadataValue::from_static("proto"),
         );
-        request.set_timeout(self.operation_timeout);
+        request.set_timeout(timeout.unwrap_or(self.operation_timeout));
         request
     }
-    async fn retry<T: Clone + Send, R, F, Fut>(&self, payload: T, mut call: F) -> Result<R, Status>
+    async fn retry<T: Clone + Send, R, F, Fut>(
+        &self,
+        payload: T,
+        timeout: Option<Duration>,
+        mut call: F,
+    ) -> Result<R, Status>
     where
         F: FnMut(Request<T>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
@@ -106,7 +136,7 @@ impl MatchingHistoryClient {
             .with_expiration_interval(NO_INTERVAL);
         let mut retrier = Retrier::new(policy);
         loop {
-            match call(self.request(payload.clone())).await {
+            match call(self.request_with_timeout(payload.clone(), timeout)).await {
                 Ok(result) => return Ok(result),
                 Err(error) => {
                     if !retryable(&error) {
@@ -177,7 +207,7 @@ impl MatchingHistoryClient {
             ..Default::default()
         };
         let client = self.history.clone();
-        self.retry(payload, move |request| {
+        self.retry(payload, None, move |request| {
             let mut client = client.clone();
             async move {
                 client
@@ -206,7 +236,7 @@ impl MatchingHistoryClient {
         };
         let client = self.history.clone();
         let started = self
-            .retry(payload, move |request| {
+            .retry(payload, self.record_started_timeout(domain_id), move |request| {
                 let mut client = client.clone();
                 async move {
                     client
@@ -263,7 +293,7 @@ impl MatchingHistoryClient {
         };
         let client = self.history.clone();
         let started = self
-            .retry(payload, move |request| {
+            .retry(payload, self.record_started_timeout(domain_id), move |request| {
                 let mut client = client.clone();
                 async move {
                     client
@@ -408,7 +438,7 @@ mod tests {
         };
         let expected = request.request_id.clone();
         let result = client
-            .retry(request, move |request| {
+            .retry(request, None, move |request| {
                 assert_eq!(
                     request.metadata().get("rpc-service").unwrap(),
                     "cadence-history"
@@ -438,7 +468,7 @@ mod tests {
         let calls = Arc::new(AtomicUsize::new(0));
         let copy = calls.clone();
         let result: Result<(), _> = client
-            .retry((), move |_| {
+            .retry((), None, move |_| {
                 copy.fetch_add(1, Ordering::Relaxed);
                 std::future::ready(Err(typed(
                     Code::AlreadyExists,
@@ -452,7 +482,7 @@ mod tests {
         let copy = calls.clone();
         let result = tokio::time::timeout(
             Duration::from_millis(20),
-            client.retry((), move |_| {
+            client.retry((), None, move |_| {
                 copy.fetch_add(1, Ordering::Relaxed);
                 std::future::ready(Err::<(), _>(Status::unavailable("temporary")))
             }),
@@ -460,5 +490,43 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+    #[tokio::test]
+    async fn matching_history_record_started_timeout_reads_live_per_domain() {
+        let client = client();
+        let default = Duration::from_secs(1);
+        // Without a provider the client keeps its configured operation timeout.
+        assert_eq!(client.record_started_timeout("domain-a"), None);
+        assert_eq!(
+            client.request(()).metadata().get("grpc-timeout"),
+            grpc_timeout(default).as_ref()
+        );
+        // Go reads `matching.recordTaskStartedTimeout(domain)` per attempt.
+        let client = client().with_record_started_timeout(Arc::new(|domain_id: &str| {
+            if domain_id == "domain-a" {
+                Duration::from_millis(250)
+            } else {
+                Duration::from_secs(9)
+            }
+        }));
+        assert_eq!(
+            client.record_started_timeout("domain-a"),
+            Some(Duration::from_millis(250))
+        );
+        assert_eq!(
+            client.record_started_timeout("domain-b"),
+            Some(Duration::from_secs(9))
+        );
+        let request =
+            client.request_with_timeout((), client.record_started_timeout("domain-a"));
+        assert_eq!(
+            request.metadata().get("grpc-timeout"),
+            grpc_timeout(Duration::from_millis(250)).as_ref()
+        );
+    }
+    fn grpc_timeout(duration: Duration) -> tonic::metadata::MetadataValue<tonic::metadata::Ascii> {
+        let mut request = Request::new(());
+        request.set_timeout(duration);
+        request.metadata().get("grpc-timeout").unwrap().clone()
     }
 }

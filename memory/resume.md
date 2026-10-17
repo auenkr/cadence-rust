@@ -1,3 +1,33 @@
+## User-requested progress checkpoint — 2026-10-17
+
+Checkpoint includes the previously uncommitted recordTaskStartedTimeout draft in
+grpc_matching.rs, matching_history.rs and matching_registry.rs. This draft is
+UNVALIDATED: no passing compile/test evidence is claimed. Review and finish it
+before treating it as an accepted Go-parity change. Saved unverified audit reports
+retain their warning headers and are not authoritative migration plans.
+
+Parent remains orchestrator; implementation uses codex/gpt-6-luna with explicit
+Standard speed (target.options.serviceTier="default"), never Fast/Priority.
+Current three isolated tasks were checked running, with no pending questions:
+- maintenance-codex-luna-standard-3
+- http-codex-luna-standard-3
+- membership-codex-luna-standard-3
+Full task ID prefix:
+`node:delegated-task:command%3Amcp%3A23bdfb7a-603d-4d45-b778-557c3aff6443%3Adelegate-task%3A`
+Worktrees respectively: t3-ef455bb6, t3-7a9c12cc, t3-77b82231 under
+/home/ubuntu/.t3/worktrees/cadence-rust/. They recover previous partial work;
+no returned implementation from these rounds has been integrated.
+Earlier standard-2 workers were repeatedly cancelled before completed tests;
+the returned statuses do not explain the cancellation cause. Preserve their work.
+
+Next: read task_status on completion, inspect returned diffs against original Go,
+integrate only reviewed commits without losing the timeout draft, finish focused
+checks and full SDK/mixed-service compatibility through tmux cadence-rust.
+All four service roles remain incomplete. Continue Matching -> History -> Frontend
+-> Worker, with the final requirement of a Rust cluster needing no Go server.
+See orchestration-active.md for task history and recovery instructions.
+Checkpoint validation: git diff --check passed; no builds/tests run for this save.
+
 ## Auto-config hint checkpoint (2026-10-17)
 
 Pushed e559bfa73. Every Matching poll now carries Go's `types.AutoConfigHint`:

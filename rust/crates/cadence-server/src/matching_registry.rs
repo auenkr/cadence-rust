@@ -476,9 +476,25 @@ impl QueueRegistry {
         self.min_burst = Some(provider);
         self
     }
+    /// Install Go's live `matching.recordTaskStartedTimeout` provider on the
+    /// Matching -> History client used for task-start acknowledgements.
+    pub fn with_record_started_timeout(
+        mut self,
+        provider: crate::matching_history::RecordStartedTimeout,
+    ) -> Self {
+        self.history = self.history.clone().with_record_started_timeout(provider);
+        self
+    }
     #[cfg(test)]
     pub(crate) fn isolation_provider_for_test(&self) -> IsolationProvider {
         self.isolation.clone().expect("isolation provider installed")
+    }
+    #[cfg(test)]
+    pub(crate) fn record_started_timeout_for_test(
+        &self,
+        domain_id: &str,
+    ) -> Option<std::time::Duration> {
+        self.history.record_started_timeout(domain_id)
     }
     pub fn with_domain_metadata(
         mut self,
