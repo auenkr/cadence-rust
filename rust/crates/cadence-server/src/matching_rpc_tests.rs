@@ -2141,3 +2141,49 @@ async fn matching_rpc_cross_host_query_completes_on_accepting_host() {
     root.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn matching_rpc_empty_polls_reserve_tailroom_and_read_live_expiration() {
+    let (_directory, _store, matching, key) = fixture();
+    for task_type in [0, 1] {
+        let domain = key.domain_id.to_string();
+        if task_type == 0 {
+            let mut request = Request::new(m::PollForDecisionTaskRequest { domain_id: domain,
+                request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default() });
+            request.set_timeout(Duration::from_secs(1));
+            let response = tokio::time::timeout(Duration::from_millis(500), matching.poll_for_decision_task(request)).await
+                .expect("empty decision poll returns before the parent deadline").unwrap().into_inner();
+            assert!(response.task_token.is_empty());
+        } else {
+            let mut request = Request::new(m::PollForActivityTaskRequest { domain_id: domain,
+                request: Some(p::PollForActivityTaskRequest { task_list: list(), ..Default::default() }), ..Default::default() });
+            request.set_timeout(Duration::from_secs(1));
+            let response = tokio::time::timeout(Duration::from_millis(500), matching.poll_for_activity_task(request)).await
+                .expect("empty activity poll returns before the parent deadline").unwrap().into_inner();
+            assert!(response.task_token.is_empty());
+        }
+    }
+    // The same loaded manager reads the updated property on its next poll.
+    scaler_config_value(&matching, "matching.longPollExpirationInterval", br#""1ms""#);
+    let request = Request::new(m::PollForDecisionTaskRequest { domain_id: key.domain_id.to_string(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default() });
+    assert!(tokio::time::timeout(Duration::from_millis(500), matching.poll_for_decision_task(request)).await
+        .expect("live expiration applies without reloading the manager").unwrap().into_inner().task_token.is_empty());
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_in_memory_empty_polls_reserve_tailroom() {
+    let (_directory, _store, durable, key) = fixture();
+    let matching = Matching::new(durable.frontend.state.clone());
+    let mut request = Request::new(m::PollForDecisionTaskRequest { domain_id: key.domain_id.to_string(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default() });
+    request.set_timeout(Duration::from_secs(1));
+    assert!(tokio::time::timeout(Duration::from_millis(500), matching.poll_for_decision_task(request)).await
+        .expect("in-memory decision poll preserves deadline tailroom").unwrap().into_inner().task_token.is_empty());
+    let mut request = Request::new(m::PollForActivityTaskRequest { domain_id: key.domain_id.to_string(),
+        request: Some(p::PollForActivityTaskRequest { task_list: list(), ..Default::default() }), ..Default::default() });
+    request.set_timeout(Duration::from_secs(1));
+    assert!(tokio::time::timeout(Duration::from_millis(500), matching.poll_for_activity_task(request)).await
+        .expect("in-memory activity poll preserves deadline tailroom").unwrap().into_inner().task_token.is_empty());
+}

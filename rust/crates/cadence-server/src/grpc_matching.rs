@@ -484,6 +484,18 @@ impl Matching {
             }
         }
     }
+    fn poll_timeout(&self, domain: &str, list: &str, task_type: i32, deadline: Option<tokio::time::Instant>) -> std::time::Duration {
+        let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+        let nanos = cadence_persistence::dynamic_config::task_list_duration(
+            config.property_values("matching.longPollExpirationInterval"),
+            domain_name_for(&self.frontend.state.domains, domain).as_deref(), list, task_type,
+            self.poll_expiration.as_nanos().min(i64::MAX as u128) as i64,
+        );
+        let timeout = std::time::Duration::from_nanos(nanos.max(0) as u64);
+        // Go taskListManager.newChildContext reserves one second to encode
+        // the empty response before its caller's context expires.
+        deadline.map(|deadline| timeout.min(deadline.saturating_duration_since(tokio::time::Instant::now()).saturating_sub(std::time::Duration::from_secs(1)))).unwrap_or(timeout)
+    }
     async fn durable_queue(&self, domain: &str, list: &p::TaskList, task_type: i32) -> Result<crate::matching_registry::QueueHandle, Status> {
         task_list_name(&list.name)?;
         let domain_id = uuid::Uuid::parse_str(domain).map_err(|_| Status::invalid_argument("Domain UUID is not valid."))?;
@@ -639,6 +651,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
+        let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         let mut payload = r
             .request
@@ -660,6 +673,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 0).await?;
+            let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
             if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForDecisionTaskResponse::default())); }
             let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: crate::matching_limiter::TASK_DISPATCH_RPS, isolation_group: r.isolation_group } };
             // Go's matcher serves `queryTaskC` on the same long poll as the
@@ -691,11 +705,11 @@ impl m::matching_api_server::MatchingApi for Matching {
                 }
                 result=async {
                     if active {
-                        queue.dispatcher.poll_decision_with_poller(payload, self.poll_expiration, lifecycle).await
+                        queue.dispatcher.poll_decision_with_poller(payload, expiration, lifecycle).await
                     } else {
                         // Go standby getTask polls only queryTaskC, never the
                         // durable backlog or forwarded workflow tasks.
-                        tokio::time::sleep(self.poll_expiration).await;
+                        tokio::time::sleep(expiration).await;
                         Ok(m::PollForDecisionTaskResponse::default())
                     }
                 }=>
@@ -712,8 +726,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }
+        let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
         let v = tokio::select! {
-            result=p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,Request::new(payload))=>result?.into_inner(),
+            result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForDecisionTaskResponse::default() },
             _=guard.cancel.notified()=>return Err(Status::cancelled("Outstanding poll cancelled.")),
         };
         let sticky_execution_enabled = !v.task_token.is_empty()
@@ -748,6 +763,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
+        let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         let mut payload = r
             .request
@@ -769,6 +785,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 1).await?;
+            let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
             if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForActivityTaskResponse::default())); }
             // Go `getTask`: the worker-reported rate is applied to the shared
             // dispatch limiter before the poll is recorded; a missing or
@@ -788,10 +805,10 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let active = self.frontend.state.domains.is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
                         .map_err(|error| Status::not_found(error.message))?;
                     if active {
-                        queue.dispatcher.poll_activity_with_poller(payload, self.poll_expiration, lifecycle).await
+                        queue.dispatcher.poll_activity_with_poller(payload, expiration, lifecycle).await
                     } else {
                         let _wait = lifecycle.begin();
-                        tokio::time::sleep(self.poll_expiration).await;
+                        tokio::time::sleep(expiration).await;
                         Ok(m::PollForActivityTaskResponse::default())
                     }
                 }=>
@@ -808,8 +825,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }
+        let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
         let v = tokio::select! {
-            result=p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,Request::new(payload))=>result?.into_inner(),
+            result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForActivityTaskResponse::default() },
             _=guard.cancel.notified()=>return Err(Status::cancelled("Outstanding poll cancelled.")),
         };
         Ok(Response::new(m::PollForActivityTaskResponse {

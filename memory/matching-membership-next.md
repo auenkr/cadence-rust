@@ -113,3 +113,32 @@ Latest broad rerun uses --skip-rust-checks after the explicit 152-test/Clippy ru
 artifacts matching-transport-membership-verified, /tmp/matching-live-recheck.log,
 /tmp/matching-live-recheck.exit. Previous full workspace run already passed all
 workspace tests; no shared-crate changes since that run.
+
+## Poll deadline / expiration follow-up
+
+Internal gRPC polls now reserve Go's one-second empty-response tailroom too
+(previously only native Thrift did). Both decision/activity polls use incoming
+request metadata deadline and live matching.longPollExpirationInterval, including
+standby sleeps. Regression checks empty short-context polls and runtime config
+change on the same manager. All 153 server tests pass in
+/tmp/matching-poll-tailroom.log; strict Clippy follows in that process, sentinel
+/tmp/matching-poll-tailroom.exit. Latest binary/native Go Thrift recheck queued:
+/tmp/matching-deadline-native.log, /tmp/matching-deadline-native.exit, artifact
+matching-deadline-native. Broad run uses earlier copied standalone binary;
+mixed native queue/History fixture compilation sees latest source. Keep precise
+which validation covers the final deadline change.
+
+Additional forwarding audit required: in-process parent forwarding calls
+TaskDispatcher.delivery_loop directly, while cross-host forwarding invokes the
+full Matching poll handler. Audit parent query pickup, per-hop deadline tailroom,
+parent-specific poll expiration, and future override-RPS reads in that local path
+before claiming parity. The current cross-host query test covers forwarded
+QueryWorkflow to a root poll, not a child poll picking up a root query.
+Durable poll deadline follow-up strict Clippy also passes
+(/tmp/matching-poll-tailroom.exit=0). Extended the same deadline/expiration budget
+to Matching's in-memory fallback, with separate empty decision/activity poll
+regression. Latest verification now /tmp/matching-all-poll-budgets.log and
+/tmp/matching-all-poll-budgets.exit (all-server-unit plus strict Clippy).
+Final deadline tree: all 154 server unit tests and strict workspace/all-target
+Clippy pass (/tmp/matching-all-poll-budgets.exit=0). Latest durable Go-generated
+native Thrift probe also passes (/tmp/matching-deadline-native.exit=0).
