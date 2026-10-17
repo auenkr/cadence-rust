@@ -22,4 +22,10 @@ Use tmux session: cadence-rust for running long process
 
 After each compaction(let compaction be at 230k token, do not execed this), save the progress in memory and commit and push changes to origin
 
+## AGENT ORCHESTRACTION
+The orchestrator model will be divinding the work into subagents so things can speed up and task were done indepedently.
 
+For doing actual work use cheap dump model(But give them enugh instruction so they can work independtly)
+
+Worker AGENT:
+Like gpt 6 luna. Normal speed mode(Not fast mode)
