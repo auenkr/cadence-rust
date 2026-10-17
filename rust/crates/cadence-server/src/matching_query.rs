@@ -86,31 +86,30 @@ impl QueryChannel {
     /// waiter is registered first so a poller cannot pick up the offer before
     /// the result channel exists.
     pub fn register(&self, query: PendingQuery) -> oneshot::Receiver<QueryOutcome> {
-        let (sender, receiver) = oneshot::channel();
-        self.waiting
-            .lock()
-            .expect("matching query lock")
-            .insert(query.task_id.clone(), sender);
-        self.pending
-            .lock()
-            .expect("matching query lock")
-            .push_back(query);
-        self.notify.notify_waiters();
+        let receiver = self.register_waiter(&query.task_id);
+        self.offer(query);
         receiver
     }
 
-    /// Go `OfferQuery`'s non-blocking `queryTaskC` send: offer only when a
-    /// decision poller is parked in `next`. The caller must `register` the
-    /// result waiter first; returns false when no poller is waiting so the
-    /// caller forwards to the parent instead of stranding the query.
+    pub fn register_waiter(&self, task_id: &str) -> oneshot::Receiver<QueryOutcome> {
+        let (sender, receiver) = oneshot::channel();
+        self.waiting.lock().expect("matching query lock").insert(task_id.into(), sender);
+        receiver
+    }
+
+    pub fn offer(&self, query: PendingQuery) {
+        self.pending.lock().expect("matching query lock").push_back(query);
+        self.notify.notify_waiters();
+    }
+
+    /// Admit at most one offer per parked poller, mirroring the unbuffered
+    /// query channel. Installing a result waiter does not itself offer a task.
     pub fn try_offer(&self, query: PendingQuery) -> bool {
-        if self.waiters.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        let mut pending = self.pending.lock().expect("matching query lock");
+        if pending.len() >= self.waiters.load(std::sync::atomic::Ordering::SeqCst) {
             return false;
         }
-        self.pending
-            .lock()
-            .expect("matching query lock")
-            .push_back(query);
+        pending.push_back(query);
         self.notify.notify_waiters();
         true
     }
@@ -121,16 +120,18 @@ impl QueryChannel {
 
     /// Go `matcher.Poll` on `queryTaskC`: wait for a query offer.
     pub async fn next(&self) -> PendingQuery {
+        struct Waiter<'a>(&'a std::sync::atomic::AtomicUsize);
+        impl Drop for Waiter<'_> {
+            fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); }
+        }
+        self.waiters.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _waiter = Waiter(&self.waiters);
         loop {
             let notified = self.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if let Some(query) = self.take() {
-                return query;
-            }
-            self.waiters.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if let Some(query) = self.take() { return query; }
             notified.await;
-            self.waiters.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -178,11 +179,7 @@ fn supports_sticky_query(client_impl: &str, feature_version: &str) -> bool {
     if !matches!(client_impl, "uber-go" | "uber-java" | "") {
         return false;
     }
-    feature_version
-        .split('.')
-        .next()
-        .and_then(|major| major.parse::<u64>().ok())
-        .is_some_and(|major| major >= STICKY_QUERY_MIN_MAJOR)
+    released_feature_at_least(feature_version, STICKY_QUERY_MIN_MAJOR, 0)
 }
 
 /// Go `createPollForDecisionTaskResponse` for `task.IsQuery()`: the token is a
@@ -238,10 +235,22 @@ fn supports_consistent_query(client_impl: &str, feature_version: &str) -> bool {
     if !matches!(client_impl, "uber-go" | "uber-java") {
         return false;
     }
-    let mut parts = feature_version.split('.');
-    let major = parts.next().and_then(|part| part.parse::<u64>().ok());
-    let minor = parts.next().and_then(|part| part.parse::<u64>().ok());
-    matches!((major, minor), (Some(major), Some(minor)) if (major, minor) >= (1, 5))
+    released_feature_at_least(feature_version, 1, 5)
+}
+
+/// Hashicorp go-version release constraints reject every prerelease, accept
+/// a leading v, pad omitted numeric components, and validate the entire value.
+/// Both query constraints have patch zero, so major/minor determine the result
+/// once all numeric components and build metadata have been validated.
+fn released_feature_at_least(value: &str, major: u64, minor: u64) -> bool {
+    let value = value.strip_prefix('v').unwrap_or(value);
+    let (numbers, metadata) = value.split_once('+').map_or((value, None), |(numbers, metadata)| (numbers, Some(metadata)));
+    if metadata.is_some_and(|metadata| metadata.split('.').any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'~')))) { return false; }
+    let segments = numbers.split('.').map(|part| {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) { return None; }
+        part.parse::<i64>().ok()
+    }).collect::<Option<Vec<_>>>();
+    segments.is_some_and(|segments| (segments[0] as u64, segments.get(1).copied().unwrap_or_default() as u64) >= (major, minor))
 }
 
 /// Go `waitForQueryResult`: an answered query returns the payload; anything
@@ -346,6 +355,51 @@ mod tests {
             history_size: 1234,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn query_feature_versions_validate_full_release_syntax() {
+        for value in ["1", "v1.5", "01.05.0", "1.5.0+build.42", "2.0.0.1"] {
+            assert!(supports_sticky_query("uber-go", value), "{value}");
+        }
+        for value in ["1.5.0-alpha", "2.0.0-rc1", "1.invalid", "1.5.bad", "1.5.0+", "1.5.0+bad..build", "1.5.0+build!", "1.5.9223372036854775808"] {
+            assert!(!supports_sticky_query("uber-go", value), "{value}");
+            assert!(!supports_consistent_query("uber-go", value), "{value}");
+        }
+        assert!(supports_consistent_query("uber-go", "v1.5"));
+        assert!(!supports_consistent_query("uber-go", "1"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_query_poll_removes_waiter_and_cannot_accept_an_offer() {
+        let channel = QueryChannel::new();
+        let mut next = Box::pin(channel.next());
+        assert!(matches!(futures_poll(next.as_mut()), std::task::Poll::Pending));
+        assert!(channel.has_waiters());
+        drop(next);
+        assert!(!channel.has_waiters());
+        let _receiver = channel.register_waiter("task");
+        assert!(!channel.try_offer(query("task")));
+        assert!(channel.take().is_none());
+    }
+
+    fn futures_poll<F: std::future::Future>(future: std::pin::Pin<&mut F>) -> std::task::Poll<F::Output> {
+        let waker = std::task::Waker::noop();
+        future.poll(&mut std::task::Context::from_waker(waker))
+    }
+
+    #[tokio::test]
+    async fn registered_query_is_offered_exactly_once_to_a_parked_poller() {
+        let channel = QueryChannel::new();
+        let _receiver = channel.register_waiter("task");
+        assert!(channel.take().is_none());
+        let mut next = Box::pin(channel.next());
+        assert!(matches!(futures_poll(next.as_mut()), std::task::Poll::Pending));
+        assert!(channel.try_offer(query("task")));
+        assert!(!channel.try_offer(query("second")), "one parked poll cannot accept two queries");
+        assert_eq!(next.await.task_id, "task");
+        assert!(channel.take().is_none());
+        assert!(!channel.has_waiters());
     }
 
     #[tokio::test]

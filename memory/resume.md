@@ -1,3 +1,19 @@
+## Matching whole-service continuation (2026-10-17, current)
+
+Read `matching-standby-failover-query.md` before older Matching completion notes.
+User requires ALL Matching first, not a single-node completion bar. Current
+work adds durable manager listing, standby query-only polls and task completion,
+local domain-failover disconnects, cancellation-safe query waiter accounting,
+single query delivery and accepting-partition query tokens. Original Go oracle
+produced 72 standby state decisions in tests/fixtures/matching-standby.json.
+Workspace tests (145 server tests), strict workspace Clippy and the new Go
+standby/query-version differential pass. Full runner continues in cadence-rust:
+/tmp/matching-verified.log, /tmp/matching-verified.exit; matching-standby-verified
+artifacts. Persistent whole-Matching goal is ACTIVE.
+Do not claim the whole service is complete: native Matching Thrift transport,
+cross-host forwarding/membership/ownership and production config/cache/metrics
+still need porting and validation. Keep work on Matching.
+
 Matching strong/sticky query version gates (2026-10-17): read
 matching-query-next.md. `SupportsStickyQuery` is now ported exactly (uber-go/
 uber-java/empty impl >= 1.0.0), and the previously missing

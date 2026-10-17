@@ -1,10 +1,11 @@
 //! Native internal MatchingAPI adapters and outstanding-poll cancellation.
-//! Queue storage currently shares the single-process Rust execution engine.
+//! Durable queues dispatch through History RPCs; the in-memory mode uses the
+//! local workflow engine. Both modes preserve the original MatchingAPI.
 use crate::{grpc::Frontend, grpc_internal::History};
 use cadence_proto::{api as p, matching as m, shared};
 use cadence_common::task_list::TaskListName;
 
-fn matching_now() -> i64 {
+pub(crate) fn matching_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|time| time.as_nanos() as i64).unwrap_or_default()
 }
 /// Resolve a domain UUID to its name the way Go's domain cache does before
@@ -118,7 +119,7 @@ fn partition_config_from_proto(config: p::TaskListPartitionConfig) -> cadence_pe
 }
 
 #[allow(deprecated)]
-fn partition_config_to_proto(c: cadence_persistence::StoredPartitionConfig) -> p::TaskListPartitionConfig {
+pub(crate) fn partition_config_to_proto(c: cadence_persistence::StoredPartitionConfig) -> p::TaskListPartitionConfig {
     let partitions = |map: std::collections::HashMap<i32, Vec<String>>| map.into_iter().map(|(id, groups)| (id, p::TaskListPartition { isolation_groups: groups })).collect();
     p::TaskListPartitionConfig { version: c.version, num_read_partitions: c.read_partitions.len() as i32, num_write_partitions: c.write_partitions.len() as i32, read_partitions: partitions(c.read_partitions), write_partitions: partitions(c.write_partitions) }
 }
@@ -411,7 +412,16 @@ impl Matching {
                 }),
             }
         });
+        let standby_enabled: crate::matching_standby::Enabled = {
+            let domains = state.domains.clone();
+            let overlay = state.admin.dynamic_config.clone();
+            Arc::new(move |domain, name, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_boolean(config.property_values("matching.enableStandbyTaskCompletion"), domain_name_for(&domains, domain).as_deref(), name, task_type, true)
+            })
+        };
         let queues = queues
+            .with_standby_enabled(standby_enabled)
             .with_partition_count(read_provider)
             .with_partition_cache_enabled(cache_enabled)
             .with_sync_wait(sync_wait)
@@ -561,6 +571,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
         let task_list = payload
             .task_list
@@ -583,6 +594,9 @@ impl m::matching_api_server::MatchingApi for Matching {
             // decision backlog; a ready query is handed to this poller instead
             // of waiting for a durable task. Racing is safe: dropping the
             // dispatch future makes its worker rewrite any claimed task.
+            let active = self.frontend.state.domains.is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
+                .map_err(|error| Status::not_found(error.message))?;
+            let _standby_wait = (!active).then(|| lifecycle.begin());
             let query_lifecycle = lifecycle.clone();
             return tokio::select! {
                 biased;
@@ -603,12 +617,26 @@ impl m::matching_api_server::MatchingApi for Matching {
                         }
                     }
                 }
-                result=queue.dispatcher.poll_decision_with_poller(payload, self.poll_expiration, lifecycle)=>
+                result=async {
+                    if active {
+                        queue.dispatcher.poll_decision_with_poller(payload, self.poll_expiration, lifecycle).await
+                    } else {
+                        // Go standby getTask polls only queryTaskC, never the
+                        // durable backlog or forwarded workflow tasks.
+                        tokio::time::sleep(self.poll_expiration).await;
+                        Ok(m::PollForDecisionTaskResponse::default())
+                    }
+                }=>
                     result.map(|mut response| {
                         response.load_balancer_hints=queue.load_balancer_hints(matching_now());
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                         Response::new(response)
                     }),
+                _=failover.changed()=>Ok(Response::new(m::PollForDecisionTaskResponse {
+                    load_balancer_hints: queue.load_balancer_hints(matching_now()),
+                    partition_config: queue.partitions.get().map(partition_config_to_internal),
+                    ..Default::default()
+                })),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }
@@ -652,6 +680,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
         let task_list = payload
             .task_list
@@ -683,12 +712,27 @@ impl m::matching_api_server::MatchingApi for Matching {
             };
             let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: rate, isolation_group: r.isolation_group } };
             return tokio::select! {
-                result=queue.dispatcher.poll_activity_with_poller(payload, self.poll_expiration, lifecycle)=>
+                result=async {
+                    let active = self.frontend.state.domains.is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
+                        .map_err(|error| Status::not_found(error.message))?;
+                    if active {
+                        queue.dispatcher.poll_activity_with_poller(payload, self.poll_expiration, lifecycle).await
+                    } else {
+                        let _wait = lifecycle.begin();
+                        tokio::time::sleep(self.poll_expiration).await;
+                        Ok(m::PollForActivityTaskResponse::default())
+                    }
+                }=>
                     result.map(|mut response| {
                         response.load_balancer_hints=queue.load_balancer_hints(matching_now());
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                         Response::new(response)
                     }),
+                _=failover.changed()=>Ok(Response::new(m::PollForActivityTaskResponse {
+                    load_balancer_hints: queue.load_balancer_hints(matching_now()),
+                    partition_config: queue.partitions.get().map(partition_config_to_internal),
+                    ..Default::default()
+                })),
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }
@@ -934,12 +978,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                 let query = crate::matching_query::PendingQuery {
                     task_id: task_id.clone(),
                     domain_id: r.domain_id.clone(),
-                    task_list: root.clone(),
+                    task_list: list.name.clone(),
                     request: payload.clone(),
                 };
-                let receiver = handle.queries.register(query.clone());
+                let receiver = handle.queries.register_waiter(&task_id);
                 let _registration = handle.queries.registration(&task_id);
-                if force_local || handle.queries.try_offer(query) {
+                let offered = if force_local { handle.queries.offer(query); true } else { handle.queries.try_offer(query) };
+                if offered {
                     return match tokio::time::timeout_at(deadline, receiver).await {
                         Ok(Ok(result)) => {
                             crate::matching_query::query_outcome(result, strong).map(Response::new)
@@ -991,6 +1036,16 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::GetTaskListsByDomainRequest>,
     ) -> Result<Response<m::GetTaskListsByDomainResponse>, Status> {
         let r = request.into_inner();
+        if let Some(queues) = &self.queues {
+            let domain = self.frontend.state.domains.domain_id(&r.domain)
+                .map_err(|error| Status::not_found(error.message))?;
+            let domain = uuid::Uuid::parse_str(&domain).map_err(|_| Status::internal("Invalid domain ID."))?;
+            let all_kinds = {
+                let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::boolean(config.property_values("matching.matchingReturnAllTaskListKinds"), None, false)
+            };
+            return Ok(Response::new(queues.describe_by_domain(domain, all_kinds, matching_now())));
+        }
         // Unlike the UUID-routed methods, this request carries the domain
         // name directly, like Go's `GetDomainID(request.GetDomain())`.
         let store = self

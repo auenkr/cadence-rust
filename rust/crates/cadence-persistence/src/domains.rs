@@ -81,6 +81,7 @@ struct Inner {
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryDomainStore {
     inner: Arc<RwLock<Inner>>,
+    failover_notifications: Arc<std::sync::Mutex<HashMap<String, tokio::sync::watch::Sender<u64>>>>,
 }
 
 /// Errors for domain failover: unknown domains are `EntityNotExists`,
@@ -109,6 +110,22 @@ fn now_nanos() -> i64 {
 }
 
 impl InMemoryDomainStore {
+    /// Per-domain failover generation. Subscribing before a Matching poll
+    /// starts prevents a domain change from leaving its old long poll blocked.
+    pub fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64> {
+        self.failover_notifications.lock().expect("domain notification lock")
+            .entry(uuid.into()).or_insert_with(|| tokio::sync::watch::channel(0).0).subscribe()
+    }
+    fn notify_failover(&self, record: &DomainRecord) {
+        if !record.is_global_domain { return; }
+        let active_active = record.replication.active_clusters.as_ref()
+            .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
+            .is_some_and(|scopes| scopes.values().any(|scope| scope.cluster_attributes.as_ref().is_some_and(|attributes| !attributes.is_empty())));
+        if active_active { return; }
+        if let Some(sender) = self.failover_notifications.lock().expect("domain notification lock").get(&record.info.uuid) {
+            sender.send_modify(|generation| *generation = generation.wrapping_add(1));
+        }
+    }
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -253,6 +270,7 @@ impl InMemoryDomainStore {
             is_global_domain: candidate.is_global_domain,
         };
         if prepared.write {
+            if prepared.failover { self.notify_failover(&candidate); }
             inner.by_name.insert(req.name.clone(), candidate);
         }
         Ok(response)
@@ -361,6 +379,7 @@ impl InMemoryDomainStore {
             after_version: candidate.failover_version,
         });
         *record = candidate;
+        self.notify_failover(record);
         Ok(cadence_api::types::FailoverDomainResponse {
             domain_info: Some(record.info.clone()),
             configuration: Some(record.configuration.clone()),
@@ -837,6 +856,28 @@ mod tests {
             domain_active_cluster_name: Some(target.to_string()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn failover_notifications_track_only_eligible_domain_changes() {
+        let store = InMemoryDomainStore::new();
+        let (info, cfg, rep) = global_sample("g", "uuid-g");
+        store.create(info, cfg, rep, true).unwrap();
+        let mut watch = store.subscribe_failover("uuid-g");
+        let other = store.subscribe_failover("unrelated");
+        assert!(!watch.has_changed().unwrap());
+        store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata(), &test_policy()).unwrap();
+        assert!(watch.has_changed().unwrap());
+        assert_eq!(*watch.borrow_and_update(), 1);
+        assert!(!other.has_changed().unwrap());
+        // New subscribers observe the latest generation without spuriously
+        // disconnecting a poll that began after the failover.
+        assert!(!store.subscribe_failover("uuid-g").has_changed().unwrap());
+        let (info, cfg, rep) = sample("local", "local-id");
+        store.create(info, cfg, rep, false).unwrap();
+        let local = store.subscribe_failover("local-id");
+        store.notify_failover(store.inner.read().unwrap().by_name.get("local").unwrap());
+        assert!(!local.has_changed().unwrap());
     }
 
     #[test]

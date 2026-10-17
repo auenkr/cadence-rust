@@ -113,3 +113,12 @@ tests/clippy, all Go differentials, server build, listeners/config checks,
 service workflow probe, public/internal gRPC, Go SDK TChannel, Go-service
 matching delivery, mixed Go/Rust matching):
 `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-semaphore-query/results.json`.
+
+## Whole-service scope correction (2026-10-17)
+
+The user explicitly requires the whole Matching service before moving on. The
+single-node completion claim above is not completion of that request. See
+matching-standby-failover-query.md for the current audit and implementation.
+That continuation closes standby completion, passive poll gating, local domain
+failover notifications, durable domain listing, and query correctness bugs.
+Native Matching Thrift transport and cross-host routing/ownership remain open.

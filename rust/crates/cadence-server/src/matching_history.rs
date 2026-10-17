@@ -50,7 +50,7 @@ pub fn start_error_kind(error: &Status) -> StartErrorKind {
         _ => StartErrorKind::Retry,
     }
 }
-fn missing_execution(error: &Status) -> bool {
+pub(crate) fn missing_execution(error: &Status) -> bool {
     error.code() == Code::NotFound
         && RpcStatus::decode(error.details())
             .ok()
@@ -149,6 +149,17 @@ impl MatchingHistoryClient {
             Err(error) if missing_execution(&error) => Ok(()),
             Err(error) => Err(error),
         }
+    }
+
+    pub async fn describe_execution(&self, domain_id: &str, domain_name: &str, task: &AllocatedTask) -> Result<h::DescribeWorkflowExecutionResponse, Status> {
+        self.history.clone().describe_workflow_execution(self.request(h::DescribeWorkflowExecutionRequest {
+            domain_id: domain_id.into(),
+            request: Some(p::DescribeWorkflowExecutionRequest {
+                domain: domain_name.into(),
+                workflow_execution: Some(Self::execution(task)?),
+                ..Default::default()
+            }),
+        })).await.map(tonic::Response::into_inner)
     }
 
     /// Go matching query polling: `historyService.GetMutableState`. A query

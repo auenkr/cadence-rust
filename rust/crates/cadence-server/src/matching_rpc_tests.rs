@@ -1184,9 +1184,19 @@ async fn matching_rpc_strong_query_rejects_a_worker_without_consistent_query() {
 
 #[tokio::test]
 async fn matching_rpc_child_query_forwards_to_parent_poller() {
+    child_query_on(list().unwrap()).await;
+}
+
+#[tokio::test]
+async fn matching_rpc_child_query_completes_on_the_accepting_partition() {
+    child_query_on(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }).await;
+}
+
+async fn child_query_on(partition: p::TaskList) {
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
     let domain = key.domain_id.to_string();
+    let poll_list = partition.clone();
     let worker = matching.clone();
     let poll_domain = domain.clone();
     let poll = tokio::spawn(async move {
@@ -1195,7 +1205,7 @@ async fn matching_rpc_child_query_forwards_to_parent_poller() {
                 domain_id: poll_domain,
                 poller_id: "parent-worker".into(),
                 request: Some(p::PollForDecisionTaskRequest {
-                    task_list: list(),
+                    task_list: Some(poll_list),
                     identity: "parent-worker".into(),
                     ..Default::default()
                 }),
@@ -1206,7 +1216,7 @@ async fn matching_rpc_child_query_forwards_to_parent_poller() {
     // Wait until the parent poller parks on the query channel; Go's
     // non-blocking offer only succeeds with a waiting poller.
     let root = matching
-        .durable_queue(&domain, &list().unwrap(), 0)
+        .durable_queue(&domain, &partition, 0)
         .await
         .unwrap();
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -1256,6 +1266,7 @@ async fn matching_rpc_child_query_forwards_to_parent_poller() {
             &delivered.task_token,
         )
         .expect("poll should carry a query task token");
+    assert_eq!(token.task_list, partition.name);
     matching
         .respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
             request: Some(p::RespondQueryTaskCompletedRequest {
@@ -1270,7 +1281,7 @@ async fn matching_rpc_child_query_forwards_to_parent_poller() {
                 worker_version_info: None,
             }),
             domain_id: domain,
-            task_list: list(),
+            task_list: Some(p::TaskList { name: token.task_list, kind: 1, ..Default::default() }),
             task_id: token.task_id,
         }))
         .await
@@ -1812,4 +1823,151 @@ async fn matching_rpc_child_partition_add_falls_back_to_local_persist() {
         ..key
     };
     assert_eq!(store.task_list_size(&child_key, 0).unwrap(), 1);
+}
+
+#[tokio::test]
+async fn matching_rpc_domain_listing_uses_loaded_matching_managers() {
+    let (_dir, _store, matching, key) = fixture();
+    let request = || Request::new(m::GetTaskListsByDomainRequest { domain: "domain".into() });
+    assert!(matching.get_task_lists_by_domain(request()).await.unwrap().into_inner().decision_task_list_map.is_empty());
+    let normal = list().unwrap();
+    matching.durable_queue(&key.domain_id.to_string(), &normal, 0).await.unwrap();
+    matching.durable_queue(&key.domain_id.to_string(), &normal, 1).await.unwrap();
+    let sticky = p::TaskList { name: "sticky".into(), kind: 2, ..Default::default() };
+    matching.durable_queue(&key.domain_id.to_string(), &sticky, 0).await.unwrap();
+    let result = matching.get_task_lists_by_domain(request()).await.unwrap().into_inner();
+    assert_eq!(result.decision_task_list_map.len(), 1);
+    assert_eq!(result.activity_task_list_map.len(), 1);
+    let description = &result.decision_task_list_map["queue"];
+    assert_eq!(description.task_list.as_ref().unwrap(), &normal);
+    assert!(description.task_list_status.is_none());
+    let registry = matching.queues.as_ref().unwrap();
+    let all = registry.describe_by_domain(key.domain_id, true, matching_now());
+    assert_eq!(all.decision_task_list_map["sticky"].task_list.as_ref().unwrap().kind, 2);
+    assert!(registry.describe_by_domain(Uuid::from_u128(999), true, matching_now()).decision_task_list_map.is_empty());
+    let handle = matching.durable_queue(&key.domain_id.to_string(), &normal, 0).await.unwrap();
+    registry.unload(key.clone(), handle, matching_now()).await.unwrap();
+    assert!(!matching.get_task_lists_by_domain(request()).await.unwrap().into_inner().decision_task_list_map.contains_key("queue"));
+}
+
+#[tokio::test]
+async fn matching_rpc_standby_polls_leave_durable_backlog_unclaimed() {
+    let (_dir, store, mut matching, _key) = fixture();
+    matching.poll_expiration = Duration::from_millis(30);
+    let domain = Uuid::from_u128(3).to_string();
+    matching.frontend.state.domains.create(
+        cadence_api::types::DomainInfo { name: "standby".into(), uuid: domain.clone(), ..Default::default() },
+        Default::default(),
+        cadence_api::types::DomainReplicationConfiguration { active_cluster_name: "remote".into(), ..Default::default() },
+        true,
+    ).unwrap();
+    matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: domain.clone(), task_list: list(), workflow_execution: execution(), schedule_id: 9, ..Default::default()
+    })).await.unwrap();
+    matching.add_activity_task(Request::new(m::AddActivityTaskRequest {
+        domain_id: domain.clone(), source_domain_id: domain.clone(), task_list: list(), workflow_execution: execution(), schedule_id: 10, ..Default::default()
+    })).await.unwrap();
+    let decision = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: domain.clone(), request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+    })).await.unwrap().into_inner();
+    assert!(decision.task_token.is_empty());
+    let activity = matching.poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+        domain_id: domain.clone(), request: Some(p::PollForActivityTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+    })).await.unwrap().into_inner();
+    assert!(activity.task_token.is_empty());
+    for task_type in [0, 1] {
+        let key = TaskListKey { domain_id: Uuid::parse_str(&domain).unwrap(), name: "queue".into(), task_type };
+        assert_eq!(store.get_tasks(&key, 0, i64::MAX, 10).unwrap().len(), 1);
+        let queue = matching.durable_queue(&domain, &list().unwrap(), task_type).await.unwrap();
+        assert_eq!(queue.queue.status().1, 0, "standby poll must not acknowledge backlog");
+    }
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[derive(Clone)]
+struct StandbyHistory;
+#[tonic::async_trait]
+impl h::history_api_server::HistoryApi for StandbyHistory {
+    async fn describe_workflow_execution(&self, request: Request<h::DescribeWorkflowExecutionRequest>) -> Result<Response<h::DescribeWorkflowExecutionResponse>, Status> {
+        assert_eq!(request.get_ref().request.as_ref().unwrap().workflow_execution, execution());
+        Ok(Response::new(h::DescribeWorkflowExecutionResponse {
+            workflow_execution_info: Some(p::WorkflowExecutionInfo::default()),
+            // No pending tasks: Go treats both task types as already started.
+            ..Default::default()
+        }))
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_standby_completes_started_tasks_without_worker_poll() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let peer = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(h::history_api_server::HistoryApiServer::new(StandbyHistory))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+    });
+    let (_dir, _store, matching, _key) = fixture_with_history(&peer);
+    let domain = Uuid::from_u128(3).to_string();
+    matching.frontend.state.domains.create(
+        cadence_api::types::DomainInfo { name: "standby".into(), uuid: domain.clone(), ..Default::default() },
+        Default::default(),
+        cadence_api::types::DomainReplicationConfiguration { active_cluster_name: "remote".into(), ..Default::default() }, true,
+    ).unwrap();
+    matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: domain.clone(), task_list: list(), workflow_execution: execution(), schedule_id: 9, ..Default::default()
+    })).await.unwrap();
+    matching.add_activity_task(Request::new(m::AddActivityTaskRequest {
+        domain_id: domain.clone(), source_domain_id: domain.clone(), task_list: list(), workflow_execution: execution(), schedule_id: 10, ..Default::default()
+    })).await.unwrap();
+    for task_type in [0, 1] {
+        let queue = matching.durable_queue(&domain, &list().unwrap(), task_type).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while queue.queue.status().1 == 0 { tokio::task::yield_now().await; }
+        }).await.expect("standby backlog should be acknowledged without SDK polls");
+    }
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn matching_rpc_domain_failover_releases_blocked_polls() {
+    use cadence_api::types::{ClusterReplicationConfiguration, DomainReplicationConfiguration};
+    use cadence_common::cluster::{ClusterInformation, Metadata};
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(3).to_string();
+    matching.frontend.state.domains.create(
+        cadence_api::types::DomainInfo { name: "global".into(), uuid: domain.clone(), ..Default::default() },
+        cadence_api::types::DomainConfiguration { workflow_execution_retention_period_in_days: 3, ..Default::default() },
+        DomainReplicationConfiguration {
+            active_cluster_name: "active".into(),
+            clusters: vec![ClusterReplicationConfiguration { cluster_name: "active".into() }, ClusterReplicationConfiguration { cluster_name: "standby".into() }],
+            ..Default::default()
+        }, true,
+    ).unwrap();
+    let worker = matching.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move {
+        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: poll_domain, poller_id: "failover-poller".into(),
+            request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+        })).await
+    });
+    let queue = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async { while !queue.queries.has_waiters() { tokio::task::yield_now().await; } }).await.unwrap();
+    let metadata = Metadata {
+        failover_version_increment: 10, primary_cluster_name: "active".into(), current_cluster_name: "standby".into(),
+        clusters: std::collections::BTreeMap::from([
+            ("active".into(), ClusterInformation { enabled: true, initial_failover_version: 0, ..Default::default() }),
+            ("standby".into(), ClusterInformation { enabled: true, initial_failover_version: 1, ..Default::default() }),
+        ]),
+    };
+    matching.frontend.state.domains.failover(
+        &cadence_api::types::FailoverDomainRequest { domain_name: "global".into(), domain_active_cluster_name: Some("standby".into()), ..Default::default() },
+        "standby", &metadata, &cadence_persistence::domain_update::DomainPolicy { cooldown_nanos: 0, ..Default::default() },
+    ).unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(1), poll).await.expect("failover should release the long poll").unwrap().unwrap().into_inner();
+    assert!(response.task_token.is_empty());
+    assert!(!queue.queue.is_stopped(), "failover disconnect must retain the manager");
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }

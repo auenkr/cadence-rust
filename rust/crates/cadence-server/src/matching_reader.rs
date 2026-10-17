@@ -195,6 +195,7 @@ impl Default for IsolationConfig {
         }
     }
 }
+pub type DispatchCheck = Arc<dyn Fn(AllocatedTask) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, tonic::Status>> + Send>> + Send + Sync>;
 impl TaskReader {
     pub fn new(queue: Arc<DurableTaskQueue>, wake: Arc<Notify>, config: ReaderConfig) -> Self {
         Self::with_domain_activity(queue, wake, config, Arc::new(|| true))
@@ -240,6 +241,17 @@ impl TaskReader {
         limiter: Arc<TaskListLimiter>,
         isolation: IsolationConfig,
     ) -> Self {
+        Self::with_dispatch_check(queue, wake, config, active, limiter, isolation, None)
+    }
+    pub fn with_dispatch_check(
+        queue: Arc<DurableTaskQueue>,
+        wake: Arc<Notify>,
+        config: ReaderConfig,
+        active: Arc<dyn Fn() -> bool + Send + Sync>,
+        limiter: Arc<TaskListLimiter>,
+        isolation: IsolationConfig,
+        dispatch_check: Option<DispatchCheck>,
+    ) -> Self {
         let (stop, stopped) = watch::channel(false);
         let matcher = Arc::new(Rendezvous::default());
         let isolated: HashMap<_, _> = isolation
@@ -279,6 +291,7 @@ impl TaskReader {
             let dispatch_queue = queue.clone();
             let dispatch_limiter = limiter.clone();
             let active = active.clone();
+            let dispatch_check = dispatch_check.clone();
             let matcher = matcher.clone();
             let isolated = isolated.clone();
             let isolation = isolation.clone();
@@ -315,6 +328,25 @@ impl TaskReader {
                             // Expired buffered rows are acknowledged without an
                             // immediate GC run, matching taskReader's expiry branch.
                             break;
+                        }
+                        if let Some(check) = &dispatch_check {
+                            let result = tokio::select! {
+                                result = check(task.clone()) => result,
+                                _ = dispatch_stop.changed() => break 'dispatch,
+                            };
+                            match result {
+                                Ok(true) => {
+                                    let queue = dispatch_queue.clone();
+                                    let id = task.task_id;
+                                    if !matches!(tokio::task::spawn_blocking(move || { queue.complete(id)?; queue.run_garbage_collection(false).map(|_| ()) }).await, Ok(Ok(_))) {
+                                        dispatch_queue.stop();
+                                        break 'dispatch;
+                                    }
+                                    break;
+                                }
+                                Ok(false) => (),
+                                Err(_) => { tokio::task::yield_now().await; continue; }
+                            }
                         }
                         // Go `newDispatchContext`: the deadline only applies to an
                         // active (or unknown) domain above the 1e-7 noise floor.

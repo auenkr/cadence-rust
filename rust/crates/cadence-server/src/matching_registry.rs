@@ -93,6 +93,7 @@ pub struct QueueRegistry {
     state: Arc<Mutex<State>>,
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
+    standby_enabled: Option<crate::matching_standby::Enabled>,
     domain_metadata: Option<(cadence_persistence::InMemoryDomainStore, String)>,
     /// Go `cfg.NumTasklistReadPartitions(domain, taskList, type)`, clamped to
     /// >= 1 by the same caller. `None` keeps the single-partition default.
@@ -303,6 +304,38 @@ async fn owner_work<T: Send + 'static>(
     result
 }
 impl QueueRegistry {
+    /// Snapshot loaded managers only, like Go ManagersByDomainID. This must
+    /// neither acquire new leases nor consult frontend workflow state.
+    pub fn describe_by_domain(&self, domain: Uuid, all_kinds: bool, now: i64) -> m::GetTaskListsByDomainResponse {
+        let state = self.state.lock().expect("Matching registry lock");
+        let mut response = m::GetTaskListsByDomainResponse::default();
+        for ((id, name, task_type), owner) in &state.owners {
+            if *id != domain || (!all_kinds && owner.queue.task_list_kind() != 0) {
+                continue;
+            }
+            let Ok(parsed) = cadence_common::task_list::TaskListName::parse(name) else { continue; };
+            let pollers = owner.pollers.lock().expect("poller history lock").list(now).into_iter().map(|poller| cadence_proto::api::PollerInfo {
+                identity: poller.identity,
+                rate_per_second: poller.rate_per_second,
+                last_access_time: Some(prost_types::Timestamp {
+                    seconds: poller.last_access_time.div_euclid(1_000_000_000),
+                    nanos: poller.last_access_time.rem_euclid(1_000_000_000) as i32,
+                }),
+            }).collect();
+            let description = m::DescribeTaskListResponse {
+                pollers,
+                partition_config: owner.partitions.get().map(crate::grpc_matching::partition_config_to_proto),
+                task_list: Some(cadence_proto::api::TaskList {
+                    name: name.clone(), kind: i32::from(owner.queue.task_list_kind()) + 1,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let target = if *task_type == 0 { &mut response.decision_task_list_map } else { &mut response.activity_task_list_map };
+            target.insert(parsed.root().to_owned(), description);
+        }
+        response
+    }
     pub fn new(
         store: Arc<SqliteTaskStore>,
         history: MatchingHistoryClient,
@@ -316,6 +349,7 @@ impl QueueRegistry {
             changed: Arc::new(tokio::sync::Notify::new()),
             startups: Arc::new(Mutex::new(HashMap::new())),
             domain_metadata: None,
+            standby_enabled: None,
             partition_count: None,
             cache_enabled: None,
             sync_wait: None,
@@ -327,6 +361,10 @@ impl QueueRegistry {
             qps_interval: None,
             isolation: None,
         }
+    }
+    pub fn with_standby_enabled(mut self, enabled: crate::matching_standby::Enabled) -> Self {
+        self.standby_enabled = Some(enabled);
+        self
     }
     /// Install Go's `NumTasklistReadPartitions` provider. The provider reads
     /// `matching.numTasklistReadPartitions`; the registry clamps to >= 1.
@@ -524,13 +562,16 @@ impl QueueRegistry {
                         let task_type = lookup.2;
                         Arc::new(move || std::time::Duration::from_nanos(provider.as_ref().map(|provider| provider(&domain, &name, task_type)).unwrap_or(10_000_000).max(0) as u64))
                     };
-                    let reader = crate::matching_reader::TaskReader::with_isolation(
+                    let reader = crate::matching_reader::TaskReader::with_dispatch_check(
                         queue.clone(),
                         dispatcher.task_notification(),
                         crate::matching_reader::ReaderConfig::default(),
                         activity,
                         limiter.clone(),
                         isolation,
+                        registry.domain_metadata.as_ref().map(|(domains, cluster)| crate::matching_standby::checker(
+                            domains.clone(), cluster.clone(), registry.history.clone(), key.clone(), registry.standby_enabled.clone(),
+                        )),
                     );
                     let read_stop = reader.stop_signal();
                     let sync_matcher = Arc::new(crate::matching_sync::SyncMatcher::new(&sync_groups, read_stop.subscribe()));

@@ -24,6 +24,8 @@ pub mod yarpc;
 
 #[allow(clippy::result_large_err)]
 pub mod matching_history;
+#[allow(clippy::result_large_err)]
+pub mod matching_standby;
 
 #[allow(clippy::result_large_err)]
 pub mod matching_dispatch;
