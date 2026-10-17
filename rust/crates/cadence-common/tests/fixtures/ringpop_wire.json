@@ -1,0 +1,173 @@
+{
+  "application_error": {
+    "type": "error",
+    "message": "node is not ready to handle requests"
+  },
+  "change_default": {
+    "source": "",
+    "sourceIncarnationNumber": 0,
+    "address": "",
+    "incarnationNumber": 0,
+    "status": "",
+    "timestamp": -62135596800
+  },
+  "change_faulty_tombstone_flag": {
+    "source": "127.0.0.1:7933",
+    "sourceIncarnationNumber": 1729123456,
+    "address": "127.0.0.1:7933",
+    "incarnationNumber": 1729123456,
+    "status": "faulty",
+    "tombstone": true,
+    "timestamp": 1729123456
+  },
+  "change_labels": {
+    "source": "127.0.0.1:7933",
+    "sourceIncarnationNumber": 1729123456,
+    "address": "127.0.0.1:7933",
+    "incarnationNumber": 1729123456,
+    "status": "alive",
+    "labels": {
+      "grpc": "7833",
+      "serviceName": "matching",
+      "tchannel": "7933"
+    },
+    "timestamp": 1729123456
+  },
+  "change_tombstone": {
+    "source": "127.0.0.1:7934",
+    "sourceIncarnationNumber": 1729123400,
+    "address": "127.0.0.1:7933",
+    "incarnationNumber": 1729123456,
+    "status": "tombstone",
+    "labels": {
+      "serviceName": "matching"
+    },
+    "timestamp": 1729123456
+  },
+  "join_request_default": {
+    "app": "",
+    "source": "",
+    "incarnationNumber": 0,
+    "timeout": 0
+  },
+  "join_request_labels": {
+    "app": "cadence",
+    "source": "127.0.0.1:7933",
+    "incarnationNumber": 1729123456,
+    "timeout": 1000000000,
+    "labels": {
+      "__identity": "host-a",
+      "grpc": "7833",
+      "serviceName": "matching",
+      "tchannel": "7933"
+    }
+  },
+  "join_response_empty_membership": {
+    "app": "cadence",
+    "coordinator": "127.0.0.1:7934",
+    "membership": [],
+    "membershipChecksum": 3735928559
+  },
+  "join_response_nil_membership": {
+    "app": "cadence",
+    "coordinator": "127.0.0.1:7934",
+    "membership": null,
+    "membershipChecksum": 3735928559
+  },
+  "join_response_populated": {
+    "app": "cadence",
+    "coordinator": "127.0.0.1:7934",
+    "membership": [
+      {
+        "source": "127.0.0.1:7934",
+        "sourceIncarnationNumber": 1729123400,
+        "address": "127.0.0.1:7934",
+        "incarnationNumber": 1729123400,
+        "status": "alive",
+        "labels": {
+          "__identity": "host-b",
+          "grpc": "7834",
+          "serviceName": "matching",
+          "tchannel": "7934"
+        },
+        "timestamp": 1729123400
+      }
+    ],
+    "membershipChecksum": 3735928559
+  },
+  "member_default": {
+    "address": "",
+    "status": "",
+    "incarnationNumber": 0
+  },
+  "member_labels": {
+    "address": "127.0.0.1:7933",
+    "status": "alive",
+    "incarnationNumber": 1729123456,
+    "labels": {
+      "__identity": "host-a",
+      "grpc": "7833",
+      "serviceName": "matching",
+      "tchannel": "7933"
+    }
+  },
+  "ping_empty_changes": {
+    "changes": [],
+    "checksum": 3735928559,
+    "source": "127.0.0.1:7933",
+    "sourceIncarnationNumber": 1729123456,
+    "app": "cadence"
+  },
+  "ping_nil_changes": {
+    "changes": null,
+    "checksum": 3735928559,
+    "source": "127.0.0.1:7933",
+    "sourceIncarnationNumber": 1729123456,
+    "app": "cadence"
+  },
+  "ping_populated_changes": {
+    "changes": [
+      {
+        "source": "127.0.0.1:7933",
+        "sourceIncarnationNumber": 1729123456,
+        "address": "127.0.0.1:7933",
+        "incarnationNumber": 1729123456,
+        "status": "alive",
+        "labels": {
+          "grpc": "7833",
+          "serviceName": "matching",
+          "tchannel": "7933"
+        },
+        "timestamp": 1729123456
+      }
+    ],
+    "checksum": 3735928559,
+    "source": "127.0.0.1:7933",
+    "sourceIncarnationNumber": 1729123456,
+    "app": "cadence"
+  },
+  "ping_request_empty_changes": {
+    "source": "127.0.0.1:7933",
+    "sourceIncarnationNumber": 1729123456,
+    "target": "127.0.0.1:7935",
+    "checksum": 3735928559,
+    "changes": []
+  },
+  "ping_request_nil_changes": {
+    "source": "127.0.0.1:7933",
+    "sourceIncarnationNumber": 1729123456,
+    "target": "127.0.0.1:7935",
+    "checksum": 3735928559,
+    "changes": null
+  },
+  "ping_response_default": {
+    "pingStatus": false,
+    "target": "",
+    "changes": null
+  },
+  "ping_response_populated": {
+    "pingStatus": true,
+    "target": "127.0.0.1:7935",
+    "changes": []
+  }
+}

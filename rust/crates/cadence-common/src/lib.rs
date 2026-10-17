@@ -30,3 +30,4 @@ pub mod qps;
 pub mod rate_limiter;
 
 pub mod membership;
+pub mod ringpop_wire;

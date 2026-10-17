@@ -377,8 +377,14 @@ This is returned with the TChannel application-error flag set; arg2 contains res
 2. Data model:
    - Define serde structs matching the field names/types above, including `#[serde(rename_all = ...)]`
      or explicit `#[serde(rename = "sourceIncarnationNumber")]`, `pingStatus`, etc.
-   - Implement `omitempty` equivalents with `#[serde(skip_serializing_if = "Option::is_none")]`
-     or `skip_serializing_if = "Vec::is_empty"` / map empty; verify exact Go behavior for null vs `{}`.
+   - Implement `omitempty` only where Go has it: `labels` maps and `tombstone` bool.
+     `changes`/`membership` slices have NO `omitempty` (`swim/join_handler.go:30`,
+     `swim/ping_sender.go:36`, `swim/ping_request_sender.go:40`,
+     `swim/ping_request_handler.go:29`); do not use `Vec::is_empty` skipping.
+     Preserve Go nil-slice vs non-nil-empty-slice: nil -> JSON `null`, non-nil
+     empty -> `[]`, using `Option<Vec<...>>`. Maps with omitempty are omitted
+     when nil or empty. Verify exact Go behavior for null vs `{}` and zero
+     `util.Timestamp` (`-62135596800`).
 3. SWIM node state:
    - Implement enough SWIM to exchange these messages and update membership.
    - Start with single-node + two-node interop with Go Ringpop.
