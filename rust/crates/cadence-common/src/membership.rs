@@ -57,6 +57,9 @@ impl Ring {
             .or_else(|| self.points.first())
             .map(|point| &self.hosts[point.3])
     }
+    pub fn hosts(&self) -> &[Host] {
+        &self.hosts
+    }
     pub fn lookup_n(&self, key: &str, count: usize) -> Vec<&Host> {
         let mut result = Vec::new();
         if count == 0 || self.points.is_empty() {

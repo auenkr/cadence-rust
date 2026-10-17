@@ -13,7 +13,7 @@ use std::{
 use tokio::{
     sync::{broadcast, watch},
     task::JoinHandle,
-    time::{interval, Instant, MissedTickBehavior},
+    time::{interval_at, Instant, MissedTickBehavior},
 };
 
 const PERIOD: Duration = Duration::from_secs(2);
@@ -54,13 +54,13 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
                 return Err(error);
             }
         };
-        match self.refresh().await {
-            Ok(()) => {}
+        let initial_changed = match self.refresh().await {
+            Ok(changed) => changed,
             Err(e) => {
                 let _ = self.provider.stop().await;
                 return Err(e);
             }
-        }
+        };
         let (tx, mut stop) = watch::channel(false);
         self.shutdown = Some(tx);
         let provider = self.provider.clone();
@@ -70,25 +70,51 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
         self.worker = Some(tokio::spawn(async move {
             let mut events = events;
             let mut events_open = true;
-            let mut ticker = interval(PERIOD);
+            let now = Instant::now();
+            let mut ticker = interval_at(now + PERIOD, PERIOD);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            let mut last = Instant::now();
+            // Go leaves `members.refreshed` at its zero value until an
+            // address set changes. Failed and no-op snapshots do not throttle.
+            let mut last_changed = initial_changed.then(Instant::now);
             loop {
                 tokio::select! {
                     _ = stop.changed() => if *stop.borrow() { break },
                     event = events.recv(), if events_open => {
                         match event {
                             Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {
-                                if last.elapsed() >= MIN_REFRESH {
-                                    if let Ok(hosts) = snapshot(provider.as_ref(), &service).await { membership.replace(hosts); last = Instant::now(); }
+                                // Go's refreshChan has capacity one: collapse
+                                // all currently queued provider hints into this
+                                // single snapshot request.
+                                loop {
+                                    match events.try_recv() {
+                                        Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                                        Err(broadcast::error::TryRecvError::Empty) => break,
+                                        Err(broadcast::error::TryRecvError::Closed) => {
+                                            events_open = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if last_changed.is_none_or(|last| last.elapsed() >= MIN_REFRESH) {
+                                    if let Ok(hosts) = snapshot(provider.as_ref(), &service).await {
+                                        if membership.replace_if_addresses_changed(hosts) {
+                                            last_changed = Some(Instant::now());
+                                        }
+                                    }
                                 }
                             }
                             Err(broadcast::error::RecvError::Closed) => events_open = false,
                         }
                     },
-                    _ = ticker.tick() => { if last.elapsed() >= MIN_REFRESH {
-                        if let Ok(hosts) = snapshot(provider.as_ref(), &service).await { membership.replace(hosts); last = Instant::now(); }
-                    } },
+                    _ = ticker.tick() => {
+                        if last_changed.is_none_or(|last| last.elapsed() >= MIN_REFRESH) {
+                            if let Ok(hosts) = snapshot(provider.as_ref(), &service).await {
+                                if membership.replace_if_addresses_changed(hosts) {
+                                    last_changed = Some(Instant::now());
+                                }
+                            }
+                        }
+                    },
                 }
                 if stopped.load(Ordering::Acquire) {
                     break;
@@ -97,10 +123,10 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
         }));
         Ok(())
     }
-    async fn refresh(&self) -> Result<(), ProviderError> {
-        self.membership
-            .replace(snapshot(self.provider.as_ref(), &self.service).await?);
-        Ok(())
+    async fn refresh(&self) -> Result<bool, ProviderError> {
+        Ok(self
+            .membership
+            .replace_if_addresses_changed(snapshot(self.provider.as_ref(), &self.service).await?))
     }
     pub fn membership(&self) -> &Membership {
         &self.membership
@@ -130,6 +156,11 @@ impl<P: MatchingPeerProvider> Drop for MatchingMembershipLifecycle<P> {
     fn drop(&mut self) {
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(true);
+        }
+        // A provider snapshot can be stuck forever. A shutdown watch cannot
+        // interrupt an in-progress await, so abort the detached worker on Drop.
+        if let Some(worker) = self.worker.take() {
+            worker.abort();
         }
     }
 }
@@ -165,6 +196,9 @@ mod tests {
         order: Mutex<Vec<&'static str>>,
         fail_subscribe: AtomicBool,
         close_events: AtomicBool,
+        hang: AtomicBool,
+        snapshot_started: tokio::sync::Notify,
+        cancelled_snapshots: AtomicUsize,
     }
     impl Fake {
         fn new() -> Self {
@@ -177,6 +211,9 @@ mod tests {
                 order: Mutex::new(vec![]),
                 fail_subscribe: AtomicBool::new(false),
                 close_events: AtomicBool::new(false),
+                hang: AtomicBool::new(false),
+                snapshot_started: tokio::sync::Notify::new(),
+                cancelled_snapshots: AtomicUsize::new(0),
             }
         }
         fn set(&self, peers: Vec<PeerMember>) {
@@ -191,6 +228,17 @@ mod tests {
         }
         async fn members(&self, _: &str) -> Result<Vec<PeerMember>, ProviderError> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
+            if self.hang.load(Ordering::SeqCst) {
+                struct CancelGuard<'a>(&'a AtomicUsize);
+                impl Drop for CancelGuard<'_> {
+                    fn drop(&mut self) {
+                        self.0.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+                let _guard = CancelGuard(&self.cancelled_snapshots);
+                self.snapshot_started.notify_one();
+                std::future::pending::<()>().await;
+            }
             if self.fail.load(Ordering::SeqCst) {
                 return Err(ProviderError("injected snapshot failure".into()));
             }
@@ -302,6 +350,121 @@ mod tests {
         lifecycle.shutdown().await.unwrap();
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn hint_inside_min_refresh_waits_for_two_second_ticker() {
+        let p = Arc::new(Fake::new());
+        p.set(vec![member(
+            "one:7",
+            "one",
+            "matching",
+            PeerStatus::Alive,
+            "8",
+        )]);
+        let m = Membership::new("self", vec![]);
+        let mut lifecycle = MatchingMembershipLifecycle::new("matching", p.clone(), m.clone());
+        lifecycle.start().await.unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(p.fetches.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(Duration::from_millis(200)).await;
+        p.set(vec![member(
+            "two:7",
+            "two",
+            "matching",
+            PeerStatus::Alive,
+            "9",
+        )]);
+        tokio::task::yield_now().await;
+        assert_eq!(
+            p.fetches.load(Ordering::SeqCst),
+            1,
+            "Go suppresses refreshes less than one second after a changed view"
+        );
+        assert_eq!(m.owner("key").unwrap().address, "one:7");
+
+        tokio::time::advance(Duration::from_millis(1800)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            p.fetches.load(Ordering::SeqCst),
+            2,
+            "the next 2s ticker re-fetches the dropped hint"
+        );
+        assert_eq!(m.owner("key").unwrap().address, "two:7");
+        lifecycle.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failed_and_unchanged_snapshots_preserve_go_refresh_timestamp() {
+        let p = Arc::new(Fake::new());
+        p.set(vec![member(
+            "one:7",
+            "one",
+            "matching",
+            PeerStatus::Alive,
+            "8",
+        )]);
+        let mut lifecycle = MatchingMembershipLifecycle::new(
+            "matching",
+            p.clone(),
+            Membership::new("self", vec![]),
+        );
+        lifecycle.start().await.unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(p.fetches.load(Ordering::SeqCst), 1);
+        tokio::time::advance(Duration::from_millis(1100)).await;
+        p.fail.store(true, Ordering::SeqCst);
+        for expected in 2..=5 {
+            p.set(vec![member(
+                "one:7",
+                "one",
+                "matching",
+                PeerStatus::Alive,
+                "8",
+            )]);
+            tokio::task::yield_now().await;
+            assert_eq!(p.fetches.load(Ordering::SeqCst), expected);
+        }
+        p.fail.store(false, Ordering::SeqCst);
+        for expected in 6..=8 {
+            p.set(vec![member(
+                "one:7",
+                "one",
+                "matching",
+                PeerStatus::Alive,
+                "8",
+            )]);
+            tokio::task::yield_now().await;
+            assert_eq!(p.fetches.load(Ordering::SeqCst), expected);
+        }
+        lifecycle.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dropping_lifecycle_aborts_a_stuck_snapshot_worker() {
+        let p = Arc::new(Fake::new());
+        p.set(vec![member(
+            "one:7",
+            "one",
+            "matching",
+            PeerStatus::Alive,
+            "8",
+        )]);
+        let mut lifecycle = MatchingMembershipLifecycle::new(
+            "matching",
+            p.clone(),
+            Membership::new("self", vec![]),
+        );
+        lifecycle.start().await.unwrap();
+        tokio::task::yield_now().await;
+        p.hang.store(true, Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        p.set(vec![]);
+        p.snapshot_started.notified().await;
+        drop(lifecycle);
+        tokio::task::yield_now().await;
+        assert_eq!(p.cancelled_snapshots.load(Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn mapping_matches_go_port_and_identity_boundaries() {
         let make = |address: &str, grpc: &str, identity: &str| {
@@ -321,17 +484,39 @@ mod tests {
             assert_eq!(!host.grpc_address.is_empty(), expected, "label {label:?}");
             assert_eq!(host.identity, "[::1]:7935");
             if expected {
-                assert_eq!(host.grpc_address, format!("[::1]:{label}"));
+                let port = label.parse::<u16>().unwrap();
+                assert_eq!(host.grpc_address, format!("[::1]:{port}"));
             }
         }
-        let malformed = make("bad:host:7935", "80", "id")
+        let cases = [
+            ("host:7935", "host:80"),
+            (":7935", ":80"),
+            ("host:", "host:80"),
+            ("[::1]:7935", "[::1]:80"),
+            ("[bad]:7935", "[bad]:80"),
+            ("[::1]x:7935", ":80"),
+            ("bad:host:7935", ":80"),
+            ("broken", ":80"),
+            ("host]:7935", ":80"),
+            ("[host]]:7935", ":80"),
+            ("[host:7935", ":80"),
+            ("[host]", ":80"),
+        ];
+        for (address, expected) in cases {
+            let actual = make(address, "80", "id")
+                .matching_host("matching")
+                .unwrap()
+                .grpc_address;
+            assert_eq!(
+                actual, expected,
+                "Go SplitHostPort/JoinHostPort case {address:?}"
+            );
+        }
+        assert!(make("bad:host:7935", "65536", "id")
             .matching_host("matching")
-            .unwrap();
-        assert!(malformed.grpc_address.is_empty());
-        let invalid_addr = make("broken", "80", "id")
-            .matching_host("matching")
-            .unwrap();
-        assert!(invalid_addr.grpc_address.is_empty());
+            .unwrap()
+            .grpc_address
+            .is_empty());
         let leading_zero = make("host:7935", "00080", "id")
             .matching_host("matching")
             .unwrap();

@@ -34,7 +34,7 @@ impl PeerMember {
             .labels
             .get("grpc")
             .and_then(|p| label_to_port(p))
-            .and_then(|port| host.as_ref().map(|host| format!("{host}:{port}")))
+            .map(|port| join_host_port(host.as_deref().unwrap_or(""), &port.to_string()))
             .unwrap_or_default();
         Some(Host {
             address: self.address.clone(),
@@ -56,17 +56,40 @@ fn label_to_port(label: &str) -> Option<u16> {
 }
 
 fn host_from_host_port(address: &str) -> Option<String> {
-    if let Some(rest) = address.strip_prefix('[') {
-        if let Some((host, suffix)) = rest.split_once(']') {
-            if suffix.starts_with(':') && !suffix[1..].is_empty() {
-                return Some(format!("[{host}]"));
-            }
+    let colon = address.rfind(':')?;
+    let host = if address.starts_with('[') {
+        let end = address.find(']')?;
+        match end + 1 {
+            n if n == address.len() => return None,
+            n if n == colon => &address[1..end],
+            n if address.as_bytes()[n] == b':' => return None,
+            _ => return None,
         }
-        return None;
+    } else {
+        let host = &address[..colon];
+        if host.contains(':') {
+            return None;
+        }
+        host
+    };
+    if let Some(after_open) = address.strip_prefix('[') {
+        let end = address.find(']')?;
+        if after_open.contains('[') || address[end + 1..].contains(']') {
+            return None;
+        }
+    } else {
+        if address.contains('[') || address.contains(']') {
+            return None;
+        }
     }
-    match address.rsplit_once(':') {
-        Some((host, port)) if !port.is_empty() && !host.contains(':') => Some(host.to_owned()),
-        _ => None,
+    Some(host.to_owned())
+}
+
+fn join_host_port(host: &str, port: &str) -> String {
+    if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
     }
 }
 

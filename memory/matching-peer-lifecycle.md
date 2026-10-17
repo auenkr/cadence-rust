@@ -65,6 +65,60 @@ test referencing the provider's private port parser directly. Other worktrees we
 using the shared tmux session/build cache concurrently; no other process was killed
 or modified.
 
+## Exact Go source audit repairs (2026-10-17)
+
+Review of the actual Go source refined the earlier assumptions above:
+
+* `Ring.Refresh` (`go/common/membership/hashring.go`) throttles against
+  `members.refreshed`, and `updateMembersMap` writes that time only after the
+  address-keyed membership diff is nonempty. Errors and successful no-op
+  snapshots do not advance it. A changed snapshot updates it; a provider event
+  arriving inside the 1s window is discarded, while the 2s ticker later signals
+  another refresh. Rust now tracks the timestamp only when the address set
+  changes and schedules its first periodic tick 2s after startup. The paused-time
+  regression test checks a hint at 200ms and applies its new snapshot at 2s.
+* Go `signalSelf` uses a capacity-one channel, so queued callbacks coalesce.
+  Rust now drains already queued broadcast hints before taking one snapshot.
+  Failed snapshots leave the last changed-view time untouched, matching Go's
+  possible immediate retry behavior after the minimum interval has elapsed.
+* `Drop` previously only sent the watch signal. That cannot interrupt an
+  in-progress provider `members()` await, so the spawned worker could outlive the
+  lifecycle indefinitely. `Drop` now aborts the worker; an injected permanently
+  pending snapshot test checks that its future is cancelled. Explicit async
+  shutdown continues to self-evict, abort/join the worker, clear placement, and
+  stop the provider.
+* The earlier claim that malformed addresses always yielded an empty gRPC
+  endpoint was incorrect. Go `NewDetailedHostInfo` ignores
+  `net.SplitHostPort` errors, preserving an empty IP; `GetNamedAddress` then
+  formats `:port` if a valid gRPC port label exists. Rust now follows that
+  behavior. Its structural parsing follows Go's `SplitHostPort` rules (including
+  empty host/port and bracket validation), `JoinHostPort` wraps colon hosts, and
+  `strconv.ParseUint(label, 10, 16)` rejects `+1` and negatives, accepts
+  leading zeroes, and rejects overflow. A focused Go stdlib oracle fixture in
+  `go/common/membership/hostinfo_differential_test.go` mirrors the Rust cases.
+  The first oracle run intentionally caught and corrected the `+1` assumption;
+  final focused command `go test ./common/membership -run
+  '^TestHostPortAndPortLabelOracle$' -count=1` passes.
+
+Validation in this repair checkout used the idle warmed Cargo target from
+`t3-77b82231` (only generated artifacts were written there):
+
+* Direct `rustfmt --edition 2021` on the touched Rust modules and `git diff
+  --check` pass.
+* `cargo check -p cadence-server --lib` passes.
+* `cargo clippy -p cadence-server --lib -- -D warnings` passes.
+* The focused lifecycle unit-test build and requested
+  `cargo clippy -p cadence-server --all-targets -- -D warnings` are blocked
+  before test execution by two pre-existing errors in untouched
+  `matching_history.rs:502,505`: metadata assertion type mismatch and a local
+  `client` binding shadowing the `client()` helper. They were left unchanged to
+  honor the bounded scope. The new deterministic Rust tests therefore remain
+  unexecuted in this checkout; the Go stdlib address oracle did execute and pass.
+
+This work remains a transport-independent lifecycle seam. It does **not** add a
+production peer provider, Ringpop SWIM, bootstrap/config wiring, or production
+discovery parity.
+
 ## Next exact Ringpop/TChannel JSON wire slice
 
 Implement the actual Ringpop protocol endpoints, not a bespoke SWIM: first audit
