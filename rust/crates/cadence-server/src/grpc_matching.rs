@@ -145,6 +145,8 @@ pub struct Matching {
     queues: Option<crate::matching_registry::QueueRegistry>,
     /// Go `cfg.NumTasklistWritePartitions`, shared with the registry limiter.
     partition_count: Option<crate::matching_registry::PartitionCountProvider>,
+    /// Go `cfg.EnableAdaptiveScaler`, guarding manual partition updates.
+    scaler_config: Option<crate::matching_registry::ScalerConfigProvider>,
     poll_expiration: std::time::Duration,
 }
 impl Matching {
@@ -154,6 +156,7 @@ impl Matching {
             polls: Arc::new(Mutex::new(HashMap::new())),
             queues: None,
             partition_count: None,
+            scaler_config: None,
             poll_expiration: std::time::Duration::from_secs(60),
         }
     }
@@ -264,6 +267,74 @@ impl Matching {
                 cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.forwarderMaxRatePerSecond"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 10)
             })
         };
+        let scaler_config: crate::matching_registry::ScalerConfigProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let name = domain_name_for(&domains, domain_id);
+                let config = overlay.lock().expect("admin lock");
+                let integer = |key: &str, default: i64| {
+                    cadence_persistence::dynamic_config::task_list_integer(
+                        config.property_values(key),
+                        name.as_deref(),
+                        task_list,
+                        task_type,
+                        default,
+                    )
+                };
+                let duration = |key: &str, default: i64| {
+                    cadence_persistence::dynamic_config::task_list_duration(
+                        config.property_values(key),
+                        name.as_deref(),
+                        task_list,
+                        task_type,
+                        default,
+                    )
+                };
+                let boolean = |key: &str, default: bool| {
+                    cadence_persistence::dynamic_config::task_list_boolean(
+                        config.property_values(key),
+                        name.as_deref(),
+                        task_list,
+                        task_type,
+                        default,
+                    )
+                };
+                crate::matching_scaler::ScalerConfig {
+                    enabled: boolean("matching.enableAdaptiveScaler", false),
+                    // Read from the same locked snapshot: the standalone
+                    // cache-enabled provider re-locks the store, which would
+                    // self-deadlock on a non-reentrant mutex.
+                    cache_enabled: boolean(
+                        "matching.enableGetNumberOfPartitionsFromCache",
+                        false,
+                    ),
+                    update_interval_nanos: duration("matching.adaptiveScalerUpdateInterval", 15_000_000_000),
+                    upscale_rps: integer("matching.partitionUpscaleRPS", 200) as f64,
+                    downscale_factor: cadence_persistence::dynamic_config::task_list_float(
+                        config.property_values("matching.partitionDownscaleFactor"),
+                        name.as_deref(),
+                        task_list,
+                        task_type,
+                        0.75,
+                    ),
+                    upscale_sustain_nanos: duration("matching.partitionUpscaleSustainedDuration", 60_000_000_000),
+                    downscale_sustain_nanos: duration("matching.partitionDownscaleSustainedDuration", 120_000_000_000),
+                    min_write_partitions: integer("matching.taskListMinimumWritePartitions", 1),
+                    isolation_assignment: boolean("matching.enablePartitionIsolationGroupAssignment", false),
+                    empty_check: boolean("matching.enablePartitionEmptyCheck", false),
+                    group_upscale_sustain_nanos: duration("matching.isolationGroupUpscaleSustainedDuration", 60_000_000_000),
+                    group_downscale_sustain_nanos: duration("matching.isolationGroupDownscaleSustainedDuration", 120_000_000_000),
+                    group_has_pollers_sustain_nanos: duration("matching.isolationGroupHasPollersSustainedDuration", 60_000_000_000),
+                    group_no_pollers_sustain_nanos: duration("matching.isolationGroupNoPollersSustainedDuration", 60_000_000_000),
+                    groups_per_partition: integer("matching.isolationGroupsPerPartition", 2),
+                    poller_window_nanos: duration("matching.taskIsolationPollerWindow", 2_000_000_000),
+                    isolation_groups: cadence_persistence::dynamic_config::string_list(
+                        config.property_values("system.allIsolationGroups"),
+                    ),
+                }
+            })
+        };
         let isolation: crate::matching_registry::IsolationProvider = Arc::new(move |domain_id, task_list, task_type, kind, pollers, partitions| {
             let name = domain_name_for(&domains, domain_id);
             let config = overlay.lock().expect("admin lock");
@@ -316,12 +387,14 @@ impl Matching {
             .with_forward_degree(forward_degree)
             .with_forward_polls(forward_polls)
             .with_forward_tasks(forward_tasks, forward_rate)
+            .with_scaler_config(scaler_config.clone())
             .with_qps_interval(qps_interval)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
         let mut matching = Self::new(state);
         matching.queues = Some(queues);
         matching.partition_count = Some(provider);
+        matching.scaler_config = Some(scaler_config);
         matching.poll_expiration = poll_expiration;
         matching
     }
@@ -1053,9 +1126,20 @@ impl m::matching_api_server::MatchingApi for Matching {
         self.domain_name(&r.domain_id)?;
         let task_list = r
             .task_list
+            .clone()
             .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
         if task_list.name.is_empty() {
             return Err(Status::invalid_argument("TaskList is not set."));
+        }
+        // Go rejects manual updates while the scaler owns the config, before
+        // the kind checks.
+        if let Some(scaler) = &self.scaler_config {
+            let task_type = if r.task_list_type == 2 { 1 } else { 0 };
+            if scaler(&r.domain_id, &task_list.name, task_type).enabled {
+                return Err(Status::invalid_argument(
+                    "Manual update is not allowed because adaptive scaler is enabled.",
+                ));
+            }
         }
         let kind_is_normal = matches!(task_list.kind, 0 | 1);
         if !kind_is_normal {

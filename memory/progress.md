@@ -1,5 +1,17 @@
 # Progress log
 
+- **2026-10-17 — Matching adaptive scaler + isolation balancer.** Ported Go
+  `tasklist/adaptive_scaler.go` and `tasklist/isolation_balancer.go` in a new
+  `matching_scaler.rs` (`Sustain`, write-count thresholds with downscale
+  hysteresis, dense write-map rebuild, read drain, isolation-group goals and
+  `ensureMinimumGroups`). A per-root-normal scaler daemon runs on root owners
+  with live config, a weak-state lifecycle (no owner resurrection / registry
+  pinning), versioned partition updates through the existing
+  `update_partition_config` path, and the Go manual-update guard. Go defaults
+  preserved. 7 scaler unit tests + registry integration/guard tests pass, full
+  `cadence-server --lib` = 123 passed, strict all-target Clippy clean. See
+  `memory/matching-scaler-next.md`.
+
 - **2026-10-14 — Go SDK workflow running against Rust frontend.** Added
   `rust-cadence-version-workflow` with a Go worker and starter targeting the
   Rust YARPC/Thrift endpoint. Fixed the activity-schedule decision field IDs,

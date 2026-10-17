@@ -554,7 +554,113 @@ async fn matching_rpc_forward_task_limits_reload_and_rate_zero_blocks() {
     }
 }
 
-struct StartingHistory;
+fn scaler_config_value(matching: &Matching, property: &str, json: &[u8]) {
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .unwrap()
+        .update(
+            false,
+            property,
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    json.to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
+}
+
+#[tokio::test]
+async fn matching_rpc_manual_partition_update_rejected_while_scaler_enabled() {
+    let (_dir, _store, matching, key) = fixture();
+    scaler_config_value(&matching, "matching.enableAdaptiveScaler", b"true");
+    let error = matching
+        .update_task_list_partition_config(Request::new(
+            m::UpdateTaskListPartitionConfigRequest {
+                domain_id: key.domain_id.to_string(),
+                task_list: list(),
+                task_list_type: 1,
+                partition_config: Some(native_config(1, &[0, 1], &[0, 1])),
+            },
+        ))
+        .await
+        .expect_err("Go rejects manual updates while the scaler owns the config");
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_adaptive_scaler_upscales_write_partitions_on_load() {
+    let address = start_starting_history().await;
+    let (_dir, store, matching, key) = fixture_with_history(&address);
+    for (property, value) in [
+        ("matching.enableAdaptiveScaler", b"true".as_slice()),
+        ("matching.enableGetNumberOfPartitionsFromCache", b"true".as_slice()),
+        ("matching.adaptiveScalerUpdateInterval", b"\"50ms\"".as_slice()),
+        ("matching.partitionUpscaleRPS", b"1".as_slice()),
+        ("matching.partitionUpscaleSustainedDuration", b"\"0s\"".as_slice()),
+        ("matching.partitionDownscaleSustainedDuration", b"\"1h\"".as_slice()),
+    ] {
+        scaler_config_value(&matching, property, value);
+    }
+    // Resolving the root owner starts its scaler loop (normal kind, root).
+    let queue = matching
+        .durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0)
+        .await
+        .unwrap();
+    assert!(queue.partitions.get().is_none());
+    // A burst of arrivals reports QPS well above 1*1, so the sustained
+    // overload grows the dense write map through the versioned update path.
+    for schedule_id in 101..113 {
+        matching
+            .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+                domain_id: key.domain_id.to_string(),
+                workflow_execution: execution(),
+                task_list: list(),
+                schedule_id,
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+    }
+    let config = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(config) = queue.partitions.get() {
+                if config.write_partitions.len() >= 2 {
+                    return config;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("sustained load must upscale write partitions");
+    assert!(config.read_partitions.contains_key(&0));
+    assert!(config.write_partitions.contains_key(&0));
+    assert!(config
+        .write_partitions
+        .keys()
+        .all(|id| config.read_partitions.contains_key(id)));
+    assert_eq!(store.task_list_size(&key, 0).unwrap(), 12);
+    matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+}
 #[tokio::test]
 async fn matching_rpc_forwarded_root_backlog_waits_for_late_poller() {
     let address = start_starting_history().await;
@@ -581,6 +687,8 @@ async fn matching_rpc_forwarded_root_backlog_waits_for_late_poller() {
     assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
+struct StartingHistory;
+
 #[tonic::async_trait]
 impl h::history_api_server::HistoryApi for StartingHistory {
     async fn record_decision_task_started(

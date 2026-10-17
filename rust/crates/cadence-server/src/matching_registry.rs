@@ -37,6 +37,10 @@ struct Owner {
     sync_wait: Arc<dyn Fn() -> std::time::Duration + Send + Sync>,
     forward_tasks: Arc<crate::matching_forward::RequestTokens>,
     forward_rate: Arc<crate::matching_forward::ForwardRate>,
+    /// Go `adaptiveScalerImpl` daemon handle. Aborted on unload/shutdown/drop
+    /// so a stale loop can neither resurrect the owner through `get` nor pin
+    /// the registry (and its task store) past its lifetime.
+    scaler: Mutex<Option<tokio::task::AbortHandle>>,
     /// Go `taskListManagerImpl.createTime`: when the manager was created, used
     /// to withhold `LoadBalancerHints` for a task list's first 10s.
     created: i64,
@@ -45,6 +49,11 @@ struct Owner {
     liveness: Arc<cadence_common::liveness::Liveness>,
 }
 impl Owner {
+    fn abort_scaler(&self) {
+        if let Some(handle) = self.scaler.lock().expect("Matching scaler lock").take() {
+            handle.abort();
+        }
+    }
     fn stop(&self) {
         self.writer.stop();
         self.reader.stop();
@@ -55,12 +64,18 @@ impl Owner {
         now: i64,
         readers: &mut Vec<crate::matching_reader::TaskReader>,
     ) -> Result<(), Status> {
+        self.abort_scaler();
         self.stop();
         readers.push(self.reader.clone());
         let ack = self.queue.persist_final_ack(now);
         let garbage = self.queue.run_garbage_collection(true);
         ack.and(garbage.map(|_| ()))
             .map_err(|error| Status::unavailable(error.to_string()))
+    }
+}
+impl Drop for Owner {
+    fn drop(&mut self) {
+        self.abort_scaler();
     }
 }
 #[derive(Default)]
@@ -92,11 +107,16 @@ pub struct QueueRegistry {
     forward_polls: Option<ForwardPollsProvider>,
     forward_tasks: Option<ForwardPollsProvider>,
     forward_rate: Option<ForwardPollsProvider>,
+    scaler_config: Option<ScalerConfigProvider>,
     /// Go `cfg.QPSTrackerInterval(domain, taskList, type)`. `None` uses the
     /// dynamic-property default (10s).
     qps_interval: Option<QpsIntervalProvider>,
     isolation: Option<IsolationProvider>,
 }
+/// Live adaptive-scaler configuration per domain/task-list/type, mirroring
+/// Go's `TaskListConfig` scaler reads. `None` keeps the scaler parked.
+pub type ScalerConfigProvider =
+    Arc<dyn Fn(&str, &str, i32) -> crate::matching_scaler::ScalerConfig + Send + Sync>;
 pub type IsolationProvider = Arc<dyn Fn(&str, &str, i32, i16, Arc<Mutex<cadence_common::poller::Manager>>, Arc<crate::matching_partition::PartitionCache>) -> crate::matching_reader::IsolationConfig + Send + Sync>;
 /// Live read-partition-count provider used to size the dispatch limiter and to
 /// divide dispatch rate, mirroring Go's `NumTasklistReadPartitions`.
@@ -303,6 +323,7 @@ impl QueueRegistry {
             forward_polls: None,
             forward_tasks: None,
             forward_rate: None,
+            scaler_config: None,
             qps_interval: None,
             isolation: None,
         }
@@ -328,6 +349,12 @@ impl QueueRegistry {
     pub fn with_forward_tasks(mut self, tasks: ForwardPollsProvider, rate: ForwardPollsProvider) -> Self {
         self.forward_tasks = Some(tasks);
         self.forward_rate = Some(rate);
+        self
+    }
+    /// Install the adaptive-scaler configuration provider. The scaler loop
+    /// starts on root normal owners and rereads the provider every tick.
+    pub fn with_scaler_config(mut self, provider: ScalerConfigProvider) -> Self {
+        self.scaler_config = Some(provider);
         self
     }
     pub fn with_partition_cache_enabled(mut self, provider: PartitionCacheEnabledProvider) -> Self {
@@ -608,6 +635,7 @@ impl QueueRegistry {
                             tokio::time::Instant::now() + std::time::Duration::from_secs(150),
                         ),
                         liveness,
+                        scaler: Mutex::new(None),
                     });
                     state = registry.state.lock().expect("Matching registry lock");
                     if state.stopped {
@@ -632,6 +660,38 @@ impl QueueRegistry {
                             }
                         } else if let Some(root) = state.owners.get(&(lookup.0, name.root().into(), lookup.2)) {
                             if let Some(config) = root.partitions.get() { owner.partitions.push(&config); }
+                        }
+                    }
+                    // Go starts the adaptive scaler on root normal managers;
+                    // the loop self-terminates when the owner stops.
+                    if kind == 0 && registry.scaler_config.is_some() {
+                        if let Ok(parsed) =
+                            cadence_common::task_list::TaskListName::parse(&key.name)
+                        {
+                            if parsed.is_root() {
+                                // Like the forward resolver, retain only a
+                                // weak handle on the owner state: the scaler
+                                // must not keep the registry (and its task
+                                // store) alive after every other handle is
+                                // dropped. The loop exits once the upgrade
+                                // fails.
+                                let scaler_state = Arc::downgrade(&registry.state);
+                                let mut scaler_registry = registry.clone();
+                                scaler_registry.state = Arc::new(Mutex::new(State::default()));
+                                let root = TaskListKey {
+                                    domain_id: key.domain_id,
+                                    name: key.name.clone(),
+                                    task_type: key.task_type,
+                                };
+                                let task = tokio::spawn(async move {
+                                    let mut scaler_registry = scaler_registry;
+                                    scaler_registry.scaler_loop(root, scaler_state).await;
+                                });
+                                *owner
+                                    .scaler
+                                    .lock()
+                                    .expect("Matching scaler lock") = Some(task.abort_handle());
+                            }
                         }
                     }
                     state.owners.insert(lookup, owner.clone());
@@ -659,6 +719,148 @@ impl QueueRegistry {
         })
         .await
         })
+    }
+    /// Go `adaptiveScalerImpl` periodic loop, running only on root normal
+    /// owners. Live config may enable the scaler at any tick; the loop ends
+    /// when the owner stops, the registry shuts down, or every other registry
+    /// handle is gone (the weak state can no longer be upgraded).
+    async fn scaler_loop(
+        &mut self,
+        root: TaskListKey,
+        state: std::sync::Weak<Mutex<State>>,
+    ) {
+        let Some(provider) = self.scaler_config.clone() else {
+            return;
+        };
+        let mut scaler = crate::matching_scaler::Scaler::new();
+        loop {
+            let name = match cadence_common::task_list::TaskListName::parse(&root.name) {
+                Ok(name) => name,
+                Err(_) => return,
+            };
+            let config = provider(&root.domain_id.to_string(), name.root(), root.task_type);
+            tokio::time::sleep(std::time::Duration::from_nanos(
+                config.update_interval_nanos.max(0) as u64,
+            ))
+            .await;
+            let Some(live) = state.upgrade() else {
+                return;
+            };
+            self.state = live;
+            match self.scaler_update(&root, &config, &mut scaler).await {
+                Ok(true) => (),
+                Ok(false) => return,
+                Err(error) => eprintln!("Matching adaptive scaler failed: {error}"),
+            }
+        }
+    }
+    /// One Go `run()` tick. Returns false when the loop should stop. A
+    /// metrics-collection failure resets the sustains like Go's error branch.
+    async fn scaler_update(
+        &self,
+        root: &TaskListKey,
+        config: &crate::matching_scaler::ScalerConfig,
+        scaler: &mut crate::matching_scaler::Scaler,
+    ) -> Result<bool, Status> {
+        use crate::matching_scaler::{AggregateMetrics, PartitionMetrics};
+        let now = registry_now();
+        let handle = match self.get(root.clone(), 0, now).await {
+            Ok(handle) => handle,
+            Err(_) => return Ok(false),
+        };
+        if handle.queue.is_stopped() {
+            return Ok(false);
+        }
+        if !config.enabled || !config.cache_enabled {
+            scaler.reset();
+            return Ok(true);
+        }
+        let current = handle.partitions.get().unwrap_or(cadence_persistence::StoredPartitionConfig {
+            version: 0,
+            read_partitions: HashMap::from([(0, Vec::new())]),
+            write_partitions: HashMap::from([(0, Vec::new())]),
+        });
+        let metrics = if config.isolation_assignment {
+            let mut metrics = AggregateMetrics {
+                isolation_enabled: true,
+                ..AggregateMetrics::default()
+            };
+            let name = cadence_common::task_list::TaskListName::parse(&root.name)
+                .map_err(Status::invalid_argument)?;
+            let mut ids: Vec<i32> = current.read_partitions.keys().copied().collect();
+            ids.sort();
+            for id in ids {
+                let sub = TaskListKey {
+                    name: name.partition_name(id as i64),
+                    ..root.clone()
+                };
+                let other = match self.get(sub, 0, now).await {
+                    Ok(other) => other,
+                    Err(_) => {
+                        scaler.reset();
+                        return Ok(true);
+                    }
+                };
+                let qps = other.qps.qps();
+                metrics.total_qps += qps;
+                let (_, _, backlog_hint, _, _, empty) = other.queue.status();
+                metrics.by_partition.insert(
+                    id,
+                    PartitionMetrics {
+                        qps,
+                        read_only: !current.write_partitions.contains_key(&id),
+                        empty: if config.empty_check {
+                            empty
+                        } else {
+                            backlog_hint == 0
+                        },
+                    },
+                );
+                let counts = other
+                    .pollers
+                    .lock()
+                    .expect("poller history lock")
+                    .count_by_group(now, now.saturating_sub(config.poller_window_nanos));
+                for group in &config.isolation_groups {
+                    *metrics.qps_by_group.entry(group.clone()).or_insert(0.0) +=
+                        other.qps.group_qps(group);
+                    *metrics
+                        .has_pollers_by_group
+                        .entry(group.clone())
+                        .or_insert(false) |= counts.get(group).copied().unwrap_or(0) > 0;
+                }
+            }
+            metrics
+        } else {
+            AggregateMetrics {
+                // Go `assumeEvenQPS`: root arrival QPS times write count.
+                total_qps: handle.qps.qps() * current.write_partitions.len() as f64,
+                ..AggregateMetrics::default()
+            }
+        };
+        match scaler.tick(
+            config,
+            now,
+            &current.read_partitions,
+            &current.write_partitions,
+            &metrics,
+            |_| None,
+        ) {
+            Some((read_partitions, write_partitions)) => self
+                .update_partition_config(
+                    root.clone(),
+                    handle,
+                    cadence_persistence::StoredPartitionConfig {
+                        version: 0,
+                        read_partitions,
+                        write_partitions,
+                    },
+                    now,
+                )
+                .await
+                .map(|_| true),
+            None => Ok(true),
+        }
     }
     pub async fn update_partition_config(
         &self,

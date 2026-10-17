@@ -86,6 +86,21 @@ pub fn task_list_boolean(
         .unwrap_or(default)
 }
 
+/// Go `GetFloat64PropertyFilteredByTaskListInfo` reads, e.g. the scaler's
+/// downscale hysteresis factor. Non-finite values fall back to the default.
+pub fn task_list_float(
+    values: &[DynamicConfigValue],
+    domain: Option<&str>,
+    task_list: &str,
+    task_type: i32,
+    default: f64,
+) -> f64 {
+    selected_context(values, domain, Some((task_list, task_type)))
+        .and_then(|value| value.as_f64())
+        .filter(|value| value.is_finite())
+        .unwrap_or(default)
+}
+
 pub fn task_list_duration(
     values: &[DynamicConfigValue],
     domain: Option<&str>,

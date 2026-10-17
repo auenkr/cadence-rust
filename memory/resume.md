@@ -1,3 +1,15 @@
+Matching adaptive scaler + isolation balancer (2026-10-17): read
+matching-scaler-next.md first. Ports Go tasklist/adaptive_scaler.go and
+tasklist/isolation_balancer.go: Sustain, upscale/downscale thresholds with
+hysteresis, dense write-map rebuild, read-drain, isolation-group goals, and a
+per-root scaler daemon (live config, weak-state lifecycle, versioned partition
+updates), plus the manual-update guard. 7 scaler unit tests + registry
+integration/guard tests pass, full cadence-server --lib =123 passed, strict
+Clippy clean. Uncommitted until this checkpoint. Remaining genuine single-process
+gaps: standby task completion, strong/sticky query version gates, handler error
+taxonomy, semaphore lifecycle, domain-failover poller disconnect, Thrift
+transport. Multi-host routing/membership still out of single-node scope.
+
 Matching completion (2026-10-16): read matching-sync-forwarding-next.md first.
 Committed d501f3779 (forward limits, backlog waits, query walk, standalone
 durable wiring) on top of ca062c861/a9531588d. FULL 31-stage compatibility
