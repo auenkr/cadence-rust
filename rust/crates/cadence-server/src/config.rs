@@ -146,9 +146,31 @@ pub struct HttpConfig {
     #[serde(default)]
     pub procedures: Vec<String>,
     #[serde(default)]
-    pub tls: Option<serde_yaml::Value>,
+    pub tls: Option<TlsConfig>,
     #[serde(default, rename = "TLSMode")]
     pub tls_mode: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TlsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, rename = "certFile")]
+    pub cert_file: String,
+    #[serde(default, rename = "keyFile")]
+    pub key_file: String,
+    #[serde(default, rename = "caFile")]
+    pub ca_file: String,
+    #[serde(default, rename = "caFiles")]
+    pub ca_files: Vec<String>,
+    #[serde(default, rename = "enableHostVerification")]
+    pub enable_host_verification: bool,
+    #[serde(default, rename = "requireClientAuth")]
+    pub require_client_auth: bool,
+    #[serde(default, rename = "serverName")]
+    pub server_name: String,
+    #[serde(default, rename = "sslmode")]
+    pub ssl_mode: String,
 }
 
 fn de_flex_u16<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {

@@ -40,14 +40,37 @@ fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net
     Ok(Some(std::net::SocketAddr::new(ip, http.port)))
 }
 
-fn matching_http_tls_enabled(http: &config::HttpConfig) -> bool {
-    let Some(tls) = http.tls.as_ref() else {
-        return false;
+async fn matching_http_tls(
+    http: &config::HttpConfig,
+) -> anyhow::Result<Option<axum_server::tls_rustls::RustlsConfig>> {
+    let Some(tls) = http.tls.as_ref().filter(|tls| tls.enabled) else {
+        return Ok(None);
     };
-    let Some(enabled) = tls.get("enabled").or_else(|| tls.get("Enabled")) else {
-        return !matches!(tls, serde_yaml::Value::Mapping(_));
-    };
-    !matches!(enabled, serde_yaml::Value::Bool(false))
+    if !http.tls_mode.eq_ignore_ascii_case("enforced") {
+        anyhow::bail!(
+            "Matching HTTP TLS enabled requires TLSMode: enforced; mode {:?} is unsupported",
+            http.tls_mode
+        );
+    }
+    if tls.require_client_auth
+        || !tls.ca_file.is_empty()
+        || !tls.ca_files.is_empty()
+        || tls.enable_host_verification
+        || !tls.server_name.is_empty()
+        || !tls.ssl_mode.is_empty()
+    {
+        anyhow::bail!("Matching HTTP TLS configured CA/client-auth/host-verification/serverName/sslmode options are unsupported");
+    }
+    if tls.cert_file.is_empty() || tls.key_file.is_empty() {
+        anyhow::bail!("Matching HTTP TLS enforced mode requires certFile and keyFile");
+    }
+    let config =
+        axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert_file, &tls.key_file)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("loading Matching HTTP TLS certificate/key: {error}")
+            })?;
+    Ok(Some(config))
 }
 
 #[cfg(test)]
@@ -62,15 +85,15 @@ mod matching_http_listener_tests {
             "127.0.0.1:8801"
         );
     }
-    #[test]
-    fn rejects_invalid_configuration_and_detects_enabled_tls() {
+    #[tokio::test]
+    async fn rejects_invalid_configuration_and_detects_enabled_tls() {
         let rpc: config::RpcConfig = serde_yaml::from_str("http: {port: 0}").unwrap();
         assert!(matching_http_addr(&rpc)
             .unwrap_err()
             .to_string()
             .contains("HTTP port is not set"));
         let tls: config::HttpConfig = serde_yaml::from_str("tls: {enabled: true}").unwrap();
-        assert!(matching_http_tls_enabled(&tls));
+        assert!(matching_http_tls(&tls).await.is_err());
     }
 }
 
@@ -367,12 +390,15 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            if run_matching {
-                if let Some(http) = matching_rpc.and_then(|rpc| rpc.http.as_ref()) {
-                    if matching_http_tls_enabled(http) {
-                        anyhow::bail!("Matching HTTP TLS is configured but Rust inbound TLS is unsupported; refusing to serve plaintext");
-                    }
+            let matching_http_tls_config = if run_matching {
+                match matching_rpc.and_then(|rpc| rpc.http.as_ref()) {
+                    Some(http) => matching_http_tls(http).await?,
+                    None => None,
                 }
+            } else {
+                None
+            };
+            if run_matching {
                 if let Some(addr) = matching_http_addr {
                     println!("Cadence internal Matching HTTP listening on {addr}");
                 }
@@ -514,16 +540,19 @@ async fn main() -> anyhow::Result<()> {
                             let http = matching_rpc
                                 .and_then(|rpc| rpc.http.as_ref())
                                 .expect("configured Matching HTTP address");
-                            let listener = tokio::net::TcpListener::bind(addr).await?;
-                            axum::serve(
-                                listener,
-                                cadence_server::thrift_matching::router_with_procedures(
-                                    matching_service.clone(),
-                                    http.procedures.clone(),
-                                ),
-                            )
-                            .await
-                            .map_err(anyhow::Error::from)
+                            let app = cadence_server::thrift_matching::router_with_procedures(
+                                matching_service.clone(),
+                                http.procedures.clone(),
+                            );
+                            if let Some(tls_config) = matching_http_tls_config.clone() {
+                                axum_server::bind_rustls(addr, tls_config)
+                                    .serve(app.into_make_service())
+                                    .await
+                                    .map_err(anyhow::Error::from)
+                            } else {
+                                let listener = tokio::net::TcpListener::bind(addr).await?;
+                                axum::serve(listener, app).await.map_err(anyhow::Error::from)
+                            }
                         } else {
                             std::future::pending::<anyhow::Result<()>>().await
                         }

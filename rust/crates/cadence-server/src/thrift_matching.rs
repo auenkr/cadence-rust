@@ -949,4 +949,62 @@ mod tests {
             .unwrap();
         assert_ne!(allowed.status(), StatusCode::NOT_FOUND);
     }
+
+    #[tokio::test]
+    async fn dedicated_http_listener_enforces_tls_handshake() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let generated = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let cert_path = tempfile::NamedTempFile::new().unwrap();
+        let key_path = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(cert_path.path(), generated.cert.pem()).unwrap();
+        std::fs::write(key_path.path(), generated.key_pair.serialize_pem()).unwrap();
+        let tls =
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path.path(), key_path.path())
+                .await
+                .unwrap();
+        let app = router_with_procedures(
+            Matching::new(crate::handlers::AppState::default()),
+            vec!["Meta::health".into()],
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let listener = listener.into_std().unwrap();
+        let server = tokio::spawn(
+            axum_server::from_tcp_rustls(listener, tls)
+                .unwrap()
+                .serve(app.into_make_service()),
+        );
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(generated.cert.der().clone()).unwrap();
+        let client = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(client));
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut stream = connector
+            .connect("localhost".try_into().unwrap(), tcp)
+            .await
+            .unwrap();
+        stream.write_all(b"POST / HTTP/1.1\r\nHost: localhost\r\nRpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\nRpc-Procedure: Meta::health\r\nContent-Length: 1\r\nConnection: close\r\n\r\n\0").await.unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+
+        let mut plaintext = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let _ = plaintext
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await;
+        let mut response = [0_u8; 256];
+        let plaintext_read = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            plaintext.read(&mut response),
+        )
+        .await;
+        assert!(
+            matches!(plaintext_read, Ok(Ok(count)) if count > 0 && response[0] == 0x15),
+            "plaintext did not receive a TLS alert: {plaintext_read:?}, bytes={response:?}"
+        );
+        server.abort();
+    }
 }
