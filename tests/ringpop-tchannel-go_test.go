@@ -42,6 +42,32 @@ func TestRustRingpopTChannel(t *testing.T) {
 	if err := client.Call(ctx, "/protocol/join", joinReq, &joinResp); err != nil {
 		t.Fatalf("join: %v", err)
 	}
+
+	// The Go JSON client sends nil headers as JSON null and empty headers as {}.
+	// The test handler echoes both the JSON body and response headers so this
+	// checks the wire distinction in both directions.
+	var nullBody interface{}
+	if err := client.Call(ctx, "/protocol/header-probe", map[string]string{}, &nullBody); err != nil {
+		t.Fatalf("null headers probe: %v", err)
+	}
+	if nullBody != nil {
+		t.Fatalf("expected null request headers echoed as null, got %#v", nullBody)
+	}
+	emptyCtx := channeljson.WithHeaders(ctx, map[string]string{})
+	var emptyBody map[string]string
+	if err := client.Call(emptyCtx, "/protocol/header-probe", map[string]string{}, &emptyBody); err != nil {
+		t.Fatalf("empty headers probe: %v", err)
+	}
+	if emptyBody == nil || len(emptyBody) != 0 {
+		t.Fatalf("expected empty object request headers echoed as {}, got %#v", emptyBody)
+	}
+
+	shortCtx, cancelShort := channeljson.NewContext(100 * time.Millisecond)
+	defer cancelShort()
+	var slowResp map[string]interface{}
+	if err := client.Call(shortCtx, "/protocol/slow-probe", map[string]string{}, &slowResp); err == nil {
+		t.Fatal("expected timeout for slow Ringpop handler")
+	}
 	if joinResp["app"] != "cadence" {
 		t.Fatalf("unexpected join app: %#v", joinResp["app"])
 	}

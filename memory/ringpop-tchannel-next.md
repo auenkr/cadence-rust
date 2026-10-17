@@ -19,7 +19,48 @@
   production responder and contains no SWIM or discovery logic.
 - Documented the focused runner in `tests/README.md`.
 
-## Evidence
+## Final review and repair on TLS-enabled parent
+
+Candidate `994a12bdec7f4ad1fcb047675e503fd25ccea45b` was cherry-picked onto
+the current parent (`86b06d35a`, including enforced Matching HTTP TLS) as
+`bbbfd299c`. The compatibility fix and final evidence are recorded in
+the repair commit.
+
+- Added a deadline around injected Ringpop handlers. Completed calls now time
+  out at the TChannel call TTL; connection handling already aborts the task on a
+  TChannel CANCEL frame. The Go probe verifies a 100 ms call against a 2 second
+  handler returns an error.
+- Extended the test-only probe and pinned Go JSON client check: default nil
+  request headers arrive at the handler as `None`/JSON `null`, and an explicitly
+  empty header map arrives as `Some({})`/JSON `{}`. The probe echoes that shape
+  in arg3. `tchannel-go/json.Client.Call` reads response arg2 internally but
+  does not expose it on its Context, so the compatibility assertion covers the
+  request arg2 shape; server response encoding preserves `null` vs `{}` in code.
+- The test-only probe does not add a production Ringpop responder. Normal
+  frontend/Matching listener setup still passes no Ringpop handler, and
+  `handle_call` rejects an unregistered `ringpop` service.
+
+### Final validation
+
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=<warmed t3-0a3d52d6 target> cargo test
+  -p cadence-server --lib tchannel::tests`: 4 passed.
+- Strict `cargo clippy -p cadence-server --all-targets -- -D warnings`: passed.
+- `python3 tests/run-ringpop-tchannel-compat.py` with the rebuilt test-only
+  example: passed against the actual pinned Go `tchannel-go/json.Client`,
+  including join, ping, ping-req, app error, malformed JSON, unknown method,
+  unknown service, nil/empty arg2, and handler deadline.
+- `python3 tests/run-matching-thrift-compat.py` with the rebuilt server: all ten
+  Matching Thrift methods passed on TChannel, HTTP, and HTTP trailing slash;
+  enforced TLS checks passed.
+- `git diff --check` passed. The matching pinned IDL sources were temporarily
+  linked from the existing read-only worktree because this checkout's submodule
+  is uninitialized. The temporary link was removed; `git submodule status`
+  remains at pinned commit `bfbf273b41b9e36ce21e47a49600d22d73e4614c`.
+- No cargo/rustc process was active at final inspection. No target cleanup was
+  performed in this round; the warmed target was 8.0 GB and filesystem free
+  space was 12 GB afterward. Probe logs/configs remain under `/tmp/ringpop-review-*`.
+
+## Earlier candidate evidence
 
 - `CARGO_BUILD_JOBS=1 cargo test -p cadence-server --lib tchannel::tests
   --manifest-path rust/Cargo.toml`: passed, 4 tests.

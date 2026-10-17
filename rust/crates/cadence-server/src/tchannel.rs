@@ -419,9 +419,16 @@ async fn handle_call(
                     .await
                 }
             };
-        let result = handler
-            .call(method.clone(), request_headers, call.args[2].clone())
-            .await;
+        let deadline = tokio::time::Instant::from_std(call.started + call.ttl);
+        let result = match tokio::time::timeout_at(
+            deadline,
+            handler.call(method.clone(), request_headers, call.args[2].clone()),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => return error(&writer, id, 1, &call.trace, "Request timed out").await,
+        };
         return match result {
             Ok(response) => {
                 let arg2 = match response.headers {

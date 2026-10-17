@@ -25,8 +25,20 @@ fn parse_addr() -> SocketAddr {
 async fn main() -> anyhow::Result<()> {
     let addr = parse_addr();
 
-    let handler = RingpopHandler::new(|method, _headers, body| async move {
+    let handler = RingpopHandler::new(|method, headers, body| async move {
         match method.as_str() {
+            "/protocol/header-probe" => {
+                let body = serde_json::to_vec(&headers)
+                    .map_err(|e| RingpopError::System(format!("JSON encode failed: {e}")))?;
+                Ok(RingpopResponse { headers, body })
+            }
+            "/protocol/slow-probe" => {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                Ok(RingpopResponse {
+                    headers,
+                    body: b"{}".to_vec(),
+                })
+            }
             "/protocol/join" => {
                 let req: JoinRequest = serde_json::from_slice(&body).map_err(|e| {
                     RingpopError::System(format!("Malformed TChannel JSON body: {e}"))
