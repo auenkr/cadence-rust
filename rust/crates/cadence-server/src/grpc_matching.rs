@@ -498,6 +498,23 @@ impl Matching {
             }
         }
     }
+    fn poll_rate(&self, domain: &str, list: &str, task_type: i32, worker_rate: Option<f64>, limiter: &crate::matching_limiter::TaskListLimiter) -> f64 {
+        // The override read must release the admin lock before reporting: the
+        // limiter's live partition-count provider reads the same overlay, so
+        // reporting under the lock would re-enter this mutex and hang.
+        let override_rate = {
+            let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+            cadence_persistence::dynamic_config::task_list_float(
+                config.property_values("matching.overrideTaskListRps"),
+                domain_name_for(&self.frontend.state.domains, domain).as_deref(), list, task_type, 0.0,
+            )
+        };
+        let rate = if override_rate > 0.0 { Some(override_rate) } else { worker_rate };
+        match rate.filter(|rate| *rate >= 0.0) {
+            Some(rate) => { limiter.report_limit(rate); rate }
+            None => crate::matching_limiter::TASK_DISPATCH_RPS,
+        }
+    }
     fn poll_timeout(&self, domain: &str, list: &str, task_type: i32, deadline: Option<tokio::time::Instant>) -> std::time::Duration {
         let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
         let nanos = cadence_persistence::dynamic_config::task_list_duration(
@@ -689,7 +706,8 @@ impl m::matching_api_server::MatchingApi for Matching {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 0).await?;
             let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
             if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForDecisionTaskResponse::default())); }
-            let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: crate::matching_limiter::TASK_DISPATCH_RPS, isolation_group: r.isolation_group } };
+            let rate = self.poll_rate(&r.domain_id, &guard.key.task_list, 0, None, &queue.limiter);
+            let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: rate, isolation_group: r.isolation_group } };
             // Go's matcher serves `queryTaskC` on the same long poll as the
             // decision backlog; a ready query is handed to this poller instead
             // of waiting for a durable task. Racing is safe: dropping the
@@ -806,13 +824,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             // negative metadata rate keeps the configured default for poller
             // history without resetting the shared limiter.
             let max_dispatch = payload.task_list_metadata.as_ref().and_then(|metadata| metadata.max_tasks_per_second);
-            let rate = match max_dispatch.filter(|rate| *rate >= 0.0) {
-                Some(rate) => {
-                    queue.limiter.report_limit(rate);
-                    rate
-                }
-                None => crate::matching_limiter::TASK_DISPATCH_RPS,
-            };
+            let rate = self.poll_rate(&r.domain_id, &guard.key.task_list, 1, max_dispatch, &queue.limiter);
             let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: rate, isolation_group: r.isolation_group } };
             return tokio::select! {
                 result=async {

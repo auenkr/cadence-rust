@@ -2247,3 +2247,77 @@ async fn matching_rpc_local_parent_poll_applies_its_own_expiration_and_tailroom(
         .expect("root-specific expiration applies to the forwarded activity poll").unwrap().into_inner().task_token.is_empty());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
+
+#[tokio::test]
+async fn matching_rpc_live_rps_override_matches_go_precedence() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    // These are the pinned Go TestTaskListUsesOverrideRPS cases. Each poll
+    // receives a fresh limiter so its prior minimum report cannot mask changes.
+    for (override_rate, worker, expected) in [
+        (0.0, Some(100.0), 100.0),
+        (-1.0, Some(100.0), 100.0),
+        (200.0, Some(100.0), 200.0),
+        (25.0, Some(100.0), 25.0),
+        (0.0, None, crate::matching_limiter::TASK_DISPATCH_RPS),
+        (150.0, None, 150.0),
+        (0.0, Some(-1.0), crate::matching_limiter::TASK_DISPATCH_RPS),
+        (0.0, Some(0.0), 0.0),
+    ] {
+        matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.overrideTaskListRps", vec![cadence_api::admin::DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, override_rate.to_string().into_bytes())), filters: vec![],
+        }]);
+        for task_type in [0, 1] {
+            let limiter = crate::matching_limiter::TaskListLimiter::with_defaults();
+            assert_eq!(matching.poll_rate(&domain, &key.name, task_type, worker, &limiter), expected);
+            if expected != crate::matching_limiter::TASK_DISPATCH_RPS {
+                assert_eq!(limiter.limit(), expected);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_report_limit_does_not_hold_the_admin_overlay() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    // The owner's live partition provider reads the same non-reentrant overlay
+    // `poll_rate` reads the override from. Go's `ReportLimit` consults it while
+    // applying an accepted report, so reporting under the overlay would
+    // re-enter the mutex and hang the poll (and with it a single-threaded
+    // runtime's timers). This provider fails loudly instead of deadlocking.
+    let overlay = matching.frontend.state.admin.dynamic_config.clone();
+    let limiter = crate::matching_limiter::TaskListLimiter::new(
+        {
+            let clock = crate::matching_limiter::MonotonicClock::new();
+            Arc::new(move || clock.now())
+        },
+        crate::matching_limiter::TASK_DISPATCH_RPS,
+        crate::matching_limiter::TASK_DISPATCH_RPS_TTL_NANOS,
+        1,
+        Arc::new(move || {
+            overlay
+                .try_lock()
+                .expect("poll_rate must release the admin overlay before reporting")
+                .property_values("matching.numTasklistReadPartitions")
+                .len() as i64
+                + 2
+        }),
+    );
+    // Override path first: 200 is below the default, so it is accepted and the
+    // live partition provider runs while the overlay is free.
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.overrideTaskListRps", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, b"200".to_vec())), filters: vec![],
+    }]);
+    assert_eq!(matching.poll_rate(&domain, &key.name, 1, Some(25.0), &limiter), 200.0);
+    // Two read partitions, so the accepted report halves the backing limit.
+    assert_eq!(limiter.partitions(), 2);
+    assert_eq!(limiter.limit(), 100.0);
+    // Cleared override falls back to the worker-reported rate, which is lower
+    // than the accepted report, so this path also consults the provider.
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.overrideTaskListRps", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, b"0".to_vec())), filters: vec![],
+    }]);
+    assert_eq!(matching.poll_rate(&domain, &key.name, 1, Some(25.0), &limiter), 25.0);
+    assert_eq!(limiter.limit(), 12.5);
+}
