@@ -154,3 +154,40 @@ Rust config/port-label wiring; lifecycle consumption by Matching server startup;
 production two-process or Go Ringpop interoperability tests; and validation of
 leave/rejoin, membership convergence, role filtering on real peer data, and actual
 cross-host RPC endpoint routing.
+
+## Validation follow-up (2026-10-17, isolated task checkout)
+
+Candidate commits were applied in order on top of checkpoint `56976ec5b`:
+`d8776890a`, `56fd25c16`, `3a79b10e4`, `06041e5c3` (recorded locally as
+`a7202ea5c`, `be52a8457`, `fd0bc1de4`, `0326cccf0`). The isolated checkout
+needed the already-pinned `go/idls` contents copied from `t3-312cf341` because
+its submodule was uninitialized; this local build prerequisite is not committed.
+
+* Separate prerequisite test-only compile repair: `81718fba9`. Renamed the
+  local `history_client` binding so it does not shadow `client()`, and compared
+  gRPC metadata as `Option<&MetadataValue>` in all three timeout assertions.
+  No timeout implementation behavior changed.
+* Focused lifecycle command
+  `CARGO_BUILD_JOBS=1 cargo test -p cadence-server --lib
+  matching_membership_lifecycle -- --nocapture` — **9 passed, 0 failed, 163
+  filtered out**. The first run caught an incorrect test expectation for Go's
+  `SplitHostPort("[bad]:7935")` followed by `JoinHostPort`; Go returns
+  `bad:80`. Corrected only that expectation in separate repair commit
+  `a329d9bc3`; the rerun passed.
+* Actual Go oracle command
+  `go test ./common/membership -run '^TestHostPortAndPortLabelOracle$' -count=1`
+  — **passed** (`ok`, 0.133s).
+* Strict `cargo clippy -p cadence-server --all-targets -- -D warnings` reaches
+  the target but fails on the pre-existing unused `#[cfg(test)]` helper
+  `record_started_timeout_for_test` in untouched `matching_registry.rs:493`.
+  The permitted queue/registry scope was left unchanged. All-target Clippy
+  otherwise passed with the single unrelated lint explicitly allowed:
+  `cargo clippy -p cadence-server --all-targets -- -D warnings -A dead_code`.
+* `rustfmt --edition 2021 --check` passes for both lifecycle modules, and
+  `git diff --check` passes. The touched `matching_history.rs` already contains
+  unrelated formatting drift from the timeout draft, so the whole file was not
+  reformatted.
+
+This validates only the transport-independent lifecycle slice and its Go
+address mapping oracle. It makes no claim of Ringpop wire compatibility or full
+Matching completion.
