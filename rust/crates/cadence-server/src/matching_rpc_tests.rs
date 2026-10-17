@@ -1087,6 +1087,102 @@ async fn matching_rpc_delivers_query_to_decision_poller() {
 }
 
 #[tokio::test]
+async fn matching_rpc_strong_query_rejects_a_worker_without_consistent_query() {
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, matching, key) = fixture_with_history(&peer);
+    let domain = key.domain_id.to_string();
+    let worker = matching.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move {
+        worker
+            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+                domain_id: poll_domain,
+                poller_id: "sdk-worker".into(),
+                request: Some(p::PollForDecisionTaskRequest {
+                    task_list: list(),
+                    identity: "sdk-worker".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }))
+            .await
+    });
+    let root = matching
+        .durable_queue(&domain, &list().unwrap(), 0)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root.queries.has_waiters() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let querier = matching.clone();
+    let query_domain = domain.clone();
+    let query = tokio::spawn(async move {
+        querier
+            .query_workflow(Request::new(m::QueryWorkflowRequest {
+                request: Some(p::QueryWorkflowRequest {
+                    domain: "domain".into(),
+                    workflow_execution: execution(),
+                    query: Some(p::WorkflowQuery {
+                        query_type: "ping".into(),
+                        query_args: None,
+                    }),
+                    // A strong-consistency query enforces the worker gate.
+                    query_consistency_level: p::QueryConsistencyLevel::Strong as i32,
+                    ..Default::default()
+                }),
+                domain_id: query_domain,
+                task_list: list(),
+                forwarded_from: String::new(),
+            }))
+            .await
+    });
+    let delivered = tokio::time::timeout(Duration::from_secs(5), poll)
+        .await
+        .expect("query should reach the decision poller")
+        .unwrap()
+        .expect("poll should succeed")
+        .into_inner();
+    let token =
+        cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
+            &delivered.task_token,
+        )
+        .expect("poll should carry a query task token");
+    // The worker answers, but reports a version that predates consistent query.
+    matching
+        .respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+            request: Some(p::RespondQueryTaskCompletedRequest {
+                task_token: Vec::new(),
+                result: Some(p::WorkflowQueryResult {
+                    result_type: p::QueryResultType::Answered as i32,
+                    answer: Some(p::Payload {
+                        data: b"stale".to_vec(),
+                    }),
+                    error_message: String::new(),
+                }),
+                worker_version_info: Some(p::WorkerVersionInfo {
+                    r#impl: "uber-go".into(),
+                    feature_version: "1.4.0".into(),
+                }),
+            }),
+            domain_id: domain,
+            task_list: list(),
+            task_id: token.task_id,
+        }))
+        .await
+        .unwrap();
+    let error = tokio::time::timeout(Duration::from_secs(5), query)
+        .await
+        .expect("query should complete")
+        .unwrap()
+        .expect_err("a strong query from an unsupported worker must fail");
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+}
+
+#[tokio::test]
 async fn matching_rpc_child_query_forwards_to_parent_poller() {
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);

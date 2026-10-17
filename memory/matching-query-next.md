@@ -100,8 +100,12 @@ ported at matching scope:
   exactly like Go `waitForQueryResult`.
 
 Tests: `strong_consistency_requires_a_supported_worker` and
-`strong_query_rejects_a_worker_without_consistent_query`, plus the existing
-query tests updated for the new outcome shape. Full `cadence-server --lib` and
+`strong_query_rejects_a_worker_without_consistent_query` cover the gate logic,
+and `matching_rpc_strong_query_rejects_a_worker_without_consistent_query`
+drives it end to end through the gRPC handler (a parked decision poller, a
+strong-consistency query, and a worker that answers while reporting feature
+version 1.4.0, expecting `FailedPrecondition`). The existing query tests were
+updated for the new outcome shape. Full `cadence-server --lib` (134 passed) and
 strict Clippy re-run clean.
 
 ## Remaining limits (do NOT report as complete)
