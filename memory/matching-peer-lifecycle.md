@@ -32,6 +32,24 @@ Current member mapper represents the gRPC endpoint and identity; malformed/missi
 gRPC ports map to an empty endpoint. TChannel port metadata should be carried in the
 provider representation when a concrete peer protocol requires it.
 
+## Repair review (2026-10-17)
+
+Cherry-picked lifecycle implementation `581d908bb6986cccb24cb43515651353097030fe`
+for review, then repaired: start is idempotent while running and after stop; provider
+teardown runs after startup/start/subscription/snapshot errors; receiver lag remains a
+refresh hint and closed receivers are disabled; stopping aborts a potentially blocked
+snapshot worker. Initial synchronous snapshot is retained, and change hints are
+rate-limited with periodic 2s retries. Mapping applies Go's base-10 unsigned-16-bit
+port rule (0 valid, signs and overflow invalid), IPv6 bracket-host extraction, and
+empty-identity fallback. The malformed host:port behavior should be compared against
+Go `net.SplitHostPort`; no Ringpop/network parity is claimed.
+
+Added tests cover Go port bounds, IPv6, identity fallback, malformed endpoint, failed
+subscribe cleanup, start/stop idempotence, coalescing by fetch count, and last-good
+snapshot after failures. Validation status must be recorded with the repair commit:
+the concurrent cold builds were blocked by other worktrees' long-running Rust tests
+and cargo cache/build locks; do not infer test or clippy success from process launch.
+
 ## Next exact Ringpop/TChannel JSON wire slice
 
 Implement the actual Ringpop protocol endpoints, not a bespoke SWIM: first audit

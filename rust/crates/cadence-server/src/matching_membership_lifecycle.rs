@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::watch,
+    sync::{broadcast, watch},
     task::JoinHandle,
     time::{interval, Instant, MissedTickBehavior},
 };
@@ -40,8 +40,20 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
     }
     /// Provider start, watch registration, and initial fetch are synchronous barriers.
     pub async fn start(&mut self) -> Result<(), ProviderError> {
-        self.provider.start().await?;
-        let events = self.provider.subscribe(&self.service).await?;
+        if self.worker.is_some() || self.stopped.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if let Err(error) = self.provider.start().await {
+            let _ = self.provider.stop().await;
+            return Err(error);
+        }
+        let events = match self.provider.subscribe(&self.service).await {
+            Ok(events) => events,
+            Err(error) => {
+                let _ = self.provider.stop().await;
+                return Err(error);
+            }
+        };
         match self.refresh().await {
             Ok(()) => {}
             Err(e) => {
@@ -57,15 +69,23 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
         let stopped = self.stopped.clone();
         self.worker = Some(tokio::spawn(async move {
             let mut events = events;
+            let mut events_open = true;
             let mut ticker = interval(PERIOD);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut last = Instant::now();
             loop {
                 tokio::select! {
                     _ = stop.changed() => if *stop.borrow() { break },
-                    event = events.recv() => { if event.is_err() { continue; } if last.elapsed() >= MIN_REFRESH {
-                        if let Ok(hosts) = snapshot(provider.as_ref(), &service).await { membership.replace(hosts); last = Instant::now(); }
-                    } },
+                    event = events.recv(), if events_open => {
+                        match event {
+                            Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                                if last.elapsed() >= MIN_REFRESH {
+                                    if let Ok(hosts) = snapshot(provider.as_ref(), &service).await { membership.replace(hosts); last = Instant::now(); }
+                                }
+                            }
+                            Err(broadcast::error::RecvError::Closed) => events_open = false,
+                        }
+                    },
                     _ = ticker.tick() => { if last.elapsed() >= MIN_REFRESH {
                         if let Ok(hosts) = snapshot(provider.as_ref(), &service).await { membership.replace(hosts); last = Instant::now(); }
                     } },
@@ -87,6 +107,9 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
     }
     /// Withdrawal precedes provider teardown; emptying local placement follows worker exit.
     pub async fn shutdown(&mut self) -> Result<(), ProviderError> {
+        if self.worker.is_none() && self.stopped.load(Ordering::Acquire) {
+            return Ok(());
+        }
         if self.stopped.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
@@ -95,6 +118,7 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
             let _ = tx.send(true);
         }
         if let Some(worker) = self.worker.take() {
+            worker.abort();
             let _ = worker.await;
         }
         self.membership.replace(Vec::new());
@@ -125,7 +149,7 @@ async fn snapshot<P: MatchingPeerProvider>(
 mod tests {
     use super::*;
     use crate::matching_peer_provider::{PeerChange, PeerStatus};
-    use std::{collections::HashMap, sync::Mutex};
+    use std::{collections::HashMap, sync::{atomic::AtomicUsize, Mutex}};
     use tokio::sync::broadcast;
 
     // These in-process fakes validate resolver lifecycle semantics only; they are
@@ -134,7 +158,9 @@ mod tests {
         peers: Mutex<Vec<PeerMember>>,
         tx: broadcast::Sender<PeerChange>,
         fail: AtomicBool,
+        fetches: AtomicUsize,
         order: Mutex<Vec<&'static str>>,
+        fail_subscribe: AtomicBool,
     }
     impl Fake {
         fn new() -> Self {
@@ -143,7 +169,9 @@ mod tests {
                 peers: Mutex::new(vec![]),
                 tx,
                 fail: AtomicBool::new(false),
+                fetches: AtomicUsize::new(0),
                 order: Mutex::new(vec![]),
+                fail_subscribe: AtomicBool::new(false),
             }
         }
         fn set(&self, peers: Vec<PeerMember>) {
@@ -157,6 +185,7 @@ mod tests {
             Ok(())
         }
         async fn members(&self, _: &str) -> Result<Vec<PeerMember>, ProviderError> {
+            self.fetches.fetch_add(1, Ordering::SeqCst);
             if self.fail.load(Ordering::SeqCst) {
                 return Err(ProviderError("injected snapshot failure".into()));
             }
@@ -167,6 +196,9 @@ mod tests {
             _: &str,
         ) -> Result<broadcast::Receiver<PeerChange>, ProviderError> {
             self.order.lock().unwrap().push("subscribe");
+            if self.fail_subscribe.load(Ordering::SeqCst) {
+                return Err(ProviderError("injected subscribe failure".into()));
+            }
             Ok(self.tx.subscribe())
         }
         async fn self_evict(&self) -> Result<(), ProviderError> {
@@ -239,11 +271,12 @@ mod tests {
             PeerStatus::Alive,
             "9",
         )]);
-        tokio::time::timeout(Duration::from_millis(300), changed.changed())
+        tokio::time::timeout(Duration::from_millis(2600), changed.changed())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(m.owner("key").unwrap().address, "two:7");
+        assert_eq!(p.fetches.load(Ordering::SeqCst), 2, "burst of hints must coalesce");
         let generation = *changed.borrow();
         p.fail.store(true, Ordering::SeqCst);
         for _ in 0..12 {
@@ -253,6 +286,24 @@ mod tests {
         assert_eq!(*changed.borrow(), generation);
         assert_eq!(m.owner("key").unwrap().address, "two:7");
         lifecycle.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn mapping_matches_go_port_and_identity_boundaries() {
+        let make = |address: &str, grpc: &str, identity: &str| {
+            member(address, identity, "matching", PeerStatus::Alive, grpc)
+        };
+        for (label, expected) in [("0", true), ("65535", true), ("65536", false), ("-1", false), ("+1", false), ("", false)] {
+            let host = make("[::1]:7935", label, "").matching_host("matching").unwrap();
+            assert_eq!(!host.grpc_address.is_empty(), expected, "label {label:?}");
+            assert_eq!(host.identity, "[::1]:7935");
+            if expected { assert_eq!(host.grpc_address, format!("[::1]:{label}")); }
+        }
+        let malformed = make("bad:host:7935", "80", "id").matching_host("matching").unwrap();
+        assert_eq!(malformed.grpc_address, "bad:host:80");
+        let invalid_addr = make("broken", "80", "id").matching_host("matching").unwrap();
+        assert!(invalid_addr.grpc_address.is_empty());
+        assert_eq!(label_to_port("00080"), Some(80));
     }
     #[tokio::test]
     async fn shutdown_self_evicts_before_stop_and_clears_placement() {
@@ -273,5 +324,21 @@ mod tests {
             *p.order.lock().unwrap(),
             vec!["start", "subscribe", "evict", "stop"]
         );
+    }
+
+    #[tokio::test]
+    async fn startup_failures_stop_provider_and_start_is_idempotent() {
+        let p = Arc::new(Fake::new());
+        p.fail_subscribe.store(true, Ordering::SeqCst);
+        let mut lifecycle = MatchingMembershipLifecycle::new("matching", p.clone(), Membership::new("self", vec![]));
+        assert!(lifecycle.start().await.is_err());
+        assert_eq!(*p.order.lock().unwrap(), vec!["start", "subscribe", "stop"]);
+        p.fail_subscribe.store(false, Ordering::SeqCst);
+        lifecycle.start().await.unwrap();
+        lifecycle.start().await.unwrap();
+        assert_eq!(p.order.lock().unwrap().iter().filter(|&&v| v == "start").count(), 2);
+        lifecycle.shutdown().await.unwrap();
+        lifecycle.shutdown().await.unwrap();
+        assert_eq!(p.order.lock().unwrap().iter().filter(|&&v| v == "stop").count(), 2);
     }
 }

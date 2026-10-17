@@ -29,22 +29,43 @@ impl PeerMember {
         {
             return None;
         }
-        let host = self
-            .address
-            .rsplit_once(':')
-            .map(|(h, _)| h)
-            .unwrap_or(&self.address);
-        let grpc = self
-            .labels
-            .get("grpc")
-            .filter(|p| p.parse::<u16>().is_ok())
-            .map(|p| format!("{host}:{p}"))
+        let host = host_from_host_port(&self.address).unwrap_or_default();
+        let grpc = self.labels.get("grpc")
+            .and_then(|p| label_to_port(p).map(|port| format!("{host}:{port}")))
             .unwrap_or_default();
         Some(Host {
             address: self.address.clone(),
-            identity: self.identity.clone(),
+            identity: if self.identity.is_empty() {
+                self.address.clone()
+            } else {
+                self.identity.clone()
+            },
             grpc_address: grpc,
         })
+    }
+}
+
+fn label_to_port(label: &str) -> Option<u16> {
+    if label.is_empty() || !label.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    label.parse::<u16>().ok()
+}
+
+fn host_from_host_port(address: &str) -> Option<String> {
+    if let Some(rest) = address.strip_prefix('[') {
+        if let Some((host, suffix)) = rest.split_once(']') {
+            if suffix.starts_with(':') && !suffix[1..].is_empty() {
+                return Some(format!("[{host}]"));
+            }
+        }
+        return None;
+    }
+    match address.rsplit_once(':') {
+        Some((host, port)) if !port.is_empty() && !host.contains(':') => {
+            Some(host.to_owned())
+        }
+        _ => None,
     }
 }
 
@@ -61,14 +82,13 @@ impl fmt::Display for ProviderError {
 impl std::error::Error for ProviderError {}
 
 /// Async infrastructure seam. Events are hints only: consumers re-fetch snapshots.
-#[allow(async_fn_in_trait)]
 pub trait MatchingPeerProvider: Send + Sync + 'static {
-    async fn start(&self) -> Result<(), ProviderError>;
-    async fn members(&self, service: &str) -> Result<Vec<PeerMember>, ProviderError>;
-    async fn subscribe(
+    fn start(&self) -> impl std::future::Future<Output = Result<(), ProviderError>> + Send;
+    fn members(&self, service: &str) -> impl std::future::Future<Output = Result<Vec<PeerMember>, ProviderError>> + Send;
+    fn subscribe(
         &self,
         service: &str,
-    ) -> Result<broadcast::Receiver<PeerChange>, ProviderError>;
-    async fn self_evict(&self) -> Result<(), ProviderError>;
-    async fn stop(&self) -> Result<(), ProviderError>;
+    ) -> impl std::future::Future<Output = Result<broadcast::Receiver<PeerChange>, ProviderError>> + Send;
+    fn self_evict(&self) -> impl std::future::Future<Output = Result<(), ProviderError>> + Send;
+    fn stop(&self) -> impl std::future::Future<Output = Result<(), ProviderError>> + Send;
 }
