@@ -21,8 +21,21 @@ fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net
             )
         })?
     } else {
-        // Go selects an available interface address; wildcard binding is the remaining parity gap.
-        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+        // Match Go common/rpc/localip.go's address score and first-highest tie rule.
+        let interfaces = if_addrs::get_if_addrs()?;
+        let mut best: Option<(i32, std::net::IpAddr)> = None;
+        for iface in interfaces {
+            let ip = iface.ip();
+            let mut score = if ip.is_ipv4() { 300 } else { 0 };
+            if !iface.is_loopback() && !ip.is_loopback() {
+                // getifaddrs omits interface flags; active addresses are treated as UP.
+                score += 200;
+            }
+            if best.as_ref().is_none_or(|(previous, _)| score > *previous) {
+                best = Some((score, ip));
+            }
+        }
+        best.map(|(_, ip)| ip).ok_or_else(|| anyhow::anyhow!("no addresses to listen on"))?
     };
     Ok(Some(std::net::SocketAddr::new(ip, http.port)))
 }

@@ -24,6 +24,6 @@
 
 ## Remaining parity gaps
 
-- With neither bind option configured, Go auto-detects a host interface; this implementation uses wildcard binding. This is documented and must not be described as exact bind parity.
-- HTTP TLS termination and TLS certificate validation are unsupported; enabled TLS fails startup. Implement YARPC-compatible TLS before claiming full transport parity.
+- Auto-selection mirrors `go/common/rpc/localip.go` address scoring and first-highest tie behavior. `if-addrs` does not expose interface UP flags, so configured non-loopback addresses are treated as UP; down-interface scoring cannot be represented exactly by this crate API.
+- TLS remains unfinished. Go `config.TLS.ToTLSConfig` reads certificate/key pairs, CA file(s), server name, host verification, and client-auth settings. YARPC v1.88.0 defines `disabled`, `permissive` (TLS and plaintext), and `enforced` (TLS only); the inbound installs TLS handling only for non-disabled mode and errors when mode requires TLS but config is missing. Go builds HTTP TLS only when `HTTP.TLS.Enabled`, then passes the mode. Rust currently parses TLS as untyped YAML, does not consume `tls_mode`, and rejects enabled TLS to prevent plaintext fallback. No TLS mode or handshake parity is claimed.
 - This slice does not complete Matching service replacement or any Matching migration gate.
