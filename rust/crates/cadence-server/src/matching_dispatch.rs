@@ -246,7 +246,7 @@ impl TaskDispatcher {
         let queue = self.queue.clone();
         tokio::task::spawn_blocking(move || {
             queue.read_batch_with_clock(
-                NonZeroU32::new(100000).unwrap(),
+                100000,
                 NonZeroU32::new(1).unwrap(),
                 now,
             )
@@ -860,7 +860,7 @@ mod tests {
                 assert!(dispatcher
                     .queue
                     .read_batch(
-                        NonZeroU32::new(100).unwrap(),
+                        100,
                         NonZeroU32::new(1).unwrap(),
                         now()
                     )

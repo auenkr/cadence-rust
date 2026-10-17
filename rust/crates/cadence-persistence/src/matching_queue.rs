@@ -123,14 +123,14 @@ fn scan_batch(
     key: &TaskListKey,
     mut read: i64,
     max: i64,
-    range: NonZeroU32,
+    range: u32,
     batch: NonZeroU32,
 ) -> StorageResult<ScannedBatch> {
     for _ in 0..10 {
         if read >= max {
             break;
         }
-        let upper = read.wrapping_add(i64::from(range.get())).min(max);
+        let upper = read.wrapping_add(i64::from(range)).min(max);
         // Go taskReader retries each individual bounded query, rather than
         // restarting the ten-range scan after a transient driver failure.
         let tasks = crate::matching_retry::persistence(|| {
@@ -348,7 +348,7 @@ impl DurableTaskQueue {
     /// advance the read level without becoming in-flight acknowledgements.
     pub fn read_batch(
         &self,
-        read_range_size: NonZeroU32,
+        read_range_size: u32,
         batch_size: NonZeroU32,
         now: i64,
     ) -> Result<ReadBatch> {
@@ -359,7 +359,7 @@ impl DurableTaskQueue {
     /// wrapper remains useful for replaying deterministic Go scan fixtures.
     pub fn read_batch_with_clock(
         &self,
-        read_range_size: NonZeroU32,
+        read_range_size: u32,
         batch_size: NonZeroU32,
         clock: impl FnMut() -> i64,
     ) -> Result<ReadBatch> {
@@ -378,7 +378,7 @@ impl DurableTaskQueue {
     /// state; false retains the current in-flight row and leaves later rows unread.
     pub fn read_batch_into(
         &self,
-        read_range_size: NonZeroU32,
+        read_range_size: u32,
         batch_size: NonZeroU32,
         mut clock: impl FnMut() -> i64,
         mut admit: impl FnMut(AllocatedTask) -> bool,
@@ -399,7 +399,7 @@ impl DurableTaskQueue {
     /// cursor exclusive across async buffer waits without holding a thread/lock.
     pub fn reader_turn(
         self: &Arc<Self>,
-        read_range_size: NonZeroU32,
+        read_range_size: u32,
         batch_size: NonZeroU32,
     ) -> Result<ReaderTurn> {
         let (permit, scanned) = self.load_reader_turn(read_range_size, batch_size)?;
@@ -412,7 +412,7 @@ impl DurableTaskQueue {
     }
     fn load_reader_turn(
         &self,
-        range: NonZeroU32,
+        range: u32,
         batch: NonZeroU32,
     ) -> Result<(ReaderPermit, ScannedBatch)> {
         let permit = self.reader.lock();
@@ -652,7 +652,7 @@ mod tests {
                 .update_partition_config(Some(config.clone()), 2)
                 .unwrap();
             let tasks = queue.append(&[data(), data()], 3).unwrap();
-            queue.read_batch(n(100), n(10), 4).unwrap();
+            queue.read_batch(100, n(10), 4).unwrap();
             for task in tasks {
                 queue.complete(task.task_id).unwrap();
             }
@@ -760,14 +760,14 @@ mod tests {
         let store = Arc::new(SqliteTaskStore::create(&path, BlobEncoding::ThriftRW).unwrap());
         let queue = Arc::new(DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap());
         let first = queue.append(&[data()], 2).unwrap();
-        queue.read_batch(n(100), n(1), 3).unwrap();
+        queue.read_batch(100, n(1), 3).unwrap();
         let written = queue.append(&[data()], 4).unwrap();
         let connection = rusqlite::Connection::open(&path).unwrap();
         connection
             .execute_batch("ALTER TABLE tasks RENAME TO temporarily_unavailable_tasks")
             .unwrap();
         let copy = queue.clone();
-        let reader = std::thread::spawn(move || copy.read_batch(n(100), n(1), 5));
+        let reader = std::thread::spawn(move || copy.read_batch(100, n(1), 5));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while queue.reader.try_lock().is_ok() {
             assert!(std::time::Instant::now() < deadline, "reader did not start");
@@ -791,7 +791,7 @@ mod tests {
             .expect("reader retries must not block completion")
             .unwrap();
         assert_eq!(loaded.tasks, written);
-        assert!(queue.read_batch(n(100), n(1), 4).unwrap().tasks.is_empty());
+        assert!(queue.read_batch(100, n(1), 4).unwrap().tasks.is_empty());
         queue.complete(written[0].task_id).unwrap();
         assert!(!queue.is_stopped());
     }
@@ -840,7 +840,7 @@ mod tests {
         let (sender, receiver) = std::sync::mpsc::channel();
         let reading = std::thread::spawn(move || {
             let result = (|| -> Result<()> {
-                let rows = copy.read_batch(n(100), n(1), 4)?;
+                let rows = copy.read_batch(100, n(1), 4)?;
                 assert_eq!(rows.tasks[0].task_id, 1);
                 copy.complete(1)?;
                 copy.persist_ack(5)
@@ -862,7 +862,7 @@ mod tests {
         let persisted = store.get_task_list(&key()).unwrap();
         assert_eq!(persisted.range_id, 2);
         assert_eq!(persisted.data.ack_level, 1);
-        assert_eq!(queue.read_batch(n(100), n(1), 6).unwrap().tasks, written);
+        assert_eq!(queue.read_batch(100, n(1), 6).unwrap().tasks, written);
         assert!(!queue.is_stopped());
     }
     #[test]
@@ -916,7 +916,7 @@ mod tests {
         queue
             .append_in_domain(&[data()], source.domain_id, 2)
             .unwrap();
-        assert!(queue.read_batch(n(100), n(10), 3).unwrap().tasks.is_empty());
+        assert!(queue.read_batch(100, n(10), 3).unwrap().tasks.is_empty());
         assert_eq!(store.get_tasks(&source, 0, 100, 10).unwrap().len(), 1);
         store.lease(&target, 0, 0, 4).unwrap();
         assert!(queue
@@ -950,7 +950,7 @@ mod tests {
                 &key(),
                 case["read"].as_i64().unwrap(),
                 case["max"].as_i64().unwrap(),
-                n(case["range"].as_u64().unwrap() as u32),
+                case["range"].as_u64().unwrap() as u32,
                 n(case["batch"].as_u64().unwrap() as u32),
             )
             .unwrap();
@@ -985,7 +985,7 @@ mod tests {
             let mut completed = true;
             queue
                 .read_batch_into(
-                    n(100),
+                    100,
                     n(10),
                     || 3,
                     |_| {
@@ -1014,14 +1014,14 @@ mod tests {
         );
         let queue = Arc::new(DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap());
         let written = queue.append(&vec![data(); 3], 2).unwrap();
-        let turn = queue.reader_turn(n(100), n(10)).unwrap();
+        let turn = queue.reader_turn(100, n(10)).unwrap();
         let mut turn = std::thread::spawn(move || turn).join().unwrap();
         assert_eq!(queue.levels().2, 0, "fetching is not admission");
         assert_eq!(turn.next(|| 3).unwrap(), Some(written[0].clone()));
         queue.complete(written[0].task_id).unwrap();
         drop(turn);
         assert_eq!(
-            queue.read_batch(n(100), n(10), 4).unwrap().tasks,
+            queue.read_batch(100, n(10), 4).unwrap().tasks,
             written[1..]
         );
     }
@@ -1037,7 +1037,7 @@ mod tests {
         let initial_ack = queue.levels().1;
         let pending = queue
             .read_batch_into(
-                n(100),
+                100,
                 n(10),
                 || 3,
                 |task| {
@@ -1056,7 +1056,7 @@ mod tests {
             queue.retry_data(written[0].task_id).unwrap(),
             written[0].data
         );
-        let rest = queue.read_batch(n(100), n(10), 4).unwrap();
+        let rest = queue.read_batch(100, n(10), 4).unwrap();
         assert_eq!(rest.tasks, written[1..]);
     }
     #[test]
@@ -1072,7 +1072,7 @@ mod tests {
         let written = queue.append(&[task.clone(), task], 2).unwrap();
         let mut times = [100, 101].into_iter();
         let loaded = queue
-            .read_batch_with_clock(n(100), n(10), || times.next().unwrap())
+            .read_batch_with_clock(100, n(10), || times.next().unwrap())
             .unwrap();
         // Equality is still deliverable; the next row expires at its own admission.
         assert_eq!(loaded.tasks, written[..1]);
@@ -1112,7 +1112,7 @@ mod tests {
         assert_eq!(store.get_task_list(&key()).unwrap().range_id, 2);
         drop(queue);
         let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(3), 200).unwrap();
-        let loaded = queue.read_batch(n(10), n(10), 200).unwrap();
+        let loaded = queue.read_batch(10, n(10), 200).unwrap();
         assert_eq!(loaded.tasks, tasks);
         assert_eq!(queue.complete(5).unwrap(), 0);
         for id in 1..=4 {
@@ -1123,7 +1123,7 @@ mod tests {
         assert_eq!(queue.collect_garbage(100).unwrap(), 5);
         let next = queue.append(&[data()], 400).unwrap();
         assert_eq!(next[0].task_id, 7);
-        assert_eq!(queue.read_batch(n(10), n(10), 400).unwrap().tasks, next);
+        assert_eq!(queue.read_batch(10, n(10), 400).unwrap().tasks, next);
         assert_eq!(queue.complete(7).unwrap(), 7);
         assert!(matches!(queue.complete(7), Err(QueueError::NotInFlight(7))));
     }
@@ -1134,7 +1134,7 @@ mod tests {
         let store = Arc::new(SqliteTaskStore::create(path, BlobEncoding::ThriftRW).unwrap());
         let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 100).unwrap();
         queue.append(&[data()], 100).unwrap();
-        queue.read_batch(n(100), n(10), 100).unwrap();
+        queue.read_batch(100, n(10), 100).unwrap();
         let rewritten = queue.rewrite_failed(1, 200).unwrap();
         assert_eq!(rewritten.task_id, 2);
         assert_eq!(rewritten.data.created_nanos, 200);
@@ -1145,7 +1145,7 @@ mod tests {
         assert_eq!(queue.collect_garbage(100).unwrap(), 1);
         drop(queue);
         let recovered = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 300).unwrap();
-        let batch = recovered.read_batch(n(100), n(10), 300).unwrap();
+        let batch = recovered.read_batch(100, n(10), 300).unwrap();
         assert_eq!(batch.tasks, vec![rewritten]);
         // A second owner prevents rewriting. Original remains recoverable.
         let owner = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 400).unwrap();
@@ -1156,7 +1156,7 @@ mod tests {
         assert_eq!(recovered.levels().2, 1);
         assert_eq!(store.task_list_size(&key(), 0).unwrap(), 1);
         assert_eq!(
-            owner.read_batch(n(1000), n(10), 600).unwrap().tasks[0].task_id,
+            owner.read_batch(1000, n(10), 600).unwrap().tasks[0].task_id,
             2
         );
         assert!(matches!(
@@ -1175,7 +1175,7 @@ mod tests {
             ..data()
         });
         queue.append(&tasks, 100).unwrap();
-        let batch = queue.read_batch(n(100), n(10), 100).unwrap();
+        let batch = queue.read_batch(100, n(10), 100).unwrap();
         assert_eq!(
             batch
                 .tasks
@@ -1192,7 +1192,7 @@ mod tests {
         queue.persist_ack(100).unwrap();
         drop(queue);
         let queue = DurableTaskQueue::open(store, key(), 0, n(100), 200).unwrap();
-        let batch = queue.read_batch(n(2), n(10), 200).unwrap();
+        let batch = queue.read_batch(2, n(10), 200).unwrap();
         assert!(batch.tasks.is_empty());
         assert!(batch.scan_pending);
         assert_eq!(queue.levels(), (25, 25, 0));
@@ -1208,7 +1208,7 @@ mod tests {
             .map(|_| {
                 let queue = queue.clone();
                 std::thread::spawn(move || {
-                    let task = queue.read_batch(n(100), n(1), 100).unwrap().tasks.remove(0);
+                    let task = queue.read_batch(100, n(1), 100).unwrap().tasks.remove(0);
                     queue.complete(task.task_id).unwrap();
                     task.task_id
                 })

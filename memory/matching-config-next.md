@@ -83,3 +83,34 @@ site checked before wiring): reader/dispatch values
 `matching.asyncTaskDispatchTimeout` (task_reader.go:460, default 3s),
 `matching.minTaskThrottlingBurstSize` (task_list_limiter.go:39, default 1,
 read once per limiter).
+
+## Live reader/dispatch configuration (2026-10-17)
+
+Wired the reader/detector properties Go's `taskReader` and `newTaskListLimiter`
+read, replacing hardcoded Go defaults in the native owner:
+
+- `matching.getTasksBatchSize` (default 1000, DomainName/TaskListName/TaskType
+  filtered): sizes each group buffer at owner creation and each bounded read in
+  `getTaskBatchWithRange`. A non-positive live value falls back to the property
+  default, exactly like Go's reader (`task_reader.go:109,300`).
+- `matching.readRangeSize` (default 50000, a plain unfiltered integer property):
+  read per scan step (`task_reader.go:333`). The persistence scan signature now
+  takes a `u32` range so a non-positive value makes no progress in the bounded
+  ten-step scan, as Go does, instead of substituting a default.
+- `matching.asyncTaskDispatchTimeout` (default 3s, task-list filtered): re-read
+  on every dispatch attempt (`task_reader.go:460`), not frozen at reader
+  creation.
+- `matching.minTaskThrottlingBurstSize` (default 1, task-list filtered): read
+  once when the owner's dispatch limiter is built, matching
+  `task_list_limiter.go:39`; only owners created afterwards pick it up.
+
+Plumbing: `ReaderLive` (three `Fn() -> i64` live reads) plus
+`ReaderConfig.live`; `QueueRegistry::{with_reader_live, with_min_burst}` and
+matching `ReaderPropertiesProvider`/`SyncWaitProvider` providers built in
+`Matching::with_durable_queues`. `TaskListLimiter::with_partitions_and_burst`
+and a `burst()` accessor were added.
+
+Tests: `reader_live_properties_match_go_reads` (live reads, Go default fallback,
+zero-range tolerance, fixed-config defaults) and
+`matching_rpc_live_reader_limits_build_fresh_owners` (per-owner min burst, and
+that an existing owner keeps its construction-time value).

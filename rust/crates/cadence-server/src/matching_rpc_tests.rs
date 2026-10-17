@@ -2321,3 +2321,50 @@ async fn matching_rpc_report_limit_does_not_hold_the_admin_overlay() {
     assert_eq!(matching.poll_rate(&domain, &key.name, 1, Some(25.0), &limiter), 25.0);
     assert_eq!(limiter.limit(), 12.5);
 }
+
+#[tokio::test]
+async fn matching_rpc_live_reader_limits_build_fresh_owners() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let list = |name: &str| p::TaskList {
+        name: name.into(),
+        kind: 1,
+        ..Default::default()
+    };
+    // Go's property defaults: a rate below the minimum burst still allows one
+    // token, and the reader keeps the Go batch/range/timeout defaults.
+    let default_owner = matching
+        .durable_queue(&domain, &list(&key.name), 0)
+        .await
+        .unwrap();
+    default_owner.limiter.report_limit(10.0);
+    assert_eq!(default_owner.limiter.burst(), 10);
+
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .unwrap()
+        .update(
+            false,
+            "matching.minTaskThrottlingBurstSize",
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"3000".to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
+    // Go reads `MinTaskThrottlingBurstSize` when the limiter is constructed, so
+    // only owners created afterwards pick it up; the existing owner is unchanged.
+    let configured = matching
+        .durable_queue(&domain, &list("/__cadence_sys/queue/1"), 0)
+        .await
+        .unwrap();
+    configured.limiter.report_limit(10.0);
+    assert_eq!(configured.limiter.burst(), 3000);
+    assert_eq!(default_owner.limiter.burst(), 10);
+}

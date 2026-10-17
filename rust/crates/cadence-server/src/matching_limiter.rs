@@ -119,17 +119,28 @@ impl TaskListLimiter {
     /// Build a limiter whose partition divisor is re-read live, matching Go's
     /// `countPartitions` func used by `tryUpdate`.
     pub fn with_partitions(count_partitions: PartitionCount) -> Self {
+        Self::with_partitions_and_burst(count_partitions, MIN_TASK_THROTTLING_BURST_SIZE)
+    }
+    /// Go `newTaskListLimiter` reads `matching.minTaskThrottlingBurstSize` once
+    /// when the manager's limiter is built, so a live configuration change only
+    /// applies to owners created afterwards.
+    pub fn with_partitions_and_burst(count_partitions: PartitionCount, min_burst: i64) -> Self {
         Self::new(
             real_clock(),
             TASK_DISPATCH_RPS,
             TASK_DISPATCH_RPS_TTL_NANOS,
-            MIN_TASK_THROTTLING_BURST_SIZE,
+            min_burst,
             count_partitions,
         )
     }
     /// Current backing limit, reported by `DescribeTaskList.status.rate_per_second`.
     pub fn limit(&self) -> f64 {
         self.inner.lock().expect("matching limiter lock").bucket.limit()
+    }
+    /// Current backing burst size (`max(ceil(rate), minTaskThrottlingBurstSize)`,
+    /// capped for a zero rate), mirroring the bucket Go builds in `tryUpdate`.
+    pub fn burst(&self) -> i64 {
+        self.inner.lock().expect("matching limiter lock").bucket.burst()
     }
     /// Current monotonic-anchored time in Unix nanoseconds.
     pub fn now(&self) -> i64 {

@@ -117,6 +117,13 @@ pub struct QueueRegistry {
     /// dynamic-property default (10s).
     qps_interval: Option<QpsIntervalProvider>,
     isolation: Option<IsolationProvider>,
+    /// Live reader configuration (Go's `TaskListConfig.GetTasksBatchSize`,
+    /// `ReadRangeSize` and `AsyncTaskDispatchTimeout`). `None` keeps the Go
+    /// defaults.
+    reader_live: Option<ReaderPropertiesProvider>,
+    /// Go `cfg.MinTaskThrottlingBurstSize(domain, taskList, type)`, read once
+    /// per limiter construction. `None` uses the property default (1).
+    min_burst: Option<SyncWaitProvider>,
 }
 /// Live adaptive-scaler configuration per domain/task-list/type, mirroring
 /// Go's `TaskListConfig` scaler reads. `None` keeps the scaler parked.
@@ -138,6 +145,10 @@ pub type PartitionCountProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sy
 /// `cfg.QPSTrackerInterval(domain, taskList, type)` (`matching.qpsTrackerInterval`,
 /// default 10s). Returned in nanoseconds.
 pub type QpsIntervalProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
+/// Live reader configuration for one owner, mirroring the `TaskListConfig`
+/// reads Go's `taskReader` performs (batch size, read range, dispatch timeout).
+pub type ReaderPropertiesProvider =
+    Arc<dyn Fn(&str, &str, i32) -> crate::matching_reader::ReaderLive + Send + Sync>;
 /// Go `config.QPSTrackerInterval` default.
 pub const DEFAULT_QPS_TRACKER_INTERVAL_NANOS: i64 = 10_000_000_000;
 /// Go `taskListManagerImpl` constructs its tracker with `exp = 0.5`.
@@ -367,6 +378,8 @@ impl QueueRegistry {
             scaler_config: None,
             qps_interval: None,
             isolation: None,
+            reader_live: None,
+            min_burst: None,
         }
     }
     pub(crate) fn with_local_poll_service(mut self, factory: LocalPollFactory) -> Self {
@@ -449,6 +462,18 @@ impl QueueRegistry {
     }
     pub fn with_isolation(mut self, provider: IsolationProvider) -> Self {
         self.isolation = Some(provider);
+        self
+    }
+    /// Install the live reader-configuration provider (Go's
+    /// `GetTasksBatchSize`, `ReadRangeSize` and `AsyncTaskDispatchTimeout`).
+    pub fn with_reader_live(mut self, provider: ReaderPropertiesProvider) -> Self {
+        self.reader_live = Some(provider);
+        self
+    }
+    /// Install Go's `MinTaskThrottlingBurstSize` provider, read once when a
+    /// queue owner's dispatch limiter is built.
+    pub fn with_min_burst(mut self, provider: SyncWaitProvider) -> Self {
+        self.min_burst = Some(provider);
         self
     }
     #[cfg(test)]
@@ -591,8 +616,13 @@ impl QueueRegistry {
                         dispatcher.task_notification(),
                         crate::matching_writer::WriterConfig::default(),
                     );
+                    let min_burst = registry
+                        .min_burst
+                        .as_ref()
+                        .map(|provider| provider(&domain, &lookup.1, lookup.2))
+                        .unwrap_or(crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE);
                     let limiter = Arc::new(
-                        crate::matching_limiter::TaskListLimiter::with_partitions(count_partitions),
+                        crate::matching_limiter::TaskListLimiter::with_partitions_and_burst(count_partitions, min_burst),
                     );
                     let pollers = Arc::new(Mutex::new(cadence_common::poller::Manager::default()));
                     let isolation = registry.isolation.as_ref().map(|provider| provider(&lookup.0.to_string(), &lookup.1, lookup.2, kind, pollers.clone(), partitions.clone())).unwrap_or_default();
@@ -605,10 +635,17 @@ impl QueueRegistry {
                         let task_type = lookup.2;
                         Arc::new(move || std::time::Duration::from_nanos(provider.as_ref().map(|provider| provider(&domain, &name, task_type)).unwrap_or(10_000_000).max(0) as u64))
                     };
+                    let reader_config = crate::matching_reader::ReaderConfig {
+                        live: registry
+                            .reader_live
+                            .as_ref()
+                            .map(|provider| Arc::new(provider(&domain, &lookup.1, lookup.2))),
+                        ..crate::matching_reader::ReaderConfig::default()
+                    };
                     let reader = crate::matching_reader::TaskReader::with_dispatch_check(
                         queue.clone(),
                         dispatcher.task_notification(),
-                        crate::matching_reader::ReaderConfig::default(),
+                        reader_config,
                         activity,
                         limiter.clone(),
                         isolation,

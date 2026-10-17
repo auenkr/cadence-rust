@@ -10,23 +10,95 @@ use std::{
 };
 use tokio::sync::{mpsc, watch, Notify};
 
-#[derive(Clone, Copy)]
+/// Go `matching.getTasksBatchSize` property default. Go's reader falls back to
+/// it whenever the live value is not positive.
+pub const DEFAULT_TASKS_BATCH_SIZE: i64 = 1000;
+/// Go `matching.readRangeSize` default (a plain, unfiltered integer property).
+pub const DEFAULT_READ_RANGE_SIZE: i64 = 50000;
+/// Go `matching.asyncTaskDispatchTimeout` default.
+pub const DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS: i64 = 3_000_000_000;
+/// Go `taskDispatchTimeoutBuffer` (100 ms), added to the minimum timeout
+/// needed to drain the buffers at the configured dispatch rate.
+pub const DISPATCH_TIMEOUT_BUFFER_NANOS: i64 = 100_000_000;
+
+/// Live reads of the reader's Go `TaskListConfig` properties. Go's `taskReader`
+/// consults each one per operation (buffer sizing, per-range batch, per-attempt
+/// dispatch timeout), so a runtime config change takes effect without
+/// recreating the manager. `None` in `ReaderConfig` keeps the fixed values.
+pub type LiveInt = Arc<dyn Fn() -> i64 + Send + Sync>;
+#[derive(Clone)]
+pub struct ReaderLive {
+    /// Go `cfg.GetTasksBatchSize()`.
+    pub batch_size: LiveInt,
+    /// Go `cfg.ReadRangeSize()`.
+    pub read_range_size: LiveInt,
+    /// Go `cfg.AsyncTaskDispatchTimeout()` in nanoseconds.
+    pub dispatch_timeout: LiveInt,
+}
+impl ReaderLive {
+    /// Go `taskReader` batch reads: a non-positive value uses the property
+    /// default instead of querying for zero tasks.
+    fn batch_size(&self) -> u32 {
+        let value = (self.batch_size)();
+        if value <= 0 {
+            DEFAULT_TASKS_BATCH_SIZE as u32
+        } else {
+            u32::try_from(value).unwrap_or(u32::MAX)
+        }
+    }
+    /// Go advances by `ReadRangeSize` each scan step and tolerates a
+    /// non-positive value by making no progress (the ten-step scan is bounded).
+    fn read_range_size(&self) -> u32 {
+        u32::try_from((self.read_range_size)()).unwrap_or(0)
+    }
+    fn dispatch_timeout_nanos(&self) -> i64 {
+        (self.dispatch_timeout)()
+    }
+}
+#[derive(Clone)]
 pub struct ReaderConfig {
     pub batch_size: NonZeroU32,
-    pub read_range_size: NonZeroU32,
+    pub read_range_size: u32,
     /// Go `AsyncTaskDispatchTimeout` (default 3 s).
     pub dispatch_timeout: Duration,
-    /// Go `taskDispatchTimeoutBuffer` (100 ms), added to the minimum timeout
-    /// needed to drain the buffers at the configured dispatch rate.
+    /// Go `taskDispatchTimeoutBuffer` (100 ms).
     pub dispatch_timeout_buffer: Duration,
+    /// Live dynamic-property reads; absent keeps the fixed values above.
+    pub live: Option<Arc<ReaderLive>>,
+}
+impl ReaderConfig {
+    /// Go `newTaskReader` sizes each group buffer from the configured batch
+    /// size, reserving one slot for the dispatch head.
+    fn buffer_batch_size(&self) -> u32 {
+        self.live
+            .as_ref()
+            .map_or_else(|| self.batch_size.get(), |live| live.batch_size())
+    }
+    /// Batch size for the next bounded read (Go `getTaskBatchWithRange`).
+    fn read_batch_size(&self) -> NonZeroU32 {
+        NonZeroU32::new(self.buffer_batch_size()).expect("batch size falls back to a positive default")
+    }
+    /// Range width for the next scan step (Go `getTaskBatch`).
+    fn read_range_size(&self) -> u32 {
+        self.live
+            .as_ref()
+            .map_or(self.read_range_size, |live| live.read_range_size())
+    }
+    /// Dispatch timeout for the next attempt (Go `getDispatchTimeout`).
+    fn dispatch_timeout_nanos(&self) -> i64 {
+        self.live
+            .as_ref()
+            .map_or(self.dispatch_timeout.as_nanos() as i64, |live| live.dispatch_timeout_nanos())
+    }
 }
 impl Default for ReaderConfig {
     fn default() -> Self {
         Self {
-            batch_size: NonZeroU32::new(1000).unwrap(),
-            read_range_size: NonZeroU32::new(50000).unwrap(),
-            dispatch_timeout: Duration::from_secs(3),
-            dispatch_timeout_buffer: Duration::from_millis(100),
+            batch_size: NonZeroU32::new(DEFAULT_TASKS_BATCH_SIZE as u32).unwrap(),
+            read_range_size: DEFAULT_READ_RANGE_SIZE as u32,
+            dispatch_timeout: Duration::from_nanos(DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS as u64),
+            dispatch_timeout_buffer: Duration::from_nanos(DISPATCH_TIMEOUT_BUFFER_NANOS as u64),
+            live: None,
         }
     }
 }
@@ -272,14 +344,14 @@ impl TaskReader {
         });
         let mut buffer_senders = HashMap::new();
         for buffer_group in std::iter::once(String::new()).chain(isolated.keys().cloned()) {
-            let (buffer_send, mut buffer_receive) = if config.batch_size.get() == 1 {
+            let (buffer_send, mut buffer_receive) = if config.buffer_batch_size() == 1 {
                 let buffer = Arc::new(Rendezvous::default());
                 (
                     BufferSender::Unbuffered(buffer.clone()),
                     BufferReceiver::Unbuffered(buffer),
                 )
             } else {
-                let (sender, receiver) = mpsc::channel(config.batch_size.get() as usize - 1);
+                let (sender, receiver) = mpsc::channel(config.buffer_batch_size() as usize - 1);
                 (
                     BufferSender::Buffered(sender),
                     BufferReceiver::Buffered(receiver),
@@ -295,8 +367,8 @@ impl TaskReader {
             let matcher = matcher.clone();
             let isolated = isolated.clone();
             let isolation = isolation.clone();
-            let async_timeout = config.dispatch_timeout;
             let timeout_buffer = config.dispatch_timeout_buffer;
+            let dispatch_config = config.clone();
             tokio::spawn(async move {
                 let _completed = dispatched;
                 'dispatch: loop {
@@ -356,12 +428,15 @@ impl TaskReader {
                             &matcher
                         });
                         let rps = dispatch_limiter.limit();
+                        // Go `getDispatchTimeout` re-reads the configured
+                        // timeout on every dispatch attempt.
+                        let async_timeout = dispatch_config.dispatch_timeout_nanos();
                         let deadline = ((isolated.contains_key(&group) || rps > 1e-7) && active())
                             .then(|| {
                                 let timeout = cadence_common::task_isolation::dispatch_timeout(
                                     rps,
                                     buffers,
-                                    async_timeout.as_nanos() as i64,
+                                    async_timeout,
                                     isolation_duration,
                                     timeout_buffer.as_nanos() as i64,
                                 );
@@ -433,8 +508,10 @@ impl TaskReader {
                 tokio::pin!(notification);
                 notification.as_mut().enable();
                 let queue_copy = queue.clone();
+                // Go reads the scan range and batch size on every bounded read.
+                let (range, batch) = (config.read_range_size(), config.read_batch_size());
                 let result = tokio::task::spawn_blocking(move || {
-                    queue_copy.reader_turn(config.read_range_size, config.batch_size)
+                    queue_copy.reader_turn(range, batch)
                 })
                 .await;
                 if *pump_stop.borrow() || queue.is_stopped() {
@@ -572,8 +649,64 @@ mod tests {
         matching_blob::{BlobEncoding, TaskData},
         matching_sqlite::{SqliteTaskStore, TaskListKey},
     };
+    use std::sync::atomic::{AtomicI64, Ordering};
     use std::time::Duration;
     use uuid::Uuid;
+
+    #[test]
+    fn reader_live_properties_match_go_reads() {
+        let batch = Arc::new(AtomicI64::new(4));
+        let range = Arc::new(AtomicI64::new(7));
+        let timeout = Arc::new(AtomicI64::new(2_000_000_000));
+        let live = Arc::new(ReaderLive {
+            batch_size: {
+                let batch = batch.clone();
+                Arc::new(move || batch.load(Ordering::SeqCst))
+            },
+            read_range_size: {
+                let range = range.clone();
+                Arc::new(move || range.load(Ordering::SeqCst))
+            },
+            dispatch_timeout: {
+                let timeout = timeout.clone();
+                Arc::new(move || timeout.load(Ordering::SeqCst))
+            },
+        });
+        let config = ReaderConfig {
+            live: Some(live),
+            ..Default::default()
+        };
+        // Every read happens live, so a runtime change applies to the next
+        // buffer sizing, scan step and dispatch attempt.
+        assert_eq!(config.buffer_batch_size(), 4);
+        assert_eq!(config.read_batch_size().get(), 4);
+        assert_eq!(config.read_range_size(), 7);
+        assert_eq!(config.dispatch_timeout_nanos(), 2_000_000_000);
+        batch.store(9, Ordering::SeqCst);
+        range.store(11, Ordering::SeqCst);
+        timeout.store(5_000_000, Ordering::SeqCst);
+        assert_eq!(config.buffer_batch_size(), 9);
+        assert_eq!(config.read_range_size(), 11);
+        assert_eq!(config.dispatch_timeout_nanos(), 5_000_000);
+        // Go `getTaskBatchWithRange` falls back to the property default when
+        // the configured batch size is not positive.
+        batch.store(0, Ordering::SeqCst);
+        assert_eq!(config.read_batch_size().get(), DEFAULT_TASKS_BATCH_SIZE as u32);
+        batch.store(-3, Ordering::SeqCst);
+        assert_eq!(config.buffer_batch_size(), DEFAULT_TASKS_BATCH_SIZE as u32);
+        // Go tolerates a non-positive range by making no progress in its
+        // bounded ten-step scan rather than substituting a default.
+        range.store(0, Ordering::SeqCst);
+        assert_eq!(config.read_range_size(), 0);
+        // Without live providers the fixed values and Go defaults still apply.
+        let fixed = ReaderConfig::default();
+        assert_eq!(fixed.buffer_batch_size(), DEFAULT_TASKS_BATCH_SIZE as u32);
+        assert_eq!(fixed.read_range_size(), DEFAULT_READ_RANGE_SIZE as u32);
+        assert_eq!(
+            fixed.dispatch_timeout_nanos(),
+            DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS
+        );
+    }
 
     fn fixture(
         count: usize,
@@ -625,7 +758,7 @@ mod tests {
             wake.clone(),
             ReaderConfig {
                 batch_size: NonZeroU32::new(batch).unwrap(),
-                read_range_size: NonZeroU32::new(100).unwrap(),
+                read_range_size: 100,
                 dispatch_timeout,
                 ..ReaderConfig::default()
             },

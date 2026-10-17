@@ -311,6 +311,71 @@ impl Matching {
                 cadence_persistence::dynamic_config::task_list_integer(config.property_values("matching.forwarderMaxRatePerSecond"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 10)
             })
         };
+        // Go's reader `TaskListConfig` reads: `GetTasksBatchSize` (default 1000,
+        // invalid values fall back to it), `ReadRangeSize` (default 50000, a
+        // plain unfiltered integer) and `AsyncTaskDispatchTimeout` (default 3s).
+        let reader_live: crate::matching_registry::ReaderPropertiesProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id: &str, task_list: &str, task_type: i32| {
+                let scoped = |key: &'static str, default: i64| -> crate::matching_reader::LiveInt {
+                    let domains = domains.clone();
+                    let overlay = overlay.clone();
+                    let domain_id = domain_id.to_string();
+                    let task_list = task_list.to_string();
+                    Arc::new(move || {
+                        let config = overlay.lock().expect("admin lock");
+                        cadence_persistence::dynamic_config::task_list_integer(
+                            config.property_values(key),
+                            domain_name_for(&domains, &domain_id).as_deref(),
+                            &task_list,
+                            task_type,
+                            default,
+                        )
+                    })
+                };
+                let global = |key: &'static str, default: i64| -> crate::matching_reader::LiveInt {
+                    let overlay = overlay.clone();
+                    Arc::new(move || {
+                        let config = overlay.lock().expect("admin lock");
+                        cadence_persistence::dynamic_config::integer(
+                            config.property_values(key),
+                            None,
+                            default,
+                        )
+                    })
+                };
+                crate::matching_reader::ReaderLive {
+                    batch_size: scoped(
+                        "matching.getTasksBatchSize",
+                        crate::matching_reader::DEFAULT_TASKS_BATCH_SIZE,
+                    ),
+                    read_range_size: global(
+                        "matching.readRangeSize",
+                        crate::matching_reader::DEFAULT_READ_RANGE_SIZE,
+                    ),
+                    dispatch_timeout: scoped(
+                        "matching.asyncTaskDispatchTimeout",
+                        crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
+                    ),
+                }
+            })
+        };
+        // Go `cfg.MinTaskThrottlingBurstSize(domain, taskList, type)`, default 1.
+        let min_burst: crate::matching_registry::SyncWaitProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer(
+                    config.property_values("matching.minTaskThrottlingBurstSize"),
+                    domain_name_for(&domains, domain_id).as_deref(),
+                    task_list,
+                    task_type,
+                    crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE,
+                )
+            })
+        };
         let scaler_config: crate::matching_registry::ScalerConfigProvider = {
             let domains = domains.clone();
             let overlay = overlay.clone();
@@ -443,6 +508,8 @@ impl Matching {
             .with_forward_tasks(forward_tasks, forward_rate)
             .with_scaler_config(scaler_config.clone())
             .with_qps_interval(qps_interval)
+            .with_reader_live(reader_live)
+            .with_min_burst(min_burst)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
         let mut matching = Self::new(state);
