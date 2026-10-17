@@ -408,3 +408,20 @@ This artifact intentionally does not modify lifecycle, HTTP listener, or mainten
 It only documents the missing Ringpop provider wire contract. Existing lifecycle code
 (candidate commits `d8776890a`, `56fd25c16`, `3a79b10e4`) is transport-independent and
 remains unchanged.
+
+## Rust wire model checkpoint (2026-10-17)
+
+- Candidate commit `bbd18983b8df62ab75fe3c3c1eb29064412ec00d` cherry-picked onto
+  current parent as `6410c8191` without duplicating research/timeout-fix commits.
+- Repair: Ringpop `labels` serialization now skips `None` and `Some(empty)` for
+  `Member`, `Change`, and `JoinRequest` (`skip_empty_labels`), matching Go
+  `omitempty` for empty maps. `deserialize_labels` still normalizes empty maps to
+  `None`.
+- Verified timestamp behavior against Go `util.Timestamp`: integer only; null and
+  string timestamps fail; missing defaults to zero (`TIMESTAMP_ZERO`).
+- Nil vs empty arrays remain distinct (`Option<Vec<...>>`).
+- Validation: `tests/run-ringpop-wire-compat.py` passed (Go oracle + Rust tests,
+  11 ringpop tests), strict `cargo clippy -p cadence-common --all-targets
+  -- -D warnings` passed with `CARGO_BUILD_JOBS=1`.
+- Scope remains confined to common wire module/tests/fixture/docs; no SWIM
+  server/listener/provider implementation or production parity claim.

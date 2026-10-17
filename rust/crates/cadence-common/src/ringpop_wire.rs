@@ -1,7 +1,7 @@
 //! Ringpop TChannel JSON wire models.
 
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const ALIVE: &str = "alive";
@@ -43,17 +43,33 @@ where
     Ok(value.filter(|map| !map.is_empty()))
 }
 
+fn skip_empty_labels(value: &Option<BTreeMap<String, String>>) -> bool {
+    value.as_ref().is_none_or(BTreeMap::is_empty)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member {
-    #[serde(rename = "address", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "address",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub address: String,
-    #[serde(rename = "status", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "status",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub status: String,
-    #[serde(rename = "incarnationNumber", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "incarnationNumber",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub incarnation: i64,
     #[serde(
         rename = "labels",
-        skip_serializing_if = "Option::is_none",
+        skip_serializing_if = "skip_empty_labels",
         default,
         deserialize_with = "deserialize_labels"
     )]
@@ -62,15 +78,35 @@ pub struct Member {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Change {
-    #[serde(rename = "source", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "source",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub source: String,
-    #[serde(rename = "sourceIncarnationNumber", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "sourceIncarnationNumber",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub source_incarnation: i64,
-    #[serde(rename = "address", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "address",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub address: String,
-    #[serde(rename = "incarnationNumber", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "incarnationNumber",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub incarnation: i64,
-    #[serde(rename = "status", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "status",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub status: String,
     #[serde(
         rename = "tombstone",
@@ -81,7 +117,7 @@ pub struct Change {
     pub tombstone: bool,
     #[serde(
         rename = "labels",
-        skip_serializing_if = "Option::is_none",
+        skip_serializing_if = "skip_empty_labels",
         default,
         deserialize_with = "deserialize_labels"
     )]
@@ -111,15 +147,27 @@ impl Change {
 pub struct JoinRequest {
     #[serde(rename = "app", default, deserialize_with = "deserialize_null_default")]
     pub app: String,
-    #[serde(rename = "source", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "source",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub source: String,
-    #[serde(rename = "incarnationNumber", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "incarnationNumber",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub incarnation: i64,
-    #[serde(rename = "timeout", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "timeout",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub timeout: i64,
     #[serde(
         rename = "labels",
-        skip_serializing_if = "Option::is_none",
+        skip_serializing_if = "skip_empty_labels",
         default,
         deserialize_with = "deserialize_labels"
     )]
@@ -130,11 +178,19 @@ pub struct JoinRequest {
 pub struct JoinResponse {
     #[serde(rename = "app", default, deserialize_with = "deserialize_null_default")]
     pub app: String,
-    #[serde(rename = "coordinator", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "coordinator",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub coordinator: String,
     #[serde(rename = "membership", default)]
     pub membership: Option<Vec<Change>>,
-    #[serde(rename = "membershipChecksum", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "membershipChecksum",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub membership_checksum: u32,
 }
 
@@ -142,11 +198,23 @@ pub struct JoinResponse {
 pub struct Ping {
     #[serde(rename = "changes", default)]
     pub changes: Option<Vec<Change>>,
-    #[serde(rename = "checksum", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "checksum",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub checksum: u32,
-    #[serde(rename = "source", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "source",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub source: String,
-    #[serde(rename = "sourceIncarnationNumber", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "sourceIncarnationNumber",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub source_incarnation: i64,
     #[serde(rename = "app", default, deserialize_with = "deserialize_null_default")]
     pub app: String,
@@ -154,13 +222,29 @@ pub struct Ping {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PingRequest {
-    #[serde(rename = "source", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "source",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub source: String,
-    #[serde(rename = "sourceIncarnationNumber", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "sourceIncarnationNumber",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub source_incarnation: i64,
-    #[serde(rename = "target", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "target",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub target: String,
-    #[serde(rename = "checksum", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "checksum",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub checksum: u32,
     #[serde(rename = "changes", default)]
     pub changes: Option<Vec<Change>>,
@@ -168,9 +252,17 @@ pub struct PingRequest {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PingResponse {
-    #[serde(rename = "pingStatus", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "pingStatus",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub ping_status: bool,
-    #[serde(rename = "target", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "target",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub target: String,
     #[serde(rename = "changes", default)]
     pub changes: Option<Vec<Change>>,
@@ -178,9 +270,17 @@ pub struct PingResponse {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplicationError {
-    #[serde(rename = "type", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub error_type: String,
-    #[serde(rename = "message", default, deserialize_with = "deserialize_null_default")]
+    #[serde(
+        rename = "message",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub message: String,
 }
 
@@ -191,7 +291,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn fixture() -> Value {
-        let path = format!("{}/tests/fixtures/ringpop_wire.json", env!("CARGO_MANIFEST_DIR"));
+        let path = format!(
+            "{}/tests/fixtures/ringpop_wire.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
         let raw = std::fs::read_to_string(&path).expect("fixture file");
         serde_json::from_str(&raw).expect("fixture json")
     }
@@ -222,8 +325,14 @@ mod tests {
 
     #[test]
     fn nil_vs_empty_slices_preserved() {
-        let nil_ping: Ping = Ping { changes: None, ..Default::default() };
-        let empty_ping: Ping = Ping { changes: Some(vec![]), ..Default::default() };
+        let nil_ping: Ping = Ping {
+            changes: None,
+            ..Default::default()
+        };
+        let empty_ping: Ping = Ping {
+            changes: Some(vec![]),
+            ..Default::default()
+        };
         let nil_value = serde_json::to_value(&nil_ping).unwrap();
         let empty_value = serde_json::to_value(&empty_ping).unwrap();
         assert_eq!(nil_value.get("changes").unwrap(), &Value::Null);
@@ -310,15 +419,22 @@ mod tests {
             timestamp: Timestamp(1729123456),
             ..Default::default()
         };
-        assert_eq!(serde_json::to_value(&rust).unwrap(), go["change_faulty_tombstone_flag"]);
+        assert_eq!(
+            serde_json::to_value(&rust).unwrap(),
+            go["change_faulty_tombstone_flag"]
+        );
     }
 
     #[test]
     fn go_wire_fixture_join() {
         let go = fixture();
         let rust = JoinRequest::default();
-        assert_eq!(serde_json::to_value(&rust).unwrap(), go["join_request_default"]);
-        let parsed: JoinRequest = serde_json::from_value(go["join_request_default"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&rust).unwrap(),
+            go["join_request_default"]
+        );
+        let parsed: JoinRequest =
+            serde_json::from_value(go["join_request_default"].clone()).unwrap();
         assert_eq!(parsed, rust);
 
         let rust = JoinRequest {
@@ -335,9 +451,15 @@ mod tests {
                 m
             }),
         };
-        assert_eq!(serde_json::to_value(&rust).unwrap(), go["join_request_labels"]);
+        assert_eq!(
+            serde_json::to_value(&rust).unwrap(),
+            go["join_request_labels"]
+        );
 
-        for (key, membership) in [("join_response_nil_membership", None), ("join_response_empty_membership", Some(vec![]))] {
+        for (key, membership) in [
+            ("join_response_nil_membership", None),
+            ("join_response_empty_membership", Some(vec![])),
+        ] {
             let rust = JoinResponse {
                 app: "cadence".into(),
                 coordinator: "127.0.0.1:7934".into(),
@@ -371,13 +493,19 @@ mod tests {
             }]),
             membership_checksum: 3735928559,
         };
-        assert_eq!(serde_json::to_value(&rust).unwrap(), go["join_response_populated"]);
+        assert_eq!(
+            serde_json::to_value(&rust).unwrap(),
+            go["join_response_populated"]
+        );
     }
 
     #[test]
     fn go_wire_fixture_ping() {
         let go = fixture();
-        for (key, changes) in [("ping_nil_changes", None), ("ping_empty_changes", Some(vec![]))] {
+        for (key, changes) in [
+            ("ping_nil_changes", None),
+            ("ping_empty_changes", Some(vec![])),
+        ] {
             let rust = Ping {
                 changes,
                 checksum: 3735928559,
@@ -412,9 +540,15 @@ mod tests {
             source_incarnation: 1729123456,
             app: "cadence".into(),
         };
-        assert_eq!(serde_json::to_value(&rust).unwrap(), go["ping_populated_changes"]);
+        assert_eq!(
+            serde_json::to_value(&rust).unwrap(),
+            go["ping_populated_changes"]
+        );
 
-        for (key, changes) in [("ping_request_nil_changes", None), ("ping_request_empty_changes", Some(vec![]))] {
+        for (key, changes) in [
+            ("ping_request_nil_changes", None),
+            ("ping_request_empty_changes", Some(vec![])),
+        ] {
             let rust = PingRequest {
                 source: "127.0.0.1:7933".into(),
                 source_incarnation: 1729123456,
@@ -428,8 +562,12 @@ mod tests {
         }
 
         let rust = PingResponse::default();
-        assert_eq!(serde_json::to_value(&rust).unwrap(), go["ping_response_default"]);
-        let parsed: PingResponse = serde_json::from_value(go["ping_response_default"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&rust).unwrap(),
+            go["ping_response_default"]
+        );
+        let parsed: PingResponse =
+            serde_json::from_value(go["ping_response_default"].clone()).unwrap();
         assert_eq!(parsed, rust);
 
         let rust = PingResponse {
@@ -437,7 +575,10 @@ mod tests {
             target: "127.0.0.1:7935".into(),
             changes: Some(vec![]),
         };
-        assert_eq!(serde_json::to_value(&rust).unwrap(), go["ping_response_populated"]);
+        assert_eq!(
+            serde_json::to_value(&rust).unwrap(),
+            go["ping_response_populated"]
+        );
     }
 
     #[test]
@@ -447,8 +588,72 @@ mod tests {
             error_type: "error".into(),
             message: "node is not ready to handle requests".into(),
         };
-        assert_eq!(serde_json::to_value(&rust).unwrap(), go["application_error"]);
-        let parsed: ApplicationError = serde_json::from_value(go["application_error"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&rust).unwrap(),
+            go["application_error"]
+        );
+        let parsed: ApplicationError =
+            serde_json::from_value(go["application_error"].clone()).unwrap();
         assert_eq!(parsed, rust);
+    }
+
+    #[test]
+    fn empty_labels_serialize_as_omitted() {
+        let go = fixture();
+        let empty = BTreeMap::new();
+
+        let member = Member {
+            labels: Some(empty.clone()),
+            ..Default::default()
+        };
+        assert_eq!(serde_json::to_value(&member).unwrap(), go["member_default"]);
+        assert_eq!(
+            serde_json::from_value::<Member>(go["member_default"].clone())
+                .unwrap()
+                .labels,
+            None
+        );
+
+        let change = Change {
+            labels: Some(empty.clone()),
+            ..Default::default()
+        };
+        assert_eq!(serde_json::to_value(&change).unwrap(), go["change_default"]);
+
+        let join = JoinRequest {
+            labels: Some(empty),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&join).unwrap(),
+            go["join_request_default"]
+        );
+    }
+
+    #[test]
+    fn timestamp_null_and_custom_unmarshal_match_go() {
+        // Go's util.Timestamp.UnmarshalJSON requires an integer; null and strings error.
+        assert!(serde_json::from_str::<Timestamp>("null").is_err());
+        assert!(serde_json::from_str::<Timestamp>("\"1729123456\"").is_err());
+        let parsed: Timestamp = serde_json::from_str("1729123456").unwrap();
+        assert_eq!(parsed.0, 1729123456);
+        // Missing field defaults to the zero Go timestamp.
+        #[derive(serde::Deserialize)]
+        struct Holder {
+            #[serde(default)]
+            timestamp: Timestamp,
+        }
+        let holder: Holder = serde_json::from_str("{}").unwrap();
+        assert_eq!(holder.timestamp.0, TIMESTAMP_ZERO);
+    }
+
+    #[test]
+    fn labels_empty_roundtrip_normalizes_to_none() {
+        // Go unmarshals an empty/omitted label map into nil on the wire; Rust
+        // normalizes empty maps to None so both sides omit empty labels.
+        let input = serde_json::json!({"labels": {}});
+        let parsed: Member = serde_json::from_value(input).unwrap();
+        assert_eq!(parsed.labels, None);
+        assert_eq!(serde_json::to_value(&parsed).unwrap().get("labels"), None);
     }
 }
