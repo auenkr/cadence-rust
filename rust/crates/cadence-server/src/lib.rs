@@ -54,3 +54,5 @@ pub mod thrift_matching;
 
 #[allow(clippy::result_large_err)]
 pub mod matching_membership;
+pub mod matching_peer_provider;
+pub mod matching_membership_lifecycle;
