@@ -1,3 +1,27 @@
+## Auto-config hint checkpoint (2026-10-17)
+
+Pushed e559bfa73. Every Matching poll now carries Go's `types.AutoConfigHint`:
+`matching.enableClientAutoConfig` (default false, domain/task-list/task-type
+filtered) plus the elapsed poll wait, applied to durable delivered
+decision/query responses, empty decision responses, activity responses
+(delivered = activity type, empty = decision type per Go's engine.go:937 quirk)
+and the non-durable embedded-engine polls, which previously always reported
+`None`.
+
+FULL compatibility runner PASSED all stages (Go differentials, public/internal
+gRPC, Go SDK over TChannel, Go-services delivery, mixed Go
+Frontend/History/Worker + Rust Matching):
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-auto-config/results.json,
+/tmp/compat-autoconfig.exit = 0. Workspace tests (162 server lib) and strict
+workspace/all-target Clippy pass.
+
+Whole Matching remains incomplete. Remaining live config: updateAckInterval,
+idleTasklistCheckInterval/maxTasklistIdleTime, maxTaskDeleteBatchSize,
+maxTaskBatchSize/outstandingTaskAppendsThreshold, appendTaskTimeout,
+recordTaskStartedTimeout, shutdownDrainDuration. Larger gaps: production
+membership discovery/runtime wiring in main, dedicated Matching HTTP listener,
+shard-distributor integration. See matching-config-next.md.
+
 ## Live Matching reader/dispatch config checkpoint (2026-10-17)
 
 Pushed 11a6cbc4a. The native Matching owner now reads Go's live
