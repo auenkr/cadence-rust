@@ -502,7 +502,7 @@ mod tests {
             Some(&grpc_timeout(default))
         );
         // Go reads `matching.recordTaskStartedTimeout(domain)` per attempt.
-        let client = client().with_record_started_timeout(Arc::new(|domain_id: &str| {
+        let client = history_client.clone().with_record_started_timeout(Arc::new(|domain_id: &str| {
             if domain_id == "domain-a" {
                 Duration::from_millis(250)
             } else {

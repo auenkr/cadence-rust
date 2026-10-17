@@ -1020,10 +1020,7 @@ mod tests {
         assert_eq!(turn.next(|| 3).unwrap(), Some(written[0].clone()));
         queue.complete(written[0].task_id).unwrap();
         drop(turn);
-        assert_eq!(
-            queue.read_batch(100, n(10), 4).unwrap().tasks,
-            written[1..]
-        );
+        assert_eq!(queue.read_batch(100, n(10), 4).unwrap().tasks, written[1..]);
     }
     #[test]
     fn matching_queue_cancelled_admission_leaves_later_batch_rows_unread() {
