@@ -39,20 +39,43 @@ config_path.write_text(config)
 tls_config_path = artifacts / 'server-tls.yaml'
 tls_config_path.write_text(config.replace(
     f'        port: {matching_http}',
-    f'        port: {matching_http}\n        tls: {{enabled: true}}',
+    f'        port: {matching_http}\n        TLSMode: enforced\n        tls:\n          enabled: true\n          certFile: {artifacts / "tls-cert.pem"}\n          keyFile: {artifacts / "tls-key.pem"}',
     1,
 ))
+subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout',
+                str(artifacts / 'tls-key.pem'), '-out', str(artifacts / 'tls-cert.pem'),
+                '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost'],
+               check=True, capture_output=True)
 command = [str(args.server_bin.resolve()), 'start', '--config', str(config_path), '--port', str(http), '--grpc-port', str(frontend),
            '--history-grpc-port', str(history), '--matching-grpc-port', str(matching), '--tchannel-port', str(tchannel),
            '--matching-tchannel-port', str(matching_tchannel), '--data-dir', str(artifacts / 'data')]
 overlay = artifacts / 'overlay.json'
 overlay.write_text(json.dumps({'Replace': {str(root / 'go/service/matching/wrappers/thrift/rust_native_test.go'): str(root / 'tests/matching-thrift-go_test.go')}}))
-tls_start = subprocess.run(
-    [str(args.server_bin.resolve()), 'start', '--config', str(tls_config_path)],
-    cwd=root, capture_output=True, text=True, timeout=10,
-)
-if tls_start.returncode == 0 or 'inbound TLS is unsupported' not in tls_start.stderr:
-    raise AssertionError(f'Matching TLS did not fail closed: {tls_start.stdout}\n{tls_start.stderr}')
+def assert_start_fails(test_config, message):
+    test_command = command.copy()
+    test_command[test_command.index('--config') + 1] = str(test_config)
+    result = subprocess.run(test_command, cwd=root, capture_output=True, text=True, timeout=15)
+    if result.returncode == 0 or message not in result.stdout + result.stderr:
+        raise AssertionError(f'expected startup failure containing {message!r}: {result.stdout}\n{result.stderr}')
+
+missing_tls_path = artifacts / 'missing-tls.yaml'
+missing_tls_path.write_text(config.replace(
+    f'        port: {matching_http}',
+    f'        port: {matching_http}\n        TLSMode: enforced', 1))
+assert_start_fails(missing_tls_path, 'requires tls.enabled')
+bad_cert_path = artifacts / 'bad-cert.yaml'
+bad_cert_path.write_text(tls_config_path.read_text().replace(str(artifacts / 'tls-cert.pem'), str(artifacts / 'missing-cert.pem')))
+assert_start_fails(bad_cert_path, 'loading Matching HTTP TLS certificate/key')
+invalid_cert = artifacts / 'invalid-cert.pem'
+invalid_cert.write_text('not a PEM certificate')
+invalid_cert_path = artifacts / 'invalid-cert.yaml'
+invalid_cert_path.write_text(tls_config_path.read_text().replace(str(artifacts / 'tls-cert.pem'), str(invalid_cert)))
+assert_start_fails(invalid_cert_path, 'loading Matching HTTP TLS certificate/key')
+wrong_key = artifacts / 'wrong-key.pem'
+subprocess.run(['openssl', 'genrsa', '-out', str(wrong_key), '2048'], check=True, capture_output=True)
+mismatched_path = artifacts / 'mismatched-key.yaml'
+mismatched_path.write_text(tls_config_path.read_text().replace(str(artifacts / 'tls-key.pem'), str(wrong_key)))
+assert_start_fails(mismatched_path, 'loading Matching HTTP TLS certificate/key')
 with (artifacts / 'server.log').open('w') as log:
     server = subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
     try:
@@ -111,4 +134,37 @@ with (artifacts / 'server.log').open('w') as log:
         except subprocess.TimeoutExpired:
             server.kill()
             server.wait()
+tls_command = command.copy()
+tls_command[tls_command.index('--config') + 1] = str(tls_config_path)
+with (artifacts / 'server-tls.log').open('w') as log:
+    tls_server = subprocess.Popen(tls_command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+    try:
+        deadline = time.monotonic() + 30
+        while True:
+            if tls_server.poll() is not None:
+                raise RuntimeError(f'Rust TLS server exited: {artifacts / "server-tls.log"}')
+            try:
+                with socket.create_connection(('127.0.0.1', matching_http), timeout=0.2):
+                    break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Rust Matching TLS listener did not start')
+                time.sleep(0.1)
+        subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
+                        '-run', '^TestRustMatchingTLS$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=60,
+                       env={**os.environ, 'CADENCE_MATCHING_TLS_HTTP': f'https://localhost:{matching_http}/matching',
+                            'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')})
+        with socket.create_connection(('127.0.0.1', matching_http), timeout=2) as plaintext:
+            plaintext.sendall(b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n')
+            plaintext.settimeout(2)
+            response = plaintext.recv(256)
+            if not response or response[0] != 0x15:
+                raise AssertionError(f'plaintext did not receive a TLS alert: {response!r}')
+    finally:
+        tls_server.terminate()
+        try:
+            tls_server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            tls_server.kill()
+            tls_server.wait()
 print(f'Native Matching Thrift compatibility passed; artifacts: {artifacts}')

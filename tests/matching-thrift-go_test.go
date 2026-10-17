@@ -2,6 +2,8 @@ package thrift_test
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -223,6 +225,33 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			}
 			fmt.Println("Verified all ten native Matching Thrift methods via", mode)
 		})
+	}
+}
+
+func TestRustMatchingTLS(t *testing.T) {
+	endpoint := os.Getenv("CADENCE_MATCHING_TLS_HTTP")
+	if endpoint == "" {
+		t.Skip("requires enforced TLS Matching listener")
+	}
+	tr := yhttp.NewTransport()
+	root := x509.NewCertPool()
+	certificate, err := os.ReadFile(os.Getenv("CADENCE_MATCHING_TLS_CERT"))
+	if err != nil || !root.AppendCertsFromPEM(certificate) {
+		t.Fatalf("load test TLS root: %v", err)
+	}
+	outbound := tr.NewSingleOutbound(endpoint, yhttp.OutboundTLSConfiguration(&tls.Config{RootCAs: root, ServerName: "localhost"}))
+	dispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-tls-compat", Outbounds: yarpc.Outbounds{
+		"cadence-matching": {Unary: outbound},
+	}})
+	if err := dispatcher.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer dispatcher.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	health, err := metaclient.New(dispatcher.ClientConfig("cadence-matching")).Health(ctx)
+	if err != nil || !health.GetOk() {
+		t.Fatalf("TLS Meta::health: %v %v", health, err)
 	}
 }
 func waitForPoller(t *testing.T, ctx context.Context, matching matchingserviceclient.Interface, domain string, list *s.TaskList) {

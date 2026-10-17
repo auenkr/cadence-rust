@@ -43,10 +43,18 @@ fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net
 async fn matching_http_tls(
     http: &config::HttpConfig,
 ) -> anyhow::Result<Option<axum_server::tls_rustls::RustlsConfig>> {
-    let Some(tls) = http.tls.as_ref().filter(|tls| tls.enabled) else {
+    let mode = http.tls_mode.as_str();
+    if !matches!(mode, "" | "disabled" | "permissive" | "enforced") {
+        anyhow::bail!("unknown TLSMode {mode:?}; expected disabled, permissive, or enforced");
+    }
+    let tls = http.tls.as_ref();
+    if mode == "enforced" && !tls.is_some_and(|tls| tls.enabled) {
+        anyhow::bail!("Matching HTTP TLSMode enforced requires tls.enabled: true");
+    }
+    let Some(tls) = tls.filter(|tls| tls.enabled) else {
         return Ok(None);
     };
-    if !http.tls_mode.eq_ignore_ascii_case("enforced") {
+    if mode != "enforced" {
         anyhow::bail!(
             "Matching HTTP TLS enabled requires TLSMode: enforced; mode {:?} is unsupported",
             http.tls_mode
@@ -94,6 +102,78 @@ mod matching_http_listener_tests {
             .contains("HTTP port is not set"));
         let tls: config::HttpConfig = serde_yaml::from_str("tls: {enabled: true}").unwrap();
         assert!(matching_http_tls(&tls).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn validates_tls_mode_and_certificate_configuration() {
+        let enforced_without_tls: config::HttpConfig =
+            serde_yaml::from_str("TLSMode: enforced").unwrap();
+        assert!(matching_http_tls(&enforced_without_tls)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("requires tls.enabled"));
+        let enforced_with_tls_disabled: config::HttpConfig = serde_yaml::from_str(
+            "TLSMode: enforced\ntls: {enabled: false}",
+        )
+        .unwrap();
+        assert!(matching_http_tls(&enforced_with_tls_disabled)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("requires tls.enabled"));
+
+        let uppercase: config::HttpConfig = serde_yaml::from_str(
+            "TLSMode: Enforced\ntls: {enabled: true, certFile: cert, keyFile: key}",
+        )
+        .unwrap();
+        assert!(matching_http_tls(&uppercase)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("unknown TLSMode"));
+
+        let permissive: config::HttpConfig = serde_yaml::from_str(
+            "TLSMode: permissive\ntls: {enabled: true, certFile: cert, keyFile: key}",
+        )
+        .unwrap();
+        assert!(matching_http_tls(&permissive)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("requires TLSMode: enforced"));
+
+        let missing_cert: config::HttpConfig = serde_yaml::from_str(
+            "TLSMode: enforced\ntls: {enabled: true, keyFile: key}",
+        )
+        .unwrap();
+        assert!(matching_http_tls(&missing_cert)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("requires certFile and keyFile"));
+
+        let invalid_cert = tempfile::NamedTempFile::new().unwrap();
+        let invalid_key = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(invalid_cert.path(), b"not a certificate").unwrap();
+        std::fs::write(invalid_key.path(), b"not a key").unwrap();
+        let invalid_pair: config::HttpConfig = serde_yaml::from_str(&format!(
+            "TLSMode: enforced\ntls: {{enabled: true, certFile: {:?}, keyFile: {:?}}}",
+            invalid_cert.path().to_string_lossy(),
+            invalid_key.path().to_string_lossy(),
+        ))
+        .unwrap();
+        assert!(matching_http_tls(&invalid_pair)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("loading Matching HTTP TLS certificate/key"));
     }
 }
 
