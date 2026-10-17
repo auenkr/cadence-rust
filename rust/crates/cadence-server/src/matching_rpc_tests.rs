@@ -2368,3 +2368,74 @@ async fn matching_rpc_live_reader_limits_build_fresh_owners() {
     assert_eq!(configured.limiter.burst(), 3000);
     assert_eq!(default_owner.limiter.burst(), 10);
 }
+
+#[tokio::test]
+async fn matching_rpc_poll_auto_config_hint_matches_go_scoping() {
+    use cadence_api::{
+        admin::{DynamicConfigFilter, DynamicConfigValue},
+        enums::EncodingType,
+        types::DataBlob,
+    };
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let json_blob =
+        |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+    // Keep the empty long polls short.
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .unwrap()
+        .update(false, "matching.longPollExpirationInterval", vec![DynamicConfigValue {
+            value: json_blob(serde_json::json!("5ms")),
+            filters: vec![],
+        }]);
+    let empty_activity = || async {
+        matching
+            .poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+                domain_id: domain.clone(),
+                request: Some(p::PollForActivityTaskRequest { task_list: list(), ..Default::default() }),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+    };
+    // Go installs an auto-config hint on every poll, enabled by
+    // `matching.enableClientAutoConfig` (default false).
+    let first = empty_activity().await;
+    assert!(first.task_token.is_empty());
+    let hint = first.auto_config_hint.expect("every poll carries the auto-config hint");
+    assert!(!hint.enable_auto_config);
+    // Enable it only for activity reads.
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .unwrap()
+        .update(false, "matching.enableClientAutoConfig", vec![DynamicConfigValue {
+            value: json_blob(serde_json::json!(true)),
+            filters: vec![DynamicConfigFilter { name: "taskType".into(), value: json_blob(serde_json::json!(1)) }],
+        }]);
+    // Go's empty-activity branch passes the decision task type, so the
+    // activity-scoped value does not apply to an empty activity poll.
+    assert!(!empty_activity().await.auto_config_hint.unwrap().enable_auto_config);
+    let decision = matching
+        .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain.clone(),
+            request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(decision.task_token.is_empty());
+    assert!(!decision.auto_config_hint.unwrap().enable_auto_config);
+    // A delivered task is stamped by the matcher with the manager's own type.
+    assert!(matching.auto_config_hint(&domain, "queue", 1, std::time::Instant::now()).enable_auto_config);
+    assert!(!matching.auto_config_hint(&domain, "queue", 0, std::time::Instant::now()).enable_auto_config);
+}

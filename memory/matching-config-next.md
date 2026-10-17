@@ -114,3 +114,42 @@ Tests: `reader_live_properties_match_go_reads` (live reads, Go default fallback,
 zero-range tolerance, fixed-config defaults) and
 `matching_rpc_live_reader_limits_build_fresh_owners` (per-owner min burst, and
 that an existing owner keeps its construction-time value).
+
+## Auto-config hint on every Matching poll (2026-10-17)
+
+Go's `taskMatcher.Poll` stamps the task it returns with
+`types.AutoConfigHint { EnableAutoConfig: cfg.EnableClientAutoConfig(), PollerWaitTimeInMs }`
+(`matcher.go:456`), `createPollForDecisionTaskResponse`/`createPollForActivityTaskResponse`
+copy it onto the response (`engine.go:766,955,1410,1467`), and the engine also
+installs the hint on an empty poll (`engine.go:745,936`). Rust previously only
+forwarded whatever the embedded engine happened to set, so the durable backend
+never produced a hint at all.
+
+Now `Matching::auto_config_hint` reads `matching.enableClientAutoConfig`
+(domain/task-list/task-type filtered, default false) and the elapsed poll wait,
+and it is applied to:
+
+- durable delivered decision/query responses, empty durable decision responses
+  (isolation reload, standby timeout, failover) and the query-error empty poll;
+- durable activity responses, using the manager's activity type (1) for a
+  delivered task and the decision type (0) for an empty poll, mirroring Go's
+  `engine.go:937` quirk that the empty-activity branch passes
+  `persistence.TaskListTypeDecision`;
+- the non-durable (embedded engine) decision and activity polls, which replace
+  their previously always-`None` hint with the same computation.
+
+The value flows to Thrift unchanged because `thrift_matching` serializes the
+response field (170 decision / 180 activity). Validation: 162 server lib tests,
+workspace tests and strict clippy pass; the FULL compatibility runner passed
+every stage including the Go differentials, the Go SDK over TChannel and the
+mixed Go Frontend/History/Worker + Rust Matching probe
+(`/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-auto-config/results.json`,
+`/tmp/compat-autoconfig.exit` = 0).
+
+Next candidates: `matching.updateAckInterval`, `matching.idleTasklistCheckInterval`
+/ `matching.maxTasklistIdleTime`, `matching.maxTaskDeleteBatchSize`,
+`matching.maxTaskBatchSize` / `matching.outstandingTaskAppendsThreshold`,
+`matching.appendTaskTimeout`, `matching.recordTaskStartedTimeout`,
+`matching.shutdownDrainDuration`; production membership discovery/runtime
+wiring in `main`; dedicated Matching HTTP listener; shard-distributor
+integration.

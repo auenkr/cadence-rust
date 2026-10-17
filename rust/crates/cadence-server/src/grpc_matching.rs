@@ -582,6 +582,30 @@ impl Matching {
             None => crate::matching_limiter::TASK_DISPATCH_RPS,
         }
     }
+    /// Go `types.AutoConfigHint`. `taskMatcher.Poll` stamps the task it returns
+    /// with `cfg.EnableClientAutoConfig()` bound to the manager's own task-list
+    /// type plus the elapsed poll wait, and the engine stamps the same hint on
+    /// an empty poll. For the empty branch Go passes the decision task type even
+    /// for activity polls, so the caller selects the type accordingly.
+    fn auto_config_hint(
+        &self,
+        domain: &str,
+        list: &str,
+        task_type: i32,
+        started: std::time::Instant,
+    ) -> p::AutoConfigHint {
+        let enabled = {
+            let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+            cadence_persistence::dynamic_config::task_list_boolean(
+                config.property_values("matching.enableClientAutoConfig"),
+                domain_name_for(&self.frontend.state.domains, domain).as_deref(), list, task_type, false,
+            )
+        };
+        p::AutoConfigHint {
+            enable_auto_config: enabled,
+            poller_wait_time_in_ms: i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
+        }
+    }
     fn poll_timeout(&self, domain: &str, list: &str, task_type: i32, deadline: Option<tokio::time::Instant>) -> std::time::Duration {
         let config = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
         let nanos = cadence_persistence::dynamic_config::task_list_duration(
@@ -771,8 +795,9 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 0).await?;
+            let poll_started = std::time::Instant::now();
             let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
-            if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForDecisionTaskResponse::default())); }
+            if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForDecisionTaskResponse { auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)), ..Default::default() })); }
             let rate = self.poll_rate(&r.domain_id, &guard.key.task_list, 0, None, &queue.limiter);
             let lifecycle = crate::matching_dispatch::PollLifecycle { manager: queue.pollers.clone(), id: guard.key.poller.clone(), info: cadence_common::poller::Info { identity: payload.identity.clone(), rate_per_second: rate, isolation_group: r.isolation_group } };
             // Go's matcher serves `queryTaskC` on the same long poll as the
@@ -793,12 +818,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                             let mut response=crate::matching_query::query_response(query, &state);
                             response.load_balancer_hints=queue.load_balancer_hints(matching_now());
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
+                            response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
                             Ok(Response::new(response))
                         }
                         // Go fails the waiting query and returns an empty poll.
                         Err(error)=>{
                             let _=queue.queries.complete(&query.task_id, crate::matching_query::QueryOutcome::Internal(error));
-                            Ok(Response::new(m::PollForDecisionTaskResponse { load_balancer_hints: queue.load_balancer_hints(matching_now()), partition_config: queue.partitions.get().map(partition_config_to_internal), ..Default::default() }))
+                            Ok(Response::new(m::PollForDecisionTaskResponse { auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)), load_balancer_hints: queue.load_balancer_hints(matching_now()), partition_config: queue.partitions.get().map(partition_config_to_internal), ..Default::default() }))
                         }
                     }
                 }
@@ -815,9 +841,11 @@ impl m::matching_api_server::MatchingApi for Matching {
                     result.map(|mut response| {
                         response.load_balancer_hints=queue.load_balancer_hints(matching_now());
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
+                        response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
                         Response::new(response)
                     }),
                 _=failover.changed()=>Ok(Response::new(m::PollForDecisionTaskResponse {
+                    auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
                     load_balancer_hints: queue.load_balancer_hints(matching_now()),
                     partition_config: queue.partitions.get().map(partition_config_to_internal),
                     ..Default::default()
@@ -826,6 +854,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             };
         }
         let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
+        let poll_started = std::time::Instant::now();
         let v = tokio::select! {
             result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForDecisionTaskResponse::default() },
             _=guard.cancel.notified()=>return Err(Status::cancelled("Outstanding poll cancelled.")),
@@ -835,6 +864,11 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .as_ref()
                 .and_then(|history| history.events.first())
                 .is_some_and(|event| event.event_id > 1);
+        // The embedded engine plays Matching's role, so it stamps the same
+        // auto-config hint Matching's matcher would (decision type either way).
+        let auto_config_hint = v
+            .auto_config_hint
+            .or_else(|| Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)));
         Ok(Response::new(m::PollForDecisionTaskResponse {
             sticky_execution_enabled,
             task_token: v.task_token,
@@ -854,7 +888,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             started_time: v.started_time,
             queries: v.queries,
             total_history_bytes: v.total_history_bytes,
-            auto_config_hint: v.auto_config_hint,
+            auto_config_hint,
             ..Default::default()
         }))
     }
@@ -884,8 +918,9 @@ impl m::matching_api_server::MatchingApi for Matching {
         });
         if self.queues.is_some() {
             let queue = self.durable_queue(&r.domain_id, payload.task_list.as_ref().expect("validated task list"), 1).await?;
+            let poll_started = std::time::Instant::now();
             let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
-            if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForActivityTaskResponse::default())); }
+            if queue.stop_if_isolation_changed() { return Ok(Response::new(m::PollForActivityTaskResponse { auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)), ..Default::default() })); }
             // Go `getTask`: the worker-reported rate is applied to the shared
             // dispatch limiter before the poll is recorded; a missing or
             // negative metadata rate keeps the configured default for poller
@@ -908,9 +943,15 @@ impl m::matching_api_server::MatchingApi for Matching {
                     result.map(|mut response| {
                         response.load_balancer_hints=queue.load_balancer_hints(matching_now());
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
+                        // Go's activity-delivered hint uses the manager's own
+                        // activity type; its empty-poll branch passes the
+                        // decision type even here.
+                        let task_type = if response.task_token.is_empty() { 0 } else { 1 };
+                        response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, task_type, poll_started));
                         Response::new(response)
                     }),
                 _=failover.changed()=>Ok(Response::new(m::PollForActivityTaskResponse {
+                    auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
                     load_balancer_hints: queue.load_balancer_hints(matching_now()),
                     partition_config: queue.partitions.get().map(partition_config_to_internal),
                     ..Default::default()
@@ -919,10 +960,17 @@ impl m::matching_api_server::MatchingApi for Matching {
             };
         }
         let expiration = self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
+        let poll_started = std::time::Instant::now();
         let v = tokio::select! {
             result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForActivityTaskResponse::default() },
             _=guard.cancel.notified()=>return Err(Status::cancelled("Outstanding poll cancelled.")),
         };
+        // Matching stamps a delivered activity with its own type, but an empty
+        // poll with the decision type; the embedded engine mirrors that.
+        let auto_config_task_type = if v.task_token.is_empty() { 0 } else { 1 };
+        let auto_config_hint = v
+            .auto_config_hint
+            .or_else(|| Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, auto_config_task_type, poll_started)));
         Ok(Response::new(m::PollForActivityTaskResponse {
             task_token: v.task_token,
             workflow_execution: v.workflow_execution,
@@ -940,7 +988,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             workflow_type: v.workflow_type,
             workflow_domain: v.workflow_domain,
             header: v.header,
-            auto_config_hint: v.auto_config_hint,
+            auto_config_hint,
             ..Default::default()
         }))
     }
