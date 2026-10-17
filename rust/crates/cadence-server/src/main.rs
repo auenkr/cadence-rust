@@ -1,6 +1,66 @@
 use cadence_server::{config, handlers, service};
 use clap::{Parser, Subcommand};
 
+fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net::SocketAddr>> {
+    let Some(http) = rpc.http.as_ref() else {
+        return Ok(None);
+    };
+    if rpc.bind_on_local_host && !rpc.bind_on_ip.is_empty() {
+        anyhow::bail!("bindOnLocalHost and bindOnIP are mutually exclusive");
+    }
+    if http.port == 0 {
+        anyhow::bail!("HTTP port is not set");
+    }
+    let ip = if rpc.bind_on_local_host {
+        std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+    } else if !rpc.bind_on_ip.is_empty() {
+        rpc.bind_on_ip.parse().map_err(|_| {
+            anyhow::anyhow!(
+                "unable to parse bindOnIP value or it is not an IPv4 or IPv6 address: {}",
+                rpc.bind_on_ip
+            )
+        })?
+    } else {
+        // Go selects an available interface address; wildcard binding is the remaining parity gap.
+        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+    };
+    Ok(Some(std::net::SocketAddr::new(ip, http.port)))
+}
+
+fn matching_http_tls_enabled(http: &config::HttpConfig) -> bool {
+    let Some(tls) = http.tls.as_ref() else {
+        return false;
+    };
+    let Some(enabled) = tls.get("enabled").or_else(|| tls.get("Enabled")) else {
+        return !matches!(tls, serde_yaml::Value::Mapping(_));
+    };
+    !matches!(enabled, serde_yaml::Value::Bool(false))
+}
+
+#[cfg(test)]
+mod matching_http_listener_tests {
+    use super::*;
+    #[test]
+    fn configured_listener_uses_bind_policy() {
+        let rpc: config::RpcConfig =
+            serde_yaml::from_str("bindOnLocalHost: true\nhttp: {port: 8801}").unwrap();
+        assert_eq!(
+            matching_http_addr(&rpc).unwrap().unwrap().to_string(),
+            "127.0.0.1:8801"
+        );
+    }
+    #[test]
+    fn rejects_invalid_configuration_and_detects_enabled_tls() {
+        let rpc: config::RpcConfig = serde_yaml::from_str("http: {port: 0}").unwrap();
+        assert!(matching_http_addr(&rpc)
+            .unwrap_err()
+            .to_string()
+            .contains("HTTP port is not set"));
+        let tls: config::HttpConfig = serde_yaml::from_str("tls: {enabled: true}").unwrap();
+        assert!(matching_http_tls_enabled(&tls));
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "cadence-server",
@@ -284,6 +344,21 @@ async fn main() -> anyhow::Result<()> {
             let matching_tchannel_addr = std::net::SocketAddr::new(matching_addr.ip(), matching_tchannel_port
                 .or_else(|| matching_rpc.map(|r| r.port).filter(|p| *p > 0)).unwrap_or(7935));
             let run_matching = wanted.contains(&service::ServiceName::Matching);
+            let matching_http_addr = if run_matching {
+                matching_rpc.map(matching_http_addr).transpose()?.flatten()
+            } else {
+                None
+            };
+            if run_matching {
+                if let Some(http) = matching_rpc.and_then(|rpc| rpc.http.as_ref()) {
+                    if matching_http_tls_enabled(http) {
+                        anyhow::bail!("Matching HTTP TLS is configured but Rust inbound TLS is unsupported; refusing to serve plaintext");
+                    }
+                }
+                if let Some(addr) = matching_http_addr {
+                    println!("Cadence internal Matching HTTP listening on {addr}");
+                }
+            }
             if run_matching {
                 println!("Cadence internal matching gRPC listening on {matching_addr}");
                 println!("Cadence internal matching Thrift/TChannel listening on {matching_tchannel_addr}");
@@ -352,10 +427,23 @@ async fn main() -> anyhow::Result<()> {
                 cadence_server::grpc_matching::Matching::new(state.clone())
             };
             let app = if run_matching {
-                let matching_http = cadence_server::thrift_matching::router(matching_service.clone());
-                let app = app.merge(cadence_server::thrift_matching::combined_router(matching_service.clone()));
-                if run_frontend { app } else { app.merge(matching_http) }
-            } else { app };
+                if matching_http_addr.is_some() {
+                    app
+                } else {
+                    let app = app.merge(cadence_server::thrift_matching::combined_router(
+                        matching_service.clone(),
+                    ));
+                    if run_frontend {
+                        app
+                    } else {
+                        app.merge(cadence_server::thrift_matching::router(
+                            matching_service.clone(),
+                        ))
+                    }
+                }
+            } else {
+                app
+            };
             let matching_tchannel_service = matching_service.clone();
             tokio::try_join!(
                 async {
@@ -393,7 +481,34 @@ async fn main() -> anyhow::Result<()> {
                 },
                 async {
                     if run_matching {
-                        cadence_server::grpc_matching::serve_with(matching_addr, matching_service).await
+                        cadence_server::grpc_matching::serve_with(
+                            matching_addr,
+                            matching_service.clone(),
+                        )
+                        .await
+                    } else {
+                        std::future::pending::<anyhow::Result<()>>().await
+                    }
+                },
+                async {
+                    if run_matching {
+                        if let Some(addr) = matching_http_addr {
+                            let http = matching_rpc
+                                .and_then(|rpc| rpc.http.as_ref())
+                                .expect("configured Matching HTTP address");
+                            let listener = tokio::net::TcpListener::bind(addr).await?;
+                            axum::serve(
+                                listener,
+                                cadence_server::thrift_matching::router_with_procedures(
+                                    matching_service.clone(),
+                                    http.procedures.clone(),
+                                ),
+                            )
+                            .await
+                            .map_err(anyhow::Error::from)
+                        } else {
+                            std::future::pending::<anyhow::Result<()>>().await
+                        }
                     } else {
                         std::future::pending::<anyhow::Result<()>>().await
                     }

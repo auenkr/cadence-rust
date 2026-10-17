@@ -133,6 +133,22 @@ pub struct RpcConfig {
     pub host: String,
     #[serde(default, rename = "bindOnLocalHost")]
     pub bind_on_local_host: bool,
+    #[serde(default, rename = "bindOnIP")]
+    pub bind_on_ip: String,
+    #[serde(default)]
+    pub http: Option<HttpConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HttpConfig {
+    #[serde(default, deserialize_with = "de_flex_u16")]
+    pub port: u16,
+    #[serde(default)]
+    pub procedures: Vec<String>,
+    #[serde(default)]
+    pub tls: Option<serde_yaml::Value>,
+    #[serde(default, rename = "TLSMode")]
+    pub tls_mode: String,
 }
 
 fn de_flex_u16<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {

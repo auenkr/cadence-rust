@@ -721,6 +721,19 @@ pub fn router(matching: Matching) -> axum::Router {
         .layer(axum::extract::DefaultBodyLimit::max(limit))
         .with_state(std::sync::Arc::new(matching))
 }
+
+/// Dedicated YARPC HTTP inbound with Go-compatible procedure allowlisting.
+pub fn router_with_procedures(matching: Matching, procedures: Vec<String>) -> axum::Router {
+    let limit = matching.frontend.state.grpc_max_message_size;
+    axum::Router::new()
+        .route("/", axum::routing::post(http_handler_with_procedures))
+        .route("/{*rest}", axum::routing::post(http_handler_with_procedures))
+        .layer(axum::extract::DefaultBodyLimit::max(limit))
+        .with_state((
+            std::sync::Arc::new(matching),
+            std::sync::Arc::new(procedures),
+        ))
+}
 /// Mount both spellings explicitly: Axum's nested root only matches the
 /// prefix without a trailing slash; otherwise the frontend wildcard wins.
 pub fn combined_router(matching: Matching) -> axum::Router {
@@ -786,6 +799,26 @@ async fn http_handler(
             "Matching request timed out".into(),
         ),
     }
+}
+
+async fn http_handler_with_procedures(
+    axum::extract::State((matching, procedures)): axum::extract::State<(
+        std::sync::Arc<Matching>,
+        std::sync::Arc<Vec<String>>,
+    )>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let procedure = headers
+        .get("Rpc-Procedure")
+        .and_then(|value| value.to_str().ok());
+    if !procedure.is_some_and(|name| procedures.iter().any(|allowed| allowed == name)) {
+        return crate::yarpc::transport_error(
+            axum::http::StatusCode::NOT_FOUND,
+            "procedure is not enabled".into(),
+        );
+    }
+    http_handler(axum::extract::State(matching), headers, body).await
 }
 
 #[cfg(test)]
@@ -882,5 +915,38 @@ mod tests {
         let (wire, error) = application_error(decision, status);
         assert_eq!(error.unwrap().0, "StickyWorkerUnavailableError");
         assert!(wire.get(7).is_some());
+    }
+
+    #[tokio::test]
+    async fn dedicated_http_listener_applies_configured_procedure_allowlist() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let matching = Matching::new(crate::handlers::AppState::default());
+        let app = router_with_procedures(
+            matching,
+            vec!["MatchingService::DescribeTaskList".into()],
+        );
+        let request = |procedure: &str| {
+            Request::post("/")
+                .header("Rpc-Service", "cadence-matching")
+                .header("Rpc-Encoding", "thrift")
+                .header("Rpc-Procedure", procedure)
+                .body(Body::from(Vec::<u8>::new()))
+                .unwrap()
+        };
+        let rejected = app
+            .clone()
+            .oneshot(request("MatchingService::PollForDecisionTask"))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::NOT_FOUND);
+        let allowed = app
+            .oneshot(request("MatchingService::DescribeTaskList"))
+            .await
+            .unwrap();
+        assert_ne!(allowed.status(), StatusCode::NOT_FOUND);
     }
 }
