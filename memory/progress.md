@@ -1,5 +1,14 @@
 # Progress log
 
+- **2026-10-17 — Matching strong/sticky query version gates.** `SupportsStickyQuery`
+  is now ported exactly (uber-go/uber-java/empty impl need feature version
+  >= 1.0.0; CLI and unknown impls do not). Added the previously missing
+  `SupportsConsistentQuery` gate: `QueryOutcome::Worker` carries the worker's
+  version info and `query_workflow` fails a strong-consistency query from a
+  worker without consistent-query support (uber-go/uber-java >= 1.5.0, empty
+  impl treated as supported) with `ClientVersionNotSupportedError`. Unit tests
+  cover both gates. See `memory/matching-query-next.md`.
+
 - **2026-10-17 — Matching semaphore manager + registry.** Ported Go
   `service/matching/semaphore` (identifier, registry, manager) with the
   `Created->Starting->Running->Stopped` lifecycle, startup scan rebuilding the

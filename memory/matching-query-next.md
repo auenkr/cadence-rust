@@ -73,19 +73,51 @@ there, so a query would never reach the SDK worker polling Matching.
   `go-services-matching-delivery`, `go-services-rust-matching`):
   `/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-query-full/results.json`.
 
+# Matching query completion (continuation 2026-10-17)
+
+## Strong/sticky query version gates
+
+The parity audit flagged the `versionChecker` gates as unported. They are now
+ported at matching scope:
+
+- `supports_sticky_query` (already present) matches Go
+  `versionChecker.SupportsStickyQuery` for every default case: `uber-go`,
+  `uber-java`, and an empty `clientImpl` need feature version >= 1.0.0; the CLI
+  and any unknown impl do not; an empty feature version does not. The earlier
+  "approximated" note was about not having a general `supportedClients` table;
+  the observable result is identical because Go's only sticky-query
+  constraints are `>=1.0.0` for the same three client classes.
+- `supports_consistent_query` (new) matches Go
+  `versionChecker.SupportsConsistentQuery`: `uber-go`/`uber-java` need feature
+  version >= 1.5.0; an empty `clientImpl` is treated as supported (Go's empty
+  `case consistentQuery:` fallthrough); the CLI and unknown impls are not.
+- `QueryOutcome::Worker` now carries `WorkerAnswer { result,
+  worker_version_info }`. `respond_query_task_completed` fills the worker
+  version from the completed request, and `query_workflow` passes the request's
+  `query_consistency_level == Strong` into `query_outcome`. A strong query from
+  a worker without consistent-query support fails with
+  `ClientVersionNotSupportedError` (`FailedPrecondition` + typed detail),
+  exactly like Go `waitForQueryResult`.
+
+Tests: `strong_consistency_requires_a_supported_worker` and
+`strong_query_rejects_a_worker_without_consistent_query`, plus the existing
+query tests updated for the new outcome shape. Full `cadence-server --lib` and
+strict Clippy re-run clean.
+
 ## Remaining limits (do NOT report as complete)
 
 1. Sticky query dispatch: Go tries the sticky task list first, then clears
    stickiness and retries non-sticky. The Rust durable matcher has no sticky
    path; a sticky query is offered on the (normal) key it is told to use.
-   `SupportsStickyQuery` is only approximated.
+   `SupportsStickyQuery` is now ported exactly (see above); only the
+   sticky-first dispatch order remains approximated.
 2. `QueryRejectCondition` / closed-workflow rejection is decided by History, not
    Matching, so the Rust matcher does not produce `QueryRejected` (matches Go,
    which also leaves it to History/frontend).
 3. Forwarding (`forwarded_from`), partition routing/scaling, isolation groups,
-   semaphores, membership/ownership and standalone lifecycle remain open
-   Matching gate 4/5 items.
-4. The production standalone server still serves matching via
-   `Matching::new(state)` (in-memory); the durable matcher is wired only in the
-   test/mixed harness. Query delivery therefore only affects the durable path
-   so far.
+   membership/ownership and standalone lifecycle: forwarding, scaling and
+   isolation are now ported; membership/ownership stays multi-host (out of
+   single-node scope).
+4. The production standalone server serves matching via `Matching::new(state)`
+   with durable queues when `--data-dir` is set; the in-memory engine is the
+   no-data-dir default.

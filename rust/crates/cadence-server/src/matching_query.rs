@@ -27,10 +27,28 @@ pub struct PendingQuery {
 
 /// What a waiting `QueryWorkflow` call receives.
 pub enum QueryOutcome {
-    /// The worker's `RespondQueryTaskCompleted` result.
-    Worker(p::WorkflowQueryResult),
+    /// The worker's `RespondQueryTaskCompleted` result plus its version info,
+    /// which the strong-consistency gate checks.
+    Worker(WorkerAnswer),
     /// Go `queryResult{internalError}`: polling failed before delivery.
     Internal(Status),
+}
+
+/// One worker's query answer. Go's `queryResult.workerResponse` carries the
+/// full completed request; only the result and worker version are needed here.
+pub struct WorkerAnswer {
+    pub result: p::WorkflowQueryResult,
+    pub worker_version_info: Option<p::WorkerVersionInfo>,
+}
+
+impl WorkerAnswer {
+    /// A result without version info, as older callers produce.
+    pub fn new(result: p::WorkflowQueryResult) -> Self {
+        Self {
+            result,
+            worker_version_info: None,
+        }
+    }
 }
 
 /// Per-owner query rendezvous: Go `matcher.queryTaskC` (the pending offers)
@@ -208,13 +226,56 @@ pub fn query_response(
     }
 }
 
+/// Go `versionChecker.SupportsConsistentQuery`: only the known SDK
+/// implementations at feature version >= 1.5.0. An older client that omits
+/// `clientImpl` is treated as supported, matching Go's empty `case
+/// consistentQuery:` fallthrough; a known impl with no feature version, an
+/// unknown impl, or the CLI is not.
+fn supports_consistent_query(client_impl: &str, feature_version: &str) -> bool {
+    if client_impl.is_empty() {
+        return true;
+    }
+    if !matches!(client_impl, "uber-go" | "uber-java") {
+        return false;
+    }
+    let mut parts = feature_version.split('.');
+    let major = parts.next().and_then(|part| part.parse::<u64>().ok());
+    let minor = parts.next().and_then(|part| part.parse::<u64>().ok());
+    matches!((major, minor), (Some(major), Some(minor)) if (major, minor) >= (1, 5))
+}
+
 /// Go `waitForQueryResult`: an answered query returns the payload; anything
-/// else is reported as a failed query with the worker's message.
-pub fn query_outcome(outcome: QueryOutcome) -> Result<m::QueryWorkflowResponse, Status> {
-    let result = match outcome {
+/// else is reported as a failed query with the worker's message. A
+/// strong-consistency query additionally requires the worker to support
+/// consistent query, failing with `ClientVersionNotSupportedError` otherwise.
+pub fn query_outcome(
+    outcome: QueryOutcome,
+    strong: bool,
+) -> Result<m::QueryWorkflowResponse, Status> {
+    let answer = match outcome {
         QueryOutcome::Internal(status) => return Err(status),
-        QueryOutcome::Worker(result) => result,
+        QueryOutcome::Worker(answer) => answer,
     };
+    if strong {
+        let version = answer.worker_version_info.as_ref();
+        let impl_name = version.map(|v| v.r#impl.as_str()).unwrap_or_default();
+        let feature = version
+            .map(|v| v.feature_version.as_str())
+            .unwrap_or_default();
+        if !supports_consistent_query(impl_name, feature) {
+            return Err(crate::grpc::detailed_status(
+                tonic::Code::FailedPrecondition,
+                "Client version not supported",
+                "ClientVersionNotSupportedError",
+                p::ClientVersionNotSupportedError {
+                    feature_version: feature.to_string(),
+                    client_impl: impl_name.to_string(),
+                    supported_versions: ">=1.5.0".to_string(),
+                },
+            ));
+        }
+    }
+    let result = answer.result;
     if result.result_type == p::QueryResultType::Answered as i32 {
         return Ok(m::QueryWorkflowResponse {
             query_result: result.answer,
@@ -314,16 +375,16 @@ mod tests {
         channel
             .complete(
                 "task-1",
-                QueryOutcome::Worker(p::WorkflowQueryResult {
+                QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult {
                     result_type: p::QueryResultType::Answered as i32,
                     answer: Some(p::Payload {
                         data: b"answer".to_vec(),
                     }),
                     error_message: String::new(),
-                }),
+                })),
             )
             .unwrap();
-        let response = query_outcome(receiver.await.unwrap()).unwrap();
+        let response = query_outcome(receiver.await.unwrap(), false).unwrap();
         assert_eq!(
             response.query_result.map(|payload| payload.data),
             Some(b"answer".to_vec())
@@ -346,7 +407,7 @@ mod tests {
         channel
             .complete("task-3", QueryOutcome::Internal(Status::internal("history down")))
             .unwrap();
-        let error = query_outcome(receiver.await.unwrap()).unwrap_err();
+        let error = query_outcome(receiver.await.unwrap(), false).unwrap_err();
         assert!(error.message().contains("history down"));
     }
 
@@ -354,7 +415,7 @@ mod tests {
     async fn completing_an_unknown_task_reports_not_found() {
         let channel = QueryChannel::new();
         assert!(channel
-            .complete("missing", QueryOutcome::Worker(p::WorkflowQueryResult::default()))
+            .complete("missing", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
             .is_err());
     }
 
@@ -365,18 +426,67 @@ mod tests {
         channel.withdraw("task-2");
         // No offer remains, and a late completion is rejected.
         assert!(channel
-            .complete("task-2", QueryOutcome::Worker(p::WorkflowQueryResult::default()))
+            .complete("task-2", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
             .is_err());
     }
 
     #[test]
     fn failed_query_reports_the_worker_message() {
-        let error = query_outcome(QueryOutcome::Worker(p::WorkflowQueryResult {
-            result_type: p::QueryResultType::Failed as i32,
-            answer: None,
-            error_message: "boom".into(),
-        }))
+        let error = query_outcome(
+            QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult {
+                result_type: p::QueryResultType::Failed as i32,
+                answer: None,
+                error_message: "boom".into(),
+            })),
+            false,
+        )
         .unwrap_err();
         assert!(error.message().contains("boom"));
+    }
+
+    #[test]
+    fn strong_consistency_requires_a_supported_worker() {
+        assert!(supports_consistent_query("uber-go", "1.5.0"));
+        assert!(supports_consistent_query("uber-java", "1.9.3"));
+        // An older client that omits clientImpl is treated as supported.
+        assert!(supports_consistent_query("", ""));
+        assert!(!supports_consistent_query("uber-go", "1.4.9"));
+        assert!(!supports_consistent_query("uber-java", "1.0.0"));
+        assert!(!supports_consistent_query("cli", "9.9.9"));
+        assert!(!supports_consistent_query("uber-go", ""));
+    }
+
+    #[test]
+    fn strong_query_rejects_a_worker_without_consistent_query() {
+        let answer = WorkerAnswer {
+            result: p::WorkflowQueryResult {
+                result_type: p::QueryResultType::Answered as i32,
+                answer: Some(p::Payload {
+                    data: b"answer".to_vec(),
+                }),
+                error_message: String::new(),
+            },
+            worker_version_info: Some(p::WorkerVersionInfo {
+                r#impl: "uber-go".into(),
+                feature_version: "1.4.0".into(),
+            }),
+        };
+        let error = query_outcome(QueryOutcome::Worker(answer), true).unwrap_err();
+        assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+        // The same answer is accepted for an eventual query.
+        let answer = WorkerAnswer {
+            result: p::WorkflowQueryResult {
+                result_type: p::QueryResultType::Answered as i32,
+                answer: Some(p::Payload {
+                    data: b"answer".to_vec(),
+                }),
+                error_message: String::new(),
+            },
+            worker_version_info: Some(p::WorkerVersionInfo {
+                r#impl: "uber-go".into(),
+                feature_version: "1.4.0".into(),
+            }),
+        };
+        assert!(query_outcome(QueryOutcome::Worker(answer), false).is_ok());
     }
 }

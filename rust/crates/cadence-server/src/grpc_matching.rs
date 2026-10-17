@@ -896,6 +896,9 @@ impl m::matching_api_server::MatchingApi for Matching {
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         payload.domain = self.domain_name(&r.domain_id)?;
+        // Go `waitForQueryResult(..., consistencyLevel == Strong, ...)`: the
+        // strong-consistency gate only applies to the local durable path.
+        let strong = payload.query_consistency_level == p::QueryConsistencyLevel::Strong as i32;
         if self.queues.is_some() {
             // Go `matcher.OfferQuery`: offer to a waiting local decision
             // poller, else forward up the partition chain with a forward-task
@@ -938,7 +941,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                 let _registration = handle.queries.registration(&task_id);
                 if force_local || handle.queries.try_offer(query) {
                     return match tokio::time::timeout_at(deadline, receiver).await {
-                        Ok(Ok(result)) => crate::matching_query::query_outcome(result).map(Response::new),
+                        Ok(Ok(result)) => {
+                            crate::matching_query::query_outcome(result, strong).map(Response::new)
+                        }
                         Ok(Err(_)) => Err(Status::unavailable("Matching query channel closed.")),
                         Err(_) => {
                             Err(Status::deadline_exceeded(
@@ -1315,9 +1320,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
             let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
             let result = payload.result.clone().unwrap_or_default();
+            let answer = crate::matching_query::WorkerAnswer {
+                result,
+                worker_version_info: payload.worker_version_info.clone(),
+            };
             queue
                 .queries
-                .complete(&r.task_id, crate::matching_query::QueryOutcome::Worker(result))?;
+                .complete(&r.task_id, crate::matching_query::QueryOutcome::Worker(answer))?;
             return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
         }
         let input = cv::query_completed(payload)?;
