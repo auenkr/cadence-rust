@@ -1,12 +1,13 @@
 //! Matching's atomic membership snapshots and Go-compatible ownership errors.
 use cadence_common::membership::{Host, Ring};
-use std::sync::{Arc, RwLock};
+use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex, RwLock}};
 use tonic::Status;
 
 #[derive(Clone)]
 pub struct Membership {
     identity: Arc<str>,
     ring: Arc<RwLock<Ring>>,
+    channels: Arc<Mutex<HashMap<String, tonic::transport::Channel>>>,
     changed: tokio::sync::watch::Sender<u64>,
 }
 impl Membership {
@@ -14,12 +15,15 @@ impl Membership {
         Self {
             identity: identity.into(),
             ring: Arc::new(RwLock::new(Ring::new(hosts))),
+            channels: Arc::default(),
             changed: tokio::sync::watch::channel(0).0,
         }
     }
     /// Publish placement before waking unloaders. Readers see a complete ring.
     pub fn replace(&self, hosts: Vec<Host>) {
+        let addresses: HashSet<_> = hosts.iter().map(|host| host.grpc_address.clone()).collect();
         *self.ring.write().expect("Matching membership lock") = Ring::new(hosts);
+        self.channels.lock().expect("Matching channel cache lock").retain(|address, _| addresses.contains(address));
         self.changed
             .send_modify(|generation| *generation = generation.wrapping_add(1));
     }
@@ -45,14 +49,19 @@ impl Membership {
         if owner.grpc_address.is_empty() {
             return Err(Status::unavailable("Matching owner has no gRPC address"));
         }
+        let mut channels = self.channels.lock().expect("Matching channel cache lock");
+        if let Some(channel) = channels.get(&owner.grpc_address) {
+            return Ok(Some(channel.clone()));
+        }
         let address = if owner.grpc_address.contains("://") {
-            owner.grpc_address
+            owner.grpc_address.clone()
         } else {
             format!("http://{}", owner.grpc_address)
         };
-        tonic::transport::Endpoint::from_shared(address)
-            .map(|endpoint| Some(endpoint.connect_lazy()))
-            .map_err(|error| Status::internal(error.to_string()))
+        let channel = tonic::transport::Endpoint::from_shared(address)
+            .map_err(|error| Status::internal(error.to_string()))?.connect_lazy();
+        channels.insert(owner.grpc_address, channel.clone());
+        Ok(Some(channel))
     }
     pub fn check_task_list(&self, name: &str) -> Result<(), Status> {
         let owner = self.owner(name)?;
@@ -98,6 +107,21 @@ mod tests {
     struct Details {
         #[prost(message, repeated, tag = "3")]
         errors: Vec<prost_types::Any>,
+    }
+    #[tokio::test]
+    async fn matching_membership_reuses_channels_and_evicts_removed_endpoints() {
+        let host = |address: &str| Host { address: "other:7935".into(), identity: "other".into(), grpc_address: address.into() };
+        let membership = Membership::new("self", vec![host("127.0.0.1:7835")]);
+        for _ in 0..3 { assert!(membership.remote_channel("queue").unwrap().is_some()); }
+        assert_eq!(membership.channels.lock().unwrap().len(), 1);
+        membership.replace(vec![host("127.0.0.1:7835")]);
+        assert_eq!(membership.channels.lock().unwrap().len(), 1);
+        membership.replace(vec![host("127.0.0.1:7836")]);
+        assert!(membership.channels.lock().unwrap().is_empty());
+        assert!(membership.remote_channel("queue").unwrap().is_some());
+        assert!(membership.channels.lock().unwrap().contains_key("127.0.0.1:7836"));
+        membership.replace(vec![]);
+        assert!(membership.channels.lock().unwrap().is_empty());
     }
     #[tokio::test]
     async fn matching_membership_typed_errors_and_atomic_notifications() {
