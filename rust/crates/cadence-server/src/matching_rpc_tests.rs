@@ -2187,3 +2187,63 @@ async fn matching_rpc_in_memory_empty_polls_reserve_tailroom() {
     assert!(tokio::time::timeout(Duration::from_millis(500), matching.poll_for_activity_task(request)).await
         .expect("in-memory activity poll preserves deadline tailroom").unwrap().into_inner().task_token.is_empty());
 }
+
+#[tokio::test]
+async fn matching_rpc_child_poll_receives_parent_query_and_preserves_completion_partition() {
+    let peer = start_fake_history(mutable_state()).await;
+    let (_directory, _store, matching, key) = fixture_with_history(&peer);
+    let domain = key.domain_id.to_string();
+    let root = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    let worker = matching.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: poll_domain, poller_id: "child-query-poll".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: Some(p::TaskList {
+            name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default()
+        }), ..Default::default() }), ..Default::default()
+    })).await.unwrap().into_inner() });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root.queries.has_waiters() { tokio::task::yield_now().await; }
+    }).await.expect("forwarded parent poll must wait for parent queries as well as backlog");
+    let caller = matching.clone();
+    let query_domain = domain.clone();
+    let query = tokio::spawn(async move { caller.query_workflow(Request::new(m::QueryWorkflowRequest {
+        domain_id: query_domain, task_list: list(),
+        request: Some(p::QueryWorkflowRequest { domain: "domain".into(), workflow_execution: execution(),
+            query: Some(p::WorkflowQuery { query_type: "ping".into(), query_args: None }), ..Default::default() }), ..Default::default()
+    })).await.unwrap().into_inner() });
+    let response = tokio::time::timeout(Duration::from_secs(2), poll).await.unwrap().unwrap();
+    assert_eq!(response.query.unwrap().query_type, "ping");
+    let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(&response.task_token).unwrap();
+    assert_eq!(token.task_list, "queue");
+    matching.respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+        domain_id: domain, task_list: list(), task_id: token.task_id,
+        request: Some(p::RespondQueryTaskCompletedRequest { result: Some(p::WorkflowQueryResult {
+            result_type: p::QueryResultType::Answered as i32, answer: Some(p::Payload { data: b"pong".to_vec() }), error_message: String::new(),
+        }), ..Default::default() }),
+    })).await.unwrap();
+    assert_eq!(tokio::time::timeout(Duration::from_secs(2), query).await.unwrap().unwrap().query_result.unwrap().data, b"pong");
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_local_parent_poll_applies_its_own_expiration_and_tailroom() {
+    let (_directory, _store, matching, key) = fixture();
+    let child_list = Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() });
+    let mut request = Request::new(m::PollForDecisionTaskRequest { domain_id: key.domain_id.to_string(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: child_list.clone(), ..Default::default() }), ..Default::default() });
+    // The child spends one second of tailroom and the parent spends another,
+    // just as two Go Matching handlers traversed through the RPC client do.
+    request.set_timeout(Duration::from_secs(2));
+    assert!(tokio::time::timeout(Duration::from_millis(500), matching.poll_for_decision_task(request)).await
+        .expect("each parent handler reserves its own tailroom").unwrap().into_inner().task_token.is_empty());
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.longPollExpirationInterval", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#""1ms""#.to_vec())),
+        filters: vec![cadence_api::admin::DynamicConfigFilter { name: "taskListName".into(), value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#""queue""#.to_vec())) }],
+    }]);
+    let request = Request::new(m::PollForActivityTaskRequest { domain_id: key.domain_id.to_string(),
+        request: Some(p::PollForActivityTaskRequest { task_list: child_list, ..Default::default() }), ..Default::default() });
+    assert!(tokio::time::timeout(Duration::from_millis(500), matching.poll_for_activity_task(request)).await
+        .expect("root-specific expiration applies to the forwarded activity poll").unwrap().into_inner().task_token.is_empty());
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}

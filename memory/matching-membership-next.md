@@ -154,3 +154,26 @@ its failed boundary run is retained, not rewritten. Both final service stages
 passed in the independent reruns. Prior full workspace tests plus latest 154
 server tests/strict Clippy and native Go transport recheck complete the current
 verification categories. Whole-service goal remains incomplete and active.
+
+## Full handler for same-host parent polls (2026-10-17)
+
+The service now forwards same-host parent polls through MatchingApi, not directly
+into the parent's dispatcher. A registry factory retains handler state without
+retaining its registry; each parent resolution supplies the upgraded live
+registry. This avoids an owner/registry cycle and preserves Go's parent query
+channel, per-hop deadline tailroom, parent-specific expiration, failover guards,
+and future handler-level poll properties. Bare QueueRegistry users retain the
+low-level dispatcher fallback; Matching::with_durable_queues always installs the
+full handler factory, and with_membership rebuilds it with membership state.
+
+New regressions: child poll receives a root query and completes on root; parent
+adds its own tailroom; root-filtered expiration applies to forwarded activity
+poll. All 156 server tests pass (/tmp/matching-parent-handler-test.exit=0), and
+strict workspace Clippy passes (/tmp/matching-parent-handler-clippy.exit=0).
+Final source-name cleanup is covered by another all-server test run in the live
+verification chain. Source frozen while this chain runs in cadence-rust tmux:
+/tmp/matching-parent-handler-live.log and /tmp/matching-parent-handler-live.exit.
+Chain: all server tests, binary build, original Go Thrift, Go boundary delivery,
+mixed Go Frontend/History/Worker + Rust Matching. Artifact suffixes:
+matching-parent-handler-thrift, matching-parent-handler-boundary,
+matching-parent-handler-mixed. Inspect authoritative results before claiming pass.

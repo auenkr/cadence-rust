@@ -450,11 +450,25 @@ impl Matching {
         matching.partition_count = Some(provider);
         matching.scaler_config = Some(scaler_config);
         matching.poll_expiration = poll_expiration;
-        matching
+        matching.bind_local_poll_service()
     }
     pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
         self.queues = self.queues.map(|queues| queues.with_membership(membership.clone()));
         self.membership = Some(membership);
+        self.bind_local_poll_service()
+    }
+    fn bind_local_poll_service(mut self) -> Self {
+        // The factory must not own its registry: owners retain forwarding
+        // resolvers. Retain only handler state, and borrow the live registry
+        // for each forwarded RPC after its weak owner-state upgrade.
+        if let Some(queues) = self.queues.take() {
+            let base = self.clone();
+            self.queues = Some(queues.with_local_poll_service(Arc::new(move |queues| {
+                let mut service = base.clone();
+                service.queues = Some(queues);
+                service
+            })));
+        }
         self
     }
     /// The service owns this future and cancels it during shutdown. Watch

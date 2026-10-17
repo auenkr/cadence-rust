@@ -22,6 +22,7 @@ fn registry_now() -> i64 {
 }
 type Key = (Uuid, String, i32);
 type StartupGates = HashMap<Key, Weak<Mutex<()>>>;
+type LocalPollFactory = Arc<dyn Fn(QueueRegistry) -> crate::grpc_matching::Matching + Send + Sync>;
 struct Owner {
     queue: Arc<DurableTaskQueue>,
     dispatcher: TaskDispatcher,
@@ -95,6 +96,7 @@ pub struct QueueRegistry {
     startups: Arc<Mutex<StartupGates>>,
     standby_enabled: Option<crate::matching_standby::Enabled>,
     membership: Option<crate::matching_membership::Membership>,
+    local_poll_service: Option<LocalPollFactory>,
     domain_metadata: Option<(cadence_persistence::InMemoryDomainStore, String)>,
     /// Go `cfg.NumTasklistReadPartitions(domain, taskList, type)`, clamped to
     /// >= 1 by the same caller. `None` keeps the single-partition default.
@@ -353,6 +355,7 @@ impl QueueRegistry {
             domain_metadata: None,
             standby_enabled: None,
             membership: None,
+            local_poll_service: None,
             partition_count: None,
             cache_enabled: None,
             sync_wait: None,
@@ -365,6 +368,10 @@ impl QueueRegistry {
             qps_interval: None,
             isolation: None,
         }
+    }
+    pub(crate) fn with_local_poll_service(mut self, factory: LocalPollFactory) -> Self {
+        self.local_poll_service = Some(factory);
+        self
     }
     pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
         self.membership = Some(membership);
@@ -1237,11 +1244,14 @@ async fn resolve_parent_dispatcher(
             return Some(crate::matching_dispatch::Parent::Remote(channel));
         }
     }
+    if let Some(factory) = registry.local_poll_service.clone() {
+        return Some(crate::matching_dispatch::Parent::Service(Box::new(factory(registry))));
+    }
     let handle = registry.get(key, kind, registry_now()).await.ok()?;
     if handle.stop_if_isolation_changed() {
         return None;
     }
-    Some(crate::matching_dispatch::Parent::Local(Box::new(handle.dispatcher)))
+    Some(crate::matching_dispatch::Parent::Dispatcher(Box::new(handle.dispatcher)))
 }
 
 #[cfg(test)]

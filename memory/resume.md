@@ -503,3 +503,14 @@ test-only admin override. No PR exists for this work.
 
 ## Native Matching Thrift checkpoint (2026-10-17)
 Uncommitted transport work checkpointed after context handoff: all ten Matching Thrift methods, shared TChannel listener and HTTP routing, generated method inventory, original Go client probe. Two codec unit tests pass. Original Go TChannel probe passes; HTTP probe currently routes incorrectly (EntityNotExists instead of expected BadRequest). Rebuild and diagnose HTTP path before claiming compatibility. Whole Matching remains incomplete: distributed forwarding/ownership and production integration still require implementation and tests.
+
+## Parent-handler checkpoint (2026-10-17, latest)
+Same-host parent polls now use the full Matching handler, including root queries,
+per-hop deadline tailroom and filtered expiration. All 156 server tests and strict
+workspace Clippy pass. Frozen-source live chain in tmux cadence-rust window
+matching-parent-handler-live: native Go Thrift probe passed; boundary/mixed probes
+still running at checkpoint. Inspect /tmp/matching-parent-handler-live.exit and
+log for final outcome. Full implementation details in matching-membership-next.md.
+Whole Matching remains incomplete; production discovery/runtime wiring and other
+listed parity gaps remain. Next focused operational config gap: Go's
+matching.overrideTaskListRPS, read on each poll in task_list_manager.go:715.

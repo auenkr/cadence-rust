@@ -70,13 +70,14 @@ pub(crate) struct ForwardState {
     permits: Arc<crate::matching_forward::RequestTokens>,
 }
 pub(crate) enum Parent {
-    Local(Box<TaskDispatcher>),
+    Dispatcher(Box<TaskDispatcher>),
+    Service(Box<crate::grpc_matching::Matching>),
     Remote(tonic::transport::Channel),
 }
 type ParentFuture = std::pin::Pin<Box<dyn Future<Output = Option<(Parent, String)>> + Send>>;
 type ParentResolver = dyn Fn() -> ParentFuture + Send + Sync;
-struct RemotePoll {
-    channel: tonic::transport::Channel,
+struct ForwardPoll {
+    target: Parent,
     domain_id: String,
     parent_name: String,
     forwarded_from: String,
@@ -84,10 +85,10 @@ struct RemotePoll {
     isolation_group: String,
     deadline: tokio::time::Instant,
 }
-type RemoteResult<R> = std::pin::Pin<Box<dyn Future<Output = Result<R, Status>> + Send>>;
+type ForwardResult<R> = std::pin::Pin<Box<dyn Future<Output = Result<R, Status>> + Send>>;
 trait ForwardPollRequest<R>: Clone + Send {
     fn for_parent(&self, name: &str) -> Self;
-    fn remote(self, target: RemotePoll) -> RemoteResult<R>;
+    fn forward(self, target: ForwardPoll) -> ForwardResult<R>;
 }
 impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTaskRequest {
     fn for_parent(&self, name: &str) -> Self {
@@ -97,7 +98,7 @@ impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTa
             ..Default::default()
         }
     }
-    fn remote(self, target: RemotePoll) -> RemoteResult<m::PollForDecisionTaskResponse> {
+    fn forward(self, target: ForwardPoll) -> ForwardResult<m::PollForDecisionTaskResponse> {
         Box::pin(async move {
             let payload = self.for_parent(&target.parent_name);
             let mut request = tonic::Request::new(m::PollForDecisionTaskRequest {
@@ -106,7 +107,11 @@ impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTa
                 isolation_group: target.isolation_group,
             });
             request.set_timeout(target.deadline.saturating_duration_since(tokio::time::Instant::now()));
-            m::matching_api_client::MatchingApiClient::new(target.channel).poll_for_decision_task(request).await.map(tonic::Response::into_inner)
+            match target.target {
+                Parent::Service(service) => m::matching_api_server::MatchingApi::poll_for_decision_task(&*service, request).await,
+                Parent::Remote(channel) => m::matching_api_client::MatchingApiClient::new(channel).poll_for_decision_task(request).await,
+                Parent::Dispatcher(_) => unreachable!("library dispatcher handled by forwarding loop"),
+            }.map(tonic::Response::into_inner)
         })
     }
 }
@@ -118,7 +123,7 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
             ..Default::default()
         }
     }
-    fn remote(self, target: RemotePoll) -> RemoteResult<m::PollForActivityTaskResponse> {
+    fn forward(self, target: ForwardPoll) -> ForwardResult<m::PollForActivityTaskResponse> {
         Box::pin(async move {
             let payload = self.for_parent(&target.parent_name);
             let mut request = tonic::Request::new(m::PollForActivityTaskRequest {
@@ -127,14 +132,18 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
                 isolation_group: target.isolation_group,
             });
             request.set_timeout(target.deadline.saturating_duration_since(tokio::time::Instant::now()));
-            m::matching_api_client::MatchingApiClient::new(target.channel).poll_for_activity_task(request).await.map(tonic::Response::into_inner)
+            match target.target {
+                Parent::Service(service) => m::matching_api_server::MatchingApi::poll_for_activity_task(&*service, request).await,
+                Parent::Remote(channel) => m::matching_api_client::MatchingApiClient::new(channel).poll_for_activity_task(request).await,
+                Parent::Dispatcher(_) => unreachable!("library dispatcher handled by forwarding loop"),
+            }.map(tonic::Response::into_inner)
         })
     }
 }
 #[cfg(test)]
 impl<R: Send + 'static> ForwardPollRequest<R> for () {
     fn for_parent(&self, _name: &str) -> Self {}
-    fn remote(self, _target: RemotePoll) -> RemoteResult<R> { Box::pin(async { Err(Status::unimplemented("test poll")) }) }
+    fn forward(self, _target: ForwardPoll) -> ForwardResult<R> { Box::pin(async { Err(Status::unimplemented("test poll")) }) }
 }
 impl ForwardState {
     pub(crate) fn new(
@@ -373,10 +382,10 @@ impl TaskDispatcher {
                 return false;
             };
             let parent = match parent {
-                Parent::Local(parent) => parent,
-                Parent::Remote(channel) => {
+                Parent::Dispatcher(parent) => parent,
+                target => {
                     let (poller_id, isolation_group) = lifecycle.as_ref().map(|poll| (poll.id.clone(), poll.info.isolation_group.clone())).unwrap_or_default();
-                    let target = RemotePoll { channel, domain_id: self.domain_id.clone(),
+                    let target = ForwardPoll { target, domain_id: self.domain_id.clone(),
                         parent_name, forwarded_from: forward.source.clone(),
                         poller_id, isolation_group, deadline };
                     // A cancelled child RPC must drop the upstream RPC as well.
@@ -384,7 +393,7 @@ impl TaskDispatcher {
                     // directly rather than waiting out a full parent long poll.
                     let Some(response) = sender.as_mut() else { return true; };
                     let result = tokio::select! {
-                        result = poll.remote(target) => result,
+                        result = poll.forward(target) => result,
                         _ = response.closed() => return true,
                     };
                     return match result {
