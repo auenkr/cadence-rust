@@ -23,7 +23,9 @@ pub use executions::{
     StartError, StoredPartitionConfig, TaskError, WorkflowMutationError,
 };
 pub use schedules::{ScheduleError, ScheduleRecord};
-pub use semaphores::{AcquireError, SemaphoreError, SemaphoreHold, SemaphoreMetadata};
+pub use semaphores::{
+    AcquireError, GrantOutcome, SemaphoreError, SemaphoreHold, SemaphoreMetadata, SemaphoreRow,
+};
 
 pub mod matching_blob;
 pub mod matching_sqlite;

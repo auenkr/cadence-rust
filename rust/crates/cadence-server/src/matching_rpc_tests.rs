@@ -554,6 +554,78 @@ async fn matching_rpc_forward_task_limits_reload_and_rate_zero_blocks() {
     }
 }
 
+#[tokio::test]
+async fn matching_rpc_semaphore_acquire_grants_and_reports_no_slot() {
+    let (_dir, _store, matching, _key) = fixture();
+    let mut matching = matching;
+    matching.frontend.state.semaphore_enabled = true;
+    let domain = Uuid::from_u128(1).to_string();
+    // Registration normally happens on the RegisterDomain path; mirror it so
+    // the bucket metadata is keyed by the domain UUID the request carries.
+    matching
+        .frontend
+        .state
+        .executions
+        .register_domain("domain", &domain);
+    matching
+        .frontend
+        .state
+        .executions
+        .create_semaphore("domain", "sem", 2, 2)
+        .unwrap();
+    let acquire = |matching: &Matching, owner: &str| {
+        let domain = domain.clone();
+        let owner = owner.to_string();
+        let matching = matching.clone();
+        async move {
+            MatchingApi::acquire_semaphore(
+                &matching,
+                Request::new(m::AcquireSemaphoreRequest {
+                    domain_id: domain,
+                    semaphore_name: "sem".into(),
+                    bucket: 0,
+                    owner_id: owner,
+                }),
+            )
+            .await
+            .map(|response| response.into_inner())
+        }
+    };
+    // The first two owners fill the two-slot bucket.
+    let first = acquire(&matching, "1:w:r1:1").await.unwrap();
+    assert_eq!(first.outcome, 1, "first acquire is Acquired");
+    assert!((1..=2).contains(&first.token_id));
+    let second = acquire(&matching, "1:w:r2:1").await.unwrap();
+    assert_eq!(second.outcome, 1);
+    assert_ne!(first.token_id, second.token_id);
+    // A third owner gets NoSlot rather than blocking.
+    let third = acquire(&matching, "1:w:r3:1").await.unwrap();
+    assert_eq!((third.outcome, third.token_id), (2, 0));
+    // A re-acquire by a holder returns its slot.
+    let again = acquire(&matching, "1:w:r1:1").await.unwrap();
+    assert_eq!((again.outcome, again.token_id), (1, first.token_id));
+    // A bad owner id surfaces as a typed error.
+    let bad_owner = acquire(&matching, "").await.unwrap_err();
+    assert_eq!(bad_owner.code(), tonic::Code::InvalidArgument);
+    // A missing semaphore is NotFound from the startup scan.
+    let missing = MatchingApi::acquire_semaphore(
+        &matching,
+        Request::new(m::AcquireSemaphoreRequest {
+            domain_id: domain.clone(),
+            semaphore_name: "absent".into(),
+            bucket: 0,
+            owner_id: "1:w:r1:1".into(),
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(missing.code(), tonic::Code::NotFound);
+    // Disabled domains are rejected before any bucket work.
+    matching.frontend.state.semaphore_enabled = false;
+    let disabled = acquire(&matching, "1:w:r9:1").await.unwrap_err();
+    assert_eq!(disabled.code(), tonic::Code::InvalidArgument);
+}
+
 fn scaler_config_value(matching: &Matching, property: &str, json: &[u8]) {
     matching
         .frontend

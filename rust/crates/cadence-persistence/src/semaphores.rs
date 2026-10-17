@@ -34,6 +34,23 @@ pub struct SemaphoreHold {
     pub token_id: i32,
 }
 
+/// One row of a bucket scan, mirroring Go's `SemaphoreOwnership` with its
+/// `RowType` discriminator: a token slot and its holder, or an owner and the
+/// token it holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SemaphoreRow {
+    Token { token_id: i32, holder: String },
+    Owner { owner_id: String, held_token: i32 },
+}
+
+/// Outcome of a conditional grant, mirroring Go's `SemaphoreGrant*` outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrantOutcome {
+    Applied,
+    SlotTaken,
+    AlreadyHeld(i32),
+}
+
 /// Errors for semaphore creation, mirroring Go's metadata manager and
 /// frontend duplicate mapping.
 #[derive(Debug, thiserror::Error)]
@@ -178,8 +195,7 @@ impl super::InMemoryExecutionStore {
         name: &str,
         bucket: i32,
         owner_id: &str,
-    ) {
-        let mut inner = self.inner.write().expect("execution store lock");
+    ) {        let mut inner = self.inner.write().expect("execution store lock");
         if let Some(holds) = inner.semaphore_holds.get_mut(&(
             domain_id.to_string(),
             name.to_string(),
@@ -199,6 +215,153 @@ impl super::InMemoryExecutionStore {
             .filter(|((d, _), _)| d == &namespace)
             .map(|((_, name), meta)| (name.clone(), meta.clone()))
             .collect()
+    }
+
+    fn semaphore_budget(
+        inner: &super::executions::Inner,
+        domain_id: &str,
+        name: &str,
+    ) -> Result<i32, AcquireError> {
+        inner
+            .semaphores
+            .get(&(domain_id.to_string(), name.to_string()))
+            .map(|metadata| bucket_budget(metadata.bucket_size))
+            .ok_or_else(|| {
+                AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(format!(
+                    "semaphore {name:?} does not exist in domain {domain_id:?}"
+                )))
+            })
+    }
+
+    /// One bucket's token and owner rows, mirroring Go's
+    /// `ScanSemaphoreBucket`. Token rows are the seeded slots; owner rows are
+    /// the held slots. Like Go, a missing semaphore is an empty scan; the
+    /// matching manager checks metadata before scanning, so the caller maps
+    /// NotFound itself.
+    pub fn scan_semaphore_bucket(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
+        let inner = self.inner.read().expect("execution store lock");
+        let budget = Self::semaphore_budget(&inner, domain_id, name)?;
+        let holds: Vec<SemaphoreHold> = inner
+            .semaphore_holds
+            .get(&(domain_id.to_string(), name.to_string(), bucket))
+            .cloned()
+            .unwrap_or_default();
+        let mut holders: HashMap<i32, String> = HashMap::new();
+        for hold in &holds {
+            holders.insert(hold.token_id, hold.owner_id.clone());
+        }
+        let mut rows = Vec::with_capacity(budget as usize + holds.len());
+        for token_id in 1..=budget {
+            rows.push(SemaphoreRow::Token {
+                token_id,
+                holder: holders.get(&token_id).cloned().unwrap_or_default(),
+            });
+        }
+        for hold in holds {
+            rows.push(SemaphoreRow::Owner {
+                owner_id: hold.owner_id,
+                held_token: hold.token_id,
+            });
+        }
+        Ok(rows)
+    }
+
+    /// The holder of one token row, mirroring
+    /// `GetSemaphoreOwnershipByToken`. A token outside the seeded range reads
+    /// as a removed row: Go's token rows are seeded once, so a miss is
+    /// `EntityNotExists` when the semaphore exists.
+    pub fn get_semaphore_ownership_by_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+    ) -> Result<String, AcquireError> {
+        let inner = self.inner.read().expect("execution store lock");
+        let budget = Self::semaphore_budget(&inner, domain_id, name)?;
+        if !(1..=budget).contains(&token_id) {
+            return Err(AcquireError::NotFound(
+                cadence_api::errors::EntityNotExistsError::new(format!(
+                    "semaphore token {token_id} does not exist in bucket {bucket}"
+                )),
+            ));
+        }
+        Ok(inner
+            .semaphore_holds
+            .get(&(domain_id.to_string(), name.to_string(), bucket))
+            .and_then(|holds| {
+                holds
+                    .iter()
+                    .find(|hold| hold.token_id == token_id)
+                    .map(|hold| hold.owner_id.clone())
+            })
+            .unwrap_or_default())
+    }
+
+    /// Conditional grant of one token to an owner, mirroring
+    /// `GrantSemaphoreToken`. Returns `AlreadyHeld(held_token)` when the
+    /// owner already holds a token, `SlotTaken` when another owner holds the
+    /// token, else `Applied`.
+    pub fn grant_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> Result<GrantOutcome, AcquireError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        let budget = Self::semaphore_budget(&inner, domain_id, name)?;
+        if !(1..=budget).contains(&token_id) {
+            return Err(AcquireError::Invalid(format!(
+                "TokenID must be a seeded slot, got {token_id}"
+            )));
+        }
+        let holds = inner
+            .semaphore_holds
+            .entry((domain_id.to_string(), name.to_string(), bucket))
+            .or_default();
+        if let Some(held) = holds.iter().find(|hold| hold.owner_id == owner_id) {
+            return Ok(GrantOutcome::AlreadyHeld(held.token_id));
+        }
+        if let Some(holder) = holds.iter().find(|hold| hold.token_id == token_id) {
+            let _ = holder;
+            return Ok(GrantOutcome::SlotTaken);
+        }
+        holds.push(SemaphoreHold {
+            owner_id: owner_id.to_string(),
+            token_id,
+        });
+        Ok(GrantOutcome::Applied)
+    }
+
+    /// Release one owner's hold of a token, mirroring
+    /// `ReleaseSemaphoreToken`. Returns whether the row was cleared.
+    pub fn release_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> Result<bool, AcquireError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        Self::semaphore_budget(&inner, domain_id, name)?;
+        let mut applied = false;
+        if let Some(holds) = inner
+            .semaphore_holds
+            .get_mut(&(domain_id.to_string(), name.to_string(), bucket))
+        {
+            let before = holds.len();
+            holds.retain(|hold| !(hold.owner_id == owner_id && hold.token_id == token_id));
+            applied = holds.len() != before;
+        }
+        Ok(applied)
     }
 }
 

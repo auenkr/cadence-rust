@@ -72,6 +72,33 @@ fn check_sticky_poller(
     }
     Ok(())
 }
+/// Wall-clock nanoseconds for the semaphore manager's idle liveness.
+fn semaphore_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|time| time.as_nanos() as i64)
+        .unwrap_or_default()
+}
+/// Map a semaphore manager error to the Go-compatible gRPC status.
+fn semaphore_status(error: crate::matching_semaphore::ManagerError) -> Status {
+    use crate::matching_semaphore::ManagerError;
+    match error {
+        ManagerError::BadRequest(message) => Status::invalid_argument(message),
+        ManagerError::Disabled => Status::invalid_argument(
+            "distributed semaphore is not enabled for this domain",
+        ),
+        ManagerError::NotFound(message) => Status::not_found(message),
+        ManagerError::NotReady => crate::grpc::detailed_status(
+            tonic::Code::ResourceExhausted,
+            "semaphore manager is not ready",
+            "ServiceBusyError",
+            cadence_proto::api::ServiceBusyError {
+                reason: String::new(),
+            },
+        ),
+        ManagerError::Internal(message) => Status::internal(message),
+    }
+}
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -147,16 +174,20 @@ pub struct Matching {
     partition_count: Option<crate::matching_registry::PartitionCountProvider>,
     /// Go `cfg.EnableAdaptiveScaler`, guarding manual partition updates.
     scaler_config: Option<crate::matching_registry::ScalerConfigProvider>,
+    /// Go `semaphoreRegistry`: one manager per semaphore bucket, in-memory.
+    semaphores: crate::matching_semaphore::Registry,
     poll_expiration: std::time::Duration,
 }
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
+        let semaphores = crate::matching_semaphore::Registry::new(state.executions.clone());
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
             queues: None,
             partition_count: None,
             scaler_config: None,
+            semaphores,
             poll_expiration: std::time::Duration::from_secs(60),
         }
     }
@@ -1066,57 +1097,40 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AcquireSemaphoreRequest>,
     ) -> Result<Response<m::AcquireSemaphoreResponse>, Status> {
         use cadence_api::enums::SemaphoreAcquireOutcome;
+        use crate::matching_semaphore::Identifier;
         let r = request.into_inner();
-        // Identifier validation mirrors Go's `NewIdentifier`.
-        if r.domain_id.is_empty() {
-            return Err(Status::invalid_argument("domainID is required."));
-        }
-        if r.semaphore_name.is_empty() {
-            return Err(Status::invalid_argument("semaphoreName is required."));
-        }
-        if r.bucket < 0 {
-            return Err(Status::invalid_argument(format!(
-                "bucket must not be negative, got {}.",
-                r.bucket
-            )));
-        }
-        if r.owner_id.is_empty() {
-            return Err(Status::invalid_argument("ownerID is required."));
-        }
         // Owner parsing mirrors Go's `ParseRequestOwner`.
         cadence_common::semaphore::parse_owner(&r.owner_id)
             .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
         // The domain must exist, like Go's domain-cache lookup.
         self.domain_name(&r.domain_id)?;
         if !self.frontend.state.semaphore_enabled {
-            return Err(Status::failed_precondition(
-                "Semaphores are not enabled on this host.",
+            return Err(Status::invalid_argument(
+                "distributed semaphore is not enabled for this domain",
             ));
         }
-        // Single host serves every bucket: no ownership routing needed.
-        let store = self
-            .frontend
-            .state
-            .executions
-            .clone();
-        match store.acquire_semaphore(&r.domain_id, &r.semaphore_name, r.bucket, &r.owner_id) {
-            Ok((outcome, token_id)) => {
-                let outcome = match outcome {
-                    SemaphoreAcquireOutcome::Acquired => 1,
-                    SemaphoreAcquireOutcome::NoSlot => 2,
-                    SemaphoreAcquireOutcome::Invalid => 0,
-                    _ => 0,
-                };
-                Ok(Response::new(m::AcquireSemaphoreResponse {
-                    outcome,
-                    token_id,
-                }))
-            }
-            Err(cadence_persistence::AcquireError::NotFound(e)) => Err(Status::not_found(e.message)),
-            Err(cadence_persistence::AcquireError::Invalid(message)) => {
-                Err(Status::invalid_argument(message))
-            }
-        }
+        // Go `EnableDistributedSemaphore` is a per-domain flag; the standalone
+        // host reads one global toggle, matching the rest of the server.
+        let identifier = Identifier::new(&r.domain_id, &r.semaphore_name, r.bucket)
+            .map_err(semaphore_status)?;
+        // Single host owns every bucket: no membership ring check needed, but
+        // idle buckets still unload like Go's liveness callback.
+        self.semaphores.sweep_idle(semaphore_now());
+        let manager = self
+            .semaphores
+            .get_or_create(identifier)
+            .map_err(semaphore_status)?;
+        let result = manager.acquire(&r.owner_id).map_err(semaphore_status)?;
+        let outcome = match result.outcome {
+            SemaphoreAcquireOutcome::Acquired => 1,
+            SemaphoreAcquireOutcome::NoSlot => 2,
+            SemaphoreAcquireOutcome::Invalid => 0,
+            _ => 0,
+        };
+        Ok(Response::new(m::AcquireSemaphoreResponse {
+            outcome,
+            token_id: result.token_id,
+        }))
     }
     async fn update_task_list_partition_config(
         &self,
@@ -1394,6 +1408,18 @@ pub async fn serve(
 /// the mixed-service harness instead of the in-memory engine.
 pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyhow::Result<()> {
     let limit = matching.frontend.state.grpc_max_message_size;
+    // Go runs a per-bucket liveness timer; a shared ticker unloads idle
+    // semaphore buckets so a quiet host does not keep them forever.
+    {
+        let sweeper = matching.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                ticker.tick().await;
+                sweeper.semaphores.sweep_idle(semaphore_now());
+            }
+        });
+    }
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(cadence_proto::FILE_DESCRIPTOR_SET)
         .with_service_name("uber.cadence.matching.v1.MatchingAPI")

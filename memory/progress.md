@@ -1,5 +1,18 @@
 # Progress log
 
+- **2026-10-17 — Matching semaphore manager + registry.** Ported Go
+  `service/matching/semaphore` (identifier, registry, manager) with the
+  `Created->Starting->Running->Stopped` lifecycle, startup scan rebuilding the
+  free-set and owner reverse-index, conditional grant with confirm-hold /
+  stale-index handling, `NoSlot` on a full bucket, and idle-bucket unloading.
+  Added the persistence token/owner row surface (`scan_semaphore_bucket`,
+  `get_semaphore_ownership_by_token`, `grant_semaphore_token`,
+  `release_semaphore_token`) and rewired `AcquireSemaphore` with
+  Go-compatible error mapping (including `ServiceBusyError` on `NotReady`).
+  `serve_with` runs a 30s idle sweeper. 7 unit tests + 1 gRPC end-to-end test,
+  full `cadence-server --lib` = 131 passed, strict Clippy clean. See
+  `memory/matching-semaphore-next.md`.
+
 - **2026-10-17 — Matching adaptive scaler + isolation balancer.** Ported Go
   `tasklist/adaptive_scaler.go` and `tasklist/isolation_balancer.go` in a new
   `matching_scaler.rs` (`Sustain`, write-count thresholds with downscale

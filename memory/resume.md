@@ -1,3 +1,16 @@
+Matching semaphore manager + registry (2026-10-17): read
+matching-semaphore-next.md first. Ports Go service/matching/semaphore:
+Identifier, Registry (get_or_create/unregister/by_identifier/all_managers/
+sweep_idle), and Manager (Created->Starting->Running->Stopped, startup scan
+rebuild, conditional grant with confirm-hold/stale-index handling, NoSlot).
+Adds the persistence token/owner row surface (scan/get_ownership/grant/release)
+and rewires AcquireSemaphore with Go-compatible error mapping; serve_with runs
+a 30s idle sweeper. 7 unit + 1 gRPC end-to-end test, full cadence-server --lib
+=131 passed, strict Clippy clean. Committed with the adaptive scaler in
+d5a00e110.. Remaining genuine single-process gaps: standby task completion,
+strong/sticky query version gates, handler error taxonomy, domain-failover
+poller disconnect, Thrift transport. Multi-host routing/membership out of scope.
+
 Matching adaptive scaler + isolation balancer (2026-10-17): read
 matching-scaler-next.md first. Ports Go tasklist/adaptive_scaler.go and
 tasklist/isolation_balancer.go: Sustain, upscale/downscale thresholds with
