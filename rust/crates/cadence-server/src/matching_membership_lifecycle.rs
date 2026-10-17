@@ -149,7 +149,10 @@ async fn snapshot<P: MatchingPeerProvider>(
 mod tests {
     use super::*;
     use crate::matching_peer_provider::{PeerChange, PeerStatus};
-    use std::{collections::HashMap, sync::{atomic::AtomicUsize, Mutex}};
+    use std::{
+        collections::HashMap,
+        sync::{atomic::AtomicUsize, Mutex},
+    };
     use tokio::sync::broadcast;
 
     // These in-process fakes validate resolver lifecycle semantics only; they are
@@ -161,6 +164,7 @@ mod tests {
         fetches: AtomicUsize,
         order: Mutex<Vec<&'static str>>,
         fail_subscribe: AtomicBool,
+        close_events: AtomicBool,
     }
     impl Fake {
         fn new() -> Self {
@@ -172,6 +176,7 @@ mod tests {
                 fetches: AtomicUsize::new(0),
                 order: Mutex::new(vec![]),
                 fail_subscribe: AtomicBool::new(false),
+                close_events: AtomicBool::new(false),
             }
         }
         fn set(&self, peers: Vec<PeerMember>) {
@@ -198,6 +203,11 @@ mod tests {
             self.order.lock().unwrap().push("subscribe");
             if self.fail_subscribe.load(Ordering::SeqCst) {
                 return Err(ProviderError("injected subscribe failure".into()));
+            }
+            if self.close_events.load(Ordering::SeqCst) {
+                let (tx, rx) = broadcast::channel(1);
+                drop(tx);
+                return Ok(rx);
             }
             Ok(self.tx.subscribe())
         }
@@ -276,7 +286,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(m.owner("key").unwrap().address, "two:7");
-        assert_eq!(p.fetches.load(Ordering::SeqCst), 2, "burst of hints must coalesce");
+        assert_eq!(
+            p.fetches.load(Ordering::SeqCst),
+            2,
+            "burst of hints must coalesce"
+        );
         let generation = *changed.borrow();
         p.fail.store(true, Ordering::SeqCst);
         for _ in 0..12 {
@@ -293,17 +307,35 @@ mod tests {
         let make = |address: &str, grpc: &str, identity: &str| {
             member(address, identity, "matching", PeerStatus::Alive, grpc)
         };
-        for (label, expected) in [("0", true), ("65535", true), ("65536", false), ("-1", false), ("+1", false), ("", false)] {
-            let host = make("[::1]:7935", label, "").matching_host("matching").unwrap();
+        for (label, expected) in [
+            ("0", true),
+            ("65535", true),
+            ("65536", false),
+            ("-1", false),
+            ("+1", false),
+            ("", false),
+        ] {
+            let host = make("[::1]:7935", label, "")
+                .matching_host("matching")
+                .unwrap();
             assert_eq!(!host.grpc_address.is_empty(), expected, "label {label:?}");
             assert_eq!(host.identity, "[::1]:7935");
-            if expected { assert_eq!(host.grpc_address, format!("[::1]:{label}")); }
+            if expected {
+                assert_eq!(host.grpc_address, format!("[::1]:{label}"));
+            }
         }
-        let malformed = make("bad:host:7935", "80", "id").matching_host("matching").unwrap();
-        assert_eq!(malformed.grpc_address, "bad:host:80");
-        let invalid_addr = make("broken", "80", "id").matching_host("matching").unwrap();
+        let malformed = make("bad:host:7935", "80", "id")
+            .matching_host("matching")
+            .unwrap();
+        assert!(malformed.grpc_address.is_empty());
+        let invalid_addr = make("broken", "80", "id")
+            .matching_host("matching")
+            .unwrap();
         assert!(invalid_addr.grpc_address.is_empty());
-        assert_eq!(label_to_port("00080"), Some(80));
+        let leading_zero = make("host:7935", "00080", "id")
+            .matching_host("matching")
+            .unwrap();
+        assert_eq!(leading_zero.grpc_address, "host:80");
     }
     #[tokio::test]
     async fn shutdown_self_evicts_before_stop_and_clears_placement() {
@@ -330,15 +362,65 @@ mod tests {
     async fn startup_failures_stop_provider_and_start_is_idempotent() {
         let p = Arc::new(Fake::new());
         p.fail_subscribe.store(true, Ordering::SeqCst);
-        let mut lifecycle = MatchingMembershipLifecycle::new("matching", p.clone(), Membership::new("self", vec![]));
+        let mut lifecycle = MatchingMembershipLifecycle::new(
+            "matching",
+            p.clone(),
+            Membership::new("self", vec![]),
+        );
         assert!(lifecycle.start().await.is_err());
         assert_eq!(*p.order.lock().unwrap(), vec!["start", "subscribe", "stop"]);
         p.fail_subscribe.store(false, Ordering::SeqCst);
         lifecycle.start().await.unwrap();
         lifecycle.start().await.unwrap();
-        assert_eq!(p.order.lock().unwrap().iter().filter(|&&v| v == "start").count(), 2);
+        assert_eq!(
+            p.order
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|&&v| v == "start")
+                .count(),
+            2
+        );
         lifecycle.shutdown().await.unwrap();
         lifecycle.shutdown().await.unwrap();
-        assert_eq!(p.order.lock().unwrap().iter().filter(|&&v| v == "stop").count(), 2);
+        assert_eq!(
+            p.order
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|&&v| v == "stop")
+                .count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn closed_event_stream_keeps_periodic_refresh_alive() {
+        let p = Arc::new(Fake::new());
+        p.close_events.store(true, Ordering::SeqCst);
+        p.set(vec![member(
+            "one:7",
+            "one",
+            "matching",
+            PeerStatus::Alive,
+            "8",
+        )]);
+        let m = Membership::new("self", vec![]);
+        let mut lifecycle = MatchingMembershipLifecycle::new("matching", p.clone(), m.clone());
+        lifecycle.start().await.unwrap();
+        let initial_fetches = p.fetches.load(Ordering::SeqCst);
+        *p.peers.lock().unwrap() = vec![member("two:7", "two", "matching", PeerStatus::Alive, "9")];
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if m.owner("key").is_ok_and(|owner| owner.address == "two:7") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("periodic refresh should run after the watch closes");
+        assert!(p.fetches.load(Ordering::SeqCst) > initial_fetches);
+        lifecycle.shutdown().await.unwrap();
     }
 }

@@ -29,9 +29,12 @@ impl PeerMember {
         {
             return None;
         }
-        let host = host_from_host_port(&self.address).unwrap_or_default();
-        let grpc = self.labels.get("grpc")
-            .and_then(|p| label_to_port(p).map(|port| format!("{host}:{port}")))
+        let host = host_from_host_port(&self.address);
+        let grpc = self
+            .labels
+            .get("grpc")
+            .and_then(|p| label_to_port(p))
+            .and_then(|port| host.as_ref().map(|host| format!("{host}:{port}")))
             .unwrap_or_default();
         Some(Host {
             address: self.address.clone(),
@@ -62,9 +65,7 @@ fn host_from_host_port(address: &str) -> Option<String> {
         return None;
     }
     match address.rsplit_once(':') {
-        Some((host, port)) if !port.is_empty() && !host.contains(':') => {
-            Some(host.to_owned())
-        }
+        Some((host, port)) if !port.is_empty() && !host.contains(':') => Some(host.to_owned()),
         _ => None,
     }
 }
@@ -84,7 +85,10 @@ impl std::error::Error for ProviderError {}
 /// Async infrastructure seam. Events are hints only: consumers re-fetch snapshots.
 pub trait MatchingPeerProvider: Send + Sync + 'static {
     fn start(&self) -> impl std::future::Future<Output = Result<(), ProviderError>> + Send;
-    fn members(&self, service: &str) -> impl std::future::Future<Output = Result<Vec<PeerMember>, ProviderError>> + Send;
+    fn members(
+        &self,
+        service: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<PeerMember>, ProviderError>> + Send;
     fn subscribe(
         &self,
         service: &str,

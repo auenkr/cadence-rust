@@ -41,14 +41,29 @@ refresh hint and closed receivers are disabled; stopping aborts a potentially bl
 snapshot worker. Initial synchronous snapshot is retained, and change hints are
 rate-limited with periodic 2s retries. Mapping applies Go's base-10 unsigned-16-bit
 port rule (0 valid, signs and overflow invalid), IPv6 bracket-host extraction, and
-empty-identity fallback. The malformed host:port behavior should be compared against
-Go `net.SplitHostPort`; no Ringpop/network parity is claimed.
+empty-identity fallback. Invalid placement host:port values produce an empty gRPC
+endpoint; no Ringpop/network parity is claimed.
 
 Added tests cover Go port bounds, IPv6, identity fallback, malformed endpoint, failed
-subscribe cleanup, start/stop idempotence, coalescing by fetch count, and last-good
-snapshot after failures. Validation status must be recorded with the repair commit:
-the concurrent cold builds were blocked by other worktrees' long-running Rust tests
-and cargo cache/build locks; do not infer test or clippy success from process launch.
+subscribe cleanup, start/stop idempotence, coalescing by fetch count, closed-event
+periodic refresh, and last-good snapshot after failures.
+
+## Validation (2026-10-17)
+
+In isolated checkout `t3-77b82231`, using named windows in tmux session
+`cadence-rust`:
+
+* `rustfmt --edition 2021 --check rust/crates/cadence-server/src/matching_membership_lifecycle.rs rust/crates/cadence-server/src/matching_peer_provider.rs` — passed.
+* `cargo test -p cadence-server --lib matching_membership_lifecycle -- --nocapture` — passed, 6 passed, 0 failed, 162 filtered out (3.15s).
+* `cargo clippy -p cadence-server --all-targets -- -D warnings` — passed.
+
+The first test execution exposed a real mapping bug: an invalid placement address
+could produce a `:grpc-port` endpoint because the invalid host was replaced with
+an empty string before formatting. Mapping now requires both a valid parsed host
+and an in-range unsigned decimal port. The initial compile also caught and fixed a
+test referencing the provider's private port parser directly. Other worktrees were
+using the shared tmux session/build cache concurrently; no other process was killed
+or modified.
 
 ## Next exact Ringpop/TChannel JSON wire slice
 
@@ -77,3 +92,11 @@ The primary next wire slice is exactly the first three protocol endpoints; next
 inspect `swim/handlers.go`, `swim/{join,ping,gossip}*.go`, request structs, and
 TChannel JSON registration/call code for byte-compatible schemas. Admin routes
 are operational/test aids, not a substitute for protocol interoperability.
+
+This commit implements only the transport-independent lifecycle seam and member
+mapping. It is not production peer discovery and does not complete Matching. Still
+missing: concrete Ringpop-compatible TChannel provider and seed/bootstrap modes;
+Rust config/port-label wiring; lifecycle consumption by Matching server startup;
+production two-process or Go Ringpop interoperability tests; and validation of
+leave/rejoin, membership convergence, role filtering on real peer data, and actual
+cross-host RPC endpoint routing.
