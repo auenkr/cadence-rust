@@ -1,3 +1,46 @@
+## Verified Matching transport / membership checkpoint (2026-10-17)
+
+Current implementation commit ce242f295 is pushed. All 154 server tests and
+strict workspace/all-target Clippy pass. Original Go-generated native Thrift
+clients pass all ten methods via TChannel and both HTTP mount spellings.
+Go/Rust ring placement agrees across 4,590 lookups. Real cross-host gRPC tests
+cover backlog delivery, sync adds without duplicate persistence, cancellation,
+and query completion on the accepting host.
+
+Final boundary and mixed Go/Rust probes BOTH PASS:
+/tmp/matching-mixed-final.exit = 0; artifacts matching-deadline-go-boundary and
+matching-deadline-mixed. Mixed test covers SDK workflow/activity completion,
+query dispatch, isolation, native partition config, idle unload and recovery.
+Broad runner's other 30 stages passed in matching-transport-membership-verified;
+its failed boundary stage was rerun successfully with source frozen. Earlier
+workspace suite passed; final server suite/Clippy and native transport were
+rerun after deadline changes. This is combined verification, not a claim that
+the earlier failed runner invocation exited zero.
+
+Whole Matching remains ACTIVE / INCOMPLETE. Continue only Matching. Next audit:
+local parent poll forwarding must use full handler policies (query pickup,
+per-hop deadlines/config); production membership discovery/runtime wiring;
+shared persistence/domain cache; shard-distributor and remaining live config;
+dedicated configured HTTP listener, metrics and outgoing channel limits/cache.
+See matching-membership-next.md for detailed evidence and outstanding scope.
+
+## Latest Matching deadline checkpoint (2026-10-17)
+
+Pushed ce242f295: Go-style empty-poll deadline tailroom and live long-poll
+expiration in durable and in-memory Matching. All 154 server tests and strict
+workspace Clippy pass. Native Go Thrift probe passes after durable deadline
+change. Whole-service scope remains active and incomplete.
+
+Broad artifacts matching-transport-membership-verified passed static, native
+Thrift, listener isolation, standalone public/internal gRPC and Go SDK checks,
+but Go delivery boundary failed after live source edits invalidated its prebuild
+(activity response empty, likely schedule-to-start expiry during recompilation).
+Source is now frozen. Running independent final Go boundary + mixed SDK probes
+in tmux matching-mixed-final: /tmp/matching-mixed-final.log and .exit; artifacts
+matching-deadline-go-boundary and matching-deadline-mixed. Inspect authoritative
+results before claiming compatibility. See matching-membership-next.md for all
+remaining ownership/provider/config and forwarding audit work.
+
 ## Current Matching continuation (2026-10-17)
 
 Native Matching Thrift is implemented and original Go clients pass all ten

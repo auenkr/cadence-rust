@@ -142,3 +142,15 @@ regression. Latest verification now /tmp/matching-all-poll-budgets.log and
 Final deadline tree: all 154 server unit tests and strict workspace/all-target
 Clippy pass (/tmp/matching-all-poll-budgets.exit=0). Latest durable Go-generated
 native Thrift probe also passes (/tmp/matching-deadline-native.exit=0).
+
+## Final combined verification checkpoint
+
+Frozen-source boundary AND mixed Go/Rust probes pass:
+/tmp/matching-mixed-final.exit = 0. Boundary artifacts matching-deadline-go-boundary;
+mixed artifacts matching-deadline-mixed. Mixed probe verifies workflow/activity
+completion, query/isolation dispatch, native partition config, idle unload/recovery.
+Broad runner's first 30 stages all pass in matching-transport-membership-verified;
+its failed boundary run is retained, not rewritten. Both final service stages
+passed in the independent reruns. Prior full workspace tests plus latest 154
+server tests/strict Clippy and native Go transport recheck complete the current
+verification categories. Whole-service goal remains incomplete and active.
