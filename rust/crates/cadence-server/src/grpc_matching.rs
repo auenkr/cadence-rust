@@ -177,7 +177,7 @@ pub struct Matching {
     scaler_config: Option<crate::matching_registry::ScalerConfigProvider>,
     /// Go `semaphoreRegistry`: one manager per semaphore bucket, in-memory.
     semaphores: crate::matching_semaphore::Registry,
-    poll_expiration: std::time::Duration,
+    pub(crate) poll_expiration: std::time::Duration,
 }
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {

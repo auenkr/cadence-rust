@@ -48,3 +48,6 @@ pub mod matching_limiter;
 pub mod matching_query;
 
 pub mod matching_reader;
+
+#[allow(clippy::result_large_err)]
+pub mod thrift_matching;

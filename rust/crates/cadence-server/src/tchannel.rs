@@ -367,8 +367,9 @@ fn response_frames(
         }
     }
 }
-async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState) -> Result<()> {
-    if call.service != "cadence-frontend" {
+async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState, matching: Option<crate::grpc_matching::Matching>) -> Result<()> {
+    let expected_service = if matching.is_some() { "cadence-matching" } else { "cadence-frontend" };
+    if call.service != expected_service {
         return error(&writer, id, 6, &call.trace, "Unknown TChannel service").await;
     }
     if call.headers.get("as").map(String::as_str) != Some("thrift") {
@@ -385,9 +386,10 @@ async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState)
     if !procedure.contains("::") {
         bail!("Unknown Cadence procedure");
     }
-    let method = cadence_thrift::service::find_method(procedure)
-        .ok_or_else(|| anyhow!("Unknown Cadence procedure"))?
-        .method;
+    let definition = cadence_thrift::service::find_method(procedure)
+        .filter(|definition| definition.service == "Meta" || definition.service == if matching.is_some() { "MatchingService" } else { "WorkflowService" })
+        .ok_or_else(|| anyhow!("Unknown Cadence procedure"))?;
+    let method = definition.method;
     let mut headers = Cursor::new(&call.args[1]);
     headers.headers16()?;
     if headers.remaining() != 0 {
@@ -399,12 +401,12 @@ async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState)
     let remaining = deadline.saturating_duration_since(Instant::now());
     let result = tokio::time::timeout(
         remaining,
-        crate::yarpc::dispatch(
-            &state,
-            method,
-            &request,
-            deadline.min(Instant::now() + Duration::from_secs(60)),
-        ),
+        async {
+            match matching {
+                Some(matching) => crate::thrift_matching::dispatch(&matching, procedure, &request, deadline).await,
+                None => crate::yarpc::dispatch(&state, method, &request, deadline.min(Instant::now() + Duration::from_secs(60))).await,
+            }
+        },
     )
     .await;
     let (result, application_error) = match result {
@@ -412,7 +414,7 @@ async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState)
         Ok(Err(message)) => return error(&writer, id, 6, &call.trace, &message).await,
         Ok(Ok(value)) => value,
     };
-    let mut meta = vec![("$rpc$-service", "cadence-frontend".to_string())];
+    let mut meta = vec![("$rpc$-service", expected_service.to_string())];
     if let Some((name, details)) = &application_error {
         meta.push(("$rpc$-application-error-name", name.to_string()));
         let mut end = details.len().min(256);
@@ -440,7 +442,7 @@ async fn handle_call(writer: SharedWriter, id: u32, call: Call, state: AppState)
     Ok(())
 }
 
-async fn connection(stream: TcpStream, state: AppState) -> Result<()> {
+async fn connection(stream: TcpStream, state: AppState, matching: Option<crate::grpc_matching::Matching>) -> Result<()> {
     stream.set_nodelay(true)?;
     let local = stream.local_addr()?.to_string();
     let (mut reader, writer) = stream.into_split();
@@ -508,9 +510,9 @@ async fn connection(stream: TcpStream, state: AppState) -> Result<()> {
                             !call.continuation(&frame.payload,state.grpc_max_message_size)?
                         };
                         if complete {
-                            let call=calls.remove(&frame.id).expect("assembled call");let id=frame.id;let writer=writer.clone();let state=state.clone();
+                            let call=calls.remove(&frame.id).expect("assembled call");let id=frame.id;let writer=writer.clone();let state=state.clone();let matching=matching.clone();
                             let abort=tasks.spawn(async move {
-                                let trace=call.trace;let result=handle_call(writer.clone(),id,call,state).await;
+                                let trace=call.trace;let result=handle_call(writer.clone(),id,call,state,matching).await;
                                 let result=if let Err(e)=result {error(&writer,id,6,&trace,&e.to_string()).await} else {Ok(())};
                                 (id,result)
                             });aborts.insert(id,abort);
@@ -524,14 +526,21 @@ async fn connection(stream: TcpStream, state: AppState) -> Result<()> {
     }
 }
 pub async fn serve(addr: std::net::SocketAddr, state: AppState) -> Result<()> {
+    serve_with(addr, state, None).await
+}
+pub async fn serve_matching(addr: std::net::SocketAddr, matching: crate::grpc_matching::Matching) -> Result<()> {
+    serve_with(addr, matching.frontend.state.clone(), Some(matching)).await
+}
+async fn serve_with(addr: std::net::SocketAddr, state: AppState, matching: Option<crate::grpc_matching::Matching>) -> Result<()> {
     let listener = TcpListener::bind(addr)
         .await
         .context("bind TChannel frontend")?;
     loop {
         let (stream, _) = listener.accept().await?;
         let state = state.clone();
+        let matching = matching.clone();
         tokio::spawn(async move {
-            let _ = connection(stream, state).await;
+            let _ = connection(stream, state, matching).await;
         });
     }
 }

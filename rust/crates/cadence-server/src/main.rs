@@ -37,6 +37,9 @@ enum Command {
         /// Native TChannel Thrift frontend port (config rpc.port by default).
         #[arg(long)]
         tchannel_port: Option<u16>,
+        /// Native internal Matching Thrift/TChannel port (matching.rpc.port).
+        #[arg(long)]
+        matching_tchannel_port: Option<u16>,
         /// Directory for JSON snapshots (domains.json, executions.json).
         /// Enables restart durability; omitted means purely in-memory.
         #[arg(long)]
@@ -63,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
             history_grpc_port,
             matching_grpc_port,
             tchannel_port,
+            matching_tchannel_port,
             data_dir,
         } => {
             let cfg = match config {
@@ -277,9 +281,12 @@ async fn main() -> anyhow::Result<()> {
                     .or_else(|| matching_rpc.map(|r| r.grpc_port).filter(|p| *p > 0))
                     .unwrap_or(7835),
             ));
+            let matching_tchannel_addr = std::net::SocketAddr::new(matching_addr.ip(), matching_tchannel_port
+                .or_else(|| matching_rpc.map(|r| r.port).filter(|p| *p > 0)).unwrap_or(7935));
             let run_matching = wanted.contains(&service::ServiceName::Matching);
             if run_matching {
                 println!("Cadence internal matching gRPC listening on {matching_addr}");
+                println!("Cadence internal matching Thrift/TChannel listening on {matching_tchannel_addr}");
             }
             // Durable matching queues live beside the JSON snapshots so a
             // standalone restart recovers backlog, partition fencing and ack
@@ -344,6 +351,12 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 cadence_server::grpc_matching::Matching::new(state.clone())
             };
+            let app = if run_matching {
+                let matching_http = cadence_server::thrift_matching::router(matching_service.clone());
+                let app = app.nest("/matching", matching_http.clone());
+                if run_frontend { app } else { app.merge(matching_http) }
+            } else { app };
+            let matching_tchannel_service = matching_service.clone();
             tokio::try_join!(
                 async {
                     axum::serve(listener, app)
@@ -367,6 +380,13 @@ async fn main() -> anyhow::Result<()> {
                 async {
                     if run_history {
                         cadence_server::grpc_internal::serve(history_addr, history_state).await
+                    } else {
+                        std::future::pending::<anyhow::Result<()>>().await
+                    }
+                },
+                async {
+                    if run_matching {
+                        cadence_server::tchannel::serve_matching(matching_tchannel_addr, matching_tchannel_service).await
                     } else {
                         std::future::pending::<anyhow::Result<()>>().await
                     }

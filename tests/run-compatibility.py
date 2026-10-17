@@ -80,12 +80,12 @@ def main():
     run("active-active-differential", [sys.executable, str(root / "tests/run-active-active-compat.py")])
     run("domain-update-differential", [sys.executable, str(root / "tests/run-domain-update-compat.py")])
     run("server-build", ["cargo", "build", "--manifest-path", manifest, "-p", "cadence-server"])
-    # Reserve all five ports together to avoid selecting the same port twice.
-    reservations = [socket.socket() for _ in range(5)]
+    # Reserve all six ports together to avoid selecting the same port twice.
+    reservations = [socket.socket() for _ in range(6)]
     try:
         for reservation in reservations:
             reservation.bind(("127.0.0.1", 0))
-        http, frontend, history, matching, tchannel = [s.getsockname()[1] for s in reservations]
+        http, frontend, history, matching, tchannel, matching_tchannel = [s.getsockname()[1] for s in reservations]
     finally:
         for reservation in reservations:
             reservation.close()
@@ -101,7 +101,8 @@ def main():
     run("cluster-config-cli", [sys.executable, str(root / "tests/check-cluster-config-cli.py"), str(binary)], cwd=server_workdir)
     command = [str(binary), "start", "--port", str(http),
                "--grpc-port", str(frontend), "--history-grpc-port", str(history),
-               "--matching-grpc-port", str(matching), "--tchannel-port", str(tchannel)]
+               "--matching-grpc-port", str(matching), "--tchannel-port", str(tchannel),
+               "--matching-tchannel-port", str(matching_tchannel)]
     # First boot the copied binary with no configuration file or Go checkout.
     with (artifacts / "embedded-startup.log").open("w") as log:
         embedded = subprocess.Popen(command, cwd=server_workdir, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -134,7 +135,7 @@ def main():
     command += ["--config", str(config)]
     (artifacts / "server.json").write_text(json.dumps({"command": command, "workingDirectory": str(server_workdir), "ports": {
         "http": http, "frontend": frontend, "history": history,
-        "matching": matching, "tchannel": tchannel}}, indent=2) + "\n")
+        "matching": matching, "tchannel": tchannel, "matchingTchannel": matching_tchannel}}, indent=2) + "\n")
     with (artifacts / "server.log").open("w") as log:
         server = subprocess.Popen(command, cwd=server_workdir, env=env, stdout=log, stderr=subprocess.STDOUT)
         try:

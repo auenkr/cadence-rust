@@ -30,7 +30,7 @@ fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
 }
 
-fn ttl_deadline(headers: &HeaderMap, default: Duration) -> Instant {
+pub(crate) fn ttl_deadline(headers: &HeaderMap, default: Duration) -> Instant {
     let millis: u64 = header(headers, "Context-TTL-MS")
         .and_then(|v| v.parse().ok())
         .unwrap_or(default.as_millis() as u64)
@@ -38,7 +38,7 @@ fn ttl_deadline(headers: &HeaderMap, default: Duration) -> Instant {
     Instant::now() + Duration::from_millis(millis)
 }
 
-fn ok_reply(service_echo: &str, result: Struct, app_error: Option<(&str, String)>) -> Response {
+pub(crate) fn ok_reply(service_echo: &str, result: Struct, app_error: Option<(&str, String)>) -> Response {
     let mut w = Writer::new();
     write_struct(&mut w, &result);
     let mut resp = w.into_bytes().into_response();
@@ -75,7 +75,7 @@ fn ok_reply(service_echo: &str, result: Struct, app_error: Option<(&str, String)
     resp
 }
 
-fn transport_error(status: StatusCode, message: String) -> Response {
+pub(crate) fn transport_error(status: StatusCode, message: String) -> Response {
     let mut resp = (status, message).into_response();
     resp.headers_mut()
         .insert("Rpc-Status", "error".parse().unwrap());

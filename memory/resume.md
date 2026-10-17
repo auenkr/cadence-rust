@@ -445,3 +445,6 @@ The dynamic-policy differential oracle outside the combined runner has a known
 fixture enum mismatch and must not be represented as passing. Preserve the Go
 one-minute failover cooldown; combined-runner rapid-failover checks use an explicit
 test-only admin override. No PR exists for this work.
+
+## Native Matching Thrift checkpoint (2026-10-17)
+Uncommitted transport work checkpointed after context handoff: all ten Matching Thrift methods, shared TChannel listener and HTTP routing, generated method inventory, original Go client probe. Two codec unit tests pass. Original Go TChannel probe passes; HTTP probe currently routes incorrectly (EntityNotExists instead of expected BadRequest). Rebuild and diagnose HTTP path before claiming compatibility. Whole Matching remains incomplete: distributed forwarding/ownership and production integration still require implementation and tests.

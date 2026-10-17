@@ -16,21 +16,22 @@ args = parser.parse_args()
 binary = args.binary.resolve()
 for role in ["matching", "history"]:
     with ExitStack() as stack, tempfile.TemporaryDirectory(prefix=f"cadence-{role}-listeners-") as directory:
-        sockets = [stack.enter_context(socket.socket()) for _ in range(5)]
+        sockets = [stack.enter_context(socket.socket()) for _ in range(6)]
         for listener in sockets:
             listener.bind(("127.0.0.1", 0))
             listener.listen()
-        http, frontend, history, matching, tchannel = [listener.getsockname()[1] for listener in sockets]
+        http, frontend, history, matching, tchannel, matching_tchannel = [listener.getsockname()[1] for listener in sockets]
         # Keep all unselected RPC ports occupied. Accidental listener startup
         # fails the process rather than being hidden by an unused open port.
         sockets[0].close()
         selected = matching if role == "matching" else history
         sockets[3 if role == "matching" else 2].close()
+        if role == "matching": sockets[5].close()
         with (Path(directory) / "server.log").open("w+") as log:
             process = subprocess.Popen([str(binary), "start", "--services", role,
                 "--port", str(http), "--grpc-port", str(frontend),
                 "--history-grpc-port", str(history), "--matching-grpc-port", str(matching),
-                "--tchannel-port", str(tchannel)], cwd=directory, stdout=log, stderr=subprocess.STDOUT)
+                "--tchannel-port", str(tchannel), "--matching-tchannel-port", str(matching_tchannel)], cwd=directory, stdout=log, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 30
                 while True:
@@ -42,6 +43,8 @@ for role in ["matching", "history"]:
                             assert response.status == 200
                         with socket.create_connection(("127.0.0.1", selected), timeout=1):
                             pass
+                        if role == "matching":
+                            with socket.create_connection(("127.0.0.1", matching_tchannel), timeout=1): pass
                         break
                     except (OSError, urllib.error.URLError):
                         if time.monotonic() >= deadline:
