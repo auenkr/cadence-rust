@@ -41,6 +41,9 @@ type PollerMap = std::collections::HashMap<(String, String, String, String), i64
 
 #[derive(Debug, Clone)]
 pub struct AppState {
+    /// Dedicated Matching HTTP owns the `cadence-matching` YARPC service;
+    /// reject attempts to route that service through the public JSON listener.
+    pub matching_http_isolated: bool,
     pub admin: crate::admin::AdminState,
     /// History shard count from config (Go `numHistoryShards`, dev default
     /// 4). Single host owns every shard; runs are not partitioned.
@@ -63,6 +66,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            matching_http_isolated: false,
             admin: crate::admin::AdminState::default(),
             num_history_shards: 4,
             scheduler_enabled: false,

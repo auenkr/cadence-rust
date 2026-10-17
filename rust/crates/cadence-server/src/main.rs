@@ -182,6 +182,11 @@ async fn main() -> anyhow::Result<()> {
                 num_history_shards,
                 ..Default::default()
             };
+            state.matching_http_isolated = wanted.contains(&service::ServiceName::Matching)
+                && cfg
+                    .services
+                    .get("matching")
+                    .is_some_and(|matching| matching.rpc.http.is_some());
             let metadata = cfg.cluster_metadata.as_ref().expect("validated cluster metadata");
             state.current_cluster_name.clone_from(&metadata.current_cluster_name);
             state.cluster_metadata = metadata.metadata();

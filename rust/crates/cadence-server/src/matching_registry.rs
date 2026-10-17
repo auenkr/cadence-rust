@@ -490,6 +490,7 @@ impl QueueRegistry {
         self.isolation.clone().expect("isolation provider installed")
     }
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn record_started_timeout_for_test(
         &self,
         domain_id: &str,

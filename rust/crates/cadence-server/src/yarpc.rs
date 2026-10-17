@@ -1614,9 +1614,24 @@ pub async fn yarpc_handler(
     body: Bytes,
 ) -> Response {
     let service_echo = header(&headers, "Rpc-Service").unwrap_or(SERVICE);
+    if service_echo == "cadence-matching" && state.matching_http_isolated {
+        return transport_error(
+            StatusCode::NOT_FOUND,
+            "Matching YARPC is served on its configured listener".to_string(),
+        );
+    }
     let Some(procedure) = header(&headers, "Rpc-Procedure") else {
         return transport_error(StatusCode::BAD_REQUEST, "missing Rpc-Procedure".to_string());
     };
+    if state.matching_http_isolated
+        && find_method(procedure)
+            .is_some_and(|method| matches!(method.service, "MatchingService" | "Meta"))
+    {
+        return transport_error(
+            StatusCode::NOT_FOUND,
+            "Matching YARPC is served on its configured listener".to_string(),
+        );
+    }
     match header(&headers, "Rpc-Encoding") {
         Some("thrift") => {}
         Some(other) => {
