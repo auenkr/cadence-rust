@@ -79,3 +79,22 @@ merely replacing defaults at manager creation is not sufficient for live propert
 Latest broad verification: workspace tests passed (150 server tests plus the
 workspace/integration suites), and strict workspace/all-target Clippy passed.
 The full runner has advanced into Go differential stages; final exit pending.
+
+Audit caution: missing keys must be checked for real Go call sites before adding
+behavior. For example, `EnableSyncMatch` and `ActivityTaskSyncMatchWaitTime`
+currently appear only in Go config/manager construction, not operational calls.
+Making those toggles affect behavior would change the pinned Go logic. Preserve
+unused-property behavior; prioritize properties actually read by Go actors.
+
+## Local poll forwarding delay follow-up
+
+Auditing Go matcher.pollNonBlocking exposed a default mismatch: Rust forwarded
+polls immediately rather than waiting Go's default 10ms for local tasks. Added
+live matching.localPollWaitTime provider and delay before acquiring a forwarding
+permit. The wait is raced with local delivery and caller cancellation. Focused
+regression (30s configured wait prevents parent registration, next poll after
+setting 0s reaches parent) passes: /tmp/matching-localpoll-test.exit = 0.
+Current all-server-unit + strict Clippy rerun: /tmp/matching-final-unit.log and
+/tmp/matching-final-unit.exit. Full suite continues with the latest build.
+Latest local-wait tree: all 151 server unit tests and strict workspace/all-target
+Clippy pass (`/tmp/matching-final-unit.exit` = 0).

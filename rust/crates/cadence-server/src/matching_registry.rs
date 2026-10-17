@@ -101,6 +101,7 @@ pub struct QueueRegistry {
     partition_count: Option<PartitionCountProvider>,
     cache_enabled: Option<PartitionCacheEnabledProvider>,
     sync_wait: Option<SyncWaitProvider>,
+    local_poll_wait: Option<SyncWaitProvider>,
     /// Go `cfg.ForwarderMaxChildrenPerNode(domain, taskList, type)`
     /// (`matching.forwarderMaxChildrenPerNode`, default 20). `None` uses the default.
     forward_degree: Option<ForwardDegreeProvider>,
@@ -355,6 +356,7 @@ impl QueueRegistry {
             partition_count: None,
             cache_enabled: None,
             sync_wait: None,
+            local_poll_wait: None,
             forward_degree: None,
             forward_polls: None,
             forward_tasks: None,
@@ -403,6 +405,10 @@ impl QueueRegistry {
     }
     pub fn with_sync_wait(mut self, provider: SyncWaitProvider) -> Self {
         self.sync_wait = Some(provider);
+        self
+    }
+    pub fn with_local_poll_wait(mut self, provider: SyncWaitProvider) -> Self {
+        self.local_poll_wait = Some(provider);
         self
     }
     pub fn with_forward_degree(mut self, provider: ForwardDegreeProvider) -> Self {
@@ -656,6 +662,13 @@ impl QueueRegistry {
                                 },
                                 max_outstanding,
                                 lookup.1.clone(),
+                                {
+                                    let provider = registry.local_poll_wait.clone();
+                                    let domain = domain.clone();
+                                    let name = lookup.1.clone();
+                                    let task_type = lookup.2;
+                                    Arc::new(move || provider.as_ref().map(|provider| provider(&domain, &name, task_type)).unwrap_or(10_000_000))
+                                },
                             ))
                         }
                     };

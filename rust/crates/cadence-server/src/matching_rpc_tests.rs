@@ -2043,3 +2043,39 @@ async fn matching_rpc_cross_host_poll_add_and_cancellation() {
     root.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn matching_rpc_local_poll_wait_delays_forwarding_and_reloads() {
+    let (_directory, _store, matching, key) = fixture();
+    scaler_config_value(&matching, "matching.localPollWaitTime", br#""30s""#);
+    let domain = key.domain_id.to_string();
+    let child_list = p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() };
+    let child = matching.durable_queue(&domain, &child_list, 0).await.unwrap();
+    let root = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    let start_poll = |id: &str| {
+        let service = matching.clone();
+        let domain = domain.clone();
+        let task_list = child_list.clone();
+        let id = id.to_owned();
+        tokio::spawn(async move { service.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain, poller_id: id,
+            request: Some(p::PollForDecisionTaskRequest { task_list: Some(task_list), ..Default::default() }), ..Default::default()
+        })).await })
+    };
+    let delayed = start_poll("delayed");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !child.pollers.lock().unwrap().contains_poll("delayed") { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!root.pollers.lock().unwrap().contains_poll("delayed"), "configured local wait precedes the parent poll");
+    delayed.abort();
+    assert!(delayed.await.unwrap_err().is_cancelled());
+    scaler_config_value(&matching, "matching.localPollWaitTime", br#""0s""#);
+    let immediate = start_poll("immediate");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root.pollers.lock().unwrap().contains_poll("immediate") { tokio::task::yield_now().await; }
+    }).await.expect("next poll uses the current property instead of manager startup defaults");
+    immediate.abort();
+    assert!(immediate.await.unwrap_err().is_cancelled());
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}

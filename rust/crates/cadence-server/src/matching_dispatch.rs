@@ -66,6 +66,7 @@ pub struct TaskDispatcher {
 pub(crate) struct ForwardState {
     resolve: Arc<ParentResolver>,
     source: String,
+    local_wait: crate::matching_forward::Count,
     permits: Arc<crate::matching_forward::RequestTokens>,
 }
 pub(crate) enum Parent {
@@ -143,10 +144,12 @@ impl ForwardState {
             + 'static,
         max_outstanding: crate::matching_forward::Count,
         source: String,
+        local_wait: crate::matching_forward::Count,
     ) -> Self {
         Self {
             resolve: Arc::new(resolve),
             source,
+            local_wait,
             permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding)),
         }
     }
@@ -614,7 +617,13 @@ impl TaskDispatcher {
                         result = self.claim_delivery(lifecycle.as_ref().map(|l| l.info.isolation_group.as_str()).unwrap_or_default()) => result,
                         permit = async {
                             match &self.forward {
-                                Some(forward) if !forward_failed => forward.permits.acquire().await,
+                                Some(forward) if !forward_failed => {
+                                    // Go pollNonBlocking gives local tasks a
+                                    // configured head start before ForwardPoll.
+                                    let wait = Duration::from_nanos((forward.local_wait)().max(0) as u64);
+                                    tokio::time::sleep(wait).await;
+                                    forward.permits.acquire().await
+                                },
                                 _ => std::future::pending().await,
                             }
                         } => match permit {

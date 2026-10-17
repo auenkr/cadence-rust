@@ -243,6 +243,14 @@ impl Matching {
                 cadence_persistence::dynamic_config::task_list_duration(config.property_values("matching.localTaskWaitTime"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 10_000_000)
             })
         };
+        let local_poll_wait: crate::matching_registry::SyncWaitProvider = {
+            let domains = domains.clone();
+            let overlay = overlay.clone();
+            Arc::new(move |domain_id, task_list, task_type| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_duration(config.property_values("matching.localPollWaitTime"), domain_name_for(&domains, domain_id).as_deref(), task_list, task_type, 10_000_000)
+            })
+        };
         let cache_enabled: crate::matching_registry::PartitionCacheEnabledProvider = {
             let domains = domains.clone();
             let overlay = overlay.clone();
@@ -429,6 +437,7 @@ impl Matching {
             .with_partition_count(read_provider)
             .with_partition_cache_enabled(cache_enabled)
             .with_sync_wait(sync_wait)
+            .with_local_poll_wait(local_poll_wait)
             .with_forward_degree(forward_degree)
             .with_forward_polls(forward_polls)
             .with_forward_tasks(forward_tasks, forward_rate)
