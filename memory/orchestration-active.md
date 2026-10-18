@@ -1,3 +1,9 @@
+## Writer actor draft review 2026-10-18
+
+6c1bd6fa4 NOT integrated/not wired. Worker4focusedtests+Go8trace verification+strict persistenceClippy passed. Parent inspected: fixture test never runs Rust actor, only validates Go data; cancellation ignored during admission; stop synchronously joins in-flight backend unlike Go immediate Stop. 1/2ms polling and handler zip truncation need audit. Luna Standard repair accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-actor-parity-standard-41-20261018
+Requires actual Rust-vs-Go event traces,admission cancellation,nonblocking stop/separate join/lifecycle before queue integration. JOINsender38 separate active. Matchingonly/incomplete.
+
 ## Writer original-Go contract/oracle returned 2026-10-18
 
 0da3c1dd5 original taskWriter overlay produced8verified event traces exit0; integrated. Covers capacity,batch,enqueue/response timeout,cancel-after-accept,stop; simultaneous select races remain nondeterministic,real15ms timers. Parent reviewed design and rejected note's invented negative-capacity recoverable error as automatic policy: Go construction fails/panics, no fallback.
