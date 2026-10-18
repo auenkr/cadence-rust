@@ -1,3 +1,7 @@
+## Memberlist repair checks returned 2026-10-18
+
+Repair b5b912efd289086bfdc4e5def6103c7f5c178ee3 removes invented 64 cap, adjusts insertion callback range excluding end, adds >64/local-field/insertion tests. Parent reviewed diff. Worker confirms 4 focused tests, member/dissemination oracle regressions and strict common all-target Clippy exit 0. Still UNINTEGRATED pending memberlist actual-Go consumer standard-27 (checked running). Final combined stack must include ed35c38ca +3f2f3ce34 +b5b912efd +cf0eb63ef +consumer before acceptance. Matching remains current/incomplete.
+
 ## Memberlist Go oracle ready 2026-10-18
 
 cf0eb63ef executed original Update directly, 108 status/incarnation cases + local refutation +80 batch, generator twice identical. Parent reviewed: fixture lacks initial remote member/clock metadata needed for independent reconstruction. Consumer task assigned to add metadata and Rust comparison:
