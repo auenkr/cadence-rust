@@ -1,3 +1,17 @@
+## Authoritative resume checkpoint — 2026-10-18
+
+Parent source 0a6b6b336; Matching remains incomplete. Service order Matching -> History -> Frontend -> Worker. Workers use Luna normal speed, serviceTier=default, isolated async worktrees. No future-service migration yet.
+
+Integrated production writer live batch/timeout and signed capacity/rendezvous fixes; outbound JOIN/PING, selector, concurrent JOIN group and asynchronous cancellable JoinCluster retry controller. Latest controller commits 17d7b6015/b5b783bbe. Ready/gossip/startup wiring remains open.
+
+Latest full frozen validation is source 3c8c5f98a: 34 compatibility stages, 568 tests passed (2 ignored), strict workspace Clippy; Rust Matching with original Go Frontend/History/Worker and no Go Matching. Later JOIN group/controller slices have focused Go interoperability checks. Actual SIGKILL/restart with persisted task and original Go peers passed; artifact selection repaired in 593182641.
+
+Discovery candidate d55ad694aa3e924387c7390f021a8aaed8c4e5f2 (worktree t3-8bb4397c) is NOT integrated. Review null JSON compatibility, oracle coverage, Go source overlay placement and config parsing before acceptance. DNS/SRV/runtime remain open.
+
+Active task matching-ringpop-ping-req-standard-69-20261018 is running, no pending question. Task prefix node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3A. Implements real inbound relay with actual Go requester/target; no scheduler/main wiring. Do not duplicate.
+
+Disk only 4.4GB free: inspect active processes/caches before building; preserve sources, commits and evidence. See orchestration-active.md and matching-production-gap-audit-20261018.md. Next finish discovery review/repair and relay review, then remaining production membership wiring and audit, rerun combined mixed validation before History. Historical notes below are superseded.
+
 ## Resume checkpoint — 2026-10-18 (after handoff)
 
 Matching remains current and incomplete. Follow service order Matching -> History -> Frontend -> Worker. Root AGENTS.md already records service-by-service mixed original-Go testing and storage rules.
