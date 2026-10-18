@@ -1,3 +1,10 @@
+## Memberlist core integrated 2026-10-18
+
+Final standard-28 passed all combined gates exit 0:112-case original Go Update oracle, focused unit, member/dissemination oracles, wire compatibility, strict locked common all-target Clippy, two Go generations/no drift. Integrated 65adea85d,f3537eb21,40e5808a1,292b5524f,9e6504863 +final evidence 25186c5a6 cherry-pick. Worker cleaned own target 479.8MiB, ~62GB free.
+Next Matching discovery dependency Luna Standard task:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-protocol-standard-30-20261018
+Accepted running: original-Go inbound join/direct-ping group, bounded join-only acceptance if needed; no bootstrap/probe/timer/main readiness claims. HTTP exact-Go parity standard-29 separate active. Matching remains current/incomplete.
+
 ## Memberlist combined gate and HTTP exact behavior correction 2026-10-18
 
 HTTP 126afe824 returned 3 focused, locked build, strict Clippy, full live Go runner all exit 0, including concurrent stalled clients. NOT INTEGRATED: memory admits intentional read_exact fragmented TLS improvement unlike Go one-Read/short=>plaintext; parent earlier asked improvement but USER no-logic-change wins. MAX_PENDING=128 drop policy also needs source parity. Exact-Go repair assigned:
