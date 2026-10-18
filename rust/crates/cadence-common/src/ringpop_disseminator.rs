@@ -58,6 +58,13 @@ impl Disseminator {
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty()
     }
+    /// Read-only per-address propagation counters for parity diagnostics.
+    pub fn propagation_counts(&self) -> BTreeMap<String, usize> {
+        self.changes
+            .iter()
+            .map(|(address, pending)| (address.clone(), pending.propagated))
+            .collect()
+    }
     pub fn clear(&mut self) {
         self.changes.clear();
     }

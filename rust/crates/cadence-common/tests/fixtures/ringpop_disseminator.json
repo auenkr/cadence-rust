@@ -1,4 +1,13 @@
 {
+  "checksumEqualNoDeltas": {
+    "changes": [],
+    "fullSync": false,
+    "state": {
+      "changes": [],
+      "pending": 0,
+      "counters": {}
+    }
+  },
   "checksumMismatchFullSync": {
     "changes": [
       {
@@ -65,22 +74,55 @@
     },
     "issued": [
       {
-        "source": "new",
-        "sourceIncarnationNumber": 0,
-        "address": "peer",
-        "incarnationNumber": 2,
-        "status": "suspect",
-        "timestamp": 19
-      },
-      {
         "source": "peer",
         "sourceIncarnationNumber": 0,
         "address": "failed",
         "incarnationNumber": 3,
         "status": "alive",
         "timestamp": -62135596800
+      },
+      {
+        "source": "new",
+        "sourceIncarnationNumber": 0,
+        "address": "peer",
+        "incarnationNumber": 2,
+        "status": "suspect",
+        "timestamp": 19
       }
     ]
+  },
+  "fullySenderFiltered": {
+    "changes": [
+      {
+        "source": "local",
+        "sourceIncarnationNumber": 41,
+        "address": "local",
+        "incarnationNumber": 41,
+        "status": "alive",
+        "timestamp": -62135596800
+      }
+    ],
+    "fullSync": true,
+    "state": {
+      "changes": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 9,
+          "address": "only",
+          "incarnationNumber": 4,
+          "status": "alive",
+          "timestamp": -62135596800
+        }
+      ],
+      "pending": 1,
+      "counters": {
+        "only": 0
+      }
+    }
+  },
+  "maxPByFactorWithOnePingable": {
+    "0": 0,
+    "1": 1
   },
   "maxPByPingableCount": {
     "0": 0,

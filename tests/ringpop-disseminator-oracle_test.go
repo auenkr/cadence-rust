@@ -30,6 +30,11 @@ func snapshot(d *disseminator) disseminationSnapshot {
 	return s
 }
 
+func normalizeChanges(changes []Change) []Change {
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Address < changes[j].Address })
+	return changes
+}
+
 func fixtureDisseminator(local Member, members ...Member) *disseminator {
 	n := &Node{address: local.Address, logger: logging.Logger("fixture")}
 	ml := &memberlist{node: n, local: &local, logger: logging.Logger("fixture")}
@@ -77,8 +82,8 @@ func TestGenerateRingpopDisseminatorFixtures(t *testing.T) {
 	d.RecordChange(Change{Source: "peer", Address: "failed", Incarnation: 3, Status: Alive})
 	failedSent, _ := d.IssueAsSender() // failed delivery: deliberately do not invoke callback
 	failedAfter := snapshot(d)
-	result["senderCallbackReplacement"] = map[string]interface{}{"issued": sent, "afterCallback": replaced}
-	result["failedCallbackNotInvoked"] = map[string]interface{}{"issued": failedSent, "afterFailedDelivery": failedAfter}
+	result["senderCallbackReplacement"] = map[string]interface{}{"issued": normalizeChanges(sent), "afterCallback": replaced}
+	result["failedCallbackNotInvoked"] = map[string]interface{}{"issued": normalizeChanges(failedSent), "afterFailedDelivery": failedAfter}
 
 	// Repeated successful sender callbacks remove a change at maxP.
 	d = fixtureDisseminator(Member{Address: "local", Status: Alive, Incarnation: 41})
@@ -88,7 +93,7 @@ func TestGenerateRingpopDisseminatorFixtures(t *testing.T) {
 		cs, cb := d.IssueAsSender()
 		cb()
 		s := snapshot(d)
-		s.Changes = cs
+		s.Changes = normalizeChanges(cs)
 		repeats = append(repeats, s)
 	}
 	result["repeatedSuccessfulSends"] = repeats
@@ -123,6 +128,30 @@ func TestGenerateRingpopDisseminatorFixtures(t *testing.T) {
 		maxP[fmt.Sprint(count)] = d.maxP
 	}
 	result["maxPByPingableCount"] = maxP
+	// Preserve Go's integer factor and floating point formula at maxP 0/1.
+	maxPByFactor := map[string]int{}
+	for _, factor := range []int{0, 1} {
+		local := Member{Address: "local", Status: Alive}
+		members := []Member{local, {Address: "peer", Status: Alive}}
+		d = fixtureDisseminator(local, members...)
+		d.pFactor = factor
+		d.AdjustMaxPropagations()
+		maxPByFactor[strconv.Itoa(factor)] = d.maxP
+	}
+	result["maxPByFactorWithOnePingable"] = maxPByFactor
+
+	// Equal checksums with no deltas do not trigger full sync.
+	d = fixtureDisseminator(Member{Address: "local", Status: Alive, Incarnation: 41})
+	equalChecksum := d.node.memberlist.Checksum()
+	equal, equalFullSync := d.IssueAsReceiver("sender", 9, equalChecksum)
+	result["checksumEqualNoDeltas"] = map[string]interface{}{"changes": normalizeChanges(equal), "fullSync": equalFullSync, "state": snapshot(d)}
+
+	// All queued changes can be filtered by the sender. With unequal checksums
+	// this falls through to the full membership path.
+	d = fixtureDisseminator(Member{Address: "local", Status: Alive, Incarnation: 41})
+	d.RecordChange(Change{Source: "sender", SourceIncarnation: 9, Address: "only", Incarnation: 4, Status: Alive})
+	filteredAll, filteredAllFullSync := d.IssueAsReceiver("sender", 9, 123)
+	result["fullySenderFiltered"] = map[string]interface{}{"changes": normalizeChanges(filteredAll), "fullSync": filteredAllFullSync, "state": snapshot(d)}
 
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
