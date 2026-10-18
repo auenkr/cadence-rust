@@ -1,3 +1,10 @@
+## Live mixed process restart PASSED — 2026-10-18
+
+Revieweda455cd254,testsource+report;integrated50c3190d4. Sourcea1ee92c58RustMatchingSIGKILLwith1pendingSQLiterow,reopenssameDB/listener,existingSDKworkflow/activitycomplete,exactly1finalHistorycompletion,GoFrontendHistoryWorkerremainalive,NOGoMatching. AdjacentnormalmixedSDKretry/timeout/query/isolationregressionpassed. Artifacts~/.cache/cadence-rust-test-artifacts/matching-process-restart63/. Disk9.2GBfreeafterworkercleanup.
+ParentreviewCJSusesfirstmatching_deliveryexecutableincache (potentialstale);normal-speedLuna66exactCargoJSONartifactselection+restartrevalidationaccepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-test-artifact-selection-standard-66-20261018
+Controller65independentactive. Matching incomplete.
+
 ## JOIN stale probe harness fixed — 2026-10-18
 
 Reviewed8dc7e18d0,integrated. DefaultJOINrunneralwaysbuildscurrentcheckoutandcopiesuniqueownedtempbinary;explicitoverridevalidatedexecutable,ownedcleanupfinally. FreshsingleJOIN+twopeerGROUPGo testsPASS,invalidoverrideexpectedexit1. Confirmscachedglobalbinarywasfailurecause;controllerdraftstillunintegratedforasync/delayerrepair65. Restart63independentlyactive. Disk2.5GBfree,mustpreserveactivecacheandavoidfreshbuilds. Matching incomplete.
