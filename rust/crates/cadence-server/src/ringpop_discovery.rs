@@ -2,6 +2,7 @@
 //! DNS and DNS-SRV modes remain deliberately unimplemented here.
 
 use crate::config::{BootstrapMode, RingpopConfig};
+use serde::de::Error as _;
 use std::{fs, path::PathBuf};
 
 pub trait DiscoverProvider {
@@ -41,10 +42,26 @@ impl JsonFile {
 impl DiscoverProvider for JsonFile {
     fn hosts(&self) -> Result<Vec<String>, DiscoveryError> {
         let data = fs::read(&self.path)?;
-        serde_json::from_slice(&data).map_err(|error| match error.classify() {
-            serde_json::error::Category::Syntax | serde_json::error::Category::Eof => DiscoveryError::JsonSyntax(error),
-            serde_json::error::Category::Data | serde_json::error::Category::Io => DiscoveryError::JsonType(error),
-        })
+        // encoding/json unmarshals JSON null into a nil []string, and null
+        // array elements into empty strings. serde's Vec<String> rejects both.
+        let value: serde_json::Value = serde_json::from_slice(&data).map_err(DiscoveryError::JsonSyntax)?;
+        match value {
+            serde_json::Value::Null => Ok(Vec::new()),
+            serde_json::Value::Array(values) => values.into_iter().map(|value| match value {
+                serde_json::Value::Null => Ok(String::new()),
+                serde_json::Value::String(value) => Ok(value),
+                other => Err(DiscoveryError::JsonType(serde_json::Error::custom(format!("expected string or null, got {}", json_type_name(&other))))),
+            }).collect(),
+            other => Err(DiscoveryError::JsonType(serde_json::Error::custom(format!("expected array or null, got {}", json_type_name(&other))))),
+        }
+    }
+}
+
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null", serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number", serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array", serde_json::Value::Object(_) => "object",
     }
 }
 
@@ -106,6 +123,25 @@ mod tests {
     #[test]
     fn matches_actual_go_provider_oracle_fixture() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!("../../../../tests/fixtures/ringpop_bootstrap_provider.json")).unwrap();
+        let inputs: serde_json::Value = serde_json::from_str(include_str!("../../../../tests/fixtures/ringpop_bootstrap_provider_inputs.json")).unwrap();
+        assert_eq!(inputs["fileInputs"], fixture["fileInputs"]);
+        let mixed_mode = crate::config::Config::from_yaml("ringpop: {name: x, bootstrapMode: HoStS}").unwrap();
+        assert_eq!(mixed_mode.ringpop.bootstrap_mode as i32, fixture["bootstrapModes"]["mixed"]["mode"].as_i64().unwrap() as i32);
+        let upper_mode = crate::config::Config::from_yaml("ringpop: {name: x, bootstrapMode: DNS-SRV}").unwrap();
+        assert_eq!(upper_mode.ringpop.bootstrap_mode as i32, fixture["bootstrapModes"]["upper"]["mode"].as_i64().unwrap() as i32);
+        let unknown_mode = crate::config::Config::from_yaml("ringpop: {name: x, bootstrapMode: WeIrD}").unwrap_err().to_string();
+        assert!(unknown_mode.contains(fixture["bootstrapModes"]["unknown"]["error"].as_str().unwrap()));
+        for (raw, expected) in inputs["fileInputs"].as_array().unwrap().iter().zip(fixture["fileObservations"].as_array().unwrap()) {
+            let f = tempfile::NamedTempFile::new().unwrap();
+            fs::write(f.path(), raw.as_str().unwrap()).unwrap();
+            let actual = JsonFile::new(f.path()).hosts();
+            match expected["errorType"].as_str().unwrap() {
+                "" => assert_eq!(actual.unwrap(), expected["hosts"].as_array().map_or_else(Vec::new, |values| values.iter().map(|value| value.as_str().unwrap().to_owned()).collect()), "raw input must match Go provider result"),
+                "*json.SyntaxError" => assert!(matches!(actual, Err(DiscoveryError::JsonSyntax(_))), "raw input {raw:?}: {actual:?}"),
+                "*json.UnmarshalTypeError" => assert!(matches!(actual, Err(DiscoveryError::JsonType(_))), "raw input {raw:?}: {actual:?}"),
+                other => panic!("unhandled Go error category {other}"),
+            }
+        }
         let empty = tempfile::NamedTempFile::new().unwrap();
         fs::write(empty.path(), b"[]").unwrap();
         assert!(JsonFile::new(empty.path()).hosts().unwrap().is_empty());

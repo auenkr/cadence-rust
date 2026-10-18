@@ -39,16 +39,35 @@ func TestBootstrapProviderActualOracle(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "hosts.json")
-	if err := os.WriteFile(path, []byte(`[]`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	emptyProvider, err := newDiscoveryProvider(&config.Config{BootstrapMode: config.BootstrapModeFile, BootstrapFile: path}, testlogger.New(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	empty, err := emptyProvider.Hosts()
-	if err != nil || len(empty) != 0 {
-		t.Fatalf("empty file hosts %v, error %v", empty, err)
+	inputBytes, err := os.ReadFile("../../../../tests/fixtures/ringpop_bootstrap_provider_inputs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inputs struct {
+		FileInputs []string `json:"fileInputs"`
+	}
+	if err := json.Unmarshal(inputBytes, &inputs); err != nil {
+		t.Fatal(err)
+	}
+	type observation struct {
+		Hosts     []string `json:"hosts"`
+		ErrorType string   `json:"errorType"`
+	}
+	fileObservations := make([]observation, 0, len(inputs.FileInputs))
+	for _, raw := range inputs.FileInputs {
+		if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		hosts, readErr := emptyProvider.Hosts()
+		if readErr != nil {
+			fileObservations = append(fileObservations, observation{ErrorType: fmt.Sprintf("%T", readErr)})
+		} else {
+			fileObservations = append(fileObservations, observation{Hosts: hosts})
+		}
 	}
 	if err := os.WriteFile(path, []byte(`["first:1","first:1"," raw "]`), 0600); err != nil {
 		t.Fatal(err)
@@ -110,6 +129,16 @@ func TestBootstrapProviderActualOracle(t *testing.T) {
 		}
 		durations[key] = int64(durationConfig.MaxJoinDuration)
 	}
+	bootstrapModes := map[string]any{}
+	for key, value := range map[string]string{"mixed": "HoStS", "upper": "DNS-SRV", "unknown": "WeIrD"} {
+		var modeConfig config.Config
+		err := yaml.Unmarshal([]byte("name: x\nbootstrapMode: "+value+"\n"), &modeConfig)
+		if err != nil {
+			bootstrapModes[key] = map[string]any{"error": err.Error()}
+		} else {
+			bootstrapModes[key] = map[string]any{"mode": int(modeConfig.BootstrapMode)}
+		}
+	}
 	configErrors := map[string]string{}
 	for name, candidate := range map[string]config.Config{
 		"missingName":  {},
@@ -122,9 +151,9 @@ func TestBootstrapProviderActualOracle(t *testing.T) {
 			configErrors[name] = err.Error()
 		}
 	}
-	result := map[string]any{"static": cases[1].hosts, "emptyFile": empty, "file": first, "fileAfterUpdate": updated,
+	result := map[string]any{"static": cases[1].hosts, "fileInputs": inputs.FileInputs, "fileObservations": fileObservations, "file": first, "fileAfterUpdate": updated,
 		"missingErrorType": fmt.Sprintf("%T", missingErr), "malformedErrorType": fmt.Sprintf("%T", syntaxErr), "objectErrorType": fmt.Sprintf("%T", objectErr),
-		"configHosts": parsed.BootstrapHosts, "configMode": int(parsed.BootstrapMode), "configMaxJoinDurationNanos": int64(parsed.MaxJoinDuration), "configErrors": configErrors, "durations": durations}
+		"configHosts": parsed.BootstrapHosts, "configMode": int(parsed.BootstrapMode), "configMaxJoinDurationNanos": int64(parsed.MaxJoinDuration), "configErrors": configErrors, "durations": durations, "bootstrapModes": bootstrapModes}
 	b, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)

@@ -4,14 +4,20 @@ import json
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/ringpop_bootstrap_provider.json"
 
-proc = subprocess.run(
-    ["go", "test", "./common/peerprovider/ringpopprovider", "-run", "^TestBootstrapProviderActualOracle$", "-count=1", "-v"],
-    cwd=ROOT / "go", text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-)
+overlay_test = ROOT / "tests/go-overlay/common/peerprovider/ringpopprovider/bootstrap_oracle_test.go"
+go_test_path = ROOT / "go/common/peerprovider/ringpopprovider/bootstrap_oracle_test.go"
+with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as overlay:
+    json.dump({"Replace": {str(go_test_path): str(overlay_test)}}, overlay)
+    overlay.flush()
+    proc = subprocess.run(
+        ["go", "test", f"-overlay={overlay.name}", "./common/peerprovider/ringpopprovider", "-run", "^TestBootstrapProviderActualOracle$", "-count=1", "-v"],
+        cwd=ROOT / "go", text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
 sys.stdout.write(proc.stdout)
 if proc.returncode:
     raise SystemExit(proc.returncode)

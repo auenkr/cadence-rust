@@ -43,3 +43,48 @@ all `0`. Focused Rust tests ran 20 Ringpop tests (189 filtered out); strict
 locked Clippy used `cargo clippy --locked --offline -p cadence-server
 --all-targets -- -D warnings`. Earlier interrupted attempts are retained in
 the evidence directory and are not counted as passing runs.
+
+## Final review of candidate d55ad694 (2026-10-18)
+
+The isolated review checkout already had `d55ad694aa3e924387c7390f021a8aaed8c4e5f2`
+at HEAD (parent `593182641e545a7e088c962e97f76fc9ed4b541b`), so no duplicate
+cherry-pick was needed. The follow-up compatibility fixes are in the commit
+created after that candidate.
+
+Go `encoding/json` probes showed that JSON `null` decodes successfully into a
+nil `[]string`, and null elements in arrays become empty strings. Scalar,
+object, nested-array elements, trailing JSON, and empty input fail with the
+Go type or syntax error category. Rust `JsonFile` now reproduces those
+success/failure classes and null conversions. The shared raw input set is
+`tests/fixtures/ringpop_bootstrap_provider_inputs.json`; both the Go overlay
+oracle and Rust test load that file and feed each same raw string to their
+provider. Oracle output is checked in at
+`tests/fixtures/ringpop_bootstrap_provider.json`.
+
+The oracle test was moved to `tests/go-overlay/...`; the runner uses Go's
+`-overlay` option to expose it to `go test`, leaving the original `go/` source
+tree untouched. Additional Go observations confirm `HoStS` maps to hosts,
+`DNS-SRV` maps to DNS-SRV, `WeIrD` is rejected, Go validation strings match,
+and the tested durations map to the recorded signed nanosecond values. Rust
+YAML parse errors add line/column context around the same unknown-mode error
+text; the parity test checks the underlying message while confirming rejection.
+
+Reproducible final commands and statuses (all exit `0`):
+
+- `python3 tests/run-ringpop-bootstrap-provider-oracle.py`
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target cargo test --locked --offline -p cadence-server --lib ringpop_discovery::tests -- --nocapture`
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target cargo clippy --locked --offline -p cadence-server --all-targets -- -D warnings`
+
+Statuses and full output are in `memory/evidence/ringpop-bootstrap-provider/review-go-final.*`,
+`review-rust-final2.*`, and `review-clippy-final2.*`. The Go oracle's pinned
+source hashes remain factory `6399dd07109751fce846d83495b5455782478073b4b6df45197688fb41f8a5a7`
+and config `8c9963d0a8f618497ef63413774b6875f03b2b2bc638cba6fc0ec5a76f933d4`.
+Review hashes: Rust discovery `a47ade4dee853998faecbc85d0893d7e04bfc2679a11d730a03d047ca317757e`,
+Rust config `6b01bfc07f6c334d882f11e8d5f31572e90c95f82c1784e7687507ada4c0a51c`,
+input fixture `5aa1bac7b65c4a893de5ab6e8aa198629b66da8d85ba15ce3f2b61ec626bcdfd`,
+output fixture `8d9fe7211f181639434b85b447792f78ca098ff110116195c510c62e5cb7371e`,
+Go overlay test `61b523d1af2192451f95323fb86ba3c43197332df7141b1947d0bc5eab4ced6d`,
+and oracle runner `c4f0f2b3b8f52632361e9dd4f8cd40f6f01c8c3735d1587647142478750097a0`.
+
+This provider slice is still not a Matching completion claim. DNS/SRV, runtime
+wiring/lifecycle, and mixed-service validation remain out of scope here.

@@ -1,0 +1,24 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 05s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target/debug/deps/cadence_server-2a6178078280a35b)
+
+running 4 tests
+test ringpop_discovery::tests::file_reads_each_time_and_preserves_array_contents ... ok
+
+thread 'ringpop_discovery::tests::matches_actual_go_provider_oracle_fixture' (919414) panicked at crates/cadence-server/src/ringpop_discovery.rs:133:9:
+assertion `left == right` failed
+  left: "ringpop: invalid ringpop bootstrap mode \"WeIrD\" at line 1 column 10"
+ right: "invalid ringpop bootstrap mode \"WeIrD\""
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test ringpop_discovery::tests::missing_file_is_io_error_and_config_selects_supported_provider ... ok
+test ringpop_discovery::tests::static_hosts_preserve_order_duplicates_and_strings ... ok
+test ringpop_discovery::tests::matches_actual_go_provider_oracle_fixture ... FAILED
+
+failures:
+
+failures:
+    ringpop_discovery::tests::matches_actual_go_provider_oracle_fixture
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 205 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `-p cadence-server --lib`
