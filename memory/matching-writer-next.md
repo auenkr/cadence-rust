@@ -1,49 +1,127 @@
-# Matching writer continuation (2026-10-16)
+# Matching task writer: next implementation slice
 
-Active service remains Matching. All four roles are incomplete.
+Status: Go oracle and design evidence only; no Rust implementation or build in
+this round. Matching remains incomplete. Original production Go files were not
+modified.
 
-The previously uncommitted writer skeleton is now connected to native decision/
-activity AddTask RPCs and failed-delivery rewrites. Each queue owner has a bounded
-250-request append channel, a sequential actor draining up to 100 additional
-requests per batch (Go's actual off-by-one convention), and five-second append
-budget. Enqueue saturation yields detailed ServiceBusyError; response timeout is
-a deadline error. Caller cancellation after enqueue leaves the durable write and
-notification alive. Actor receiver stays parked after stop, as Go does not close
-appendCh. Queue fatal-stop watcher also stops writer and wakes registry controller.
+## Original Go contract
 
-Persistence batches preserve each request's source domain, reserve IDs across
-lease ranges, compute creation/expiry timestamps after ID allocation and perform
-one fenced SQL transaction. Failed writes retain allocated IDs/max read boundary.
-Rewrites use the same actor and acknowledge original only after successful append.
-Sticky lease condition failures translate to Go's InternalServiceError message.
+Source: `go/service/matching/tasklist/task_writer.go` (especially `newTaskWriter`,
+`appendTask`, `allocTaskIDs`, `taskWriterLoop`, `getWriteBatch`, and
+`sendWriteResponse`). The writer is created at
+`go/service/matching/tasklist/task_list_manager.go:253`; manager startup invokes
+`Start`, teardown calls `Stop` at ~335. Synchronous append callers are manager
+normal AddTask (~596), sync AddTask (~623), and reader failed-delivery rewrite
+(`task_reader.go:416`). `GetMaxReadLevel` is consumed by reader/manager read
+boundaries. Preserve the synchronous `appendTask` API at these call sites.
 
-New tests: actual-Go getWriteBatch oracle (seven cases), cancellation durability,
-independent enqueue vs response timeout behavior. tests/run-compatibility.py now
-includes the writer differential stage. Final validation PASSED: 345 workspace tests, strict all-target workspace
-Clippy and all 26 compatibility stages, including actual mixed Go services/Rust
-Matching and seven existing SDK scenarios. Evidence:
-/tmp/cadence-writer-full.log and /tmp/cadence-writer-full.exit;
-/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-writer-verified.
-/tmp/cadence-writer-full.exit = 0. Two unused local timestamps discovered during
-workspace compilation were removed before strict lint and differential/live builds.
+* `appendCh` capacity is sampled exactly once in `newTaskWriter` from
+  `OutstandingTaskAppendsThreshold()`. Go `make(chan, negative)` panics; zero is
+  an unbuffered rendezvous; positive values bound waiting appends. This is not a
+  live resizing setting.
+* `MaxTaskBatchSize()` is read for every collection pass. The writer already
+  has one request, then takes up to that many immediately available requests:
+  actual maximum is `1 + max(value, 0)`. Zero and negative mean singleton
+  batches, not disabled writes. Collection is nonblocking and does not wait for
+  a full batch.
+* `AppendTaskTimeout()` is sampled per append invocation before enqueue. One
+  deadline bounds both channel enqueue and post-enqueue response wait. Queue
+  saturation returns ServiceBusy with `task queue is full and timed out waiting
+  to enqueue`; after enqueue it returns a deadline/cancellation-wrapped receive
+  error. Caller cancellation after enqueue does not retract durable work.
+  Per-request response channel has capacity one so an abandoned caller cannot
+  block the writer.
+* Stop atomically marks stopped and closes stopCh, but leaves appendCh open.
+  Append checks stopped before queueing; stop while waiting for response returns
+  `task list shutting down`. The actor checks stopped after receiving a request,
+  exits without draining queued items, and response fanout selects stopCh to
+  avoid blocking. Select races mean simultaneous stop/response or stop/enqueue
+  readiness are intentionally nondeterministic. Do not promise a drain the Go
+  writer does not perform.
+* Actor allocates IDs for a full batch before CreateTasks. Allocation/lease
+  failure responds to each request with the same error and leaves max-read-level
+  untouched. IDs consumed before a failed persistence write are not reclaimed;
+  max-read-level is nevertheless advanced through the allocated IDs after the
+  CreateTasks attempt, even on persistence error. A persistence
+  ConditionFailedError signals fatal (sticky task lists translate to the fixed
+  InternalServiceError); other CreateTasks errors are returned to the batch.
+  Lease renewal retries transient errors; CreateTasks itself is not retried here.
 
-Next: reader background buffer/pump and dispatch admission, per-owner startup
-concurrency, dynamic per-list configuration and persistence transient retries.
-Current dispatcher still calls read_batch(batch=1) per poll with 100ms fallback;
-Go reader independently scans on buffered notifications/start/ack timer, with a
-batchSize-1 channel plus one dispatch head per isolation group. Reads advance ack
-only under existing scan/expiry rules. Reader stop persists ack and forces GC,
-then waits for reader loops; manager Stop does not wait for all History RPCs.
-Sync matcher, query broker, forwarding, isolation/rate limits, membership,
-production backend selection and internal Thrift remain incomplete.
+## Bounded Rust design
 
-Startup source audit: Go handler/engine.go getTaskList holds taskListCreationLock
-only through construction/registry Register, releases it BEFORE mgr.Start and its
-lease I/O. Existing callers can retrieve manager and wait on startWG in operations
-(task_list_manager.go lines ~406/426/455/547/673). Rust registry currently holds its
-map lock through DurableTaskQueue::open. A correct continuation needs per-key
-single startup + cancellation-independent completion, ready/error signaling,
-shutdown ownership fencing, and no registry-wide lock during lease I/O. Do not
-merely unlock around SQL without preventing duplicate lease acquisition.
-CreateTasks itself has no writer retry in Go db.go; lease renewal and reader I/O
-use ThrottleRetry. Preserve this distinction when adding retry classification.
+Keep `DurableTaskQueue::append` synchronous and source-compatible. Its existing
+writer mutex already serializes persistence and defines owner lifetime; adding
+an async API would force executor/runtime assumptions into synchronous matching
+callers and failed-delivery rewrite. Add a per-queue writer actor only as an
+internal implementation detail: bounded `sync_channel`/Tokio mpsc plus a
+dedicated owned worker (or an equivalent bounded queue/condvar), with a
+one-shot response per request. All current callers enqueue and block on their
+response, preserving call ordering and result semantics. Do not hold the queue
+state/connection mutex while waiting for queue capacity or a response; only the
+actor takes persistence/ID ownership. The queue owns and joins/cancels its actor
+at shutdown, and registry removal must not hold the global registry lock across
+that wait. Never close the sender channel while append callers can still hold
+an owner reference.
+
+Read capacity when constructing each queue owner; reject negative configuration
+at that boundary with an explicit config error rather than Rust panic. Capacity
+zero must be an actual rendezvous (not silently clamped to one). Sample max
+batch size on each actor collection and implement the Go convention of one
+already-received item plus up to `max(value, 0)` immediately-ready items. Sample
+timeout per append before enqueue; use a single monotonic deadline for enqueue
+and response, return a distinct ServiceBusy queue-full error only when enqueue
+did not happen, and retain accepted work after caller cancellation. Use an owned
+response cell so cancellation never blocks actor fanout. Stop rejects new work,
+wakes existing waiters, leaves accepted requests' persistence outcome fenced by
+the same actor lifecycle, and follows source-compatible actor exit behavior;
+do not label this a graceful drain unless service-level shutdown separately
+implements one.
+
+Preserve ordering of ID allocation, one batch CreateTasks, event/metrics,
+max-read-level publication, and per-request response fanout. Do not implement
+the DB mutex as a substitute for the channel: it has no bounded queue,
+per-call enqueue deadline, live batching or accepted-request cancellation
+semantics.
+
+## Oracle generator and evidence
+
+`tests/run-matching-writer-next-oracle.py` overlays
+`tests/matching-writer-next-go_test.go` into the original `tasklist` package;
+the overlay file does not modify tracked Go production source. The test invokes
+the actual `newTaskWriter`, `getWriteBatch`, `appendTask`, and `Stop` methods.
+The generator compares with `tests/fixtures/matching-writer-next.json`; use
+`--regenerate` only when intentionally reviewing a Go-source behavior change.
+Evidence copy and command output are under
+`memory/evidence/matching-writer-next/`.
+
+The test uses channels as gates for enqueue/response/stop ordering. Go's
+`context.WithTimeout` uses the real runtime timer and cannot be driven by the
+task-list mocked clock, so timeout boundaries use 15ms deadlines; ordering is
+deterministic, exact timer scheduling is not. In particular, simultaneous
+ready select cases remain Go runtime race semantics. The fixture includes
+capacity 0/1/4/8; max batch 0/-1/1/4; full-queue deadline; accepted request
+response deadline; cancellation after acceptance; stop after acceptance. This
+slice does not yet inject allocation/CreateTasks errors; tests for those belong
+to implementation acceptance below.
+
+## Implementation acceptance tests
+
+1. Construction samples capacity once; capacity 0 rendezvous blocks until a
+   receiver, positive N admits exactly N pending requests, negative fails
+   cleanly. Changing provider after construction does not resize it.
+2. Live batch-provider updates affect the next collection; values -1/0/1/large
+   yield batch counts 1/1/2/(1+large), and the actor never waits to fill a batch.
+3. One per-call deadline covers both queue admission and persistence response;
+   errors retain ServiceBusy-vs-deadline distinction. Cancellation after
+   acceptance leaves one durable create and cannot stall subsequent writes.
+4. Stop wakes blocked admission/response callers, rejects later requests, does
+   not close a channel still referenced by callers, and demonstrates the
+   documented queued-work race without claiming drain semantics.
+5. Allocate-ID / lease error fanout, lease-range rollover, persistence error ID
+   consumption and max-read-level, fatal condition failure/sticky translation,
+   and no CreateTasks retry are asserted with persistence fakes.
+6. Concurrent sync AddTask, normal AddTask, and reader rewrite share actor
+   ordering; append caller cancellation and queue owner removal do not deadlock
+   registry, owner, or persistence locks.
+
+No Rust work was performed, no service was advanced, no commit/push was made.

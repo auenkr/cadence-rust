@@ -1,0 +1,103 @@
+[
+  {
+    "capacity": 0,
+    "maximum": 0,
+    "batch": [
+      0
+    ],
+    "remaining": 5,
+    "enqueue_timeout": "",
+    "response_timeout": "",
+    "cancelled_after_enqueue": "",
+    "stopped": ""
+  },
+  {
+    "capacity": 1,
+    "maximum": -1,
+    "batch": [
+      0
+    ],
+    "remaining": 5,
+    "enqueue_timeout": "",
+    "response_timeout": "",
+    "cancelled_after_enqueue": "",
+    "stopped": ""
+  },
+  {
+    "capacity": 4,
+    "maximum": 1,
+    "batch": [
+      0,
+      1
+    ],
+    "remaining": 4,
+    "enqueue_timeout": "",
+    "response_timeout": "",
+    "cancelled_after_enqueue": "",
+    "stopped": ""
+  },
+  {
+    "capacity": 8,
+    "maximum": 4,
+    "batch": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "remaining": 1,
+    "enqueue_timeout": "",
+    "response_timeout": "",
+    "cancelled_after_enqueue": "",
+    "stopped": ""
+  },
+  {
+    "capacity": 0,
+    "maximum": 0,
+    "batch": [
+      0
+    ],
+    "remaining": 5,
+    "enqueue_timeout": "task queue is full and timed out waiting to enqueue",
+    "response_timeout": "",
+    "cancelled_after_enqueue": "",
+    "stopped": ""
+  },
+  {
+    "capacity": 0,
+    "maximum": 0,
+    "batch": [
+      0
+    ],
+    "remaining": 5,
+    "enqueue_timeout": "",
+    "response_timeout": "failed to receive a success response from the channel within a timeout threshold: context deadline exceeded",
+    "cancelled_after_enqueue": "",
+    "stopped": ""
+  },
+  {
+    "capacity": 0,
+    "maximum": 0,
+    "batch": [
+      0
+    ],
+    "remaining": 5,
+    "enqueue_timeout": "",
+    "response_timeout": "",
+    "cancelled_after_enqueue": "failed to receive a success response from the channel within a timeout threshold: context canceled",
+    "stopped": ""
+  },
+  {
+    "capacity": 0,
+    "maximum": 0,
+    "batch": [
+      0
+    ],
+    "remaining": 5,
+    "enqueue_timeout": "",
+    "response_timeout": "",
+    "cancelled_after_enqueue": "",
+    "stopped": "task list shutting down"
+  }
+]
