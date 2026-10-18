@@ -1,0 +1,5 @@
+=== RUN   TestRustRealRingpopNode
+--- PASS: TestRustRealRingpopNode (0.03s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.068s
+Real RingpopNode Go client probe passed; evidence: /tmp/ringpop-node-compat-68vir164

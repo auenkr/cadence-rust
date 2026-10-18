@@ -77,3 +77,62 @@ barrier around requests already in flight. Full Ringpop parity and Matching
 completion remain unclaimed. Next work must complete discovery/bootstrap and
 bidirectional mixed Go/Rust behavior before Matching can advertise this node
 as ready in production.
+
+## Candidate repair on the HTTP parent
+
+Candidate `3dbd1b11be01288f6f2bd1fcae1882d0627a4c43` was applied after the
+Matching HTTP/TLS parent commit `5482560aa8b9bc81a4a0af92aa09bc9a716b056f`.
+The pinned Go v0.10.0 handler table in
+`/home/ubuntu/go/pkg/mod/github.com/uber/ringpop-go@v0.10.0/swim/handlers.go`
+registers `/protocol/join` and `/protocol/ping`; TChannel passes these exact
+names through, so the Rust handler now dispatches those exact names only.
+Bare `join` and `ping` remain unknown system errors.
+
+The Go source shows `Node.Stop()` changes the stopped flag but does not clear
+`Ready()`. The Rust state now tracks readiness and stopped status independently.
+`set_ready` cannot change the reported `Stopped` lifecycle, while PING readiness
+follows the Go Ready flag. Go's `encoding/json` zeroes omitted and explicit-null
+strings, numbers, and booleans; the existing Rust wire types already use
+`deserialize_null_default` for these fields. Nullable slices and maps remain
+nullable, matching Go nil slices/maps. The real Go client probe exercises a null
+source and omitted fields over TChannel.
+
+The added test-only `ringpop_node_probe` example serves
+`RingpopNode::handler()` through the production `serve_ringpop` boundary. Its Go
+client checks exact method dispatch, real JOIN/PING, app/self validation,
+readiness, JSON system errors versus application errors, accepted remote
+membership, checksum/full sync, and request counters. It uses file-driven
+readiness control for deterministic testing; no production wiring is
+introduced.
+
+Validation commands ran in tmux session `cadence-rust`, window
+`ringpop-validation`, with `CARGO_BUILD_JOBS=1`. Candidate logs and exit markers
+are in `memory/ringpop-candidate-*`:
+
+- `python3 tests/run-ringpop-inbound-handler-oracle.py` — exit 0; generated Go
+  oracle fixture matched the committed fixture (no fixture diff).
+- `cargo test --locked -p cadence-server ringpop_provider --lib` — exit 0; 8
+  provider tests passed.
+- `cargo build --locked -p cadence-server --example ringpop_node_probe` — exit
+  0; `python3 tests/run-ringpop-node-compat.py --server-example <built probe>`
+  — exit 0. The real Go client passed. Final observed request counters were
+  JOIN=4 and PING=16.
+- `cargo test --locked -p cadence-common ringpop --no-fail-fast` — exit 0; 19
+  unit tests plus the dissemination, member, and memberlist Go oracles passed.
+- `cargo clippy --locked -p cadence-server --all-targets -- -D warnings` —
+  exit 0.
+- `python3 tests/run-ringpop-tchannel-compat.py --server-example <parent probe>`
+  — exit 0. `python3 tests/run-matching-thrift-compat.py --server-bin <latest
+  parent server>` — exit 0 against the latest HTTP/TLS parent binary; generated
+  Go Matching calls passed over TChannel, HTTP, HTTP trailing slash, and TLS,
+  along with the runner's TLS and listener regression probes.
+
+The parallel parent regression worker also passed workspace tests/Clippy,
+Matching native Thrift, and the service listener/configuration checks. Its
+optional Node service workflow probe exited 1 because `@grpc/grpc-js` was
+missing in that worktree. This dependency failure is unrelated to this Ringpop
+slice; the requested Rust/Go Ringpop and native Matching HTTP/TLS checks passed.
+
+The candidate was transplanted as `fb0e71376` after parent commit
+`5482560aa8b9bc81a4a0af92aa09bc9a716b056f`; the repair commit follows it.
+No production SWIM/Matching completion is claimed.

@@ -1,0 +1,5 @@
+=== RUN   TestRustRingpopTChannel
+--- PASS: TestRustRingpopTChannel (0.13s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.211s
+Ringpop TChannel compatibility passed; artifacts: /tmp/ringpop-tchannel-compat-emjd85w3

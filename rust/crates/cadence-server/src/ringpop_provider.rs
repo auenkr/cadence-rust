@@ -34,7 +34,8 @@ pub struct RingpopNode {
 struct State {
     app: String,
     address: String,
-    lifecycle: RingpopLifecycle,
+    ready: bool,
+    stopped: bool,
     requires_app_in_ping: bool,
     memberlist: Memberlist,
     disseminator: Disseminator,
@@ -57,7 +58,8 @@ impl RingpopNode {
             state: Arc::new(Mutex::new(State {
                 app: app.into(),
                 address: local_member.address.clone(),
-                lifecycle: RingpopLifecycle::Bootstrapping,
+                ready: false,
+                stopped: false,
                 requires_app_in_ping,
                 memberlist: Memberlist::new(local_member),
                 disseminator,
@@ -68,23 +70,26 @@ impl RingpopNode {
 
     /// Bootstrap owner controls readiness. `false` also supports draining.
     pub fn set_ready(&self, ready: bool) {
-        self.state.lock().expect("Ringpop state poisoned").lifecycle = if ready {
-            RingpopLifecycle::Ready
-        } else {
-            RingpopLifecycle::Bootstrapping
-        };
+        self.state.lock().expect("Ringpop state poisoned").ready = ready;
     }
 
     pub fn stop(&self) {
-        self.state.lock().expect("Ringpop state poisoned").lifecycle = RingpopLifecycle::Stopped;
+        self.state.lock().expect("Ringpop state poisoned").stopped = true;
     }
 
     pub fn lifecycle(&self) -> RingpopLifecycle {
-        self.state.lock().expect("Ringpop state poisoned").lifecycle
+        let state = self.state.lock().expect("Ringpop state poisoned");
+        if state.stopped {
+            RingpopLifecycle::Stopped
+        } else if state.ready {
+            RingpopLifecycle::Ready
+        } else {
+            RingpopLifecycle::Bootstrapping
+        }
     }
 
     pub fn is_ready(&self) -> bool {
-        self.lifecycle() == RingpopLifecycle::Ready
+        self.state.lock().expect("Ringpop state poisoned").ready
     }
 
     pub fn request_counts(&self) -> RingpopRequestCounts {
@@ -105,8 +110,8 @@ impl RingpopNode {
             let state = Arc::clone(&state);
             async move {
                 let result = match method.as_str() {
-                    "join" => handle_join(&state, &body),
-                    "ping" => handle_ping(
+                    "/protocol/join" => handle_join(&state, &body),
+                    "/protocol/ping" => handle_ping(
                         &state,
                         &body,
                         || {
@@ -210,7 +215,7 @@ where
 {
     let request: Ping = decode(body)?;
     let mut node = state.lock().expect("Ringpop state poisoned");
-    if node.lifecycle != RingpopLifecycle::Ready {
+    if !node.ready {
         return Err(RingpopError::Application(
             "node is not ready to handle requests".into(),
         ));
@@ -592,6 +597,39 @@ mod tests {
         assert_eq!(
             response.checksum,
             node.state.lock().unwrap().memberlist.checksum()
+        );
+    }
+
+    #[tokio::test]
+    async fn handler_dispatches_only_registered_go_method_names_and_stop_preserves_ready() {
+        let node = node();
+        node.set_ready(true);
+        let handler = node.handler();
+        let join = handler
+            .call(
+                "/protocol/join".into(),
+                None,
+                br#"{"app":"cadence-matching","source":"remote"}"#.to_vec(),
+            )
+            .await
+            .unwrap();
+        assert!(serde_json::from_slice::<JoinResponse>(&join.body).is_ok());
+        for method in ["join", "ping"] {
+            assert!(matches!(
+                handler.call(method.into(), None, b"{}".to_vec()).await,
+                Err(RingpopError::System(_))
+            ));
+        }
+        node.stop();
+        assert_eq!(node.lifecycle(), RingpopLifecycle::Stopped);
+        assert!(node.is_ready(), "Go Stop leaves the Ready flag intact");
+        let ping = br#"{"app":"cadence-matching","source":"remote"}"#;
+        assert!(node.handle_ping_with(ping, || 1, |_| 0).is_ok());
+        node.set_ready(false);
+        assert_eq!(node.lifecycle(), RingpopLifecycle::Stopped);
+        assert_eq!(
+            node.handle_ping_with(ping, || 1, |_| 0).unwrap_err(),
+            RingpopError::Application("node is not ready to handle requests".into())
         );
     }
 }

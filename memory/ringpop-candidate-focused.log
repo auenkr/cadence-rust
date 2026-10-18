@@ -1,0 +1,21 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-f495d261/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-f495d261/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-f495d261/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-f495d261/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-f495d261/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-f495d261/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized] target(s) in 2m 28s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-345e7984/rust/target/debug/deps/cadence_server-54f39540ddd51d8b)
+
+running 8 tests
+test ringpop_provider::tests::join_rejects_unknown_app_self_join_and_malformed_body_with_pinned_messages ... ok
+test ringpop_provider::tests::handler_dispatches_only_registered_go_method_names_and_stop_preserves_ready ... ok
+test ringpop_provider::tests::join_returns_go_shaped_membership_and_checksum_without_setting_ready ... ok
+test ringpop_provider::tests::join_snapshot_preserves_member_labels_and_tombstone_wire_normalization ... ok
+test ringpop_provider::tests::ping_app_errors_match_ringpop_and_malformed_json_is_rejected ... ok
+test ringpop_provider::tests::ping_local_refutation_uses_injected_incarnation_in_response_and_full_state ... ok
+test ringpop_provider::tests::original_go_handler_json_fixture_matches_join_and_ping_responses ... ok
+test ringpop_provider::tests::ping_requires_readiness_then_merges_and_returns_receiver_checksum ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 176 filtered out; finished in 0.03s
+
