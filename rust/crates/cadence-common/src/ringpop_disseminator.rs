@@ -98,6 +98,7 @@ impl Disseminator {
     }
     /// Receiver responses count immediately, after suppressing changes last
     /// originated by this sender at the matching incarnation.
+    #[allow(clippy::too_many_arguments)] // Mirrors Ringpop's receiver inputs plus local full-sync state.
     pub fn issue_receiver(
         &mut self,
         sender: &str,
