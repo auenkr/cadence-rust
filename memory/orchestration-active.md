@@ -1,3 +1,9 @@
+## Dissemination draft review 2026-10-18
+
+Candidate 6c71b6774 returned 2 focused tests/Clippy/wire/member regression passed but NO dissemination Go oracle. UNINTEGRATED. Parent checked original disseminator.go: Go bumps current queue entry by address even if replaced since snapshot; candidate incorrectly skips. Full sync omits local source identity contrary MembershipAsChanges.populateSource. Also maxP float formula boundary parity needs Go vectors. Repair+original-Go differential assigned Luna Standard:
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-dissemination-parity-standard-17-20261018
+Accepted running. HTTP permissive repair standard-16 remains active. No new production discovery integration.
+
 ## Permissive HTTP TLS review 2026-10-18
 
 Candidate 30805ee32 from t3-02f97237 returned all ten Go methods plaintext/TLS same port, 3 focused tests and strict server Clippy passing. NOT INTEGRATED: parent found one-shot 5-byte peek misclassifies fragmented TLS and accept serially waits sniff/handshake (slow client blocks all new connections). Direct dependency tokio-rustls has no lock update. Repair plus fragmentation/concurrent-client validation assigned Luna Standard:
