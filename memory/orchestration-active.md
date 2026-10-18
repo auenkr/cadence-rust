@@ -1,3 +1,11 @@
+## 2026-10-18 — discovery70 and relay69 reviewed; follow-ups active
+
+Discovery70 returned a70752d3a on d55ad694, not integrated: null decoding repaired, raw shared-input fixture added, Go source test moved to tests-only overlay. Parent review raised additional invalid Unicode/large-number JSON compatibility questions. Final integration review72 running.
+
+Relay69 returned fa30557ee, NOT integrated: focused Rust test/check/Clippy only; required actual Go requester -> Rust relay -> Go target and failure/state/dissemination cases missing. Completion71 running to repair and supply evidence. Hardcoded timeout and reverse full sync remain explicit review items.
+
+New task suffixes (prefix node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3A): matching-pingreq-complete-standard-71-20261018 and matching-discovery-final-review-standard-72-20261018. Both isolated async Codex Luna serviceTier=default. No duplicate active69/70; both terminal acknowledged. Cache ownership:71 server t3-975b4b2d,72 discovery t3-e426148a. Disk1.3GB free; instructed inspect/clean only inactive reproducible outputs and preserve sources/evidence. Matching remains incomplete. Parent checkpoint7972e3f32 was pushed successfully.
+
 ## JoinCluster retry controller integrated — 2026-10-18
 
 Reviewed3da7dc739+aa858d5df;integrated17d7b6015+b5b783bbe(88originalNOTapplied). Asynccancellabledelay,clockreset,Goformatting/delayer,DestroyedseparateStopped;destroyeddiscardsjoined,deadlinepreservespartialsuccess. 24Rusttests,6freshGooverlaygroups,existingPINGpeer,strictcommon/serverClippyallpassed. Ready/gossip/mainnotwired.
