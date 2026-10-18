@@ -1,3 +1,10 @@
+## Writer admission parity integrated — 2026-10-18
+
+Reviewed d1066640a actualGo stop-during-saturated-admission assertions +Rust10actor tests+strict persistenceClippy; integrated ab00d7818. Waiting admission retains context wait after stop; initial stopped/accepted stopped paths distinct. Primitive still not production wired.
+Production already has async server TaskWriter; avoid blindly duplicating thread actor. Next Luna normal-speed task47 accepted for filtered capacity at construction/live maxbatch/live appendtimeout,zero rendezvous,existing production persistence/retry/lifecycle semantics:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-live-production-standard-47-20261018
+DirectPING46 separately active. Matching incomplete;latest full combined test still frozen3072698e,focused later slices only. Disk22GBfree.
+
 ## JOIN local-state repair integrated — 2026-10-18
 
 Reviewed57cd67e18+d2c1bb0fb; integrated1db6d4a69+aafcfe95b. OriginalGo4case AddJoinList differential covers local refutation/labels/preexisting remote queue/maxP;12provider+4JSONtests,strict serverClippy,realGo inbound/outbound probes passed. Latest transport untouched. No bootstrap/readiness/timers/main wiring yet.
