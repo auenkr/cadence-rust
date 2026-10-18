@@ -76,3 +76,15 @@ two original-Go verifications, four focused Rust tests, and strict locked
 all-target `cadence-common` Clippy all have exit `0`. This completes only the
 bounded selection primitive; bootstrap networking, retries, readiness,
 failure/restart recovery, and Matching integration remain unfinished.
+
+## Concurrent JoinGroup slice added (2026-10-18)
+
+The next bounded slice is implemented and evidenced in
+`memory/ringpop-join-group.md`. It adds one concurrent group attempt on top of
+the selector and checked `join_seed` path, including Go attempt-count semantics,
+wait-all outcome collection, atomic membership merge, dropped-future
+cancellation, and stop-during-flight behavior. A two-peer actual-Go Ringpop
+comparison and JOIN/PING regressions pass. This still does not implement
+JoinCluster retry/deadline/delay, bootstrap/provider wiring, readiness, or
+gossip startup. Continue with a source-backed JoinCluster controller review;
+Matching remains current and incomplete.

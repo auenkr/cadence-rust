@@ -1,0 +1,21 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 20s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target/debug/deps/cadence_server-4bff137241497f73)
+
+running 1 test
+
+thread 'ringpop_provider::tests::join_group_waits_for_mixed_outcomes_and_merges_successful_membership' (778044) panicked at crates/cadence-server/src/ringpop_provider.rs:731:9:
+assertion `left == right` failed
+  left: 2
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test ringpop_provider::tests::join_group_waits_for_mixed_outcomes_and_merges_successful_membership ... FAILED
+
+failures:
+
+failures:
+    ringpop_provider::tests::join_group_waits_for_mixed_outcomes_and_merges_successful_membership
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 198 filtered out; finished in 0.22s
+
+error: test failed, to rerun pass `-p cadence-server --lib`

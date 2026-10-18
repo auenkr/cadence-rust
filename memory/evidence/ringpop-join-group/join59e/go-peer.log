@@ -1,0 +1,30 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-server)
+error[E0382]: borrow of moved value: `args`
+  --> crates/cadence-server/examples/ringpop_join_probe.rs:22:15
+   |
+ 9 |     let mut args = std::env::args().skip(1);
+   |         -------- move occurs because `args` has type `std::iter::Skip<Args>`, which does not implement the `Copy` trait
+...
+18 |         args.collect::<Vec<_>>()
+   |              ------------------- `args` moved due to this method call
+...
+22 |     let app = args.next().unwrap_or_else(|| "cadence".to_owned());
+   |               ^^^^ value borrowed here after move
+   |
+note: `std::iter::Iterator::collect` takes ownership of the receiver `self`, which moves `args`
+  --> /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library/core/src/iter/traits/iterator.rs:2073:44
+help: you could `clone` the value and consume it, if the `Args: Clone` trait bound could be satisfied
+   |
+18 |         args.clone().collect::<Vec<_>>()
+   |             ++++++++
+
+For more information about this error, try `rustc --explain E0382`.
+error: could not compile `cadence-server` (example "ringpop_join_probe") due to 1 previous error
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/tests/run-ringpop-outbound-join-compat.py", line 11, in <module>
+    subprocess.run(['cargo', 'build', '--locked', '--manifest-path', str(root/'rust/Cargo.toml'), '-p', 'cadence-server', '--example', 'ringpop_join_probe'], cwd=root/'rust', check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['cargo', 'build', '--locked', '--manifest-path', '/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/Cargo.toml', '-p', 'cadence-server', '--example', 'ringpop_join_probe']' returned non-zero exit status 101.

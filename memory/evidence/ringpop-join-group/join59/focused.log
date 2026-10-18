@@ -1,0 +1,24 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-server)
+error[E0599]: no method named `iter` found for tuple `(Vec<cadence_common::ringpop_wire::Member>, u32)` in the current scope
+   --> crates/cadence-server/src/ringpop_provider.rs:718:14
+    |
+716 |           assert!(node
+    |  _________________-
+717 | |             .membership_snapshot()
+718 | |             .iter()
+    | |             -^^^^ method not found in `(Vec<cadence_common::ringpop_wire::Member>, u32)`
+    | |_____________|
+    |
+    |
+help: one of the expressions' fields has a method of the same name
+    |
+718 |             .0.iter()
+    |              ++
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `cadence-server` (lib test) due to 1 previous error

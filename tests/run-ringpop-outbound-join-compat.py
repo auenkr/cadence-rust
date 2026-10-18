@@ -23,5 +23,5 @@ with tempfile.TemporaryDirectory(prefix='ringpop-outbound-join-') as directory:
     virtual = copied/'swim/zz_cadence_ringpop_outbound_join_test.go'
     overlay = temp/'overlay.json'; overlay.write_text(json.dumps({'Replace': {str(virtual): str(root/'tests/ringpop-outbound-join-go_test.go')}}))
     env = {**os.environ, 'RINGPOP_JOIN_PROBE': str(example.resolve())}
-    subprocess.run(['go', 'test', '-overlay', str(overlay), './swim', '-run', '^TestRustOutboundJoinAgainstGo$', '-count=1', '-v'], cwd=copied, env=env, check=True, timeout=180)
-print('Rust outbound JOIN passed against a real pinned Go Ringpop node')
+    subprocess.run(['go', 'test', '-overlay', str(overlay), './swim', '-run', '^TestRustOutboundJoin(Group)?AgainstGo$', '-count=1', '-v'], cwd=copied, env=env, check=True, timeout=180)
+print('Rust outbound JOIN and JoinGroup passed against real pinned Go Ringpop nodes')

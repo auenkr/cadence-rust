@@ -1,0 +1,10 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 16s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target/debug/deps/cadence_server-4bff137241497f73)
+
+running 2 tests
+test ringpop_provider::tests::join_group_waits_for_mixed_outcomes_and_merges_successful_membership ... ok
+test ringpop_provider::tests::join_group_drop_cancels_children_and_stop_blocks_late_merge ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 198 filtered out; finished in 0.31s
+

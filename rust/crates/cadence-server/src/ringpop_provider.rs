@@ -2,6 +2,7 @@
 //!
 //! This handler deliberately does not bootstrap, probe, schedule timers, or
 //! declare readiness. The owner must complete bootstrap and call `set_ready`.
+use cadence_common::ringpop_bootstrap_selection::BootstrapSelection;
 use cadence_common::ringpop_disseminator::Disseminator;
 use cadence_common::ringpop_memberlist::Memberlist;
 use cadence_common::ringpop_wire::{
@@ -19,6 +20,34 @@ use std::time::Duration;
 pub struct RingpopRequestCounts {
     pub join: u64,
     pub ping: u64,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct JoinGroupResult {
+    /// One-based count of JoinGroup calls on this sender, including empty groups.
+    pub attempt: i64,
+    pub successes: Vec<String>,
+    pub failures: Vec<String>,
+}
+
+/// Mutable state owned by one bounded bootstrap sender. A future JoinCluster
+/// controller can retain this across attempts without moving retry policy here.
+pub struct JoinGroupState {
+    pub selection: BootstrapSelection,
+    attempts: i64,
+}
+
+impl JoinGroupState {
+    pub fn new(selection: BootstrapSelection) -> Self {
+        Self {
+            selection,
+            attempts: 0,
+        }
+    }
+
+    pub fn attempts(&self) -> i64 {
+        self.attempts
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +135,17 @@ impl RingpopNode {
         seed: &str,
         timeout: Duration,
     ) -> Result<JoinResponse, JsonCallError> {
+        self.join_seed_signed(seed, i64::try_from(timeout.as_nanos()).unwrap_or(i64::MAX))
+            .await
+    }
+
+    /// Signed-duration form used by Ringpop's Go-compatible bootstrap options.
+    /// Nonpositive durations remain signed in JOIN JSON and expire immediately.
+    pub async fn join_seed_signed(
+        &self,
+        seed: &str,
+        timeout_nanos: i64,
+    ) -> Result<JoinResponse, JsonCallError> {
         let request = {
             let node = self.state.lock().expect("Ringpop state poisoned");
             let local = node.memberlist.member(&node.address).expect("local member");
@@ -113,7 +153,7 @@ impl RingpopNode {
                 app: node.app.clone(),
                 source: local.address.clone(),
                 incarnation: local.incarnation,
-                timeout: i64::try_from(timeout.as_nanos()).unwrap_or(i64::MAX),
+                timeout: timeout_nanos,
                 labels: local.labels.clone(),
             }
         };
@@ -123,7 +163,11 @@ impl RingpopNode {
             "/protocol/join",
             None,
             &serde_json::to_value(&request).expect("JoinRequest serialization"),
-            timeout,
+            if timeout_nanos <= 0 {
+                Duration::ZERO
+            } else {
+                Duration::from_nanos(timeout_nanos as u64)
+            },
         )
         .await?;
         // Decode the complete response before touching membership. Go's
@@ -158,6 +202,40 @@ impl RingpopNode {
             |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
         );
         Ok(join)
+    }
+
+    /// Execute one Go `JoinGroup`: select once, launch every selected JOIN
+    /// concurrently, wait for all outcomes, and apply successful memberships
+    /// through `join_seed`'s atomic AddJoinList path. Outcome order is inherently
+    /// concurrent, as in Go; callers should treat each vector as a collection.
+    pub async fn join_group(
+        &self,
+        sender: &mut JoinGroupState,
+        joined: &[String],
+    ) -> JoinGroupResult {
+        sender.attempts = sender.attempts.wrapping_add(1);
+        let targets = sender.selection.select_group(joined);
+        let timeout = sender.selection.options.timeout_nanos;
+        let mut tasks = tokio::task::JoinSet::new();
+        for target in targets {
+            let node = self.clone();
+            tasks.spawn(async move {
+                let outcome = node.join_seed_signed(&target, timeout).await;
+                (target, outcome.is_ok())
+            });
+        }
+        let mut result = JoinGroupResult {
+            attempt: sender.attempts,
+            ..Default::default()
+        };
+        while let Some(outcome) = tasks.join_next().await {
+            if let Ok((target, true)) = outcome {
+                result.successes.push(target);
+            } else if let Ok((target, false)) = outcome {
+                result.failures.push(target);
+            }
+        }
+        result
     }
 
     /// Send one direct Ringpop v0.10.0 PING. Dissemination counters advance
@@ -592,6 +670,167 @@ mod tests {
         });
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         (address.to_string(), task)
+    }
+
+    #[tokio::test]
+    async fn join_group_waits_for_mixed_outcomes_and_merges_successful_membership() {
+        use cadence_common::ringpop_bootstrap_selection::{BootstrapSelection, Options};
+        let success_member = Member {
+            address: "success-peer:7933".into(),
+            status: ALIVE.into(),
+            incarnation: 1,
+            labels: None,
+        };
+        let success_body = serde_json::to_vec(&JoinResponse {
+            app: "cadence-matching".into(),
+            coordinator: "success-peer:7933".into(),
+            membership: Some(vec![Change {
+                address: success_member.address.clone(),
+                incarnation: success_member.incarnation,
+                status: ALIVE.into(),
+                labels: None,
+                ..Default::default()
+            }]),
+            membership_checksum: 0,
+        })
+        .unwrap();
+        let (success_addr, success_server) =
+            outbound_test_server(RingpopHandler::new(move |method, _, _| {
+                let body = success_body.clone();
+                async move {
+                    assert_eq!(method, "/protocol/join");
+                    tokio::time::sleep(Duration::from_millis(80)).await;
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body,
+                    })
+                }
+            }))
+            .await;
+        let (failure_addr, failure_server) =
+            outbound_test_server(RingpopHandler::new(|method, _, _| async move {
+                assert_eq!(method, "/protocol/join");
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                Err(RingpopError::Application("seed rejected JOIN".into()))
+            }))
+            .await;
+
+        let node = node();
+        let selection = BootstrapSelection::new(
+            "127.0.0.1:7933",
+            &[success_addr.clone(), failure_addr.clone()],
+            Options::default(),
+        );
+        let start = tokio::time::Instant::now();
+        let mut sender = JoinGroupState::new(selection);
+        let result = node.join_group(&mut sender, &[]).await;
+        let elapsed = start.elapsed();
+        assert_eq!(result.successes.len(), 1);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.successes.contains(&success_addr));
+        assert!(result.failures.contains(&failure_addr));
+        assert!(
+            elapsed < Duration::from_millis(150),
+            "requests were serialized: {elapsed:?}"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(80),
+            "group returned before all responses: {elapsed:?}"
+        );
+        assert!(node
+            .membership_snapshot()
+            .0
+            .iter()
+            .any(|m| m.address == "success-peer:7933"));
+        assert_eq!(result.attempt, 1);
+        assert_eq!(sender.attempts(), 1);
+        success_server.abort();
+        failure_server.abort();
+    }
+
+    #[tokio::test]
+    async fn join_group_drop_cancels_children_and_stop_blocks_late_merge() {
+        use cadence_common::ringpop_bootstrap_selection::{BootstrapSelection, Options};
+        use tokio::sync::Notify;
+
+        let remote_change = Change {
+            address: "late-peer:7933".into(),
+            incarnation: 9,
+            status: ALIVE.into(),
+            ..Default::default()
+        };
+        let body = serde_json::to_vec(&JoinResponse {
+            app: "cadence-matching".into(),
+            coordinator: "late-peer:7933".into(),
+            membership: Some(vec![remote_change]),
+            membership_checksum: 0,
+        })
+        .unwrap();
+
+        // Dropping the public group future drops its JoinSet and aborts every
+        // outbound request future; no late response can mutate membership.
+        let request_seen = Arc::new(Notify::new());
+        let handler_seen = request_seen.clone();
+        let delayed_body = body.clone();
+        let (address, server) = outbound_test_server(RingpopHandler::new(move |_, _, _| {
+            let seen = handler_seen.clone();
+            let body = delayed_body.clone();
+            async move {
+                seen.notify_one();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                Ok(RingpopResponse {
+                    headers: None,
+                    body,
+                })
+            }
+        }))
+        .await;
+        let cancelled_node = node();
+        let before = cancelled_node.membership_snapshot();
+        let mut sender = JoinGroupState::new(BootstrapSelection::new(
+            "127.0.0.1:7933",
+            std::slice::from_ref(&address),
+            Options::default(),
+        ));
+        let task_node = cancelled_node.clone();
+        let group = tokio::spawn(async move { task_node.join_group(&mut sender, &[]).await });
+        request_seen.notified().await;
+        group.abort();
+        let _ = group.await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert_eq!(cancelled_node.membership_snapshot(), before);
+        server.abort();
+
+        // A response that completes after Stop is decoded but cannot update
+        // memberlist state, matching the Go memberlist.Update stopped guard.
+        let response_seen = Arc::new(Notify::new());
+        let handler_seen = response_seen.clone();
+        let (address, server) = outbound_test_server(RingpopHandler::new(move |_, _, _| {
+            let seen = handler_seen.clone();
+            let body = body.clone();
+            async move {
+                seen.notify_one();
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                Ok(RingpopResponse {
+                    headers: None,
+                    body,
+                })
+            }
+        }))
+        .await;
+        let node = node();
+        let before = node.membership_snapshot();
+        let request_node = node.clone();
+        let call = tokio::spawn(async move {
+            request_node
+                .join_seed(&address, Duration::from_secs(1))
+                .await
+        });
+        response_seen.notified().await;
+        node.stop();
+        assert!(call.await.unwrap().is_ok());
+        assert_eq!(node.membership_snapshot(), before);
+        server.abort();
     }
 
     #[tokio::test]

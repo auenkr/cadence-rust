@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.79s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target/debug/deps/cadence_server-4bff137241497f73)
+
+running 1 test
+test ringpop_provider::tests::outbound_join_empty_nil_failure_malformed_and_deadline_leave_state_unchanged ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 199 filtered out; finished in 0.30s
+

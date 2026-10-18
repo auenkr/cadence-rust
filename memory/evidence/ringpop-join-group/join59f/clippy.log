@@ -1,0 +1,23 @@
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a73ebb0d/rust/crates/cadence-server)
+error: this `if` has identical blocks
+  --> crates/cadence-server/examples/ringpop_join_probe.rs:12:26
+   |
+12 |       let local = if group {
+   |  __________________________^
+13 | |         args.next().expect("local host:port")
+14 | |     } else {
+   | |_____^
+   |
+note: same as this
+  --> crates/cadence-server/examples/ringpop_join_probe.rs:14:12
+   |
+14 |       } else {
+   |  ____________^
+15 | |         args.next().expect("local host:port")
+16 | |     };
+   | |_____^
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#if_same_then_else
+   = note: `-D clippy::if-same-then-else` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::if_same_then_else)]`
+
+error: could not compile `cadence-server` (example "ringpop_join_probe") due to 1 previous error
