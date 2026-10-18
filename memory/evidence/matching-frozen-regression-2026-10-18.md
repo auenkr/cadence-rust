@@ -54,3 +54,65 @@ integration gaps, configuration gaps, shard-distributor behavior, and other
 items in the Matching parity audit remain open. The Ringpop JSON endpoint/core
 tests do not prove a production membership provider. Continue Matching work
 before beginning History migration.
+
+## Checkpoint `3c8c5f98a` regression — 2026-10-18
+
+Validated the requested frozen source commit
+`3c8c5f98a8a261eba46ef4a795ce576dd3ac3a76` (parent
+`ddf7ef09792eec27a2fcb0a4d2d5b5bd413c5a95`). The source worktree was clean
+before validation. No production or test source was edited. The complete
+combined runner ran in `tmux` session `cadence-rust`, window
+`frozen3c8c5f98a-complete-run`, with `CARGO_BUILD_JOBS=1` and a warmed external
+Cargo target cache.
+
+Final evidence is under
+`memory/evidence/matching-frozen-regression-2026-10-18/checkpoint3c8c5f98a/`.
+`complete-run/results.json` records **34/34** compatibility stages at exit 0,
+including workspace tests, strict workspace all-target Clippy, Matching Go
+differentials, server/config/listener checks, native Thrift/TLS, public and
+internal gRPC, existing Go SDK TChannel, Go-service Matching delivery, and the
+mixed deployment. The locked workspace test log records **568 passed, 0
+failed, 2 ignored** across 22 test binaries. The workspace Clippy stage passed
+with `-D warnings`.
+
+The mixed stage ran Go Frontend/History/Worker with Rust Matching RPC and no Go
+Matching process. Its `mixed-matching/results.json` records a passing probe,
+including `queryDispatch`, `isolationDispatch`, and `idleUnloadAndRecovery`.
+The captured workflow history contains workflow and activity events. The mixed
+Go SDK driver covers activity retry, child workflow, workflow retry,
+workflow-task retry, activity timeout, and signal. The separate SDK TChannel
+stage also passed. Workspace tests additionally cover Matching poller restart
+after History failure, durable task-queue recovery, and idle-owner recovery.
+The live mixed probe exercises owner unload/reload recovery; it does not restart
+the Rust Matching process while the Go services remain running, so a mixed
+process-restart scenario remains unverified.
+
+Supplementary checks outside the 34-stage runner all passed:
+
+* `writer-go-oracle.exit` — exit 0; original Go `taskWriter` produced and
+  verified all **9** event traces.
+* `selector-go-oracle.exit` — exit 0; the original Go selector oracle verified
+  **16** cases. `ringpop-final/selector-rust.log` passed all 4 Rust fixture
+  tests, including the 16-case fixture consumer.
+* `inbound-ringpop-go-oracle.exit` — exit 0 for the original pinned Go inbound
+  JOIN/PING handler oracle. Its generated fixture hash remained
+  `73cbefe51f9fe9e171c853e659a74b41d2121fbadf5e502835ccbcbf2f15ee7f`.
+* `ringpop-final/outbound-join.exit` and `outbound-ping.exit` — both exit 0;
+  Rust outbound JOIN and PING passed against the real pinned Go Ringpop node.
+* `ringpop-final/tchannel-boundary.exit` — exit 0; the Go TChannel JSON client
+  passed the Rust listener's JOIN, PING, PING-REQ, malformed/unknown method,
+  and application-error cases.
+
+Validation environment fixes were limited to reproducible local outputs. The
+runner's native Thrift script expects `rust/target/debug/cadence-server` even
+when `CARGO_TARGET_DIR` points at a shared cache, so a temporary workspace-local
+target symlink was used and removed after validation. The missing documented
+`cadence-web` dependency/IDL outputs were installed/generated with the README
+commands; `node_modules` was removed after the final run to restore disk space.
+The initial failed attempts and their logs remain in this checkpoint directory
+for traceability; only `complete-run/results.json` is the final combined-run
+result.
+
+This regression validates this checkpoint; it is not a claim that Matching is
+complete. Production discovery/SWIM startup and other parity-audit gaps remain
+open. No History migration work was started.
