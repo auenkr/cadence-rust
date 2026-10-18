@@ -1,0 +1,2 @@
+ok  	github.com/uber/cadence/service/matching/tasklist	0.199s
+Verified 8 event traces from original Go taskWriter

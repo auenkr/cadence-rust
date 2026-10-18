@@ -94,9 +94,6 @@ where
             response: tx,
         };
         loop {
-            if self.stopped.load(Ordering::Acquire) {
-                return Err(WriterError::Stopped);
-            }
             if cancelled.load(Ordering::Acquire) {
                 // Go's appendTask selects tCtx.Done while enqueueing and
                 // reports ServiceBusy for that branch, even for cancellation.
@@ -104,7 +101,18 @@ where
             }
             match self.sender.try_send(request) {
                 Ok(()) => break,
-                Err(TrySendError::Disconnected(_)) => return Err(WriterError::Stopped),
+                // Go leaves appendCh open when Stop closes stopCh. A caller
+                // that passed the initial stopped check has no stop case in
+                // its enqueue select, so a vanished receiver behaves like a
+                // full queue until its context ends. Keep the returned value
+                // only to make the ownership path explicit; it cannot be sent.
+                Err(TrySendError::Disconnected(returned)) => {
+                    request = returned;
+                    if Instant::now() >= deadline {
+                        return Err(WriterError::ServiceBusy);
+                    }
+                    thread::sleep(Duration::from_millis(2));
+                }
                 Err(TrySendError::Full(returned)) => {
                     request = returned;
                     if Instant::now() >= deadline {
@@ -383,6 +391,78 @@ mod tests {
         release_tx.send(()).unwrap();
         assert_eq!(first.join().unwrap(), Ok(1));
         actor.stop();
+        actor.join();
+    }
+
+    #[test]
+    fn stop_does_not_interrupt_an_append_already_waiting_for_capacity() {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let actor = Arc::new(
+            MatchingWriterActor::<u8, u8, ()>::new(1, Arc::new(|| 0), move |items| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                items.into_iter().map(Ok).collect()
+            })
+            .unwrap(),
+        );
+        let first_actor = actor.clone();
+        let first = thread::spawn(move || first_actor.append(1, Duration::from_secs(2)));
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let (response, _response_rx) = mpsc::sync_channel(1);
+        actor.sender.try_send(Request { value: 2, response }).unwrap();
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let waiting_actor = actor.clone();
+        let waiting = thread::spawn(move || {
+            started_tx.send(Instant::now()).unwrap();
+            waiting_actor.append(3, Duration::from_millis(120))
+        });
+        let began = started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        // Allow the caller to pass its initial stopped check and encounter the
+        // full channel before Stop. The saturated queue is held by the gate.
+        thread::sleep(Duration::from_millis(20));
+        actor.stop();
+        let result = waiting.join().unwrap();
+        let elapsed = began.elapsed();
+        assert_eq!(result, Err(WriterError::ServiceBusy));
+        assert!(elapsed >= Duration::from_millis(100), "wait ended too early: {elapsed:?}");
+        assert_eq!(actor.append(4, Duration::from_millis(10)), Err(WriterError::Stopped));
+
+        release_tx.send(()).unwrap();
+        let _ = first.join();
+        actor.join();
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let actor = Arc::new(
+            MatchingWriterActor::<u8, u8, ()>::new(1, Arc::new(|| 0), move |items| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                items.into_iter().map(Ok).collect()
+            })
+            .unwrap(),
+        );
+        let first_actor = actor.clone();
+        let first = thread::spawn(move || first_actor.append(1, Duration::from_secs(2)));
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let (response, _response_rx) = mpsc::sync_channel(1);
+        actor.sender.try_send(Request { value: 2, response }).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let waiting_actor = actor.clone();
+        let token = cancelled.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let waiting = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            waiting_actor.append_cancellable(3, Duration::from_secs(2), token)
+        });
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        thread::sleep(Duration::from_millis(20));
+        actor.stop();
+        cancelled.store(true, Ordering::Release);
+        assert_eq!(waiting.join().unwrap(), Err(WriterError::ServiceBusy));
+        release_tx.send(()).unwrap();
+        let _ = first.join();
         actor.join();
     }
     #[test]

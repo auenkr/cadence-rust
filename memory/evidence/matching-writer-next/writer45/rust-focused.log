@@ -1,0 +1,79 @@
+   Compiling cfg-if v1.0.5
+   Compiling zerocopy v0.8.63
+   Compiling libc v0.2.190
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling autocfg v1.5.1
+   Compiling num-traits v0.2.19
+   Compiling syn v3.0.9
+   Compiling serde_core v1.0.229
+   Compiling getrandom v0.2.17
+   Compiling siphasher v1.0.4
+   Compiling version_check v0.9.5
+   Compiling ahash v0.8.12
+   Compiling phf_shared v0.12.1
+   Compiling rand_core v0.6.4
+   Compiling ppv-lite86 v0.2.21
+   Compiling chrono-tz v0.10.4
+   Compiling find-msvc-tools v0.1.14
+   Compiling zmij v1.0.23
+   Compiling once_cell v1.21.4
+   Compiling serde v1.0.229
+   Compiling thiserror v2.0.21
+   Compiling shlex v2.0.1
+   Compiling cc v1.8.0
+   Compiling rand_chacha v0.3.1
+   Compiling chrono v0.4.45
+   Compiling phf v0.12.1
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_json v1.0.154
+   Compiling pkg-config v0.3.34
+   Compiling vcpkg v0.2.15
+   Compiling getrandom v0.4.3
+   Compiling libsqlite3-sys v0.30.1
+   Compiling rand v0.8.8
+   Compiling itoa v1.0.18
+   Compiling bitflags v2.13.2
+   Compiling rustix v1.1.5
+   Compiling memchr v2.8.3
+   Compiling farmhash v1.1.5
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-68c85418/rust/crates/cadence-common)
+   Compiling hashbrown v0.14.5
+   Compiling base64 v0.22.1
+   Compiling linux-raw-sys v0.12.1
+   Compiling snap v1.1.2
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-68c85418/rust/crates/cadence-api)
+   Compiling hashlink v0.9.1
+   Compiling sha1_smol v1.0.1
+   Compiling fallible-iterator v0.3.0
+   Compiling log v0.4.34
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling pin-project-lite v0.2.17
+   Compiling smallvec v1.16.3
+   Compiling fastrand v2.5.0
+   Compiling tempfile v3.27.0
+   Compiling rusqlite v0.32.1
+   Compiling tokio v1.53.3
+   Compiling sqlparser v0.53.0
+   Compiling uuid v1.28.0
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-68c85418/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-68c85418/rust/crates/cadence-persistence)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 31s
+     Running unittests src/lib.rs (target/debug/deps/cadence_persistence-c18f31471858d2e1)
+
+running 10 tests
+test matching_writer_actor::tests::cancellation_after_acceptance_keeps_write_and_fanout_nonblocking ... ok
+test matching_writer_actor::tests::cancellation_while_waiting_for_rendezvous_admission_is_observed ... ok
+test matching_writer_actor::tests::accepted_timeout_does_not_cancel_the_fake_persistence_write ... ok
+test matching_writer_actor::tests::consumes_original_go_trace_fixture ... ok
+test matching_writer_actor::tests::dropping_actor_does_not_join_a_blocked_handler ... ok
+test matching_writer_actor::tests::handler_response_count_mismatch_is_reported ... ok
+test matching_writer_actor::tests::full_queue_timeout_routes_to_service_busy ... ok
+test matching_writer_actor::tests::stop_returns_while_handler_is_blocked_and_join_is_explicit ... ok
+test matching_writer_actor::tests::zero_capacity_is_rendezvous_and_cancellation_keeps_accepted_work ... ok
+test matching_writer_actor::tests::stop_does_not_interrupt_an_append_already_waiting_for_capacity ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 182 filtered out; finished in 0.30s
+

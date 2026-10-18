@@ -61,6 +61,21 @@ func TestRustMatchingWriterNextOracle(t *testing.T) {
 	w2 := *w; w2.stopCh = make(chan struct{}); w2.stopped = 0; w2.appendCh = make(chan *writeTaskRequest, 1)
 	done = make(chan error, 1); go func(){ _, e := w2.appendTask(context.Background(), &persistence.TaskInfo{}); done <- e }(); <-w2.appendCh; w2.Stop(); err = <-done
 	stopped := out[0]; stopped.Stopped = err.Error(); out = append(out, stopped)
+	// A caller that passed appendTask's initial stopped check and is already
+	// blocked on a saturated appendCh has no stopCh select case. Stop must not
+	// wake it; its own deadline/cancellation wins. appendCh stays open.
+	w3 := *w; w3.stopCh = make(chan struct{}); w3.stopped = 0; w3.appendCh = make(chan *writeTaskRequest, 1); w3.appendCh <- &writeTaskRequest{}
+	w3.config.AppendTaskTimeout = func() time.Duration { return 100*time.Millisecond }
+	started := make(chan time.Time, 1); done = make(chan error, 1)
+	go func(){ started <- time.Now(); _, e := w3.appendTask(context.Background(), &persistence.TaskInfo{}); done <- e }()
+	began := <-started; time.Sleep(15*time.Millisecond); w3.Stop(); err = <-done
+	if err == nil || err.Error() != "task queue is full and timed out waiting to enqueue" || time.Since(began) < 80*time.Millisecond { t.Fatalf("saturated append after Stop = %v after %v; want ServiceBusy after deadline", err, time.Since(began)) }
+	w4 := *w; w4.stopCh = make(chan struct{}); w4.stopped = 0; w4.appendCh = make(chan *writeTaskRequest, 1); w4.appendCh <- &writeTaskRequest{}
+	w4.config.AppendTaskTimeout = func() time.Duration { return time.Second }
+	ctx, cancel = context.WithCancel(context.Background()); started = make(chan time.Time, 1); done = make(chan error, 1)
+	go func(){ started <- time.Now(); _, e := w4.appendTask(ctx, &persistence.TaskInfo{}); done <- e }()
+	began = <-started; time.Sleep(15*time.Millisecond); w4.Stop(); cancel(); err = <-done
+	if err == nil || err.Error() != "task queue is full and timed out waiting to enqueue" || time.Since(began) < 10*time.Millisecond { t.Fatalf("saturated append cancellation after Stop = %v after %v; want ServiceBusy after cancellation", err, time.Since(began)) }
 	data, err := json.MarshalIndent(out, "", "  "); if err != nil { t.Fatal(err) }
 	if err = os.WriteFile(os.Getenv("CADENCE_WRITER_NEXT_OUTPUT"), append(data, '\n'), 0600); err != nil { t.Fatal(err) }
 }

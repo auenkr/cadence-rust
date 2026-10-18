@@ -233,3 +233,41 @@ passed, 0 failed, 182 filtered, 0.18s); strict locked all-target persistence
 Clippy exit 0. Full logs and exit markers are in
 `memory/evidence/matching-writer-next/rust-final-focused-tests.*` and
 `strict-clippy-final.*`.
+
+## Admission after Stop parity repair (2026-10-18)
+
+The isolated actor now preserves Go's initial-stop check while no longer
+checking `stopped` during queue admission. If Stop ends the receiver after a
+caller already entered admission, a disconnected Rust sender is treated like a
+still-saturated open Go `appendCh`: the request remains unaccepted and waits
+until its context deadline/cancellation, returning ServiceBusy. Callers that
+start after Stop still immediately return `task list shutting down`. Accepted
+callers waiting for a response still leave on Stop, and queued accepted work
+is not drained. This does not change actor stop/join/drop behavior or connect
+the actor to production queue paths.
+
+Regression coverage holds a write handler and a second queued item to keep
+capacity saturated, starts another append, then stops the actor before its
+admission deadline. It asserts ServiceBusy only after the timeout ordering;
+afterward, a newly started append returns Stopped immediately. A second gated
+case stops a saturated actor and then cancels the already-waiting caller; it
+returns ServiceBusy through the enqueue cancellation path. The Go overlay runs
+the original `appendTask` with the same saturated queue ordering and asserts
+`task queue is full and timed out waiting to enqueue` for both timeout and
+cancellation, after Stop; a post-stop caller remains covered by existing
+Rust initial-stop coverage. Original Go production files were not changed.
+
+Evidence in `memory/evidence/matching-writer-next/writer45/`:
+
+* `python3 tests/run-matching-writer-next-oracle.py` exit 0; the actual Go
+  overlay passed and verified all 8 preexisting event traces plus the new
+  after-Stop timeout/cancellation assertions.
+* `CARGO_BUILD_JOBS=1 cargo test --locked -p cadence-persistence --lib
+  matching_writer_actor` exit 0; 10 passed, 0 failed, 182 filtered. The new
+  test asserts that the timeout waiter remains pending for at least 100ms of
+  its 120ms deadline after Stop, while post-stop admission returns immediately.
+* `CARGO_BUILD_JOBS=1 cargo clippy --locked -p cadence-persistence --all-targets
+  -- -D warnings` exit 0.
+
+This is still only the standalone actor primitive. No DurableTaskQueue wiring,
+production fallback policy, or broader Matching parity claim is included.
