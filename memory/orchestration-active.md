@@ -1,3 +1,10 @@
+## JoinCluster retry controller integrated — 2026-10-18
+
+Reviewed3da7dc739+aa858d5df;integrated17d7b6015+b5b783bbe(88originalNOTapplied). Asynccancellabledelay,clockreset,Goformatting/delayer,DestroyedseparateStopped;destroyeddiscardsjoined,deadlinepreservespartialsuccess. 24Rusttests,6freshGooverlaygroups,existingPINGpeer,strictcommon/serverClippyallpassed. Ready/gossip/mainnotwired.
+Normal-speedLuna69realinboundPING-REQrelayactualGo3nodeprotocolaccepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-ping-req-standard-69-20261018
+Discovery67independentlyactive. Matching incomplete.
+
 ## Async controller repaired but final destroy-result mismatch — 2026-10-18
 
 3da7dc739unintegratedcontainswholecontrolleragainstprecontrollerparent,DO NOTapply88first. Worker22focusedtests+strictserver/commonClippy+isolatedGodelayer/controllerpass;peerfailureusesoldglobalprobe(parentfreshnessfixalreadyintegrated). ParentreviewDestroyedbranchreturnsjoined,butGoNIL,error;deadlinefailurecorrectlypreservespartialjoined. Normal-speedLuna68finaldestroycase+COMBINEDfreshGooverlayallcases+Rust/Clippy/PINGaccepted:
