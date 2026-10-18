@@ -1,0 +1,9 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-aaef0e84/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 07s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-4bff137241497f73)
+
+running 1 test
+test ringpop_provider::tests::outbound_ping_applies_only_decoded_response_and_bumps_only_successful_sends ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 193 filtered out; finished in 0.52s
+

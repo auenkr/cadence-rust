@@ -1,0 +1,14 @@
+=== RUN   TestRustOutboundPingAgainstGo
+    zz_cadence_ringpop_outbound_ping_test.go:61: unexpected changes returned by Go PING handler: [{Source: SourceIncarnation:0 Address:127.0.0.1:43527 Incarnation:1792317072116 Status:alive Tombstone:false Labels:map[] Timestamp:{wall:0 ext:0 loc:0xa781c0}} {Source: SourceIncarnation:0 Address:127.0.0.2:7933 Incarnation:100 Status:alive Tombstone:false Labels:map[] Timestamp:{wall:0 ext:0 loc:0xa781c0}}]
+--- FAIL: TestRustOutboundPingAgainstGo (0.01s)
+FAIL
+FAIL	github.com/uber/ringpop-go/swim	0.024s
+FAIL
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/t3-aaef0e84/tests/run-ringpop-outbound-ping-compat.py", line 21, in <module>
+    subprocess.run(['go', 'test', '-overlay', str(overlay), './swim', '-run', '^TestRustOutboundPingAgainstGo$', '-count=1', '-v'], cwd=copied, env=env, check=True, timeout=180)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['go', 'test', '-overlay', '/tmp/ringpop-outbound-ping-z20b06au/overlay.json', './swim', '-run', '^TestRustOutboundPingAgainstGo$', '-count=1', '-v']' returned non-zero exit status 1.

@@ -1,0 +1,7 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-aaef0e84/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.19s
+=== RUN   TestRustRealRingpopNode
+--- PASS: TestRustRealRingpopNode (0.05s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.090s
+Real RingpopNode Go client probe passed; evidence: /tmp/ringpop-node-compat-n2b2ury8

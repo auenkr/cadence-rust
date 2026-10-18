@@ -1,0 +1,5 @@
+=== RUN   TestRustOutboundJoinAgainstGo
+--- PASS: TestRustOutboundJoinAgainstGo (0.02s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.041s
+Rust outbound JOIN passed against a real pinned Go Ringpop node

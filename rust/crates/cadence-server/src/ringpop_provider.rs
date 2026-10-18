@@ -160,6 +160,73 @@ impl RingpopNode {
         Ok(join)
     }
 
+    /// Send one direct Ringpop v0.10.0 PING. Dissemination counters advance
+    /// only after a successful TChannel response and complete JSON decode,
+    /// matching `sendPing`'s IssueAsSender/bumpPiggybackCounters ordering.
+    pub async fn ping(&self, target: &str, timeout: Duration) -> Result<Ping, JsonCallError> {
+        let (request, sent_changes) = {
+            let node = self.state.lock().expect("Ringpop state poisoned");
+            let local = node.memberlist.member(&node.address).expect("local member");
+            let changes = node.disseminator.issue_sender();
+            let request = Ping {
+                changes: Some(changes.clone()),
+                checksum: node.memberlist.checksum(),
+                source: local.address.clone(),
+                source_incarnation: local.incarnation,
+                app: node.app.clone(),
+            };
+            (request, changes)
+        };
+        let response = tchannel_json_client::call(
+            target,
+            "ringpop",
+            "/protocol/ping",
+            None,
+            &serde_json::to_value(&request).expect("Ping serialization"),
+            timeout,
+        )
+        .await?;
+        // Fully decode first. A malformed response must neither merge state
+        // nor count this packet as a successful dissemination.
+        let ping: Ping = serde_json::from_value(response.body)
+            .map_err(|error| JsonCallError::Transport(anyhow::anyhow!(error)))?;
+        let mut node = self.state.lock().expect("Ringpop state poisoned");
+        // `sendPing` invokes its successful piggyback callback before
+        // `pingNextMember` applies the response through Memberlist.Update.
+        node.disseminator.complete_sender(&sent_changes, true);
+        if !node.stopped {
+            let local_address = node.address.clone();
+            let update = node.memberlist.update(
+                ping.changes.as_deref().unwrap_or_default(),
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64
+                },
+                |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+            );
+            if !update.accepted.is_empty() {
+                let pingable = node
+                    .memberlist
+                    .members()
+                    .iter()
+                    .filter(|member| {
+                        member.address != local_address
+                            && (member.status == ALIVE || member.status == SUSPECT)
+                    })
+                    .count();
+                node.disseminator.adjust_max_propagations(pingable);
+                for change in update.accepted {
+                    node.disseminator.record(change);
+                }
+            }
+        }
+        // Go's sendPing callback above succeeds even if the node stopped while
+        // the response was in flight; memberlist.Update itself is stop guarded.
+        Ok(ping)
+    }
+
     /// Stable snapshot boundary for bootstrap owners and compatibility checks.
     pub fn membership_snapshot(&self) -> (Vec<Member>, u32) {
         let node = self.state.lock().expect("Ringpop state poisoned");
@@ -175,6 +242,14 @@ impl RingpopNode {
             .expect("Ringpop state poisoned")
             .disseminator
             .propagation_counts()
+    }
+
+    pub fn max_propagations(&self) -> usize {
+        self.state
+            .lock()
+            .expect("Ringpop state poisoned")
+            .disseminator
+            .max_propagations()
     }
 
     pub fn handler(&self) -> RingpopHandler {
@@ -614,6 +689,230 @@ mod tests {
             before,
             "dropping the JOIN future partially mutated membership"
         );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn outbound_ping_applies_only_decoded_response_and_bumps_only_successful_sends() {
+        let accepted = Change {
+            source: "peer:7933".into(),
+            source_incarnation: 9,
+            address: "peer:7933".into(),
+            incarnation: 9,
+            status: ALIVE.into(),
+            ..Default::default()
+        };
+        let responder = |body: Vec<u8>| {
+            RingpopHandler::new(move |method, _, request| {
+                let body = body.clone();
+                async move {
+                    assert_eq!(method, "/protocol/ping");
+                    let request: Ping = serde_json::from_slice(&request).unwrap();
+                    assert_eq!(request.app, "cadence-matching");
+                    assert_eq!(request.source, "127.0.0.1:7933");
+                    assert_eq!(request.source_incarnation, 100);
+                    assert_eq!(request.checksum, 0);
+                    let changes = request.changes.as_deref().unwrap();
+                    assert_eq!(changes.len(), 1);
+                    assert_eq!(changes[0].source, "");
+                    assert_eq!(changes[0].source_incarnation, 0);
+                    assert_eq!(changes[0].address, "127.0.0.1:7933");
+                    assert_eq!(changes[0].incarnation, 100);
+                    assert_eq!(changes[0].status, ALIVE);
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body,
+                    })
+                }
+            })
+        };
+
+        // Both null and empty response changes are valid complete PING replies.
+        for changes in ["null", "[]"] {
+            let node = node();
+            let body = format!(r#"{{"changes":{changes},"checksum":12,"source":"peer:7933","sourceIncarnationNumber":9,"app":""}}"#).into_bytes();
+            let (address, server) = outbound_test_server(responder(body)).await;
+            let result = node.ping(&address, Duration::from_secs(1)).await.unwrap();
+            if changes == "null" {
+                assert_eq!(result.changes, None);
+            } else {
+                assert_eq!(result.changes, Some(vec![]));
+            }
+            assert_eq!(node.dissemination_counts().get("127.0.0.1:7933"), Some(&1));
+            server.abort();
+        }
+
+        // Successful response changes enter handleChanges' dissemination path.
+        let response_node = node();
+        let response = Ping {
+            changes: Some(vec![accepted.clone()]),
+            checksum: 7,
+            source: "peer:7933".into(),
+            source_incarnation: 9,
+            app: String::new(),
+        };
+        let (address, server) =
+            outbound_test_server(responder(serde_json::to_vec(&response).unwrap())).await;
+        response_node
+            .ping(&address, Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(response_node
+            .membership_snapshot()
+            .0
+            .iter()
+            .any(|member| member.address == "peer:7933"));
+        assert!(response_node
+            .dissemination_counts()
+            .contains_key("peer:7933"));
+        let queued_peer = response_node
+            .state
+            .lock()
+            .unwrap()
+            .disseminator
+            .issue_sender()
+            .into_iter()
+            .find(|change| change.address == "peer:7933")
+            .unwrap();
+        assert_eq!(queued_peer.source, "peer:7933");
+        assert_eq!(queued_peer.source_incarnation, 9);
+        assert_eq!(queued_peer.incarnation, 9);
+        assert_eq!(
+            response_node.dissemination_counts().get("127.0.0.1:7933"),
+            Some(&1)
+        );
+        server.abort();
+
+        // Complete the sent snapshot callback before Update refutes the
+        // response's local suspicion. The replacement local change starts p=0.
+        let refutation_node = node();
+        let response = Ping {
+            changes: Some(vec![Change {
+                source: "peer:7933".into(),
+                source_incarnation: 9,
+                address: "127.0.0.1:7933".into(),
+                incarnation: 100,
+                status: "suspect".into(),
+                ..Default::default()
+            }]),
+            checksum: 0,
+            source: "peer:7933".into(),
+            source_incarnation: 9,
+            app: String::new(),
+        };
+        let (address, server) =
+            outbound_test_server(responder(serde_json::to_vec(&response).unwrap())).await;
+        refutation_node
+            .ping(&address, Duration::from_secs(1))
+            .await
+            .unwrap();
+        let (members, _) = refutation_node.membership_snapshot();
+        let local_incarnation = members
+            .iter()
+            .find(|member| member.address == "127.0.0.1:7933")
+            .unwrap()
+            .incarnation;
+        assert!(local_incarnation > 100);
+        assert_eq!(refutation_node.max_propagations(), 0);
+        let queued = refutation_node
+            .state
+            .lock()
+            .unwrap()
+            .disseminator
+            .issue_sender()
+            .into_iter()
+            .find(|change| change.address == "127.0.0.1:7933")
+            .unwrap();
+        assert_eq!(queued.source, "127.0.0.1:7933");
+        assert_eq!(queued.source_incarnation, local_incarnation);
+        assert_eq!(queued.status, ALIVE);
+        assert_eq!(
+            refutation_node.dissemination_counts().get("127.0.0.1:7933"),
+            Some(&0)
+        );
+        server.abort();
+
+        // Malformed JSON, application failures, timeout and caller cancellation
+        // do not apply accepted changes or bump IssueAsSender's counters.
+        let bad_responses: Vec<(RingpopHandler, Duration)> = vec![
+            (
+                RingpopHandler::new(|_, _, _| async {
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: b"{".to_vec(),
+                    })
+                }),
+                Duration::from_secs(1),
+            ),
+            (
+                RingpopHandler::new(|_, _, _| async {
+                    Err(RingpopError::Application("rejected".into()))
+                }),
+                Duration::from_secs(1),
+            ),
+            (
+                RingpopHandler::new(|_, _, _| async {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: b"{}".to_vec(),
+                    })
+                }),
+                Duration::from_millis(30),
+            ),
+        ];
+        for (handler, timeout) in bad_responses {
+            let node = node();
+            let before = node.membership_snapshot();
+            let (address, server) = outbound_test_server(handler).await;
+            assert!(node.ping(&address, timeout).await.is_err());
+            assert_eq!(node.membership_snapshot(), before);
+            assert_eq!(node.dissemination_counts().get("127.0.0.1:7933"), Some(&0));
+            server.abort();
+        }
+
+        let cancellation_node = node();
+        let before = cancellation_node.membership_snapshot();
+        let (address, server) = outbound_test_server(RingpopHandler::new(|_, _, _| async {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            Ok(RingpopResponse {
+                headers: None,
+                body: br#"{"changes":null}"#.to_vec(),
+            })
+        }))
+        .await;
+        let caller = cancellation_node.clone();
+        let call = tokio::spawn(async move { caller.ping(&address, Duration::from_secs(2)).await });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        call.abort();
+        assert_eq!(cancellation_node.membership_snapshot(), before);
+        assert_eq!(
+            cancellation_node
+                .dissemination_counts()
+                .get("127.0.0.1:7933"),
+            Some(&0)
+        );
+        server.abort();
+
+        // Stopping after send does not suppress Go's successful sender callback,
+        // while Memberlist.Update's stopped guard leaves membership untouched.
+        let node = node();
+        let (address, server) = outbound_test_server(RingpopHandler::new(|_, _, _| async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok(RingpopResponse {
+                headers: None,
+                body: br#"{"changes":null}"#.to_vec(),
+            })
+        }))
+        .await;
+        let caller = node.clone();
+        let call = tokio::spawn(async move { caller.ping(&address, Duration::from_secs(1)).await });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let before = node.membership_snapshot();
+        node.stop();
+        call.await.unwrap().unwrap();
+        assert_eq!(node.membership_snapshot(), before);
+        assert_eq!(node.dissemination_counts().get("127.0.0.1:7933"), Some(&1));
         server.abort();
     }
 

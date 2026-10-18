@@ -1,0 +1,31 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-aaef0e84/rust/crates/cadence-server)
+error[E0618]: expected function, found `ringpop_provider::RingpopNode`
+   --> crates/cadence-server/src/ringpop_provider.rs:855:24
+    |
+571 |     fn node() -> RingpopNode {
+    |     ------------------------ this function of the same name is available here, but it's shadowed by the local binding
+...
+784 |         let node = node();
+    |             ---- `node` has type `ringpop_provider::RingpopNode`
+...
+855 |             let node = node();
+    |                        ^^^^--
+    |                        |
+    |                        call expression requires function
+
+error[E0618]: expected function, found `ringpop_provider::RingpopNode`
+   --> crates/cadence-server/src/ringpop_provider.rs:864:20
+    |
+571 |     fn node() -> RingpopNode {
+    |     ------------------------ this function of the same name is available here, but it's shadowed by the local binding
+...
+784 |         let node = node();
+    |             ---- `node` has type `ringpop_provider::RingpopNode`
+...
+864 |         let node = node();
+    |                    ^^^^--
+    |                    |
+    |                    call expression requires function
+
+For more information about this error, try `rustc --explain E0618`.
+error: could not compile `cadence-server` (lib test) due to 2 previous errors
