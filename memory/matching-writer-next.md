@@ -189,3 +189,47 @@ parity remains incomplete. Strict locked all-target persistence Clippy passed
 with `CARGO_BUILD_JOBS=1 cargo clippy --locked -p cadence-persistence
 --all-targets -- -D warnings` (exit 0). The Go oracle passed and reproduced all
 8 fixture traces; a Rust-vs-Go event-by-event differential suite remains open.
+
+## Actor continuation in matching-actor-parity checkout (2026-10-18)
+
+Applied original candidate commits `6c1bd6fa409ec4eabaf792b0fcb9b0ecf8fcce39`
+and `a5200df8328d5157011d060d987b6046db546959` (cherry-pick commits
+`4a8591c0f` and `7e2448340`). The Rust persistence actor remains an isolated
+primitive: no production queue wiring or server `matching_writer.rs` edits were
+made. Negative capacity still returns `InvalidCapacity` at primitive
+construction; no production fallback behavior was introduced.
+
+Corrections in this continuation: `Drop` sets stop and detaches the worker
+handle so it cannot synchronously join a blocked handler; controlled callers
+can still use explicit `join()`. Admission cancellation now maps to
+`ServiceBusy`, matching Go's enqueue-side `tCtx.Done()` branch. Cancellation
+after admission remains `Cancelled`, and accepted work is retained. The
+fixture test executes each Go fixture batch through the actor and compares its
+persistence callback input with the exact fixture batch. A gate holds the
+actor at its live batch-size sample while buffered requests are preloaded, so
+caller scheduling cannot change those assertions. Go's runtime nondeterminism
+for simultaneous select cases remains documented in the original evidence
+above. Other actor tests execute response timeout, accepted cancellation,
+rendezvous admission, stop and drop behavior with channel gates.
+
+Evidence collected in this checkout:
+
+* `python3 tests/run-matching-writer-next-oracle.py` — exit 0;
+  `ok github.com/uber/cadence/service/matching/tasklist 0.129s`, then
+  `Verified 8 event traces from original Go taskWriter`.
+* `cd rust && CARGO_BUILD_JOBS=1 cargo test --locked -p cadence-persistence
+  --lib matching_writer_actor` — tmux `cadence-rust` window `writer44-final3` passed: exit 0, 9 passed,
+  0 failed, 182 filtered, 0.18s.
+* `CARGO_BUILD_JOBS=1 cargo clippy --locked -p cadence-persistence
+  --all-targets -- -D warnings` ran after the focused tests in that serialized window and passed (exit 0).
+
+Known limitation: admission, response cancellation, and worker stop detection
+still use 2ms/10ms polling around `std::sync::mpsc`; no notification-driven
+queue was added. Drop now returns promptly while a handler is blocked, but that
+owned thread finishes only after its handler is released/returns.
+
+Final validation for this continuation: Rust focused actor tests exit 0 (9
+passed, 0 failed, 182 filtered, 0.18s); strict locked all-target persistence
+Clippy exit 0. Full logs and exit markers are in
+`memory/evidence/matching-writer-next/rust-final-focused-tests.*` and
+`strict-clippy-final.*`.

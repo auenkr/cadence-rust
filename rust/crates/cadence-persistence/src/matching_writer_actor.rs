@@ -4,9 +4,9 @@
 //! provider, and its append API accepts slices rather than individual calls.
 use std::{
     sync::{
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-        Arc, Mutex,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -98,7 +98,9 @@ where
                 return Err(WriterError::Stopped);
             }
             if cancelled.load(Ordering::Acquire) {
-                return Err(WriterError::Cancelled);
+                // Go's appendTask selects tCtx.Done while enqueueing and
+                // reports ServiceBusy for that branch, even for cancellation.
+                return Err(WriterError::ServiceBusy);
             }
             match self.sender.try_send(request) {
                 Ok(()) => break,
@@ -127,13 +129,13 @@ where
                 Ok(HandlerResult::Item(Ok(response))) => return Ok(response),
                 Ok(HandlerResult::Item(Err(error))) => return Err(WriterError::Write(error)),
                 Ok(HandlerResult::CountMismatch { expected, actual }) => {
-                    return Err(WriterError::ResponseCountMismatch { expected, actual })
+                    return Err(WriterError::ResponseCountMismatch { expected, actual });
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() >= deadline => {
-                    return Err(WriterError::ResponseTimeout)
+                    return Err(WriterError::ResponseTimeout);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) if cancelled.load(Ordering::Acquire) => {
-                    return Err(WriterError::Cancelled)
+                    return Err(WriterError::Cancelled);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Err(WriterError::Stopped),
@@ -154,9 +156,10 @@ where
 impl<T, R, E> Drop for MatchingWriterActor<T, R, E> {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::Release);
-        if let Some(join) = self.join.get_mut().expect("writer join lock").take() {
-            let _ = join.join();
-        }
+        // Go Stop closes a signal and returns; it never waits for an in-flight
+        // persistence operation. Dropping the JoinHandle detaches the owned
+        // worker, which exits after that operation completes.
+        let _ = self.join.get_mut().expect("writer join lock").take();
     }
 }
 fn actor_loop<T, R, E>(
@@ -223,10 +226,59 @@ mod tests {
         assert_eq!(traces.len(), 8);
         for trace in traces {
             assert!(trace.capacity >= 0);
-            assert_eq!(trace.batch.first(), Some(&0));
-            let extras = (trace.batch.len() - 1) as i64;
-            assert!(extras <= trace.maximum.max(0));
-            assert_eq!(trace.remaining + extras as usize, 5);
+            // Go's test replaces appendCh with capacity 8 after recording the
+            // construction capacity. Gate live batch sampling, preload the
+            // fixture's ready requests, then check the real actor event.
+            assert_eq!(trace.remaining + trace.batch.len().saturating_sub(1), 5);
+            let maximum = trace.maximum;
+            let (sampling_tx, sampling_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let (batch_tx, batch_rx) = mpsc::channel();
+            let first_sample = Arc::new(AtomicBool::new(true));
+            let sample_once = first_sample.clone();
+            let release_rx = Mutex::new(release_rx);
+            let actor = MatchingWriterActor::<i64, i64, ()>::new(
+                8,
+                Arc::new(move || {
+                    if sample_once.swap(false, Ordering::SeqCst) {
+                        sampling_tx.send(()).unwrap();
+                        release_rx.lock().unwrap().recv().unwrap();
+                    }
+                    maximum
+                }),
+                move |items| {
+                    batch_tx.send(items.clone()).unwrap();
+                    items.into_iter().map(Ok).collect()
+                },
+            )
+            .unwrap();
+            let actor = Arc::new(actor);
+            let first_actor = actor.clone();
+            let first = thread::spawn(move || first_actor.append(0, Duration::from_secs(2)));
+            sampling_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            let mut response_receivers = Vec::new();
+            for id in 1..=5 {
+                let (response_tx, response_rx) = mpsc::sync_channel(1);
+                actor
+                    .sender
+                    .try_send(Request {
+                        value: id,
+                        response: response_tx,
+                    })
+                    .unwrap();
+                response_receivers.push(response_rx);
+            }
+            release_tx.send(()).unwrap();
+            assert_eq!(
+                batch_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+                trace.batch
+            );
+            assert!(first.join().unwrap().is_ok());
+            for response in response_receivers {
+                let _ = response.recv_timeout(Duration::from_secs(1)).unwrap();
+            }
+            actor.stop();
+            actor.join();
             // Exercise the response/admission outcome recorded by the real Go
             // writer, including all four timeout/stop traces.
             if !trace.enqueue_timeout.is_empty() {
@@ -299,6 +351,40 @@ mod tests {
         a.stop();
         a.join();
     }
+
+    #[test]
+    fn full_queue_timeout_routes_to_service_busy() {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let first_write = Arc::new(AtomicBool::new(true));
+        let gate_once = first_write.clone();
+        let actor = Arc::new(
+            MatchingWriterActor::<u8, u8, ()>::new(1, Arc::new(|| 0), move |items| {
+                if gate_once.swap(false, Ordering::SeqCst) {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                }
+                items.into_iter().map(Ok).collect()
+            })
+            .unwrap(),
+        );
+        let first_actor = actor.clone();
+        let first = thread::spawn(move || first_actor.append(1, Duration::from_secs(2)));
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let (response, _response_rx) = mpsc::sync_channel(1);
+        actor
+            .sender
+            .try_send(Request { value: 2, response })
+            .unwrap();
+        assert_eq!(
+            actor.append(3, Duration::from_millis(30)),
+            Err(WriterError::ServiceBusy)
+        );
+        release_tx.send(()).unwrap();
+        assert_eq!(first.join().unwrap(), Ok(1));
+        actor.stop();
+        actor.join();
+    }
     #[test]
     fn cancellation_after_acceptance_keeps_write_and_fanout_nonblocking() {
         let (entered_tx, entered_rx) = mpsc::channel();
@@ -356,7 +442,7 @@ mod tests {
             thread::spawn(move || caller.append_cancellable(1, Duration::from_secs(2), token));
         thread::sleep(Duration::from_millis(20));
         cancelled.store(true, Ordering::Release);
-        assert_eq!(append.join().unwrap(), Err(WriterError::Cancelled));
+        assert_eq!(append.join().unwrap(), Err(WriterError::ServiceBusy));
         release_tx.send(()).unwrap();
         assert_eq!(first.join().unwrap(), Ok(0));
         actor.stop();
@@ -381,6 +467,30 @@ mod tests {
         assert_eq!(append.join().unwrap(), Err(WriterError::Stopped));
         release_tx.send(()).unwrap();
         caller.join();
+    }
+
+    #[test]
+    fn dropping_actor_does_not_join_a_blocked_handler() {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let actor = Arc::new(
+            MatchingWriterActor::<u8, u8, ()>::new(1, Arc::new(|| 0), move |items| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                items.into_iter().map(Ok).collect()
+            })
+            .unwrap(),
+        );
+        let caller = actor.clone();
+        let append = thread::spawn(move || {
+            let result = caller.append(1, Duration::from_millis(30));
+            drop(caller);
+            result
+        });
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(append.join().unwrap(), Err(WriterError::ResponseTimeout));
+        drop(actor);
+        release_tx.send(()).unwrap();
     }
 
     #[test]
