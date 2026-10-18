@@ -25,10 +25,9 @@ pub struct Memberlist {
 
 impl Memberlist {
     pub fn new(local: Member) -> Self {
-        let checksum = memberlist_checksum(std::slice::from_ref(&local));
-        let mut list = Self::from_snapshot(local, vec![]);
-        list.checksum = checksum;
-        list
+        // Ringpop's constructor inserts the local member but leaves the cached
+        // aggregate checksum at zero until its first membership mutation.
+        Self::from_snapshot(local, vec![])
     }
 
     /// Construct a memberlist from an explicit initial snapshot. This is
