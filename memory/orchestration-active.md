@@ -1,3 +1,9 @@
+## Dissemination consumer passed; combined gate 2026-10-18
+
+Consumer dc019e056 passed 1 Rust differential test; expanded original-Go generator twice byte-identical. Adds counters accessor and requested 0/1 bound, equal-checksum, fully-filtered coverage. Not integrated yet. Final combined original stack: 6c71b6774 + 187f4aeff + f6cd28372 + 5044177ec + dc019e056. Luna Standard final check accepted running:
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Adissemination-final-check-standard-21-20261018
+Must confirm both oracles, explicit integration target, Go fixture no drift, strict common all-target Clippy/locked checks and wire runner on combined tree before integration. HTTP repair standard-16 remains separate active work.
+
 ## Dissemination repair checks confirmed 2026-10-18
 
 standard-19 completed candidate 2e56a05ad + repair f4f966b3e (equivalent 6c71b6774 + 187f4aeff), final f6cd28372 adds narrow too_many_arguments allowance + evidence. Confirmed explicit integration target 2 tests, strict common all-target Clippy, member oracle 1 test and Go wire runner/11 Rust tests passed. Parent reviewed repair diff and lint scope. Still UNINTEGRATED pending actual dissemination consumer standard-20, checked running. Final validation stack needs f6cd28372 or equivalent lint fix plus consumer commit. Floating-point propagation bound parity remains pending actual-Go vectors. HTTP repair standard-16 separate active work.
