@@ -1,3 +1,10 @@
+## Live GC batch configuration integrated 2026-10-18
+
+31d7c2267 reviewed original under-lock read and signed loop/error behavior; integrated after15GoGCcases,36persistence tests,Go/RustSQLiteinterop,1server filtered/live provider test,strict workspace/all-targetClippy passed. No nonpositive rejection/saturation added; signed SQLite/delete-repeat semantics preserved with bounded tests. Worker cleaned4.7GB own inactive cache,37GB free reported.
+Next writer dependency original-Go contract+fixtures Luna Standard accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-go-contract-standard-39-20261018
+Scope append channel/batch/timeout architecture+actual Go event oracle, not unrelated domain/runtime work. JOINsender38 separate active (may need apply transport originals if absent in initial checkout per prior note). Matching only/incomplete.
+
 Integration hash correction: worker-reported full base8bcc48481b279d26275498d17723cde0e120d5c0 was invalid; used original equivalent b2441650e. Actual parent integrations a58a583ee,9f546f403,6106a95ec. JOINworker38 checkout started before integration due failed hash; if transport absent there, apply b2441650e+595a3614e+755052150 (or these parent equivalents) before implementation. No code lost.
 
 ## Outbound JSON transport repaired and integrated 2026-10-18
