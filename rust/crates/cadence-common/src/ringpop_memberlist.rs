@@ -79,7 +79,8 @@ impl Memberlist {
                 continue;
             }
             if gossip.address == self.local_address {
-                let local = &mut self.members[0];
+                let local_index = old_index.expect("local member is always present");
+                let local = &mut self.members[local_index];
                 local.incarnation = next_incarnation();
                 change = Change {
                     source: local.address.clone(),
@@ -149,7 +150,7 @@ mod tests {
                 change("self", SUSPECT, 11),
             ],
             || 12,
-            |len| len,
+            |_| 0,
         );
         assert_eq!(result.accepted.len(), 3);
         assert_eq!(list.member("new").unwrap().status, SUSPECT);
