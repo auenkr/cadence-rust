@@ -1,0 +1,9 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-bafd6c1f/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 05s
+=== RUN   TestRustOutboundJoinAgainstGo
+--- PASS: TestRustOutboundJoinAgainstGo (0.04s)
+=== RUN   TestRustOutboundJoinGroupAgainstGo
+--- PASS: TestRustOutboundJoinGroupAgainstGo (0.01s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.064s
+Rust outbound JOIN and JoinGroup passed against real pinned Go Ringpop nodes
