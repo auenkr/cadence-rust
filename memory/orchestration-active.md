@@ -1,3 +1,7 @@
+## Dissemination integrated after combined checks 2026-10-18
+
+Recovery standard-22 validated combined tree 0655292c3; evidence 1ee2a55b7. All exit 0: both original-Go fixture generators/no drift, 11 wire tests + Go wire oracle, 2 dissemination integration tests, dissemination oracle, member oracle, strict locked common all-target Clippy. Logs /tmp/cadence-standard-21-0655292/. Integrated as b25d3480b,27cc30f64,c047406ac,fb8b490e4,1916c4e30. Matching remains current/incomplete; production SWIM not implemented. HTTP recovery standard-23 separate active work.
+
 ## Interrupted validation recovery 2026-10-18
 
 standard-21 final checks incomplete: tmux server vanished twice, no Rust exit codes. Go fixture generation passed/no drift, combined candidate tree 0655292c3 unintegrated. HTTP repair standard-16 cancelled, no pending child runs; latest summary says unit/check/lint evidence exists, live production build/runner unfinished. Parent measured 71GB disk free, ~8GB RAM available, no cargo/rustc or tmux server; cause of interruption unproven.
