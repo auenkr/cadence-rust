@@ -1,3 +1,9 @@
+## Production capacity candidate concurrency blocker — 2026-10-18
+
+9bd9cfdd7 NOTintegrated. Worker8writer+1filtertest,Go8oracle,strictserverClippypass. Parentfoundpermitaccumulation: receiveraddpermit eachpass,senderdropspermitreturnsit,nextpass>=2permits =>concurrentcallersoverwritesingleslot. Alsozero-batchdrainonlychecksunusedbufferedreceiver,notwaitingrendezvoussenders. Normal-speedLuna58 concurrencyrepair+meaningfulrepeated/multiplecaller/zerobatchingtestsaccepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-rendezvous-concurrency-standard-58-20261018
+Selector57 independentlyactive. No capacityintegrationuntilreview. Matching incomplete.
+
 ## Selector56 passes existing suite; negative-cap bug found — 2026-10-18
 
 Unintegratedorderedac195cd51+0a63bbd6d+565a68483. Go2verify/fourRusttests/strictcommonClippy passed56. Parentdiffreviewfound55 changednegativecap tozero viausize::try_from(cap).unwrap_or(0),butGo equalitystopcondition consumespool fornegativecap. Existingnegative*negativefixture missesnegativeproduct. Normal-speedLuna57 focusedactualGo signedcapcases+fixaccepted:
