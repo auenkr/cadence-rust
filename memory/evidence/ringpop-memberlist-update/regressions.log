@@ -1,0 +1,50 @@
+ok  	github.com/uber/ringpop-go/swim	0.020s
+Generated rust/crates/cadence-common/tests/fixtures/ringpop_member_primitives.json and rust/crates/cadence-common/tests/fixtures/ringpop_disseminator.json from ringpop-go v0.10.0
+
+EXIT go-fixture-generator 0
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-481753f4/rust/crates/cadence-common)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.31s
+     Running unittests src/lib.rs (target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 16 tests
+test ringpop_member::tests::labels_are_utf8_byte_encoded_order_independent_and_signed ... ok
+test ringpop_member::tests::aggregate_sorts_and_excludes_tombstones ... ok
+test ringpop_member::tests::lower_precedence_rejects_gossip_even_with_higher_signed_label_checksum ... ok
+test ringpop_member::tests::merge_precedence_and_incarnation_rules ... ok
+test ringpop_memberlist::tests::remote_acceptance_refutation_tombstone_and_checksum ... ok
+test ringpop_wire::tests::change_normalization_matches_go ... ok
+test ringpop_wire::tests::empty_labels_serialize_as_omitted ... ok
+test ringpop_wire::tests::go_wire_fixture_application_error ... ok
+test ringpop_wire::tests::go_wire_fixture_change ... ok
+test ringpop_wire::tests::go_wire_fixture_join ... ok
+test ringpop_wire::tests::go_wire_fixture_member ... ok
+test ringpop_wire::tests::go_wire_fixture_ping ... ok
+test ringpop_wire::tests::labels_empty_roundtrip_normalizes_to_none ... ok
+test ringpop_wire::tests::timestamp_null_and_custom_unmarshal_match_go ... ok
+test ringpop_wire::tests::nil_vs_empty_slices_preserved ... ok
+test ringpop_wire::tests::timestamp_zero_matches_go ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.01s
+
+     Running tests/ringpop_disseminator.rs (target/debug/deps/ringpop_disseminator-495e2285822a22e0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/ringpop_disseminator_oracle.rs (target/debug/deps/ringpop_disseminator_oracle-0c26e606e1088b52)
+
+running 1 test
+test pinned_ringpop_dissemination_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ringpop_member_oracle.rs (target/debug/deps/ringpop_member_oracle-1b97b8588868e28a)
+
+running 1 test
+test pinned_ringpop_member_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+EXIT rust-ringpop-regressions 0
