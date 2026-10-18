@@ -1,3 +1,10 @@
+## Controller62 incomplete; probe freshness diagnosis — 2026-10-18
+
+62applied88f963346as680065326only,no repaircommit/testscomplete. Parentreadrunner: global/tmp/cadence-ringpop-join-probe reusedifexists,likelyoldbinarywithout--group =>invalidsocketaddress. Splitnormal-speedLuna64harnessfreshbuild+realGoJOIN/GROUPregression and65asyncdelay/actualGodelayer/formatter/clockrepair:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-join-probe-freshness-standard-64-20261018
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-join-async-delay-standard-65-20261018
+Restart63independentlyactive. Controllerunintegrated. Matching incomplete.
+
 ## Full frozen regression PASSED — 2026-10-18
 
 Reviewedf424d1c79reportandactualcomplete-run/results.json;integrateda1ee92c58. Frozen3c8c5f98a34/34compatstages,568workspacepassed0failed2ignored,strictworkspaceClippy,mixedoriginalGoFrontendHistoryWorker+RustMatchingNO GoMatchingpassed. Supplementary9writertraces/16selectorcases/realGoJOINPING/TChannelboundarypassed. ExcludeslaterJOINgroup. MixedidleownerrecoveryNOTprocessrestart.
