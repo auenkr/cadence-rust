@@ -1,0 +1,365 @@
+{
+  "source": "github.com/uber/ringpop-go v0.10.0 swim/member.go and swim/memberlist.go",
+  "primitiveCases": [
+    {
+      "name": "status_alive",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "status_suspect",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect10"
+    },
+    {
+      "name": "status_faulty",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty10"
+    },
+    {
+      "name": "status_leave",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave10"
+    },
+    {
+      "name": "status_tombstone",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone10"
+    },
+    {
+      "name": "status_unknown",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown10"
+    },
+    {
+      "name": "tombstone_old_nil",
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone10"
+    },
+    {
+      "name": "alive_old_nil",
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "older_incarnation",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 11,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave10"
+    },
+    {
+      "name": "newer_incarnation",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 11,
+        "labels": {}
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive11"
+    },
+    {
+      "name": "equal_incarnation_equal_state",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "precedence_beats_higher_label_checksum",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "precedence": "aA"
+        }
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": {
+          "precedence": "bA"
+        }
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": -870966799,
+      "checksumString": "nsuspect10#labels-870966799"
+    },
+    {
+      "name": "higher_label_checksum",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "candidate": "aA"
+        }
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "candidate": "bA"
+        }
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 368546780,
+      "checksumString": "nalive10#labels368546780"
+    },
+    {
+      "name": "unicode_empty_labels",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n-雪",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "": "",
+          "ключ": "значение🌱"
+        }
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": -2136355806,
+      "checksumString": "n-雪alive10#labels-2136355806"
+    },
+    {
+      "name": "nil_labels",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "empty_labels",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "signed_positive_labels",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "signed": "aA"
+        }
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 1620647347,
+      "checksumString": "nalive10#labels1620647347"
+    },
+    {
+      "name": "signed_negative_labels",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {}
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "signed": "dA"
+        }
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": -678489541,
+      "checksumString": "nalive10#labels-678489541"
+    }
+  ],
+  "memberlists": [
+    {
+      "name": "sorted_with_tombstone",
+      "members": [
+        {
+          "address": "z",
+          "status": "alive",
+          "incarnation": 2,
+          "labels": null
+        },
+        {
+          "address": "gone",
+          "status": "tombstone",
+          "incarnation": 8,
+          "labels": null
+        },
+        {
+          "address": "a",
+          "status": "suspect",
+          "incarnation": 1,
+          "labels": null
+        }
+      ],
+      "genChecksumString": "asuspect1;zalive2;",
+      "computeChecksum": 3174283383
+    },
+    {
+      "name": "empty",
+      "members": [],
+      "genChecksumString": "",
+      "computeChecksum": 3696677242
+    }
+  ]
+}
