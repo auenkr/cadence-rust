@@ -1,3 +1,9 @@
+## Writer live settings draft needs behavior tests — 2026-10-18
+
+Candidate c3266b87d81c317f3d2b0d96cfcadc674a5b2fe8 NOT integrated. Parent reviewed4filediff: provider tuple filters domain/list/type, samples batch after first request and timeout each append attempt; nonpositive deadline immediate. Existing4writer tests,Go tasklist,strict serverClippy passed,NO added live/filter tests. Luna normal-speed49 accepted actual production dynamic-update and filter independence validation/fixes:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-live-validation-standard-49-20261018
+Capacity/rendezvous still deferred. DirectPING46 separately active. Matching incomplete.
+
 ## Production writer task47 returned no change — 2026-10-18
 
 Worker reverted incomplete draft; no source,commit,or tests returned. Split oversized production scope. Luna normal-speed48 accepted ONLY live maxTaskBatchSize and appendTaskTimeout filtered production provider wiring, preserving current actor/persistence:
