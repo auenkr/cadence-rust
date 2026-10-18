@@ -1,3 +1,5 @@
+Storage follow-up: completed regression worktree t3-28143470 target (~9.4GB) cleaned with cargo clean after checking active build uses t3-765b79ff. Preserved 1.2GB regression artifacts/results/logs and all source/commits. Active outbound cache untouched.
+
 ## Frozen integrated Matching regression passed 2026-10-18
 
 standard-31 source3072698e passed34/34 full compatibility checks incl Rust Matching +Go Frontend/History/Worker with NO Go Matching,524 workspace tests0fail,strict locked workspace/all-target Clippy,native Thrift/TLS,Ringpop JSON/wire. Report a052d703a cherry-picked; artifacts ~/.cache/cadence-rust-test-artifacts/matching-frozen-3072698e/. This excludes later inbound protocol integration, separately focused validated. No whole Matching completion claim.
