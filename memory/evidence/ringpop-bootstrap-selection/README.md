@@ -92,3 +92,49 @@ job. The fixture's `seeds: null` case is decoded as an empty seed list; its
 recorded size is the Go selector's effective pre-`Init` cap, so the test checks
 `effective_size` directly rather than comparing it to the uncapped Rust option
 or recalculating after joined members are filtered.
+
+## Selector signed-cap correction (2026-10-18)
+
+The prior Rust conversion mapped a negative wrapped cap to zero. Original Go
+`SelectGroup` stops only when `len(group) == cap`; a negative cap is never
+reached, so selection drains the available preferred/nonpreferred round pool.
+Rust now preserves this behavior, while zero stops immediately and a positive
+cap selects up to that exact count. The checked fixture has 16 cases generated
+by pinned original Go, including both negative operand combinations, joined
+count equal to or above effective size, and a multiplication overflow whose
+wrapped cap is negative. Assertions use the source preference pool because Go
+preference classes may still contain already joined targets.
+
+Reproduce with
+`memory/evidence/ringpop-bootstrap-selection/selector57/run.sh`. It generates
+the checked fixture, verifies it twice against Go, runs the four focused Rust
+oracle tests, then strict locked all-target Clippy for `cadence-common`. All
+five exit markers are `0`; output is in `selector57/`. Rust used
+`CARGO_BUILD_JOBS=1` and the idle shared target
+`/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target`.
+
+Ordered source commits applied to this selector state:
+
+```text
+ac195cd5138c8e563d32364746f5c076cdd63b82 candidate selector implementation
+0a63bbd6d2ccfaea7040ab9abb0cdc2424b01d76 oracle repair and raw-input cases
+565a68483c58863c37ef9d8bc6a652af5966bc60 focused validation evidence
+```
+
+This correction is bounded selector work and does not establish Matching
+service completion or network bootstrap parity.
+
+SHA-256 for the corrected implementation and final run logs:
+
+```text
+008f45948a4b60d3b232eb839b80f965339ccca7fa175492c1e6d0c48e928134  rust/crates/cadence-common/src/ringpop_bootstrap_selection.rs
+9563ed28a13e5f2b800645d2ace7880cb13ec842d7c0dafc246fe7aba32b229d  rust/crates/cadence-common/tests/ringpop_bootstrap_selection_oracle.rs
+c3bf9545db52b5e6f2d45d49513f72fcdc6ac198278445849341e71e66083e09  tests/ringpop-bootstrap-selection-oracle_test.go
+52f6a35e6be53b2c592e9e32f8f52c4e7621733fcbff9df7ff16172e8f55e9ca  tests/run-ringpop-bootstrap-selection-oracle.py
+e618fe380421f4c395078608bb62aee1f47ee6c7d6dad1293632da5c2f56eba1  tests/fixtures/ringpop_bootstrap_selection.json
+7ed31e538c03a781a955a4547c0469d5dfc079bb7070b1468c8b11c1122a4384  selector57/common-clippy.log
+5af02d55281a8f2491d5143dd14c3d4997511005745db21977e8a1503bd8fe60  selector57/go-generate.log
+ffe5b3afc838270dd76ab0f6a0b972c947cfe2006ceeabd7ec700817a9ae849a  selector57/go-run-1.log
+b17512084134bed1bf854c5fff5f1a3bc6f8c0e26ba131cb40b9f259d8528a3e  selector57/go-run-2.log
+d47d20c5fabdbd0df3c649b13543fbca919ecf2344349caf5adcacfcce33edc2  selector57/rust-focused.log
+```

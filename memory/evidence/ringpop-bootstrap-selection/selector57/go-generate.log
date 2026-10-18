@@ -1,0 +1,7 @@
+=== RUN   TestGoCaptureHostMatrix
+--- PASS: TestGoCaptureHostMatrix (0.00s)
+=== RUN   TestGenerateRingpopBootstrapSelectionFixtures
+--- PASS: TestGenerateRingpopBootstrapSelectionFixtures (0.00s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.016s
+generated original-Go selection fixture: tests/fixtures/ringpop_bootstrap_selection.json

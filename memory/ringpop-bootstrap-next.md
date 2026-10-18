@@ -59,3 +59,20 @@ Live recipe for timing-dependent cases: run a pinned Go Ringpop node with a real
 - Cadence `ringpopprovider/config/config.go`: `8c9963d0a8f618497ef63413774b6875f03b2b2bc638cba6fc0ec5a76f933d4a`
 
 Regenerate with `sha256sum` against the module-cache paths before implementing, because module cache files are outside the repository and are not pinned by the fixture itself.
+
+## Current selector status — supersedes the earlier 11-case notes
+
+The focused selector implementation and prior host-parsing oracle are now
+followed by the signed-cap correction. Go `SelectGroup` uses equality against
+the signed wrapped cap: zero selects nothing, positive caps select up to the
+cap, and negative caps drain the available preferred/nonpreferred round pool.
+The 16-case fixture now covers both negative operand signs, joined count equal
+to and greater than effective size, and multiplication overflow. Rust and the
+Python verifier both assert the exact count using Go's signed 64-bit wrap.
+
+Evidence is in
+`memory/evidence/ringpop-bootstrap-selection/selector57/`: fixture generation,
+two original-Go verifications, four focused Rust tests, and strict locked
+all-target `cadence-common` Clippy all have exit `0`. This completes only the
+bounded selection primitive; bootstrap networking, retries, readiness,
+failure/restart recovery, and Matching integration remain unfinished.

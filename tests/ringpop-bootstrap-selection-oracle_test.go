@@ -67,6 +67,11 @@ func TestGenerateRingpopBootstrapSelectionFixtures(t *testing.T) {
 		{"requested-size-capped-to-potential", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1"}, &joinOpts{size: 9, parallelismFactor: 3}, nil},
 		{"zero-options-default", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1", "192.0.2.5:1"}, &joinOpts{}, nil},
 		{"negative-options-retained", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1"}, &joinOpts{timeout: -2 * time.Second, maxJoinDuration: -7 * time.Second, size: -3, parallelismFactor: -4}, nil},
+		{"positive-size-negative-parallelism", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1"}, &joinOpts{size: 2, parallelismFactor: -1}, nil},
+		{"negative-size-positive-parallelism", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1"}, &joinOpts{size: -2, parallelismFactor: 1}, nil},
+		{"joined-equals-size-zero-cap", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1"}, &joinOpts{size: 2, parallelismFactor: 1}, []string{"192.0.2.2:1", "192.0.2.3:1"}},
+		{"joined-exceeds-size", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1", "192.0.2.5:1"}, &joinOpts{size: 2, parallelismFactor: 1}, []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1"}},
+		{"overflowed-negative-cap", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1"}, &joinOpts{size: 2, parallelismFactor: int(^uint(0) >> 1)}, nil},
 		{"explicit-nonzero-options", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1", "192.0.2.5:1", "192.0.2.6:1", "192.0.2.7:1"}, &joinOpts{timeout: 250 * time.Millisecond, maxJoinDuration: 4 * time.Second, size: 2, parallelismFactor: 3}, nil},
 		{"ipv6-capture", "[2001:db8::1]:10", []string{"[2001:db8::1]:11", "[2001:db8::2]:12"}, &joinOpts{size: 1, parallelismFactor: 1}, nil},
 		{"hostname-capture", "node-a.example:10", []string{"node-a.example:11", "node-b.example:12"}, &joinOpts{size: 1, parallelismFactor: 1}, nil},
@@ -80,6 +85,7 @@ func TestGenerateRingpopBootstrapSelectionFixtures(t *testing.T) {
 			t.Fatalf("%s: newJoinSender: %v", tc.name, err)
 		}
 		j.Init(tc.joined)
+		available := len(j.preferredNodes) + len(j.nonPreferredNodes)
 		group := j.SelectGroup(tc.joined)
 		f := snapshotSelection(tc.name, tc.local, tc.hosts, tc.opts, j, tc.joined, group)
 		fixtures = append(fixtures, f)
@@ -108,6 +114,14 @@ func TestGenerateRingpopBootstrapSelectionFixtures(t *testing.T) {
 		}
 		if tc.name == "negative-options-retained" && (j.timeout != -2*time.Second || j.maxJoinDuration != -7*time.Second || j.size != -3 || j.parallelismFactor != -4) {
 			t.Fatalf("negative option mismatch: %+v", j)
+		}
+		if tc.name == "positive-size-negative-parallelism" || tc.name == "negative-size-positive-parallelism" || tc.name == "joined-exceeds-size" || tc.name == "overflowed-negative-cap" {
+			if len(group) != available {
+				t.Fatalf("negative cap must drain available round pool: size=%d parallelism=%d joined=%d group=%v available=%d", j.size, j.parallelismFactor, len(tc.joined), group, available)
+			}
+		}
+		if tc.name == "joined-equals-size-zero-cap" && len(group) != 0 {
+			t.Fatalf("zero cap must stop immediately: group=%v", group)
 		}
 		if tc.name == "explicit-nonzero-options" && (j.timeout != 250*time.Millisecond || j.maxJoinDuration != 4*time.Second || j.size != 2 || j.parallelismFactor != 3 || len(group) != 6) {
 			t.Fatalf("explicit option/cap mismatch: %+v group=%v", j, group)

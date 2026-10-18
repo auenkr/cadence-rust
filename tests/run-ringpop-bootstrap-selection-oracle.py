@@ -45,7 +45,7 @@ if args.generate:
 
 data = json.loads(FIXTURE.read_text())
 assert data["source"] == "github.com/uber/ringpop-go v0.10.0 swim/join_sender.go newJoinSender + SelectGroup"
-assert len(data["cases"]) == 11, len(data["cases"])
+assert len(data["cases"]) == 16, len(data["cases"])
 assert len(generated["cases"]) == len(data["cases"])
 stable_fields = ("name", "local", "seeds", "requestedTimeoutNanos", "requestedMaxJoinDurationNanos", "requestedSize", "requestedParallelism", "bootstrapHosts", "potential", "preferred", "nonPreferred", "joined", "timeoutNanos", "maxJoinDurationNanos", "size", "parallelism")
 for expected, actual in zip(data["cases"], generated["cases"]):
@@ -54,5 +54,7 @@ for expected, actual in zip(data["cases"], generated["cases"]):
     group = actual.get("group") or []
     assert not (Counter(group) - Counter(candidates)), (expected["name"], group)
     cap = (expected["size"] - len(expected.get("joined") or [])) * expected["parallelism"]
-    assert len(group) <= cap if cap >= 0 else True, (expected["name"], group, cap)
+    cap = ((cap + (1 << 63)) % (1 << 64)) - (1 << 63)  # Go int64 arithmetic wraps.
+    expected_len = min(len(candidates), cap) if cap > 0 else len(candidates) if cap < 0 else 0
+    assert len(group) == expected_len, (expected["name"], group, cap, expected_len)
 print(f"verified {len(data['cases'])} original-Go selection fixtures without modifying checked fixture")

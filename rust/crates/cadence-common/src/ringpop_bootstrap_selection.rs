@@ -221,9 +221,10 @@ impl BootstrapSelection {
             .effective_size
             .wrapping_sub(i64::try_from(joined.len()).unwrap_or(i64::MAX));
         let cap = remaining.wrapping_mul(self.options.parallelism);
-        let limit = usize::try_from(cap).unwrap_or(0);
         let mut group = Vec::new();
-        while group.len() < limit {
+        // Go stops only when len(group) equals the signed cap. A negative cap
+        // can never be reached, so the loop drains the available round pool.
+        while cap < 0 || i64::try_from(group.len()).unwrap_or(i64::MAX) < cap {
             let pool = if !self.preferred_round.is_empty() {
                 &mut self.preferred_round
             } else {

@@ -129,12 +129,12 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
         let cap = (selector.effective_size - joined.len() as i64)
             .wrapping_mul(selector.options.parallelism);
         let expected_len = if cap < 0 {
-            0
+            pool.len()
         } else {
-            (cap as usize).min(pool.len())
+            usize::try_from(cap).unwrap_or(usize::MAX).min(pool.len())
         };
         assert_eq!(group.len(), expected_len, "{} group length", case.name);
-        if cap as usize >= pool.len() && cap >= 0 {
+        if cap < 0 || usize::try_from(cap).unwrap_or(usize::MAX) >= pool.len() {
             assert_eq!(
                 sorted(group.clone()),
                 sorted(pool),
@@ -189,7 +189,7 @@ fn go_int64_group_cap_wraps_and_partial_round_exhausts_exactly() {
     let mut selector =
         BootstrapSelection::new("n1:1", &seeds, Options::from_signed(0, 0, 2, i64::MAX));
     let mut first = First;
-    assert!(selector.select_group_with(&[], &mut first).is_empty()); // Go int64 overflow produces a negative loop bound.
+    assert_eq!(selector.select_group_with(&[], &mut first).len(), 3); // Go int64 overflow makes the cap negative, draining the pool.
 
     let mut selector = BootstrapSelection::new("n1:1", &seeds, Options::from_signed(0, 0, 2, 1));
     let round1 = selector.select_group_with(&[], &mut First);

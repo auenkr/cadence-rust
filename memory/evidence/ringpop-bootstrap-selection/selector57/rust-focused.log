@@ -1,0 +1,12 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a91aebfa/rust/crates/cadence-common)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running tests/ringpop_bootstrap_selection_oracle.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target/debug/deps/ringpop_bootstrap_selection_oracle-86925d64a056762c)
+
+running 4 tests
+test capture_host_matches_go_split_host_port_matrix ... ok
+test go_int64_group_cap_wraps_and_partial_round_exhausts_exactly ... ok
+test requested_size_is_capped_and_exhausted_round_restarts ... ok
+test rust_selector_consumes_pinned_original_go_selection_cases ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

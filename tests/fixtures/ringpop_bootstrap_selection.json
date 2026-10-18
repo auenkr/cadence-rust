@@ -259,6 +259,206 @@
       "parallelism": -4
     },
     {
+      "name": "positive-size-negative-parallelism",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 2,
+      "requestedParallelism": -1,
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "potential": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "nonPreferred": null,
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 2,
+      "parallelism": -1
+    },
+    {
+      "name": "negative-size-positive-parallelism",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": -2,
+      "requestedParallelism": 1,
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "potential": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "nonPreferred": null,
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": -2,
+      "parallelism": 1
+    },
+    {
+      "name": "joined-equals-size-zero-cap",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 2,
+      "requestedParallelism": 1,
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "potential": [
+        "192.0.2.4:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "nonPreferred": null,
+      "joined": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "group": null,
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 2,
+      "parallelism": 1
+    },
+    {
+      "name": "joined-exceeds-size",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 2,
+      "requestedParallelism": 1,
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "potential": [
+        "192.0.2.5:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "nonPreferred": null,
+      "joined": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 2,
+      "parallelism": 1
+    },
+    {
+      "name": "overflowed-negative-cap",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 2,
+      "requestedParallelism": 9223372036854775807,
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "potential": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "nonPreferred": null,
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 2,
+      "parallelism": 9223372036854775807
+    },
+    {
       "name": "explicit-nonzero-options",
       "local": "192.0.2.1:1",
       "seeds": [
