@@ -1,3 +1,9 @@
+## Inbound protocol candidate review 2026-10-18
+
+3dbd1b11b NOT integrated. Worker confirms 7 direct handler tests, original Go handler fixture, common regressions/wire/Clippy pass. Parent found RingpopNode.handler dispatch 'join'/'ping' vs boundary actual '/protocol/join','/protocol/ping', so real bound clients fail. Repair+bound original-Go real-provider probe assigned Luna Standard:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-bound-protocol-standard-32-20261018
+Also audit zero-value/null decode and stop/readiness lifecycle. No main wiring/bootstrap/probe claim. Integrated-regression standard-31 separately active; Matching only.
+
 ## HTTP exact-Go listener integrated 2026-10-18
 
 standard-29 passed focused tests, locked server build, strict all-target Clippy, full ten-method bound Go Matching runner and Ringpop JSON transport. Parent reviewed single-read short=>plaintext and removed arbitrary 128 drop cap; lifecycle/timeout tests included. Integrated 126afe824 +6b2a8dffc +0cd4e7f16 as fdb29e6e1,a5649fca4,3072698e1. Earlier parent dirty HTTP test draft preserved in named git stash (not reapplied; validated commit supersedes).
