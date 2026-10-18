@@ -1,3 +1,9 @@
+## Selector56 passes existing suite; negative-cap bug found — 2026-10-18
+
+Unintegratedorderedac195cd51+0a63bbd6d+565a68483. Go2verify/fourRusttests/strictcommonClippy passed56. Parentdiffreviewfound55 changednegativecap tozero viausize::try_from(cap).unwrap_or(0),butGo equalitystopcondition consumespool fornegativecap. Existingnegative*negativefixture missesnegativeproduct. Normal-speedLuna57 focusedactualGo signedcapcases+fixaccepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-selector-negative-cap-standard-57-20261018
+No integration. Writer53 independentlyactive. Matching incomplete.
+
 ## Selector55 committed but Rust validation unrun — 2026-10-18
 
 Unintegratedorderedac195cd51+0a63bbd6d (55worktree t3-98cd5751 clean). RawinputGo/hostmatrix/signedwidth repair committed;Go2runs passed. Rusttests/Clippynotrun because55waitedforwriter53activeTEST. Parentchecked onlywriter53testbinaryrunning,noRustcompiler/link;commonvalidationmayrunconcurrentlyusingcompleted54cachet3-e426148a afteractiveusecheck.
