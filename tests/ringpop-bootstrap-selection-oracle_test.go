@@ -2,6 +2,7 @@ package swim
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"reflect"
 	"sort"
@@ -9,20 +10,43 @@ import (
 	"time"
 
 	"github.com/uber/ringpop-go/discovery/statichosts"
+	ringpoputil "github.com/uber/ringpop-go/util"
 )
 
+func TestGoCaptureHostMatrix(t *testing.T) {
+	cases := []struct{ input, host string; valid bool }{
+		{"host:", "host", true}, {":80", "", true}, {"[::1]:", "::1", true},
+		{"[fe80::1%eth0]:80", "fe80::1%eth0", true}, {"[abc]:80", "abc", true},
+		{"[[::1]:80", "", false}, {"host:abc", "host", true}, {"host:1:2", "", false},
+		{"host:[]:80", "", false}, {"[::1]x:80", "", false}, {"[::1]:80:90", "", false},
+		{"host:80]", "", false}, {"[]:80", "", true},
+	}
+	for _, tc := range cases {
+		host, _, err := net.SplitHostPort(tc.input)
+		if (err == nil) != tc.valid || host != tc.host || ringpoputil.CaptureHost(tc.input) != tc.host {
+			t.Errorf("SplitHostPort/CaptureHost(%q) = %q, %v; want %q valid=%v", tc.input, host, err, tc.host, tc.valid)
+		}
+	}
+}
+
 type selectionFixture struct {
-	Name                 string   `json:"name"`
-	BootstrapHosts       []string `json:"bootstrapHosts"`
-	Potential            []string `json:"potential"`
-	Preferred            []string `json:"preferred"`
-	NonPreferred         []string `json:"nonPreferred"`
-	Joined               []string `json:"joined,omitempty"`
-	Group                []string `json:"group"`
-	TimeoutNanos         int64    `json:"timeoutNanos"`
-	MaxJoinDurationNanos int64    `json:"maxJoinDurationNanos"`
-	Size                 int      `json:"size"`
-	Parallelism          int      `json:"parallelism"`
+	Name                          string   `json:"name"`
+	Local                         string   `json:"local"`
+	Seeds                         []string `json:"seeds"`
+	RequestedTimeoutNanos         int64    `json:"requestedTimeoutNanos"`
+	RequestedMaxJoinDurationNanos int64    `json:"requestedMaxJoinDurationNanos"`
+	RequestedSize                 int      `json:"requestedSize"`
+	RequestedParallelism          int      `json:"requestedParallelism"`
+	BootstrapHosts                []string `json:"bootstrapHosts"`
+	Potential                     []string `json:"potential"`
+	Preferred                     []string `json:"preferred"`
+	NonPreferred                  []string `json:"nonPreferred"`
+	Joined                        []string `json:"joined,omitempty"`
+	Group                         []string `json:"group"`
+	TimeoutNanos                  int64    `json:"timeoutNanos"`
+	MaxJoinDurationNanos          int64    `json:"maxJoinDurationNanos"`
+	Size                          int      `json:"size"`
+	Parallelism                   int      `json:"parallelism"`
 }
 
 func TestGenerateRingpopBootstrapSelectionFixtures(t *testing.T) {
@@ -57,7 +81,7 @@ func TestGenerateRingpopBootstrapSelectionFixtures(t *testing.T) {
 		}
 		j.Init(tc.joined)
 		group := j.SelectGroup(tc.joined)
-		f := snapshotSelection(tc.name, j, tc.joined, group)
+		f := snapshotSelection(tc.name, tc.local, tc.hosts, tc.opts, j, tc.joined, group)
 		fixtures = append(fixtures, f)
 		if tc.name == "empty-seeds-self-only" && (len(f.BootstrapHosts) != 1 || f.BootstrapHosts[0] != tc.local || len(f.Potential) != 0 || len(group) != 0) {
 			t.Fatalf("self insertion/exclusion mismatch: %+v", f)
@@ -102,7 +126,7 @@ func TestGenerateRingpopBootstrapSelectionFixtures(t *testing.T) {
 	if len(first) != 1 || !reflect.DeepEqual(first, second) {
 		t.Fatalf("exhausted round did not reset to its eligible target: first=%v second=%v", first, second)
 	}
-	fixtures = append(fixtures, snapshotSelection("exhausted-round-reset", j, nil, second))
+	fixtures = append(fixtures, snapshotSelection("exhausted-round-reset", "192.0.2.1:1", []string{"192.0.2.2:1"}, &joinOpts{size: 1, parallelismFactor: 1}, j, nil, second))
 	data, err := json.MarshalIndent(map[string]interface{}{"source": "github.com/uber/ringpop-go v0.10.0 swim/join_sender.go newJoinSender + SelectGroup", "cases": fixtures}, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -112,8 +136,11 @@ func TestGenerateRingpopBootstrapSelectionFixtures(t *testing.T) {
 	}
 }
 
-func snapshotSelection(name string, j *joinSender, joined, group []string) selectionFixture {
-	return selectionFixture{Name: name, BootstrapHosts: sorted(flattenHosts(j.bootstrapHostsMap)), Potential: sorted(j.potentialNodes), Preferred: sorted(j.preferredNodes), NonPreferred: sorted(j.nonPreferredNodes), Joined: sorted(joined), Group: sorted(group), TimeoutNanos: int64(j.timeout), MaxJoinDurationNanos: int64(j.maxJoinDuration), Size: j.size, Parallelism: j.parallelismFactor}
+func snapshotSelection(name, local string, seeds []string, requested *joinOpts, j *joinSender, joined, group []string) selectionFixture {
+	if requested == nil {
+		requested = &joinOpts{}
+	}
+	return selectionFixture{Name: name, Local: local, Seeds: seeds, RequestedTimeoutNanos: int64(requested.timeout), RequestedMaxJoinDurationNanos: int64(requested.maxJoinDuration), RequestedSize: requested.size, RequestedParallelism: requested.parallelismFactor, BootstrapHosts: sorted(flattenHosts(j.bootstrapHostsMap)), Potential: sorted(j.potentialNodes), Preferred: sorted(j.preferredNodes), NonPreferred: sorted(j.nonPreferredNodes), Joined: sorted(joined), Group: sorted(group), TimeoutNanos: int64(j.timeout), MaxJoinDurationNanos: int64(j.maxJoinDuration), Size: j.size, Parallelism: j.parallelismFactor}
 }
 func flattenHosts(m map[string][]string) []string {
 	var out []string

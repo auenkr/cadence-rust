@@ -2,6 +2,12 @@
   "cases": [
     {
       "name": "empty-seeds-self-only",
+      "local": "127.0.0.1:3000",
+      "seeds": null,
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 0,
+      "requestedParallelism": 0,
       "bootstrapHosts": [
         "127.0.0.1:3000"
       ],
@@ -16,6 +22,17 @@
     },
     {
       "name": "normalization-self-and-exact-duplicate",
+      "local": "127.0.0.1:3000",
+      "seeds": [
+        "127.0.0.1:3000",
+        "127.0.0.1:3001",
+        "127.0.0.1:3001",
+        "127.0.0.2:4000"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 0,
+      "requestedParallelism": 0,
       "bootstrapHosts": [
         "127.0.0.1:3000",
         "127.0.0.1:3001",
@@ -46,6 +63,17 @@
     },
     {
       "name": "remote-host-preference",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.1:2",
+        "192.0.2.1:3",
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 3,
+      "requestedParallelism": 1,
       "bootstrapHosts": [
         "192.0.2.1:1",
         "192.0.2.1:2",
@@ -79,6 +107,16 @@
     },
     {
       "name": "joined-exclusion",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.1:2",
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 3,
+      "requestedParallelism": 1,
       "bootstrapHosts": [
         "192.0.2.1:1",
         "192.0.2.1:2",
@@ -110,6 +148,15 @@
     },
     {
       "name": "requested-size-capped-to-potential",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 9,
+      "requestedParallelism": 3,
       "bootstrapHosts": [
         "192.0.2.1:1",
         "192.0.2.2:1",
@@ -135,6 +182,17 @@
     },
     {
       "name": "zero-options-default",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 0,
+      "requestedParallelism": 0,
       "bootstrapHosts": [
         "192.0.2.1:1",
         "192.0.2.2:1",
@@ -168,6 +226,15 @@
     },
     {
       "name": "negative-options-retained",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "requestedTimeoutNanos": -2000000000,
+      "requestedMaxJoinDurationNanos": -7000000000,
+      "requestedSize": -3,
+      "requestedParallelism": -4,
       "bootstrapHosts": [
         "192.0.2.1:1",
         "192.0.2.2:1",
@@ -193,6 +260,19 @@
     },
     {
       "name": "explicit-nonzero-options",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1",
+        "192.0.2.6:1",
+        "192.0.2.7:1"
+      ],
+      "requestedTimeoutNanos": 250000000,
+      "requestedMaxJoinDurationNanos": 4000000000,
+      "requestedSize": 2,
+      "requestedParallelism": 3,
       "bootstrapHosts": [
         "192.0.2.1:1",
         "192.0.2.2:1",
@@ -234,6 +314,15 @@
     },
     {
       "name": "ipv6-capture",
+      "local": "[2001:db8::1]:10",
+      "seeds": [
+        "[2001:db8::1]:11",
+        "[2001:db8::2]:12"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 1,
+      "requestedParallelism": 1,
       "bootstrapHosts": [
         "[2001:db8::1]:10",
         "[2001:db8::1]:11",
@@ -259,6 +348,15 @@
     },
     {
       "name": "hostname-capture",
+      "local": "node-a.example:10",
+      "seeds": [
+        "node-a.example:11",
+        "node-b.example:12"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 1,
+      "requestedParallelism": 1,
       "bootstrapHosts": [
         "node-a.example:10",
         "node-a.example:11",
@@ -284,6 +382,14 @@
     },
     {
       "name": "exhausted-round-reset",
+      "local": "192.0.2.1:1",
+      "seeds": [
+        "192.0.2.2:1"
+      ],
+      "requestedTimeoutNanos": 0,
+      "requestedMaxJoinDurationNanos": 0,
+      "requestedSize": 1,
+      "requestedParallelism": 1,
       "bootstrapHosts": [
         "192.0.2.1:1",
         "192.0.2.2:1"

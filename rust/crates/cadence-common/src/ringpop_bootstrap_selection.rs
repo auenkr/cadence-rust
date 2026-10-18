@@ -4,15 +4,18 @@ use std::collections::{BTreeMap, HashSet};
 
 pub const DEFAULT_TIMEOUT_NANOS: i64 = 1_000_000_000;
 pub const DEFAULT_MAX_JOIN_DURATION_NANOS: i64 = 120_000_000_000;
-pub const DEFAULT_SIZE: i32 = 3;
-pub const DEFAULT_PARALLELISM: i32 = 2;
+pub const DEFAULT_SIZE: i64 = 3;
+pub const DEFAULT_PARALLELISM: i64 = 2;
 
 /// `net.SplitHostPort`-compatible host extraction for ordinary host:port and
 /// bracketed IPv6 addresses. Invalid input captures as Go does: the empty host.
 pub fn capture_host(hostport: &str) -> &str {
     if let Some(rest) = hostport.strip_prefix('[') {
         if let Some((host, suffix)) = rest.split_once(']') {
-            if suffix.starts_with(':') && !suffix[1..].is_empty() {
+            if !host.contains(['[', ']'])
+                && suffix.starts_with(':')
+                && !suffix[1..].contains([':', '[', ']'])
+            {
                 return host;
             }
         }
@@ -21,7 +24,7 @@ pub fn capture_host(hostport: &str) -> &str {
     let Some((host, port)) = hostport.rsplit_once(':') else {
         return "";
     };
-    if host.contains(':') || port.is_empty() {
+    if host.contains([':', '[', ']']) || port.contains([':', '[', ']']) {
         ""
     } else {
         host
@@ -46,8 +49,8 @@ impl IndexChooser for RandomIndex {
 pub struct Options {
     pub timeout_nanos: i64,
     pub max_join_duration_nanos: i64,
-    pub size: i32,
-    pub parallelism: i32,
+    pub size: i64,
+    pub parallelism: i64,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -62,7 +65,7 @@ impl Default for Options {
 impl Options {
     /// Go's SelectDuration/SelectInt use the default only for zero; signed
     /// nonzero values are retained unchanged.
-    pub fn from_signed(timeout: i64, max_duration: i64, size: i32, parallelism: i32) -> Self {
+    pub fn from_signed(timeout: i64, max_duration: i64, size: i64, parallelism: i64) -> Self {
         let d = Self::default();
         Self {
             timeout_nanos: if timeout == 0 {
@@ -93,7 +96,7 @@ pub struct BootstrapSelection {
     pub preferred: Vec<String>,
     pub non_preferred: Vec<String>,
     pub options: Options,
-    pub effective_size: i32,
+    pub effective_size: i64,
     preferred_round: Vec<String>,
     non_preferred_round: Vec<String>,
 }
@@ -162,7 +165,7 @@ impl BootstrapSelection {
         };
         let effective_size = options
             .size
-            .min(i32::try_from(potential.len()).unwrap_or(i32::MAX));
+            .min(i64::try_from(potential.len()).unwrap_or(i64::MAX));
         Self {
             local: local.to_owned(),
             bootstrap_hosts,
@@ -216,13 +219,9 @@ impl BootstrapSelection {
         }
         let remaining = self
             .effective_size
-            .saturating_sub(i32::try_from(joined.len()).unwrap_or(i32::MAX));
-        let limit = i64::from(remaining).wrapping_mul(i64::from(self.options.parallelism));
-        let limit = if limit < 0 {
-            usize::MAX
-        } else {
-            usize::try_from(limit).unwrap_or(usize::MAX)
-        };
+            .wrapping_sub(i64::try_from(joined.len()).unwrap_or(i64::MAX));
+        let cap = remaining.wrapping_mul(self.options.parallelism);
+        let limit = usize::try_from(cap).unwrap_or(0);
         let mut group = Vec::new();
         while group.len() < limit {
             let pool = if !self.preferred_round.is_empty() {

@@ -10,6 +10,12 @@ struct Fixture {
 #[serde(rename_all = "camelCase")]
 struct Case {
     name: String,
+    local: String,
+    seeds: Vec<String>,
+    requested_timeout_nanos: i64,
+    requested_max_join_duration_nanos: i64,
+    requested_size: i64,
+    requested_parallelism: i64,
     bootstrap_hosts: Vec<String>,
     potential: Option<Vec<String>>,
     preferred: Option<Vec<String>>,
@@ -18,64 +24,13 @@ struct Case {
     group: Option<Vec<String>>,
     timeout_nanos: i64,
     max_join_duration_nanos: i64,
-    size: i32,
-    parallelism: i32,
+    size: i64,
+    parallelism: i64,
 }
 
 fn sorted(mut values: Vec<String>) -> Vec<String> {
     values.sort();
     values
-}
-
-fn inputs(name: &str) -> (&'static str, Vec<String>) {
-    let (local, seeds): (&str, &[&str]) = match name {
-        "empty-seeds-self-only" => ("127.0.0.1:3000", &[]),
-        "normalization-self-and-exact-duplicate" => (
-            "127.0.0.1:3000",
-            &[
-                "127.0.0.1:3000",
-                "127.0.0.1:3001",
-                "127.0.0.1:3001",
-                "127.0.0.2:4000",
-            ],
-        ),
-        "remote-host-preference" => (
-            "192.0.2.1:1",
-            &["192.0.2.1:2", "192.0.2.1:3", "192.0.2.2:1", "192.0.2.3:1"],
-        ),
-        "joined-exclusion" => (
-            "192.0.2.1:1",
-            &["192.0.2.1:2", "192.0.2.2:1", "192.0.2.3:1"],
-        ),
-        "requested-size-capped-to-potential" => ("192.0.2.1:1", &["192.0.2.2:1", "192.0.2.3:1"]),
-        "zero-options-default" => (
-            "192.0.2.1:1",
-            &["192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1", "192.0.2.5:1"],
-        ),
-        "negative-options-retained" => ("192.0.2.1:1", &["192.0.2.2:1", "192.0.2.3:1"]),
-        "explicit-nonzero-options" => (
-            "192.0.2.1:1",
-            &[
-                "192.0.2.2:1",
-                "192.0.2.3:1",
-                "192.0.2.4:1",
-                "192.0.2.5:1",
-                "192.0.2.6:1",
-                "192.0.2.7:1",
-            ],
-        ),
-        "exhausted-round-reset" => ("192.0.2.1:1", &["192.0.2.2:1"]),
-        "ipv6-capture" => (
-            "[2001:db8::1]:10",
-            &["[2001:db8::1]:11", "[2001:db8::2]:12"],
-        ),
-        "hostname-capture" => (
-            "node-a.example:10",
-            &["node-a.example:11", "node-b.example:12"],
-        ),
-        _ => panic!("unrecognized Go oracle case: {name}"),
-    };
-    (local, seeds.iter().map(|s| (*s).to_owned()).collect())
 }
 
 #[derive(Default)]
@@ -93,7 +48,8 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
     ))
     .unwrap();
     for case in fixture.cases {
-        let (local, seeds) = inputs(&case.name);
+        let local = case.local.as_str();
+        let seeds = case.seeds.clone();
         assert_eq!(
             case.bootstrap_hosts.len(),
             seeds.len() + usize::from(!seeds.iter().any(|s| s == local)),
@@ -101,10 +57,10 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
             case.name
         );
         let options = Options::from_signed(
-            case.timeout_nanos,
-            case.max_join_duration_nanos,
-            case.size,
-            case.parallelism,
+            case.requested_timeout_nanos,
+            case.requested_max_join_duration_nanos,
+            case.requested_size,
+            case.requested_parallelism,
         );
         let mut selector = BootstrapSelection::new(local, &seeds, options);
         assert_eq!(
@@ -137,7 +93,13 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
             selector.options.max_join_duration_nanos,
             case.max_join_duration_nanos
         );
-        assert_eq!(selector.effective_size, case.size);
+        assert_eq!(selector.options.size, case.size);
+        assert_eq!(selector.options.parallelism, case.parallelism);
+        assert_eq!(
+            selector.effective_size,
+            case.size
+                .min(i64::try_from(selector.potential.len()).unwrap_or(i64::MAX))
+        );
         let joined = case.joined.unwrap_or_default();
         let mut chooser = First;
         let group = selector.select_group_with(&joined, &mut chooser);
@@ -147,7 +109,7 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
             .chain(selector.non_preferred.iter())
             .cloned()
             .collect::<Vec<_>>();
-        let mut available = pool;
+        let mut available = pool.clone();
         for target in &group {
             let Some(index) = available.iter().position(|item| item == target) else {
                 panic!("{} selected an unavailable target {target}", case.name)
@@ -164,10 +126,21 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
             "{} preferred targets must be selected before fallback targets",
             case.name
         );
-        let cap = i64::from(selector.effective_size - joined.len() as i32)
-            * i64::from(selector.options.parallelism);
-        if cap >= 0 {
-            assert!(group.len() <= cap as usize, "{} group cap", case.name);
+        let cap = (selector.effective_size - joined.len() as i64)
+            .wrapping_mul(selector.options.parallelism);
+        let expected_len = if cap < 0 {
+            0
+        } else {
+            (cap as usize).min(pool.len())
+        };
+        assert_eq!(group.len(), expected_len, "{} group length", case.name);
+        if cap as usize >= pool.len() && cap >= 0 {
+            assert_eq!(
+                sorted(group.clone()),
+                sorted(pool),
+                "{} full group",
+                case.name
+            );
         }
         // Go maps define only preference classes and eligibility, not exact
         // subsets or ordering. The fixture's group is therefore not compared.
@@ -185,4 +158,45 @@ fn requested_size_is_capped_and_exhausted_round_restarts() {
     let second = selector.select_group_with(&[], &mut chooser);
     assert_eq!(first.len(), 2);
     assert_eq!(sorted(first), sorted(second));
+}
+
+#[test]
+fn capture_host_matches_go_split_host_port_matrix() {
+    use cadence_common::ringpop_bootstrap_selection::capture_host;
+    let cases = [
+        ("host:", "host"),
+        (":80", ""),
+        ("[::1]:", "::1"),
+        ("[fe80::1%eth0]:80", "fe80::1%eth0"),
+        ("[abc]:80", "abc"),
+        ("[[::1]:80", ""),
+        ("host:abc", "host"),
+        ("host:1:2", ""),
+        ("host:[]:80", ""),
+        ("[::1]x:80", ""),
+        ("[::1]:80:90", ""),
+        ("host:80]", ""),
+        ("[]:80", ""),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(capture_host(input), expected, "{input}");
+    }
+}
+
+#[test]
+fn go_int64_group_cap_wraps_and_partial_round_exhausts_exactly() {
+    let seeds = vec!["n2:1".to_owned(), "n3:1".to_owned(), "n4:1".to_owned()];
+    let mut selector =
+        BootstrapSelection::new("n1:1", &seeds, Options::from_signed(0, 0, 2, i64::MAX));
+    let mut first = First;
+    assert!(selector.select_group_with(&[], &mut first).is_empty()); // Go int64 overflow produces a negative loop bound.
+
+    let mut selector = BootstrapSelection::new("n1:1", &seeds, Options::from_signed(0, 0, 2, 1));
+    let round1 = selector.select_group_with(&[], &mut First);
+    assert_eq!(round1.len(), 2);
+    let round2 = selector.select_group_with(&[], &mut First);
+    assert_eq!(round2.len(), 1);
+    let round3 = selector.select_group_with(&[], &mut First);
+    assert_eq!(round3.len(), 2);
+    assert_eq!(sorted(round1), sorted(round3));
 }

@@ -69,3 +69,19 @@ b7bbe79e4a5dd166598357f5e2731549e5af04c087688b4b34f3fc56e6f037d8  tests/fixtures
 947a417cc3d6431992d5a13fe0221a870ebe106ddfded34c5c157437c3f46b74  selector52.log
 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  selector52.exit (contains 0)
 ```
+
+## Selector repair follow-up
+
+The bounded repair compares Rust capture parsing against a Go-generated
+`net.SplitHostPort`/`util.CaptureHost` matrix, including empty ports/hosts,
+IPv6 zones, malformed brackets and colons, and nonnumeric ports. The fixture
+now stores raw local/seeds/requested options alongside resolved Go values, and
+the Rust oracle consumes these raw fields directly. Group checks cover exact
+capacity, candidate multisets, preference ordering, partial rounds, exhaustion
+and reset; option values use signed 64-bit values and Go-style wrapping for the
+selection cap.
+
+Two original-Go verification runs and the host/port matrix passed. Logs are in
+`selector55/go-run-1.log` and `selector55/go-run-2.log`; `go.exit` contains 0.
+Rust focused test and strict all-target common clippy remain to be run after the
+active writer53 Cargo process releases its target/build slot.

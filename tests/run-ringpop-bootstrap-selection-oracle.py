@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix="ringpop-bootstrap-selection-") as tempo
     overlay.write_text(json.dumps({"Replace": {str(virtual): str(TEST)}}))
     output = temp / FIXTURE.name
     env = {**os.environ, "CADENCE_RINGPOP_BOOTSTRAP_SELECTION_OUTPUT": str(output)}
-    subprocess.run(["go", "test", "-overlay", str(overlay), "./swim", "-run", "^TestGenerateRingpopBootstrapSelectionFixtures$", "-count=1", "-v"], cwd=copied, env=env, check=True, timeout=180)
+    subprocess.run(["go", "test", "-overlay", str(overlay), "./swim", "-run", "^(TestGenerateRingpopBootstrapSelectionFixtures|TestGoCaptureHostMatrix)$", "-count=1", "-v"], cwd=copied, env=env, check=True, timeout=180)
     generated = json.loads(output.read_text())
 
 if args.generate:
@@ -47,7 +47,7 @@ data = json.loads(FIXTURE.read_text())
 assert data["source"] == "github.com/uber/ringpop-go v0.10.0 swim/join_sender.go newJoinSender + SelectGroup"
 assert len(data["cases"]) == 11, len(data["cases"])
 assert len(generated["cases"]) == len(data["cases"])
-stable_fields = ("name", "bootstrapHosts", "potential", "preferred", "nonPreferred", "joined", "timeoutNanos", "maxJoinDurationNanos", "size", "parallelism")
+stable_fields = ("name", "local", "seeds", "requestedTimeoutNanos", "requestedMaxJoinDurationNanos", "requestedSize", "requestedParallelism", "bootstrapHosts", "potential", "preferred", "nonPreferred", "joined", "timeoutNanos", "maxJoinDurationNanos", "size", "parallelism")
 for expected, actual in zip(data["cases"], generated["cases"]):
     assert all(expected.get(field) == actual.get(field) for field in stable_fields), expected["name"]
     candidates = (expected.get("preferred") or []) + (expected.get("nonPreferred") or [])
