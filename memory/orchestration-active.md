@@ -1,3 +1,9 @@
+## Permissive HTTP TLS review 2026-10-18
+
+Candidate 30805ee32 from t3-02f97237 returned all ten Go methods plaintext/TLS same port, 3 focused tests and strict server Clippy passing. NOT INTEGRATED: parent found one-shot 5-byte peek misclassifies fragmented TLS and accept serially waits sniff/handshake (slow client blocks all new connections). Direct dependency tokio-rustls has no lock update. Repair plus fragmentation/concurrent-client validation assigned Luna Standard:
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Ahttp-permissive-repair-standard-16-20261018
+Must verify revised default/disabled/enforced semantics from original Go, bounded handshake tasks/shutdown and locked build. Existing parent test edits from prior worker remain unstaged/preserved; integrate via reviewed commit later. Ringpop disseminator standard-15 remains separate active task.
+
 ## Deterministic member core integrated 2026-10-18
 
 Final parity standard-14 passed original Go fixture regeneration/no drift, Rust oracle consumer, 4 unit tests, strict common all-target Clippy, Go wire oracle + 11 Rust wire tests. Integrated exact validated stack as 86a5c8221, dcd28da6f, f36646209, 0a8ee08c1, 429d7da02. Production Ringpop/SWIM still absent.
