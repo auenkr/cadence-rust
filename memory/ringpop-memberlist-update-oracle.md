@@ -68,3 +68,35 @@ expected against the candidate's known 64-item limit and is evidence of a
 mismatch, not a passing parity claim. See `consumer-final.log` and
 `consumer-final.exit`. This bounded oracle does not claim production SWIM or
 Matching parity.
+
+## Combined repaired-tree gate (2026-10-18)
+
+Applied and validated the requested commits in this order:
+
+1. `ed35c38caad0e777de56a4c3b7707066eb44253d`
+2. `3f2f3ce34e86fab249981e42343bc9cc26419df1`
+3. `b5b912efd289086bfdc4e5def6103c7f5c178ee3`
+4. `cf0eb63efdbc1c9a06d39394157fcf1ecb61038b`
+5. `0e14eb07a34532bfc126ef18c3b8a52f9dd1a94c`
+
+The independent consumer evidence above is the starting point: it ran on the
+unrepaired draft and reported only the three 80-item batch failures (accepted
+count 64/80, final members, checksum). On the combined repaired tree,
+`CARGO_BUILD_JOBS=1` completed all checks with exit 0:
+
+- Original Go fixture generator twice; both exited 0, fixture hashes matched,
+  and `git diff` showed no fixture drift. SHA-256:
+  `c77eb329808ed5fa308c2bf96249014a81ee8444a2137bd021ddb732fa041450`.
+- `cargo test --locked -p cadence-common ringpop_memberlist --lib`
+- `cargo test --locked -p cadence-common --test ringpop_memberlist_update_oracle -- --nocapture`
+- `cargo test --locked -p cadence-common --test ringpop_member_oracle -- --nocapture`
+- `cargo test --locked -p cadence-common --test ringpop_disseminator_oracle -- --nocapture`
+- `python3 tests/run-ringpop-wire-compat.py`
+- `cargo clippy --locked -p cadence-common --all-targets -- -D warnings`
+
+Each exit marker, command, and complete output is under
+`memory/evidence/ringpop-memberlist-update/final/`. The memberlist consumer
+passed all 112 fixture cases, including the 80-change batch and its accepted
+changes, final snapshot, local state, and checksum comparisons. This validates
+the bounded `memberlist.Update` slice only. It is not a production SWIM claim
+and does not complete the Matching service.

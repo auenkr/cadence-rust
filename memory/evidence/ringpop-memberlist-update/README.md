@@ -25,3 +25,14 @@ proof. Also missing are the requested broad state/incarnation comparison
 matrix, labels/checksum differential for update results, and generator support
 for this new core. Do not treat this checkpoint as completion of Matching,
 production SWIM, or the requested slice parity audit.
+
+## Combined final validation
+
+The repaired implementation and Go-backed Rust consumer passed the combined
+final gate. See `final/` for command logs and exact exit markers, and
+`../../ringpop-memberlist-update-oracle.md` for the ordered source commits,
+consumer starting state, and scope. All seven execution steps (two Go fixture
+generation runs, focused unit tests, memberlist oracle, member oracle,
+dissemination oracle, wire runner, and strict locked all-target common Clippy)
+exited 0; the two fixture hashes match. This result covers the bounded
+`memberlist.Update` slice only, not production SWIM or Matching completion.

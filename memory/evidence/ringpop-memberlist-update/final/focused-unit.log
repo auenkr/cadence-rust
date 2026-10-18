@@ -1,0 +1,42 @@
+COMMAND: cargo test --locked -p cadence-common ringpop_memberlist --lib
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling libc v0.2.190
+   Compiling autocfg v1.5.1
+   Compiling zerocopy v0.8.63
+   Compiling num-traits v0.2.19
+   Compiling syn v3.0.9
+   Compiling cfg-if v1.0.5
+   Compiling serde_core v1.0.229
+   Compiling getrandom v0.2.17
+   Compiling siphasher v1.0.4
+   Compiling zmij v1.0.23
+   Compiling phf_shared v0.12.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_core v0.6.4
+   Compiling serde_json v1.0.154
+   Compiling thiserror v2.0.21
+   Compiling chrono-tz v0.10.4
+   Compiling serde v1.0.229
+   Compiling rand_chacha v0.3.1
+   Compiling chrono v0.4.45
+   Compiling phf v0.12.1
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_derive v1.0.229
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling rand v0.8.8
+   Compiling farmhash v1.1.5
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-23107c03/rust/crates/cadence-common)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 41.30s
+     Running unittests src/lib.rs (target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 4 tests
+test ringpop_memberlist::tests::insertion_position_clamps_to_go_random_range_excluding_end ... ok
+test ringpop_memberlist::tests::local_refutation_uses_new_incarnation_and_local_member_fields ... ok
+test ringpop_memberlist::tests::remote_acceptance_refutation_tombstone_and_checksum ... ok
+test ringpop_memberlist::tests::update_processes_complete_batch_larger_than_sixty_four ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 52 filtered out; finished in 0.00s
+

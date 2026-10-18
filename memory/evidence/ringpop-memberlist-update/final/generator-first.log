@@ -1,0 +1,3 @@
+COMMAND: python3 tests/generate-ringpop-memberlist-update.py
+ok  	github.com/uber/ringpop-go/swim	0.147s
+Generated rust/crates/cadence-common/tests/fixtures/ringpop_memberlist_update.json from ringpop-go v0.10.0
