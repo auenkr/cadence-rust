@@ -1,3 +1,9 @@
+## Production audit accepted as checklist 2026-10-18
+
+Audit229610623 integrated ae27fbe82. Parent confirmed original task_gc.go live read/loop. Audit proposed very broad next patch; narrowed to ONE live GC setting with signed backend parity, excluding earlier rejected saturation/rejection drafts. Luna Standard accepted running:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-live-gc-standard-36-20261018
+Requires original-Go bounded oracle for0/negative values and exact backend semantics, no invented safety logic. Outbound transport standard-34 active separately. Matching only, production domain/runtime/writer/shutdown/shard-distributor/metrics remain open per audit.
+
 Storage follow-up: completed regression worktree t3-28143470 target (~9.4GB) cleaned with cargo clean after checking active build uses t3-765b79ff. Preserved 1.2GB regression artifacts/results/logs and all source/commits. Active outbound cache untouched.
 
 ## Frozen integrated Matching regression passed 2026-10-18
