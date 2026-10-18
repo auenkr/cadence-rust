@@ -159,6 +159,14 @@ pub type SyncWaitProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 /// Go's signed `MaxTaskDeleteBatchSize` value, filtered by domain/list/type.
 pub type TaskDeleteBatchSizeProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 pub type WriterLiveProvider = Arc<dyn Fn(&str, &str, i32) -> (i64, i64) + Send + Sync>;
+fn scoped_writer_live(
+    provider: WriterLiveProvider,
+    domain: String,
+    task_list: String,
+    task_type: i32,
+) -> Arc<dyn Fn() -> (i64, i64) + Send + Sync> {
+    Arc::new(move || provider(&domain, &task_list, task_type))
+}
 /// Partition-tree degree used to resolve a child partition's parent for
 /// add/poll forwarding, mirroring Go's `ForwarderMaxChildrenPerNode`.
 pub type ForwardDegreeProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
@@ -804,12 +812,7 @@ impl QueueRegistry {
                         )
                             .with_liveness(liveness.clone());
                     let writer_live = registry.writer_live.as_ref().map(|provider| {
-                        let domain = lookup.0.to_string();
-                        let list = lookup.1.clone();
-                        let task_type = lookup.2;
-                        let provider = provider.clone();
-                        Arc::new(move || provider(&domain, &list, task_type))
-                            as Arc<dyn Fn() -> (i64, i64) + Send + Sync>
+                        scoped_writer_live(provider.clone(), lookup.0.to_string(), lookup.1.clone(), lookup.2)
                     });
                     let writer = crate::matching_writer::TaskWriter::new_with_live_config(
                         queue.clone(),
@@ -1644,6 +1647,27 @@ mod tests {
     use super::*;
     use cadence_persistence::matching_blob::BlobEncoding;
     use std::time::Duration;
+    #[test]
+    fn writer_owner_closure_keeps_registry_key_and_observes_provider_updates() {
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let live_value = Arc::new(std::sync::atomic::AtomicI64::new(1));
+        let provider: WriterLiveProvider = {
+            let observed = observed.clone();
+            let live_value = live_value.clone();
+            Arc::new(move |domain, list, kind| {
+                observed.lock().unwrap().push((domain.to_owned(), list.to_owned(), kind));
+                (live_value.load(std::sync::atomic::Ordering::SeqCst), 5_000_000_000)
+            })
+        };
+        let writer = scoped_writer_live(provider, "domain-uuid".into(), "physical-queue".into(), 1);
+        assert_eq!(writer(), (1, 5_000_000_000));
+        live_value.store(7, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(writer(), (7, 5_000_000_000), "the owner closure is retained while provider values change");
+        assert_eq!(*observed.lock().unwrap(), vec![
+            ("domain-uuid".into(), "physical-queue".into(), 1),
+            ("domain-uuid".into(), "physical-queue".into(), 1),
+        ]);
+    }
     async fn take(registry: &QueueRegistry, handle: &QueueHandle) -> AllocatedTask {
         let reader = registry
             .state

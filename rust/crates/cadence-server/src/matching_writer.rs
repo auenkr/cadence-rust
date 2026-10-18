@@ -91,21 +91,38 @@ fn full() -> Status {
         },
     )
 }
+#[cfg(test)]
 fn drain_batch<T>(mut batch: Vec<T>, receiver: &mut mpsc::Receiver<T>, maximum: i64) -> Vec<T> {
-    for _ in 0..maximum {
+    drain_batch_with(&mut batch, receiver, || maximum)
+}
+fn drain_batch_with<T>(
+    batch: &mut Vec<T>,
+    receiver: &mut mpsc::Receiver<T>,
+    mut maximum: impl FnMut() -> i64,
+) -> Vec<T> {
+    let mut additional = 0i64;
+    loop {
+        // Go calls MaxTaskBatchSize in the for-loop condition on every pass,
+        // including the check that ends the drain.
+        if additional >= maximum() {
+            break;
+        }
         match receiver.try_recv() {
-            Ok(request) => batch.push(request),
+            Ok(request) => {
+                batch.push(request);
+                additional += 1;
+            }
             Err(_) => break,
         }
     }
-    batch
+    std::mem::take(batch)
 }
 impl TaskWriter {
     pub fn new(queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig) -> Self {
         Self::new_with_live_config(queue, notify, config, None)
     }
-    /// Install Go's per-task-list writer settings. The provider is called only
-    /// after the first request is received and once for each append attempt.
+    /// Install Go's per-task-list writer settings. Batch size is sampled at
+    /// each getWriteBatch loop condition; append timeout is sampled per call.
     pub fn new_with_live_config(
         queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
         live_config: Option<Arc<dyn Fn() -> (i64, i64) + Send + Sync>>,
@@ -142,8 +159,12 @@ impl TaskWriter {
                 }
                 // Sample outside any config lock held by this actor and before
                 // probing the queue, matching Go getWriteBatch timing.
-                let max_batch_size = live_config.as_ref().map(|provider| provider().0).unwrap_or(config.max_batch_size);
-                let batch = drain_batch(vec![first], &mut receiver, max_batch_size);
+                let batch = drain_batch_with(&mut vec![first], &mut receiver, || {
+                    live_config
+                        .as_ref()
+                        .map(|provider| provider().0)
+                        .unwrap_or(config.max_batch_size)
+                });
                 let data = batch
                     .iter()
                     .map(|request| request.task.clone())
@@ -394,6 +415,98 @@ mod tests {
         let error = writer.append(task).await.unwrap_err();
         assert_eq!(error.code(), tonic::Code::ResourceExhausted);
         assert!(error.message().contains("waiting to enqueue"));
+    }
+
+    #[tokio::test]
+    async fn matching_writer_resamples_live_append_timeout_for_saturated_enqueues() {
+        use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let domain_id = Uuid::from_u128(1);
+        let key = TaskListKey { domain_id, name: "timeouts".into(), task_type: 0 };
+        let queue = Arc::new(DurableTaskQueue::open(store, key, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let domains = cadence_persistence::InMemoryDomainStore::default();
+        domains.create(cadence_api::types::DomainInfo {
+            name: "domain".into(), uuid: domain_id.to_string(), ..Default::default()
+        }, Default::default(), Default::default(), false).unwrap();
+        let overlay = Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default()));
+        let timeout_value = |value: &str| DynamicConfigValue {
+            value: Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(value).unwrap())),
+            filters: vec![],
+        };
+        overlay.lock().unwrap().update(false, "matching.appendTaskTimeout", vec![timeout_value("20ms")]);
+        let provider = crate::grpc_matching::task_writer_live_provider(domains, overlay.clone());
+        let domain = domain_id.to_string();
+        let live = Arc::new(move || provider(&domain, "timeouts", 0));
+        // Leave the receiver parked to model a saturated queue and ensure the
+        // timeout decision is made by append's real enqueue path.
+        let (sender, receiver) = mpsc::channel(1);
+        let (stop, _) = watch::channel(false);
+        let writer = TaskWriter { inner: Arc::new(Inner {
+            sender, stop, queue, config: WriterConfig::default(), live_config: Some(live),
+            parked: Mutex::new(Some(receiver)),
+        }) };
+        let task = WriteTask { data: TaskData::default(), source_domain: domain_id, schedule_to_start_seconds: 0 };
+        assert_eq!(writer.append(task.clone()).await.unwrap_err().code(), tonic::Code::DeadlineExceeded,
+            "an accepted request keeps waiting for its response until its original deadline");
+        overlay.lock().unwrap().update(false, "matching.appendTaskTimeout", vec![timeout_value("0s")]);
+        assert_eq!(writer.append(task).await.unwrap_err().code(), tonic::Code::ResourceExhausted,
+            "the next saturated enqueue uses the updated nonpositive timeout");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn matching_writer_batches_follow_live_dynamic_config_without_recreation() {
+        use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let domain_id = Uuid::from_u128(1);
+        let key = TaskListKey { domain_id, name: "batch-live".into(), task_type: 0 };
+        let queue = Arc::new(DurableTaskQueue::open(store.clone(), key.clone(), 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let domains = cadence_persistence::InMemoryDomainStore::default();
+        domains.create(cadence_api::types::DomainInfo {
+            name: "domain".into(), uuid: domain_id.to_string(), ..Default::default()
+        }, Default::default(), Default::default(), false).unwrap();
+        let overlay = Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default()));
+        overlay.lock().unwrap().update(false, "matching.maxTaskBatchSize", vec![DynamicConfigValue {
+            value: Some(DataBlob::new(EncodingType::JSON, b"0".to_vec())), filters: vec![],
+        }]);
+        let provider = crate::grpc_matching::task_writer_live_provider(domains, overlay.clone());
+        let entered = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let live = {
+            let entered = entered.clone(); let release = release.clone(); let calls = calls.clone();
+            let domain = domain_id.to_string();
+            Arc::new(move || {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 { entered.wait(); release.wait(); }
+                provider(&domain, "batch-live", 0)
+            }) as Arc<dyn Fn() -> (i64, i64) + Send + Sync>
+        };
+        let writer = TaskWriter::new_with_live_config(queue, Arc::new(Notify::new()), WriterConfig::default(), Some(live));
+        let make_request = |n: usize| {
+            let (response, receiver) = oneshot::channel();
+            (Request { task: WriteTask { data: TaskData { workflow_id: format!("w{n}"), ..Default::default() }, source_domain: domain_id, schedule_to_start_seconds: 0 }, response }, receiver)
+        };
+        let (first, first_rx) = make_request(0);
+        writer.inner.sender.send(first).await.unwrap();
+        tokio::task::spawn_blocking({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
+        let mut responses = vec![first_rx];
+        for n in 1..5 {
+            let (request, response) = make_request(n);
+            writer.inner.sender.send(request).await.unwrap();
+            responses.push(response);
+        }
+        // Change the config while this same actor is paused immediately before
+        // Go-style getWriteBatch sampling.
+        overlay.lock().unwrap().update(false, "matching.maxTaskBatchSize", vec![DynamicConfigValue {
+            value: Some(DataBlob::new(EncodingType::JSON, b"1".to_vec())), filters: vec![],
+        }]);
+        tokio::task::spawn_blocking({ let release = release.clone(); move || release.wait() }).await.unwrap();
+        for response in responses { response.await.unwrap().unwrap(); }
+        assert_eq!(calls.load(Ordering::SeqCst), 5, "Go resamples once per batch-drain loop condition, including the final condition");
+        assert_eq!(store.get_tasks(&key, 0, 10, 10).unwrap().len(), 5);
+        writer.stop();
     }
 
     #[tokio::test]

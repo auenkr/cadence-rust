@@ -42,6 +42,33 @@ fn task_delete_batch_size_provider(
         )
     })
 }
+/// Resolve both live task-writer settings using the physical task-list owner.
+/// Keep this provider shared by task-list creation and tests so dynamic updates
+/// are observed by existing writer actors.
+pub(crate) fn task_writer_live_provider(
+    domains: cadence_persistence::InMemoryDomainStore,
+    overlay: Arc<Mutex<crate::admin::DynamicConfigOverlay>>,
+) -> crate::matching_registry::WriterLiveProvider {
+    Arc::new(move |domain_id, task_list, task_type| {
+        let domain = domain_name_for(&domains, domain_id);
+        let config = overlay.lock().expect("admin lock");
+        let batch = cadence_persistence::dynamic_config::task_list_integer(
+            config.property_values("matching.maxTaskBatchSize"),
+            domain.as_deref(),
+            task_list,
+            task_type,
+            100,
+        );
+        let timeout = cadence_persistence::dynamic_config::task_list_duration(
+            config.property_values("matching.appendTaskTimeout"),
+            domain.as_deref(),
+            task_list,
+            task_type,
+            5_000_000_000,
+        );
+        (batch, timeout)
+    })
+}
 /// Go `taskListManagerImpl.AddTask` QPS reporting: an arrival counts toward the
 /// root, and toward its isolation group when the task carries one.
 fn report_arrival(
@@ -541,19 +568,7 @@ impl Matching {
             })
         };
         let max_task_delete_batch_size = task_delete_batch_size_provider(domains.clone(), overlay.clone());
-        let writer_live: crate::matching_registry::WriterLiveProvider = {
-            let domains = domains.clone();
-            let overlay = overlay.clone();
-            Arc::new(move |domain_id, task_list, task_type| {
-                let config = overlay.lock().expect("admin lock");
-                let domain = domain_name_for(&domains, domain_id);
-                let batch = cadence_persistence::dynamic_config::task_list_integer(
-                    config.property_values("matching.maxTaskBatchSize"), domain.as_deref(), task_list, task_type, 100);
-                let timeout = cadence_persistence::dynamic_config::task_list_duration(
-                    config.property_values("matching.appendTaskTimeout"), domain.as_deref(), task_list, task_type, 5_000_000_000);
-                (batch, timeout)
-            })
-        };
+        let writer_live = task_writer_live_provider(domains.clone(), overlay.clone());
         let scaler_config: crate::matching_registry::ScalerConfigProvider = {
             let domains = domains.clone();
             let overlay = overlay.clone();

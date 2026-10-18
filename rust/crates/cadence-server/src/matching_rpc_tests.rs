@@ -533,6 +533,35 @@ async fn matching_rpc_live_gc_batch_config_is_filtered_and_resampled() {
     assert_eq!(provider(&domain, "queue", 0), 1, "an existing provider observes updated live config");
 }
 
+#[tokio::test]
+async fn matching_rpc_live_writer_config_is_filtered_and_resampled() {
+    let (_dir, _store, matching, key) = fixture();
+    use cadence_api::{admin::{DynamicConfigFilter, DynamicConfigValue}, enums::EncodingType, types::DataBlob};
+    let blob = |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+    let overlay = matching.frontend.state.admin.dynamic_config.clone();
+    let update = |property: &str, value: serde_json::Value| {
+        overlay.lock().unwrap().update(false, property, vec![DynamicConfigValue {
+            value: blob(value),
+            filters: vec![
+                DynamicConfigFilter { name: "domainName".into(), value: blob(serde_json::json!("domain")) },
+                DynamicConfigFilter { name: "taskListName".into(), value: blob(serde_json::json!("queue")) },
+                DynamicConfigFilter { name: "taskType".into(), value: blob(serde_json::json!(0)) },
+            ],
+        }]);
+    };
+    update("matching.maxTaskBatchSize", serde_json::json!(0));
+    update("matching.appendTaskTimeout", serde_json::json!("17ms"));
+    let provider = super::task_writer_live_provider(matching.frontend.state.domains.clone(), overlay.clone());
+    let domain = key.domain_id.to_string();
+    assert_eq!(provider(&domain, "queue", 0), (0, 17_000_000));
+    assert_eq!(provider(&domain, "other", 0), (100, 5_000_000_000), "task-list filters must be independent");
+    assert_eq!(provider("unknown-domain", "queue", 0), (100, 5_000_000_000), "domain filters must be honored");
+    assert_eq!(provider(&domain, "queue", 1), (100, 5_000_000_000), "task-type filters must be honored");
+    update("matching.maxTaskBatchSize", serde_json::json!(2));
+    update("matching.appendTaskTimeout", serde_json::json!("31ms"));
+    assert_eq!(provider(&domain, "queue", 0), (2, 31_000_000), "an existing provider sees live updates");
+}
+
 /// Minimal History used by the query test: only `GetMutableState` is
 /// overridden, every other RPC keeps the generated `unimplemented` default.
 struct FakeHistory {
