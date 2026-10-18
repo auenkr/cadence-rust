@@ -156,3 +156,42 @@ maps for JSON headers; raw arbitrary wire payload APIs and tracing propagation
 are not exposed. INIT uses a placeholder local host port because the socket is
 short-lived and the server accepts it; production provider integration may want
 an advertised local identity. No SWIM join sender/member merge was added.
+
+## Outbound JSON transport repair on latest parent (2026-10-18)
+
+Applied candidate `b2441650ebf2f4c7224d7db55691e4c021f509ca` on latest local
+parent `1878bcdfde3c4b83bfa8c983374316f3c5390cf6` as commit `8bcc48481`, then
+repaired and adversarially validated the response decoder.
+
+- CALL_RES fixed fields now use checked reads for flags, application code,
+  tracing, transport-header count/strings, checksum type/value, and argument
+  chunk lengths. No response indexing depends on unchecked offsets. Malformed
+  continuation type/id/flags, unsupported checksum, checksum type changes,
+  truncated chunks, missing final arguments, and excess arguments are errors;
+  argument transitions no longer clamp excess chunks into arg3.
+- The response decoder validates cumulative IEEE CRC32 and CRC32C checksums on
+  every fragment. Tests run these checks over a mock TCP peer, including a
+  corrupted checksum. Every fixed-header truncation prefix from 0 through 28
+  bytes is exercised, along with a truncated header pair and malformed chunk.
+- Application failures use an internal typed error wrapper; wire message text
+  cannot make a transport error appear to be an application error.
+- The deadline starts before connect. CALL TTL subtracts elapsed connect/INIT
+  time; a delayed-INIT mock peer verifies the emitted TTL. INIT response id and
+  ERROR frame id are validated.
+- Dropping the future closes its owned TCP socket. The client sends no explicit
+  TChannel CANCEL frame; remote cancellation therefore depends on peer
+  disconnect handling. The real-Go cancellation probe verifies disconnect
+  behavior for the test handler, not an explicit CANCEL protocol exchange.
+
+Final evidence (all commands run on the repaired worktree):
+
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-765b79ff/rust/target cargo test --locked -p cadence-server --lib tchannel_json_client::adversarial_tests -- --nocapture` — exit 0, 4 tests; log `/tmp/cadence-outbound-json-repair-focused.log`, exit `/tmp/cadence-outbound-json-repair-focused.final.exit`.
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-765b79ff/rust/target cargo clippy --locked -p cadence-server --all-targets -- -D warnings` — exit 0; log `/tmp/cadence-outbound-json-repair-clippy.log`, exit `/tmp/cadence-outbound-json-repair-clippy.final.exit`.
+- `CARGO_BUILD_JOBS=1 python3 tests/run-tchannel-json-client-compat.py` — exit 0 against pinned tchannel-go v1.34.4; null/empty headers, 200 KB request/reply fragmentation, application error, malformed JSON, unknown method/service, deadline, and dropped-future disconnect. Log `/tmp/cadence-outbound-json-repair-interop.log`, exit `/tmp/cadence-outbound-json-repair-interop.exit`; runner artifacts `/tmp/tchannel-json-client-n48n9jjy`.
+- `CARGO_BUILD_JOBS=1 python3 tests/run-ringpop-tchannel-compat.py` — exit 0, Go inbound regression. Log `/tmp/cadence-outbound-json-repair-inbound.log`, exit `/tmp/cadence-outbound-json-repair-inbound.exit`; artifacts `/tmp/ringpop-tchannel-compat-pwu12r20`.
+
+The malformed-frame cases are Rust mock-peer tests; no differential oracle was
+added for Go's exact rejection behavior on those malformed wire frames. This
+repair only covers the outbound JSON transport primitive; it does not establish
+Matching service completion, add discovery/SWIM sender behavior, or validate
+service-level restart/recovery.
