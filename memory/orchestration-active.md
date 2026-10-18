@@ -1,3 +1,9 @@
+## JoinCluster draft review blockers — 2026-10-18
+
+88f963346 NOTintegrated. Worker18focusedtests+strictcommon/serverClippy+Gooriginaldeadlineoverlaypass;FULLGooverlayFAILexistingtwopeerprobeinvalidsocketaddress. Parentreview: asynccontrollerSystemclockusesblockingthreadsleep;fractionalmsformatterlosesprecision;actualGo delayerfloatmsandDestroyed/startclocksemanticsneedoracleaudit. Normal-speedLuna62 focusedrepair/fullGopeerregressionaccepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-join-controller-review-standard-62-20261018
+Frozenregression60independent3c8c5f98a. Matching incomplete.
+
 ## Concurrent JOIN group integrated — 2026-10-18
 
 Reviewed9005ae105+8f52e6440+fcfd09fbb integrated67fd9011e+04f7261f3+efed6c306. Groupselectonce,attemptcounter,concurrentwaitall,existingatomicJOINmerge,signedtimeoutadapter,cancellationJoinSet. Worker2grouptests,JOIN/PINGregressions,2realGopeers,strictserverClippypassed. No overallretry/readinessyet.
