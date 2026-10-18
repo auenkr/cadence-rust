@@ -1,3 +1,9 @@
+## Memberlist Go oracle ready 2026-10-18
+
+cf0eb63ef executed original Update directly, 108 status/incarnation cases + local refutation +80 batch, generator twice identical. Parent reviewed: fixture lacks initial remote member/clock metadata needed for independent reconstruction. Consumer task assigned to add metadata and Rust comparison:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amemberlist-oracle-consumer-standard-27-20261018
+Luna Standard accepted running; candidate remains unintegrated. Repair standard-26 checked running; HTTP standard-23 separate active work. Final combined repair+consumer validation required.
+
 ## Memberlist draft review 2026-10-18
 
 Candidate ed35c38ca +3f2f3ce34 not integrated. Rust regression/Clippy passed but requested original-Go Update oracle absent. Parent found unauthorized MAX_UPDATE_CHANGES=64 truncation, rejected as logic change. Split Luna Standard tasks:
