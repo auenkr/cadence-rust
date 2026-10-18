@@ -1,3 +1,9 @@
+## Expanded oracle ready; final combined gate 2026-10-18
+
+Consumer ce179937a ran original Go generator successfully and found exactly known precedence mismatch against UNREPAIRED candidate; other comparisons passed. Parent reviewed consumer assertion accumulation and failure assertion. Final isolated Luna Standard task combines base 7f86a56c3 + repair 610dd4fe9 + oracle 07b654686 + consumer ce179937a, reruns Go fixture generation/no drift, Rust differential/unit, strict Clippy and wire runner:
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-final-parity-standard-14-20261018
+Accepted running. Integrate only after confirmed combined passes. Consumer currently normalizes Some(empty) to None; pure checksum semantics same but nil-v-empty wire evidence is separate existing wire runner. No production SWIM claim.
+
 ## Repair verified; oracle comparison pending 2026-10-18
 
 Repair-save standard-12 completed. Candidate base 940e8b468 + repair 610dd4fe91acd218c7820ca49f940065c45b3ff7 (equivalent original base 7f86a56c3). Parent reviewed Less=>false, Equal=>signed labels comparison and regression. Worker confirmed 4 focused tests, strict common all-target Clippy, existing wire runner with Go fixtures + 11 Rust tests, all exit 0. Still UNINTEGRATED pending expanded actual-Go differential consumer standard-13 (checked running). Next validation task must combine base + 610dd4fe9 + oracle 07b654686 + returned consumer commits, run differential tests against repaired implementation, then integrate only passing stack. HTTP standard-11 remains active; preserve parent test edits.
