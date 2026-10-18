@@ -1,3 +1,7 @@
+## Repair verified; oracle comparison pending 2026-10-18
+
+Repair-save standard-12 completed. Candidate base 940e8b468 + repair 610dd4fe91acd218c7820ca49f940065c45b3ff7 (equivalent original base 7f86a56c3). Parent reviewed Less=>false, Equal=>signed labels comparison and regression. Worker confirmed 4 focused tests, strict common all-target Clippy, existing wire runner with Go fixtures + 11 Rust tests, all exit 0. Still UNINTEGRATED pending expanded actual-Go differential consumer standard-13 (checked running). Next validation task must combine base + 610dd4fe9 + oracle 07b654686 + returned consumer commits, run differential tests against repaired implementation, then integrate only passing stack. HTTP standard-11 remains active; preserve parent test edits.
+
 ## Original-Go member fixtures returned 2026-10-18
 
 Oracle candidate 07b654686 executed original unexported methods successfully in temporary package; not yet integrated. Parent review found coverage holes: precedence case uses higher status, nil maps collapse to empty, full status matrix absent. Assigned fixture coverage + Rust consumer task (implementation repair remains separate):
