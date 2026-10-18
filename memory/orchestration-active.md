@@ -1,3 +1,10 @@
+## Production capacity/rendezvous integrated; full regression running — 2026-10-18
+
+Reviewed9bd9cfdd7+b05a5752e,integratedddf7ef097+3c8c5f98a. FIFOwaitingoffersreplaceaccumulatingpermit/singleslot;zerobatchdrainswaitingoffers,guardwithdrawalcancel. Worker10Rust+9actualGo traces+strictserverClippypassed. No fullmixedclaimyet.
+Normal-speedLuna60 fullfrozencombinedworkspace/lint/34stageSDKmixedGo+Rustregressionacceptedsource3c8c5f98a:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-frozen-regression-standard-60-20261018
+Join59 separatelyactive. Storage7.5GBfree urgent60mustinspectactivecacheusageandreuse/cleanonlyinactivereproducibletargets,preserveevidence/source. Matching incomplete.
+
 ## Bootstrap selector integrated — 2026-10-18
 
 Reviewedfinal5d73ed1c8 signedcapnegativeconsumespool/zeroempty/positivebounded,16actualGo cases incloverflow/joinedcounts. Integratedac195+0a63+565a+5d73 as61d21896d,5f55e7751,efb1a3e6c,0c78cdd3f. Final57commitbundledfullselectorfromparent causingadd/addconflicts;resolvedexactvalidatedfinalfiles,verifiednodifftestedsource/tests/runner;fixtureonlydiffisallowedrandomsamehostfallbacksubset. Go2verify/fourRusttests/strictcommonClippy passed. No overallbootstrap controller yet.
