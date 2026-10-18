@@ -87,14 +87,11 @@ impl Disseminator {
         }
         for change in sent {
             if let Some(pending) = self.changes.get_mut(&change.address) {
-                // Do not charge a stale snapshot after a newer change replaced it.
-                if pending.change == *change
-                    || pending.change.clone().validate_outgoing() == *change
-                {
-                    pending.propagated = pending.propagated.saturating_add(1);
-                    if pending.propagated >= self.max_propagations {
-                        self.changes.remove(&change.address);
-                    }
+                // Ringpop indexes its counter by address and bumps the current
+                // entry, even when it was replaced after the sender snapshot.
+                pending.propagated = pending.propagated.saturating_add(1);
+                if pending.propagated >= self.max_propagations {
+                    self.changes.remove(&change.address);
                 }
             }
         }
@@ -108,6 +105,8 @@ impl Disseminator {
         sender_checksum: u32,
         local_checksum: u32,
         members: &[Member],
+        local_address: &str,
+        local_incarnation: i64,
     ) -> (Vec<Change>, bool) {
         let mut changes: Vec<_> = self
             .changes
@@ -123,8 +122,8 @@ impl Disseminator {
                 .iter()
                 .map(|m| {
                     Change {
-                        source: String::new(),
-                        source_incarnation: 0,
+                        source: local_address.to_owned(),
+                        source_incarnation: local_incarnation,
                         address: m.address.clone(),
                         incarnation: m.incarnation,
                         status: m.status.clone(),
