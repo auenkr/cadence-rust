@@ -1,5 +1,26 @@
 # Ringpop bootstrap and JoinGroup contract (bounded research, 2026-10-18)
 
+## Bounded selection primitive completed (2026-10-18)
+
+Implemented `cadence_common::ringpop_bootstrap_selection` for Matching as a
+selection-only primitive. It preserves zero-only option defaults, signed
+nonzero settings, initial `min(size, potential count)`, exact duplicate seeds,
+Go `net.SplitHostPort` host capture (including IPv6/hostnames), self insertion
+and exact self exclusion, preferred/nonpreferred classes, joined filtering
+only from `potential`, and exhausted-round reset. An injectable index chooser
+supports deterministic Rust consumer tests; production selection uses random
+indices. It intentionally does not implement networking, retries, readiness,
+or bootstrap lifecycle.
+
+`tests/run-ringpop-bootstrap-selection-oracle.py` now verifies by default
+without modifying the fixture; `--generate` explicitly regenerates it. The
+Rust consumer exercises production selector behavior against the normalized
+11-case original-Go fixture and checks class membership/invariants rather than
+unstable map-derived subsets. Evidence and final exit codes are in
+`memory/evidence/ringpop-bootstrap-selection/selector52.log` and `.exit`.
+Matching remains incomplete; continue with network bootstrap as the next
+bounded task after this primitive is committed.
+
 Pinned source: `github.com/uber/ringpop-go v0.10.0`, module cache `/home/ubuntu/go/pkg/mod/github.com/uber/ringpop-go@v0.10.0`. This documents direct bootstrap/Join behavior for the current Matching membership implementation; no Rust production changes are part of this slice.
 
 ## Source behavior and integration plan

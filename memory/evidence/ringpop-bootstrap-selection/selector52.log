@@ -1,0 +1,24 @@
+=== RUN   TestGenerateRingpopBootstrapSelectionFixtures
+--- PASS: TestGenerateRingpopBootstrapSelectionFixtures (0.00s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.017s
+verified 11 original-Go selection fixtures without modifying checked fixture
+verify1=0
+=== RUN   TestGenerateRingpopBootstrapSelectionFixtures
+--- PASS: TestGenerateRingpopBootstrapSelectionFixtures (0.00s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.120s
+verified 11 original-Go selection fixtures without modifying checked fixture
+verify2=0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running tests/ringpop_bootstrap_selection_oracle.rs (target/debug/deps/ringpop_bootstrap_selection_oracle-86925d64a056762c)
+
+running 2 tests
+test requested_size_is_capped_and_exhausted_round_restarts ... ok
+test rust_selector_consumes_pinned_original_go_selection_cases ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+rust_test=0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+clippy=0

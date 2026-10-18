@@ -68,7 +68,7 @@
         "192.0.2.1:3"
       ],
       "group": [
-        "192.0.2.1:2",
+        "192.0.2.1:3",
         "192.0.2.2:1",
         "192.0.2.3:1"
       ],
@@ -231,6 +231,56 @@
       "maxJoinDurationNanos": 4000000000,
       "size": 2,
       "parallelism": 3
+    },
+    {
+      "name": "ipv6-capture",
+      "bootstrapHosts": [
+        "[2001:db8::1]:10",
+        "[2001:db8::1]:11",
+        "[2001:db8::2]:12"
+      ],
+      "potential": [
+        "[2001:db8::1]:11",
+        "[2001:db8::2]:12"
+      ],
+      "preferred": [
+        "[2001:db8::2]:12"
+      ],
+      "nonPreferred": [
+        "[2001:db8::1]:11"
+      ],
+      "group": [
+        "[2001:db8::2]:12"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 1,
+      "parallelism": 1
+    },
+    {
+      "name": "hostname-capture",
+      "bootstrapHosts": [
+        "node-a.example:10",
+        "node-a.example:11",
+        "node-b.example:12"
+      ],
+      "potential": [
+        "node-a.example:11",
+        "node-b.example:12"
+      ],
+      "preferred": [
+        "node-b.example:12"
+      ],
+      "nonPreferred": [
+        "node-a.example:11"
+      ],
+      "group": [
+        "node-b.example:12"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 1,
+      "parallelism": 1
     },
     {
       "name": "exhausted-round-reset",

@@ -44,6 +44,8 @@ func TestGenerateRingpopBootstrapSelectionFixtures(t *testing.T) {
 		{"zero-options-default", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1", "192.0.2.5:1"}, &joinOpts{}, nil},
 		{"negative-options-retained", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1"}, &joinOpts{timeout: -2 * time.Second, maxJoinDuration: -7 * time.Second, size: -3, parallelismFactor: -4}, nil},
 		{"explicit-nonzero-options", "192.0.2.1:1", []string{"192.0.2.2:1", "192.0.2.3:1", "192.0.2.4:1", "192.0.2.5:1", "192.0.2.6:1", "192.0.2.7:1"}, &joinOpts{timeout: 250 * time.Millisecond, maxJoinDuration: 4 * time.Second, size: 2, parallelismFactor: 3}, nil},
+		{"ipv6-capture", "[2001:db8::1]:10", []string{"[2001:db8::1]:11", "[2001:db8::2]:12"}, &joinOpts{size: 1, parallelismFactor: 1}, nil},
+		{"hostname-capture", "node-a.example:10", []string{"node-a.example:11", "node-b.example:12"}, &joinOpts{size: 1, parallelismFactor: 1}, nil},
 	}
 	fixtures := make([]selectionFixture, 0, len(cases)+1)
 	for _, tc := range cases {

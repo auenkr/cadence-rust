@@ -34,3 +34,4 @@ pub mod ringpop_wire;
 pub mod ringpop_member;
 pub mod ringpop_disseminator;
 pub mod ringpop_memberlist;
+pub mod ringpop_bootstrap_selection;
