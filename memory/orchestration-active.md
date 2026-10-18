@@ -1,3 +1,9 @@
+## Dissemination original-Go oracle returned 2026-10-18
+
+5044177ec calls original pinned Go methods; generator passed and repeat was byte-identical. Parent reviewed snapshots/callback/filter/full-sync/maxP scenarios. Remaining holes: failedSent map ordering unsorted, maxP 0/1 and equal-checksum/fully-filtered cases absent. Assigned Rust consumer plus these oracle coverage fixes:
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Adisseminator-oracle-consumer-standard-20-20261018
+Luna Standard accepted running. Candidate stack still unintegrated; repair-check standard-19 and HTTP repair standard-16 are separate active work. Need final combined check after consumer returns.
+
 ## Dissemination repair returned without validation 2026-10-18
 
 Repair 187f4aeff atop 93d1d94af (equivalent 6c71b6774) fixes address-based bump and passes local source into full sync. No confirmed Rust checks due Cargo target lock; original-Go fixtures still omitted. Both remain UNINTEGRATED. Split narrowly:
