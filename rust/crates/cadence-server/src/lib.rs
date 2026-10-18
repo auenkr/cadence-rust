@@ -20,6 +20,7 @@ pub mod grpc_shard;
 pub mod handlers;
 pub mod service;
 pub mod tchannel;
+pub mod tchannel_json_client;
 pub mod ringpop_tchannel;
 pub mod ringpop_provider;
 pub mod yarpc;

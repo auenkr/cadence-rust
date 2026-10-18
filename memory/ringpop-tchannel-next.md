@@ -93,3 +93,66 @@ checksum handling, membership change dissemination, state transitions and
 tombstone normalization, labels/identity, bootstrap/discovery configuration,
 provider lifecycle/health integration, and SDK compatibility tests against
 real Go Ringpop nodes. Do not treat the test-only probe as production discovery.
+
+## Outbound client task status (2026-10-18)
+
+- Pinned `github.com/uber/tchannel-go@v1.34.4` was downloaded into the Go module cache and inspected at `/home/ubuntu/go/pkg/mod/github.com/uber/tchannel-go@v1.34.4/json/call.go` and `messages.go`. JSON calls encode arg2 and arg3 with `WriteJSON` (newline terminated), use transport `as=json`, and JSON application failures are response application-error bodies decoded as maps. `messages.go` confirms CALL_RES includes response code, tracing, and transport headers; continuation frames carry args only.
+- Added an initial one-shot Rust outbound JSON client in `rust/crates/cadence-server/src/tchannel_json_client.rs`. Each call owns a TCP stream; dropping the future drops the socket. Current client has not yet received Go interoperability evidence and should be treated as incomplete pending tests, particularly fragmented response decoding and edge cases.
+- Clippy was started in tmux session `cadence-rust`, window `outbound-json-review`, with `CARGO_BUILD_JOBS=1`; log `/tmp/cadence-outbound-json-clippy.log`, exit `/tmp/cadence-outbound-json-clippy.exit`. Do not claim completion until exit exists and is zero.
+- Required follow-up remains: test-only Go JSON server and Rust runner; call-path protocol repairs as needed; Go evidence for null/empty request headers, fragmented response, application and framing errors, malformed JSON, unknown service/method, deadline and dropped-future connection; focused tests and inbound regressions; then record final exits and commit.
+
+## Reusable outbound JSON call client (2026-10-18)
+
+Implemented `cadence_server::tchannel_json_client::call` as a one-shot TCP
+TChannel v2 JSON call client. It performs INIT/INIT_RES v2 framing, emits JSON
+transport headers and newline-terminated JSON args, fragments request args,
+assembles response fragments, validates NONE/IEEE/CRC32C response checksums,
+decodes JSON response headers/body and application errors, decodes TChannel
+ERROR frames, and applies a deadline. Dropping/canceling the call future drops
+the owning TCP stream. This client is suitable as a reusable transport primitive
+for the Matching Ringpop dependency; discovery/provider integration is not part
+of this slice.
+
+A test-only pinned-Go server is at `go/cmd/tchannel-json-test-server`; its runner
+is `tests/run-tchannel-json-client-compat.py`. The helper serves echo (including
+observed JSON headers), a 200 KB body, app error, malformed JSON, and a delayed
+handler, plus unknown method/service failures. It exercises the actual Rust
+client against `github.com/uber/tchannel-go v1.34.4`; this is not a self-only
+codec test.
+
+### Final evidence
+
+- `CARGO_BUILD_JOBS=1 cargo clippy -p cadence-server --all-targets -- -D warnings`
+  passed; final log `/tmp/cadence-outbound-json-final-clippy3.log`, exit
+  `/tmp/cadence-outbound-json-final-clippy3.exit` (0).
+- `CARGO_BUILD_JOBS=1 cargo test -p cadence-server --lib tchannel::tests`
+  passed, 4 tests; final log `/tmp/cadence-outbound-json-inbound-test3.log`,
+  exit `/tmp/cadence-outbound-json-inbound-test3.exit` (0).
+- `CARGO_BUILD_JOBS=1 python3 tests/run-tchannel-json-client-compat.py` passed
+  against the real Go server: null/empty arg2 headers, a 200 KB fragmented request and reply,
+  decoded app error, malformed JSON response rejection, unknown service and
+  method TChannel ERROR frames, 100 ms deadline, and dropped future/call socket.
+  Log `/tmp/cadence-outbound-json-interop-final3.log`, exit
+  `/tmp/cadence-outbound-json-interop-final3.exit` (0); retained server/helper
+  artifacts `/tmp/tchannel-json-client-v4p3et1g`.
+- Existing inbound regression `CARGO_BUILD_JOBS=1 python3
+  tests/run-ringpop-tchannel-compat.py` passed with the pinned Go JSON client
+  against the unchanged Rust inbound listener. Log
+  `/tmp/cadence-outbound-json-inbound-go.log`, exit
+  `/tmp/cadence-outbound-json-inbound-go.exit` (0), artifacts
+  `/tmp/ringpop-tchannel-compat-t8wr176g`.
+- Pinned v1.34.4 source was inspected in Go module cache, especially
+  `json/call.go`, `messages.go`, and `fragmenting_reader.go`/`fragmenting_writer.go`.
+  JSON `WriteJSON` newline behavior, init/call response headers, chunk boundary
+  markers and continuation semantics informed the client.
+
+### Transport boundaries
+
+This is deliberately a one-call-per-connection primitive: it does not pool or
+reuse connections, retry calls, resolve Ringpop peers, or send an explicit
+TChannel CANCEL frame. Cancellation closes the socket and is tested against the
+Go handler. It accepts typed `serde_json::Value` requests/responses and string
+maps for JSON headers; raw arbitrary wire payload APIs and tracing propagation
+are not exposed. INIT uses a placeholder local host port because the socket is
+short-lived and the server accepts it; production provider integration may want
+an advertised local identity. No SWIM join sender/member merge was added.

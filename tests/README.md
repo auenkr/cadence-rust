@@ -395,3 +395,15 @@ poll through Go Frontend. It checks that closing its owner returns an empty
 successful poll, then verifies an unacknowledged queued workflow task survives
 unload and completes after lease reload. The fixture clock avoids a five-minute
 wait; workflow/History behavior remains in the original Go services.
+
+Outbound TChannel JSON client interoperability check (pinned tchannel-go server):
+
+```sh
+CARGO_BUILD_JOBS=1 python3 tests/run-tchannel-json-client-compat.py
+```
+
+The helper checks null versus empty request headers, a 200 KB fragmented JSON
+request and response, application error decoding, malformed JSON rejection, system error
+framing for unknown service and method, deadline expiry, and cancellation by dropping the
+Rust call future. It is transport coverage only; Ringpop membership/bootstrap
+remain a separate concern.
