@@ -1,3 +1,11 @@
+## Interrupted validation recovery 2026-10-18
+
+standard-21 final checks incomplete: tmux server vanished twice, no Rust exit codes. Go fixture generation passed/no drift, combined candidate tree 0655292c3 unintegrated. HTTP repair standard-16 cancelled, no pending child runs; latest summary says unit/check/lint evidence exists, live production build/runner unfinished. Parent measured 71GB disk free, ~8GB RAM available, no cargo/rustc or tmux server; cause of interruption unproven.
+New Luna Standard isolated recovery tasks accepted running:
+- node:delegated-task:command%3Amcp%3A3ca1d1f6-72e1-4d0c-95d0-80caa7a17f3b%3Adelegate-task%3Adissemination-validation-recovery-standard-22-20261018
+- node:delegated-task:command%3Amcp%3A3ca1d1f6-72e1-4d0c-95d0-80caa7a17f3b%3Adelegate-task%3Ahttp-permissive-recovery-standard-23-20261018
+Scripts required disk-backed logs/exit markers, reuse safe free targets, recreate cadence-rust tmux. No candidate integrated without confirmed checks. Parent tests remain dirty/preserved.
+
 ## Dissemination consumer passed; combined gate 2026-10-18
 
 Consumer dc019e056 passed 1 Rust differential test; expanded original-Go generator twice byte-identical. Adds counters accessor and requested 0/1 bound, equal-checksum, fully-filtered coverage. Not integrated yet. Final combined original stack: 6c71b6774 + 187f4aeff + f6cd28372 + 5044177ec + dc019e056. Luna Standard final check accepted running:
