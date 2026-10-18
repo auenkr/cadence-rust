@@ -1,3 +1,10 @@
+## Dissemination repair returned without validation 2026-10-18
+
+Repair 187f4aeff atop 93d1d94af (equivalent 6c71b6774) fixes address-based bump and passes local source into full sync. No confirmed Rust checks due Cargo target lock; original-Go fixtures still omitted. Both remain UNINTEGRATED. Split narrowly:
+- node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Adisseminator-go-fixtures-standard-18-20261018 (Go only, no Cargo)
+- node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Adisseminator-repair-check-standard-19-20261018 (Rust checks, avoid active target lock)
+Both Luna Standard accepted running. HTTP repair standard-16 checked running no pending question. Next combine actual oracle consumer and validated repairs before integration.
+
 ## Dissemination draft review 2026-10-18
 
 Candidate 6c71b6774 returned 2 focused tests/Clippy/wire/member regression passed but NO dissemination Go oracle. UNINTEGRATED. Parent checked original disseminator.go: Go bumps current queue entry by address even if replaced since snapshot; candidate incorrectly skips. Full sync omits local source identity contrary MembershipAsChanges.populateSource. Also maxP float formula boundary parity needs Go vectors. Repair+original-Go differential assigned Luna Standard:
