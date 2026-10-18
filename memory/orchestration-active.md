@@ -1,3 +1,10 @@
+## Inbound Ringpop join/ping integrated 2026-10-18
+
+Bound standard-32 passed original-Go handler fixture/no drift,8 provider tests,19 common +oracles,real Go bound probe (4JOIN/16successfulPING),strict server Clippy,original TChannel and Matching TLS runners. Parent reviewed exact /protocol methods and Go independent ready/stopped flags. Integrated c5999cebc,cdf6bb7f3,cb91055a4. No bootstrap/probe/timers/main wiring yet.
+Next outbound dependency Luna Standard accepted running:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-outbound-standard-33-20261018
+Scope real TChannel JSON sender/join/direct ping with original Go bound server evidence; bounded join group permitted, no readiness shortcut. Integrated regression standard-31 checked running, frozen older integrated source. Matching only; whole service incomplete.
+
 ## Inbound protocol candidate review 2026-10-18
 
 3dbd1b11b NOT integrated. Worker confirms 7 direct handler tests, original Go handler fixture, common regressions/wire/Clippy pass. Parent found RingpopNode.handler dispatch 'join'/'ping' vs boundary actual '/protocol/join','/protocol/ping', so real bound clients fail. Repair+bound original-Go real-provider probe assigned Luna Standard:
