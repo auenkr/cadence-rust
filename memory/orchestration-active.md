@@ -1,3 +1,9 @@
+## Original-Go member fixtures returned 2026-10-18
+
+Oracle candidate 07b654686 executed original unexported methods successfully in temporary package; not yet integrated. Parent review found coverage holes: precedence case uses higher status, nil maps collapse to empty, full status matrix absent. Assigned fixture coverage + Rust consumer task (implementation repair remains separate):
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-differential-consumer-standard-13-20261018
+Luna Standard, accepted running. Repair-save standard-12 and HTTP permissive standard-11 checked running. No integration/parity claim yet.
+
 ## Parity round incomplete; split acceptance 2026-10-18
 
 standard-10 stopped with uncommitted precedence repair at t3-0df1b5d9 (HEAD 2d27bcab0). Build still running in cadence-rust:ringpop-member-repair; no confirmed checks/oracle. Candidate remains unintegrated. Split into bounded Luna Standard tasks:
