@@ -1,3 +1,10 @@
+## Bootstrap Go selector oracle integrated — 2026-10-18
+
+Reviewed71b969b04 actual original newJoinSender/SelectGroup overlay9cases,integrated. Corrected earlier note: exactduplicate seeds preserved;joined excluded potential but not preferred/nonpreferred. Runner regenerates fixture unconditionally and random subsets may drift; next worker must implement nondeterminism-aware verify with explicit generation.
+Luna normal-speed52 Rust selector primitive+actualGo differential accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-bootstrap-selector-rust-standard-52-20261018
+No networkbootstrap/retry/readiness in slice. Livewriter49 independently active. Matching incomplete.
+
 ## Bootstrap notes accepted; executable oracle missing — 2026-10-18
 
 Integrated source-backed research1d10b531d asb8cf3028b. No executable oracle or Rust production implementation returned; notes explicitly incomplete. Narrow normal-speed Luna51 accepted actual pinned newJoinSender/SelectGroup selection-only overlay fixtures,excluding network/retry/readiness:
