@@ -1,3 +1,7 @@
+## Storage maintenance 2026-10-18
+
+User reiterated storage cleanup. Parent measured ~68GB free of 96GB; worktrees ~5.7GB. Active HTTP cargo/rustc uses t3-b9747ee8 target, preserved. Cleaned terminal dissemination validation t3-3cdc7b86 generated target with cargo clean: 1132 files, 449.4MiB removed. Source/commits/oracle fixtures/logs/exit markers preserved; no active process referenced cleaned target. Keep retaining only useful warm caches and clean terminal generated outputs after integration. Matching service scope unchanged.
+
 Next Matching discovery dependency assigned Luna Standard:
 node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-memberlist-standard-24-20261018
 Accepted running: deterministic memberlist updates/local refutation plus original-Go differential, no future-service work or partial provider readiness.
