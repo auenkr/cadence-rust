@@ -158,13 +158,14 @@ pub type IsolationProvider = Arc<
 pub type SyncWaitProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 /// Go's signed `MaxTaskDeleteBatchSize` value, filtered by domain/list/type.
 pub type TaskDeleteBatchSizeProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
-pub type WriterLiveProvider = Arc<dyn Fn(&str, &str, i32) -> (i64, i64) + Send + Sync>;
+pub type WriterLiveProvider = Arc<dyn Fn(&str, &str, i32) -> (i64, i64, i64) + Send + Sync>;
+pub type WriterLiveConfig = Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>;
 fn scoped_writer_live(
     provider: WriterLiveProvider,
     domain: String,
     task_list: String,
     task_type: i32,
-) -> Arc<dyn Fn() -> (i64, i64) + Send + Sync> {
+) -> WriterLiveConfig {
     Arc::new(move || provider(&domain, &task_list, task_type))
 }
 /// Partition-tree degree used to resolve a child partition's parent for
@@ -1656,13 +1657,13 @@ mod tests {
             let live_value = live_value.clone();
             Arc::new(move |domain, list, kind| {
                 observed.lock().unwrap().push((domain.to_owned(), list.to_owned(), kind));
-                (live_value.load(std::sync::atomic::Ordering::SeqCst), 5_000_000_000)
+                (live_value.load(std::sync::atomic::Ordering::SeqCst), 5_000_000_000, 250)
             })
         };
         let writer = scoped_writer_live(provider, "domain-uuid".into(), "physical-queue".into(), 1);
-        assert_eq!(writer(), (1, 5_000_000_000));
+        assert_eq!(writer(), (1, 5_000_000_000, 250));
         live_value.store(7, std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(writer(), (7, 5_000_000_000), "the owner closure is retained while provider values change");
+        assert_eq!(writer(), (7, 5_000_000_000, 250), "the owner closure is retained while provider values change");
         assert_eq!(*observed.lock().unwrap(), vec![
             ("domain-uuid".into(), "physical-queue".into(), 1),
             ("domain-uuid".into(), "physical-queue".into(), 1),

@@ -1,0 +1,12 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-ce1e72cb/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 20s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-4bff137241497f73)
+
+running 8 tests
+test matching_writer::tests::matching_writer_cancelled_caller_does_not_withdraw_durable_append ... ok
+test matching_writer::tests::matching_writer_batches_follow_live_dynamic_config_without_recreation ... FAILED
+test matching_writer::tests::matching_writer_original_go_batches ... ok
+test matching_writer::tests::matching_writer_enqueue_and_response_timeouts_are_distinct ... ok
+test matching_writer::tests::matching_writer_resamples_live_append_timeout_for_saturated_enqueues ... ok
+test matching_writer::tests::matching_writer_rewrite_retry_uses_original_go_outcomes ... ok
+test matching_writer::tests::matching_writer_samples_signed_capacity_once_and_preserves_zero ... ok

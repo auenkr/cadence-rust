@@ -3,14 +3,17 @@
 use cadence_persistence::{matching_queue::DurableTaskQueue, matching_sqlite::AllocatedTask};
 use rand::SeedableRng;
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tonic::Status;
 #[derive(Clone, Copy)]
 pub struct WriterConfig {
-    pub outstanding_appends: usize,
+    pub outstanding_appends: i64,
     /// Go drains this many *additional* requests after taking the first one.
     pub max_batch_size: i64,
     pub append_timeout: Duration,
@@ -63,13 +66,52 @@ async fn retry_write<T, F: std::future::Future<Output = Result<T, WriteError>>>(
 struct Request {
     task: WriteTask,
     response: oneshot::Sender<Result<AllocatedTask, WriteError>>,
+    accepted: Option<oneshot::Sender<()>>,
+}
+struct Rendezvous {
+    permits: tokio::sync::Semaphore,
+    slot: Mutex<Option<(u64, Request)>>,
+    notify: Notify,
+    next_id: AtomicU64,
+}
+struct AdmissionGuard {
+    rendezvous: Arc<Rendezvous>,
+    id: u64,
+    armed: bool,
+}
+impl Drop for AdmissionGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let mut slot = self.rendezvous.slot.lock().expect("Matching rendezvous slot lock");
+            if slot.as_ref().is_some_and(|(id, _)| *id == self.id) {
+                slot.take();
+            }
+        }
+    }
+}
+async fn receive_rendezvous(
+    rendezvous: &Rendezvous,
+    stopped: &mut watch::Receiver<bool>,
+) -> Option<Request> {
+    loop {
+        let notified = rendezvous.notify.notified();
+        if let Some((_, mut request)) = rendezvous.slot.lock().expect("Matching rendezvous slot lock").take() {
+            if let Some(accepted) = request.accepted.take() { let _ = accepted.send(()); }
+            return Some(request);
+        }
+        tokio::select! {
+            _ = stopped.changed() => return None,
+            _ = notified => (),
+        }
+    }
 }
 struct Inner {
     sender: mpsc::Sender<Request>,
+    rendezvous: Option<Arc<Rendezvous>>,
     stop: watch::Sender<bool>,
     queue: Arc<DurableTaskQueue>,
     config: WriterConfig,
-    live_config: Option<Arc<dyn Fn() -> (i64, i64) + Send + Sync>>,
+    live_config: Option<crate::matching_registry::WriterLiveConfig>,
     // Go deliberately leaves appendCh open on stop. Keep the receiver alive
     // while handles exist so a caller already waiting to enqueue times out.
     parked: Mutex<Option<mpsc::Receiver<Request>>>,
@@ -125,16 +167,23 @@ impl TaskWriter {
     /// each getWriteBatch loop condition; append timeout is sampled per call.
     pub fn new_with_live_config(
         queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
-        live_config: Option<Arc<dyn Fn() -> (i64, i64) + Send + Sync>>,
+        live_config: Option<crate::matching_registry::WriterLiveConfig>,
     ) -> Self {
-        assert!(
-            config.outstanding_appends > 0,
-            "rendezvous append channels require separate support"
-        );
-        let (sender, receiver) = mpsc::channel(config.outstanding_appends);
+        let capacity = live_config.as_ref().map(|provider| provider().2)
+            .unwrap_or(config.outstanding_appends);
+        let capacity = usize::try_from(capacity)
+            .expect("negative matching outstanding task append threshold");
+        let rendezvous = (capacity == 0).then(|| Arc::new(Rendezvous {
+            permits: tokio::sync::Semaphore::new(0),
+            slot: Mutex::new(None),
+            notify: Notify::new(),
+            next_id: AtomicU64::new(1),
+        }));
+        let (sender, receiver) = mpsc::channel(capacity.max(1));
         let (stop, mut stopped_rx) = watch::channel(false);
         let inner = Arc::new(Inner {
             sender,
+            rendezvous: rendezvous.clone(),
             stop,
             queue: queue.clone(),
             config,
@@ -150,10 +199,19 @@ impl TaskWriter {
         tokio::spawn(async move {
             let mut receiver = receiver;
             loop {
-                let first = tokio::select! {
-                    _ = stopped_rx.changed() => break,
-                    request = receiver.recv() => match request { Some(request) => request, None => break },
+                let mut first = if let Some(rendezvous) = &rendezvous {
+                    rendezvous.permits.add_permits(1);
+                    match receive_rendezvous(rendezvous, &mut stopped_rx).await {
+                        Some(request) => request,
+                        None => break,
+                    }
+                } else {
+                    tokio::select! {
+                        _ = stopped_rx.changed() => break,
+                        request = receiver.recv() => match request { Some(request) => request, None => break },
+                    }
                 };
+                if let Some(accepted) = first.accepted.take() { let _ = accepted.send(()); }
                 if *stopped_rx.borrow() || queue.is_stopped() {
                     break;
                 }
@@ -268,12 +326,37 @@ impl TaskWriter {
         let now = tokio::time::Instant::now();
         let deadline = if timeout_nanos <= 0 { now } else { now + Duration::from_nanos(timeout_nanos as u64) };
         let (response, receiver) = oneshot::channel();
-        match tokio::time::timeout_at(deadline, self.inner.sender.send(Request { task, response }))
-            .await
-        {
-            Err(_) => return Err(full().into()),
-            Ok(Err(_)) => return Err(stopped().into()),
-            Ok(Ok(())) => (),
+        let request = Request { task, response, accepted: None };
+        if let Some(rendezvous) = &self.inner.rendezvous {
+            let permit = tokio::select! {
+                permit = rendezvous.permits.acquire() => match permit {
+                    Ok(permit) => permit,
+                    Err(_) => return Err(full().into()),
+                },
+                _ = tokio::time::sleep_until(deadline) => return Err(full().into()),
+            };
+            if tokio::time::Instant::now() >= deadline { return Err(full().into()); }
+            let (accepted, accepted_rx) = oneshot::channel();
+            let mut request = request;
+            request.accepted = Some(accepted);
+            let id = rendezvous.next_id.fetch_add(1, Ordering::Relaxed);
+            *rendezvous.slot.lock().expect("Matching rendezvous slot lock") = Some((id, request));
+            let mut admission = AdmissionGuard { rendezvous: rendezvous.clone(), id, armed: true };
+            rendezvous.notify.notify_one();
+            match tokio::time::timeout_at(deadline, accepted_rx).await {
+                Ok(Ok(())) => admission.armed = false,
+                _ => return Err(full().into()),
+            }
+            drop(admission);
+            drop(permit);
+        } else {
+            let mut request = request;
+            request.accepted = None;
+            match tokio::time::timeout_at(deadline, self.inner.sender.send(request)).await {
+                Err(_) => return Err(full().into()),
+                Ok(Err(_)) => return Err(stopped().into()),
+                Ok(Ok(())) => (),
+            }
         }
         let mut stopped_rx = self.inner.stop.subscribe();
         if *stopped_rx.borrow() {
@@ -372,6 +455,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn matching_writer_samples_signed_capacity_once_and_preserves_zero() {
+        use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let domain = Uuid::from_u128(1);
+        let key = TaskListKey { domain_id: domain, name: "capacity".into(), task_type: 0 };
+        let queue = Arc::new(DurableTaskQueue::open(store, key, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let capacity = Arc::new(AtomicI64::new(0));
+        let samples = Arc::new(AtomicUsize::new(0));
+        let live = {
+            let capacity = capacity.clone();
+            let samples = samples.clone();
+            Arc::new(move || {
+                samples.fetch_add(1, Ordering::SeqCst);
+                (100i64, 5_000_000_000i64, capacity.load(Ordering::SeqCst))
+            }) as Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>
+        };
+        let writer = TaskWriter::new_with_live_config(queue, Arc::new(Notify::new()), WriterConfig::default(), Some(live));
+        assert!(writer.inner.rendezvous.is_some(), "zero means a rendezvous, not a one-slot queue");
+        assert_eq!(samples.load(Ordering::SeqCst), 1, "capacity is sampled at owner construction");
+        capacity.store(4, Ordering::SeqCst);
+        assert!(writer.inner.rendezvous.is_some(), "live updates do not resize an existing owner");
+        writer.stop();
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "negative-capacity".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let negative = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            TaskWriter::new(queue, Arc::new(Notify::new()), WriterConfig { outstanding_appends: -1, ..WriterConfig::default() })
+        }));
+        assert!(negative.is_err(), "negative capacity must fail construction like Go make(chan, negative)");
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "positive-capacity".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let writer = TaskWriter::new(queue, Arc::new(Notify::new()), WriterConfig { outstanding_appends: 2, ..WriterConfig::default() });
+        assert_eq!(writer.inner.sender.capacity(), 2, "positive capacity retains exactly its configured buffer");
+        writer.stop();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn matching_writer_zero_capacity_times_out_unaccepted_and_keeps_accepted_write_on_stop() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let domain = Uuid::from_u128(1);
+        let key = TaskListKey { domain_id: domain, name: "rendezvous-gates".into(), task_type: 0 };
+        let queue = Arc::new(DurableTaskQueue::open(store.clone(), key.clone(), 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let entered = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let live = {
+            let calls = calls.clone();
+            let entered = entered.clone();
+            let release = release.clone();
+            Arc::new(move || {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                // construction=0, first append timeout=1, writer batch sample=2
+                if call == 2 { entered.wait(); release.wait(); }
+                let timeout = if call == 3 { 80_000_000i64 } else { 5_000_000_000i64 };
+                (0i64, timeout, 0i64)
+            }) as Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>
+        };
+        let writer = TaskWriter::new_with_live_config(queue, Arc::new(Notify::new()), WriterConfig::default(), Some(live));
+        let first_writer = writer.clone();
+        let first = tokio::spawn(async move { first_writer.append(WriteTask {
+            data: TaskData { workflow_id: "accepted".into(), ..Default::default() },
+            source_domain: domain,
+            schedule_to_start_seconds: 0,
+        }).await });
+        tokio::task::spawn_blocking({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
+
+        let busy = writer.append(WriteTask { data: TaskData::default(), source_domain: domain, schedule_to_start_seconds: 0 }).await.unwrap_err();
+        assert_eq!(busy.code(), tonic::Code::ResourceExhausted, "no second append is accepted while persistence admission is busy");
+
+        let cancelled_writer = writer.clone();
+        let cancelled = tokio::spawn(async move { cancelled_writer.append(WriteTask {
+            data: TaskData { workflow_id: "cancelled-before-acceptance".into(), ..Default::default() },
+            source_domain: domain,
+            schedule_to_start_seconds: 0,
+        }).await });
+        tokio::task::yield_now().await;
+        cancelled.abort();
+
+        writer.stop();
+        tokio::task::spawn_blocking({ let release = release.clone(); move || release.wait() }).await.unwrap();
+        let first_result = tokio::time::timeout(Duration::from_secs(1), first).await.unwrap().unwrap();
+        assert!(first_result.is_ok() || first_result.as_ref().unwrap_err().code() == tonic::Code::Unavailable,
+            "the accepted write may race its successful response with Stop");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let tasks = store.get_tasks(&key, 0, 10, 10).unwrap();
+                if !tasks.is_empty() {
+                    assert_eq!(tasks.len(), 1, "the accepted write remains durable and cancelled admission leaves no hidden request");
+                    assert_eq!(tasks[0].data.workflow_id, "accepted");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn matching_writer_enqueue_and_response_timeouts_are_distinct() {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
@@ -394,6 +580,7 @@ mod tests {
         let writer = TaskWriter {
             inner: Arc::new(Inner {
                 sender,
+                rendezvous: None,
                 stop,
                 queue,
                 config: WriterConfig {
@@ -443,7 +630,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel(1);
         let (stop, _) = watch::channel(false);
         let writer = TaskWriter { inner: Arc::new(Inner {
-            sender, stop, queue, config: WriterConfig::default(), live_config: Some(live),
+            sender, rendezvous: None, stop, queue, config: WriterConfig::default(), live_config: Some(live),
             parked: Mutex::new(Some(receiver)),
         }) };
         let task = WriteTask { data: TaskData::default(), source_domain: domain_id, schedule_to_start_seconds: 0 };
@@ -479,14 +666,14 @@ mod tests {
             let entered = entered.clone(); let release = release.clone(); let calls = calls.clone();
             let domain = domain_id.to_string();
             Arc::new(move || {
-                if calls.fetch_add(1, Ordering::SeqCst) == 0 { entered.wait(); release.wait(); }
+                if calls.fetch_add(1, Ordering::SeqCst) == 1 { entered.wait(); release.wait(); }
                 provider(&domain, "batch-live", 0)
-            }) as Arc<dyn Fn() -> (i64, i64) + Send + Sync>
+            }) as Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>
         };
         let writer = TaskWriter::new_with_live_config(queue, Arc::new(Notify::new()), WriterConfig::default(), Some(live));
         let make_request = |n: usize| {
             let (response, receiver) = oneshot::channel();
-            (Request { task: WriteTask { data: TaskData { workflow_id: format!("w{n}"), ..Default::default() }, source_domain: domain_id, schedule_to_start_seconds: 0 }, response }, receiver)
+            (Request { task: WriteTask { data: TaskData { workflow_id: format!("w{n}"), ..Default::default() }, source_domain: domain_id, schedule_to_start_seconds: 0 }, response, accepted: None }, receiver)
         };
         let (first, first_rx) = make_request(0);
         writer.inner.sender.send(first).await.unwrap();
@@ -504,7 +691,7 @@ mod tests {
         }]);
         tokio::task::spawn_blocking({ let release = release.clone(); move || release.wait() }).await.unwrap();
         for response in responses { response.await.unwrap().unwrap(); }
-        assert_eq!(calls.load(Ordering::SeqCst), 5, "Go resamples once per batch-drain loop condition, including the final condition");
+        assert_eq!(calls.load(Ordering::SeqCst), 6, "one construction-time capacity sample plus Go's per-loop batch samples");
         assert_eq!(store.get_tasks(&key, 0, 10, 10).unwrap().len(), 5);
         writer.stop();
     }
@@ -550,6 +737,7 @@ mod tests {
                     schedule_to_start_seconds: 0,
                 },
                 response,
+                accepted: None,
             })
             .await
             .unwrap();

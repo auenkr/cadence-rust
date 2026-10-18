@@ -66,7 +66,14 @@ pub(crate) fn task_writer_live_provider(
             task_type,
             5_000_000_000,
         );
-        (batch, timeout)
+        let capacity = cadence_persistence::dynamic_config::task_list_integer(
+            config.property_values("matching.outstandingTaskAppendsThreshold"),
+            domain.as_deref(),
+            task_list,
+            task_type,
+            250,
+        );
+        (batch, timeout, capacity)
     })
 }
 /// Go `taskListManagerImpl.AddTask` QPS reporting: an arrival counts toward the

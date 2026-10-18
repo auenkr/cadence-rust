@@ -271,3 +271,51 @@ Evidence in `memory/evidence/matching-writer-next/writer45/`:
 
 This is still only the standalone actor primitive. No DurableTaskQueue wiring,
 production fallback policy, or broader Matching parity claim is included.
+
+## Filtered append capacity and zero-capacity production admission (2026-10-18)
+
+The production Matching `TaskWriter` now receives the filtered
+`matching.outstandingTaskAppendsThreshold` setting from the physical queue's
+domain/list/type provider. Go defines its default as exactly 250
+(`go/common/dynamicconfig/dynamicproperties/constants.go:4001-4005`). The
+provider includes this signed value, and each writer samples it during owner
+construction. Existing owners retain their selected capacity; newly created
+owners sample the current property. Negative values fail immediately at
+construction through signed-to-capacity conversion, matching Go's
+`make(chan, negative)` failure boundary. Positive capacities retain the
+configured Tokio mpsc buffer size.
+
+Capacity zero has a separate wake-driven rendezvous path. A semaphore indicates
+that the actor is ready for its next request; a single mutex-protected slot and
+Notify carry the actual request. The actor removes the request and acknowledges
+admission only when it receives it. A drop guard withdraws an unaccepted slot
+when its caller is canceled or times out. This avoids making Tokio's required
+positive-capacity mpsc channel behave as a hidden buffer during a rendezvous.
+After admission, the existing one-shot result remains buffered and caller
+cancellation does not retract the append. Stop continues to leave the channel
+open, rejects new appends immediately, and interrupts accepted result waits.
+
+Production tests added for zero-capacity admission while the actor is gated,
+admission timeout, cancellation before acceptance, persistence of an accepted
+task across Stop, construction-time capacity sampling, non-resizing existing
+owners, negative construction failure, and positive buffer capacity. The live
+writer config test now checks the capacity filter by domain, task list, and
+task type and verifies the 250 default. The existing live batch sample test
+accounts for the additional construction-time provider call.
+
+Evidence for this slice is under `memory/evidence/matching-writer-next/writer53/`:
+
+* `focused-pass.log` / `.exit`: `CARGO_BUILD_JOBS=1 cargo test --locked -p
+  cadence-server --lib matching_writer` — exit 0, 8 passed, 0 failed.
+* `config.log` / `.exit`: `CARGO_BUILD_JOBS=1 cargo test --locked -p
+  cadence-server --lib matching_rpc_live_writer_config_is_filtered_and_resampled`
+  — exit 0, 1 passed, 0 failed.
+* `go-oracle.log` / `.exit`: `python3
+  tests/run-matching-writer-next-oracle.py` — exit 0; original Go test passed
+  and verified all 8 event traces.
+* `clippy-final.log` / `.exit`: `CARGO_BUILD_JOBS=1 cargo clippy --locked -p
+  cadence-server --all-targets -- -D warnings` — exit 0.
+
+Matching is still incomplete. This bounded slice does not claim mixed-cluster
+SDK parity or service completion; the full mixed regression and Matching parity
+audit remain separate work.

@@ -1,0 +1,9 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-ce1e72cb/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 11s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-4bff137241497f73)
+
+running 1 test
+
+thread 'matching_writer::tests::matching_writer_zero_capacity_times_out_unaccepted_and_keeps_accepted_write_on_stop' (757440) panicked at crates/cadence-server/src/matching_writer.rs:543:91:
+called `Result::unwrap()` on an `Err` value: Elapsed(())
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

@@ -1,0 +1,31 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-ce1e72cb/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 11s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-4bff137241497f73)
+
+running 8 tests
+
+thread 'matching_writer::tests::matching_writer_batches_follow_live_dynamic_config_without_recreation' (759675) panicked at crates/cadence-server/src/matching_writer.rs:694:9:
+assertion `left == right` failed: Go resamples once per batch-drain loop condition, including the final condition
+  left: 6
+ right: 5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test matching_writer::tests::matching_writer_cancelled_caller_does_not_withdraw_durable_append ... ok
+test matching_writer::tests::matching_writer_batches_follow_live_dynamic_config_without_recreation ... FAILED
+test matching_writer::tests::matching_writer_original_go_batches ... ok
+test matching_writer::tests::matching_writer_enqueue_and_response_timeouts_are_distinct ... ok
+test matching_writer::tests::matching_writer_rewrite_retry_uses_original_go_outcomes ... ok
+
+thread 'matching_writer::tests::matching_writer_samples_signed_capacity_once_and_preserves_zero' (759685) panicked at crates/cadence-server/src/matching_writer.rs:175:14:
+negative matching outstanding task append threshold: TryFromIntError(NegOverflow)
+test matching_writer::tests::matching_writer_resamples_live_append_timeout_for_saturated_enqueues ... ok
+test matching_writer::tests::matching_writer_samples_signed_capacity_once_and_preserves_zero ... ok
+test matching_writer::tests::matching_writer_zero_capacity_times_out_unaccepted_and_keeps_accepted_write_on_stop ... ok
+
+failures:
+
+failures:
+    matching_writer::tests::matching_writer_batches_follow_live_dynamic_config_without_recreation
+
+test result: FAILED. 7 passed; 1 failed; 0 ignored; 0 measured; 192 filtered out; finished in 0.26s
+
+error: test failed, to rerun pass `-p cadence-server --lib`

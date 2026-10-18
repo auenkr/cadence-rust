@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-4bff137241497f73)
+
+running 1 test
+test grpc_matching::durable_tests::matching_rpc_live_writer_config_is_filtered_and_resampled ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 199 filtered out; finished in 0.01s
+

@@ -551,15 +551,17 @@ async fn matching_rpc_live_writer_config_is_filtered_and_resampled() {
     };
     update("matching.maxTaskBatchSize", serde_json::json!(0));
     update("matching.appendTaskTimeout", serde_json::json!("17ms"));
+    update("matching.outstandingTaskAppendsThreshold", serde_json::json!(4));
     let provider = super::task_writer_live_provider(matching.frontend.state.domains.clone(), overlay.clone());
     let domain = key.domain_id.to_string();
-    assert_eq!(provider(&domain, "queue", 0), (0, 17_000_000));
-    assert_eq!(provider(&domain, "other", 0), (100, 5_000_000_000), "task-list filters must be independent");
-    assert_eq!(provider("unknown-domain", "queue", 0), (100, 5_000_000_000), "domain filters must be honored");
-    assert_eq!(provider(&domain, "queue", 1), (100, 5_000_000_000), "task-type filters must be honored");
+    assert_eq!(provider(&domain, "queue", 0), (0, 17_000_000, 4));
+    assert_eq!(provider(&domain, "other", 0), (100, 5_000_000_000, 250), "task-list filters and Go default must be honored");
+    assert_eq!(provider("unknown-domain", "queue", 0), (100, 5_000_000_000, 250), "domain filters must be honored");
+    assert_eq!(provider(&domain, "queue", 1), (100, 5_000_000_000, 250), "task-type filters must be honored");
     update("matching.maxTaskBatchSize", serde_json::json!(2));
     update("matching.appendTaskTimeout", serde_json::json!("31ms"));
-    assert_eq!(provider(&domain, "queue", 0), (2, 31_000_000), "an existing provider sees live updates");
+    update("matching.outstandingTaskAppendsThreshold", serde_json::json!(0));
+    assert_eq!(provider(&domain, "queue", 0), (2, 31_000_000, 0), "provider updates are visible; each writer samples capacity only at construction");
 }
 
 /// Minimal History used by the query test: only `GetMutableState` is
