@@ -1,3 +1,9 @@
+## JOIN sender review 2026-10-18
+
+9770e3870 NOT integrated. Real Go join/AddJoinList checksum,focused provider/parser,Clippy,inbound transport passed. Parent found local accepted refutation omitted from dissemination (only remote clears); propagation-bound event handling also missing. Candidate bundles duplicate transport module from old parent; preserve newer integrated parser on transplant. Luna Standard repair/originalGo local-state differential accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-join-state-parity-standard-42-20261018
+No bootstrap/readiness/probe claim. Writeractor41 separately active. Matchingonly/incomplete.
+
 ## Writer actor draft review 2026-10-18
 
 6c1bd6fa4 NOT integrated/not wired. Worker4focusedtests+Go8trace verification+strict persistenceClippy passed. Parent inspected: fixture test never runs Rust actor, only validates Go data; cancellation ignored during admission; stop synchronously joins in-flight backend unlike Go immediate Stop. 1/2ms polling and handler zip truncation need audit. Luna Standard repair accepted:
