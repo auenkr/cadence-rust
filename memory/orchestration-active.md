@@ -1,3 +1,9 @@
+## Outbound JSON draft reviewed 2026-10-18
+
+b2441650e NOT integrated. Worker real-Go interop incl200KB fragmented req/reply,null/empty headers,errors/deadline/drop cancellation +4inbound tests,Go inbound probe,strict Clippy all passed. Parent found response parser unchecked p[q] at CALL_RES app flag after flags;1-byte payload can panic. Also audit args/checksum/INIT/remaining TTL and typed errors. Luna Standard repair accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-json-client-parser-review-standard-37-20261018
+One connection/call,no pooling/retry/tracing/CANCEL; no SWIM sender yet. LiveGC standard-36 separate active work. Matching only.
+
 ## Production audit accepted as checklist 2026-10-18
 
 Audit229610623 integrated ae27fbe82. Parent confirmed original task_gc.go live read/loop. Audit proposed very broad next patch; narrowed to ONE live GC setting with signed backend parity, excluding earlier rejected saturation/rejection drafts. Luna Standard accepted running:
