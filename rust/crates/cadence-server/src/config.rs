@@ -148,7 +148,7 @@ pub struct HttpConfig {
     #[serde(default)]
     pub tls: Option<TlsConfig>,
     #[serde(default, rename = "TLSMode")]
-    pub tls_mode: String,
+    pub tls_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

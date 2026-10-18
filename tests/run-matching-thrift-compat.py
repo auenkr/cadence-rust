@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import ssl
 import subprocess
 import tempfile
 import time
@@ -58,11 +59,22 @@ def assert_start_fails(test_config, message):
     if result.returncode == 0 or message not in result.stdout + result.stderr:
         raise AssertionError(f'expected startup failure containing {message!r}: {result.stdout}\n{result.stderr}')
 
-missing_tls_path = artifacts / 'missing-tls.yaml'
-missing_tls_path.write_text(config.replace(
-    f'        port: {matching_http}',
-    f'        port: {matching_http}\n        TLSMode: enforced', 1))
-assert_start_fails(missing_tls_path, 'requires tls.enabled')
+def request_tls_health(port, certificate):
+    context = ssl.create_default_context(cafile=str(certificate))
+    with socket.create_connection(('127.0.0.1', port), timeout=3) as raw:
+        with context.wrap_socket(raw, server_hostname='localhost') as client:
+            client.settimeout(3)
+            client.sendall(b'POST /matching HTTP/1.1\r\nHost: localhost\r\n'
+                           b'Rpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\n'
+                           b'Rpc-Procedure: Meta::health\r\nContent-Length: 1\r\n\r\n\0')
+            response = client.recv(1024)
+            if b'200' not in response:
+                raise AssertionError(f'TLS health request returned {response!r}')
+
+invalid_mode_path = artifacts / 'invalid-mode.yaml'
+invalid_mode_path.write_text(config.replace(
+    f'        port: {matching_http}', f'        port: {matching_http}\n        TLSMode: Enforced', 1))
+assert_start_fails(invalid_mode_path, 'unknown TLSMode')
 bad_cert_path = artifacts / 'bad-cert.yaml'
 bad_cert_path.write_text(tls_config_path.read_text().replace(str(artifacts / 'tls-cert.pem'), str(artifacts / 'missing-cert.pem')))
 assert_start_fails(bad_cert_path, 'loading Matching HTTP TLS certificate/key')
@@ -153,7 +165,9 @@ with (artifacts / 'server-tls.log').open('w') as log:
         subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
                         '-run', '^TestRustMatchingTLS$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=60,
                        env={**os.environ, 'CADENCE_MATCHING_TLS_HTTP': f'https://localhost:{matching_http}/matching',
-                            'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')})
+                            'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem'),
+                            'CADENCE_MATCHING_EXPECT_PLAINTEXT_REJECT': '1',
+                            'CADENCE_MATCHING_PORT': str(matching_http)})
         with socket.create_connection(('127.0.0.1', matching_http), timeout=2) as plaintext:
             plaintext.sendall(b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n')
             plaintext.settimeout(2)
@@ -167,4 +181,170 @@ with (artifacts / 'server-tls.log').open('w') as log:
         except subprocess.TimeoutExpired:
             tls_server.kill()
             tls_server.wait()
+
+permissive_path = artifacts / 'server-permissive.yaml'
+permissive_path.write_text(tls_config_path.read_text().replace('TLSMode: enforced', 'TLSMode: permissive'))
+with (artifacts / 'server-permissive.log').open('w') as log:
+    permissive_command = command.copy()
+    permissive_command[permissive_command.index('--config') + 1] = str(permissive_path)
+    permissive_server = subprocess.Popen(permissive_command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+    try:
+        deadline = time.monotonic() + 30
+        while True:
+            if permissive_server.poll() is not None:
+                raise RuntimeError(f'Rust permissive listener exited: {artifacts / "server-permissive.log"}')
+            try:
+                with socket.create_connection(('127.0.0.1', matching_http), timeout=0.2):
+                    break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Rust permissive Matching listener did not start')
+                time.sleep(0.1)
+        # A silent connection must not hold up the listener while a different
+        # client completes a request.
+        silent = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
+        try:
+            with socket.create_connection(('127.0.0.1', matching_http), timeout=3) as probe:
+                probe.sendall(b'POST /matching HTTP/1.1\r\nHost: localhost\r\n'
+                              b'Rpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\n'
+                              b'Rpc-Procedure: Meta::health\r\nContent-Length: 1\r\n\r\n\0')
+                probe.settimeout(3)
+                if b'200' not in probe.recv(1024):
+                    raise AssertionError('listener did not serve plaintext behind a silent peer')
+            request_tls_health(matching_http, artifacts / 'tls-cert.pem')
+        finally:
+            silent.close()
+
+        # Complete a real TLS handshake after sending the ClientHello in tiny
+        # writes, then issue the same allowlisted RPC over the TLS stream.
+        raw = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
+        raw.settimeout(3)
+        incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+        context = ssl.create_default_context(cafile=str(artifacts / 'tls-cert.pem'))
+        client = context.wrap_bio(incoming, outgoing, server_side=False, server_hostname='localhost')
+        try:
+            try:
+                client.do_handshake()
+            except ssl.SSLWantReadError:
+                pass
+            hello = outgoing.read()
+            for byte in hello:
+                raw.sendall(bytes((byte,)))
+                time.sleep(0.001)
+            while True:
+                try:
+                    client.do_handshake()
+                    break
+                except ssl.SSLWantReadError:
+                    data = raw.recv(65536)
+                    if not data:
+                        raise AssertionError('server closed fragmented TLS ClientHello')
+                    incoming.write(data)
+                    pending = outgoing.read()
+                    if pending:
+                        raw.sendall(pending)
+            request = (b'POST /matching HTTP/1.1\r\nHost: localhost\r\n'
+                       b'Rpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\n'
+                       b'Rpc-Procedure: Meta::health\r\nContent-Length: 1\r\n\r\n\0')
+            client.write(request)
+            raw.sendall(outgoing.read())
+            while True:
+                try:
+                    response = client.read(4096)
+                    if b'200' not in response:
+                        raise AssertionError(f'fragmented TLS request returned {response!r}')
+                    break
+                except ssl.SSLWantReadError:
+                    incoming.write(raw.recv(65536))
+        finally:
+            raw.close()
+
+        # A client that sends a TLS record header and stalls in the handshake
+        # must not block a subsequent plaintext request.
+        stalled_tls = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
+        stalled_tls.sendall(b'\x16\x03\x03\x00\x20')
+        try:
+            with socket.create_connection(('127.0.0.1', matching_http), timeout=3) as probe:
+                probe.sendall(b'POST /matching HTTP/1.1\r\nHost: localhost\r\n'
+                              b'Rpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\n'
+                              b'Rpc-Procedure: Meta::health\r\nContent-Length: 1\r\n\r\n\0')
+                probe.settimeout(3)
+                if b'200' not in probe.recv(1024):
+                    raise AssertionError('listener did not serve plaintext behind a stalled TLS handshake')
+            request_tls_health(matching_http, artifacts / 'tls-cert.pem')
+        finally:
+            stalled_tls.close()
+        # A failed TLS handshake and a peer that closes during sniffing both
+        # release their per-connection work so later clients remain serviceable.
+        for partial in (b'\x16\x03', b'\x16\x03\x03\x00\x01\xff'):
+            failed = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
+            failed.sendall(partial)
+            failed.close()
+        with socket.create_connection(('127.0.0.1', matching_http), timeout=3) as probe:
+            probe.sendall(b'POST /matching HTTP/1.1\r\nHost: localhost\r\n'
+                          b'Rpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\n'
+                          b'Rpc-Procedure: Meta::health\r\nContent-Length: 1\r\n\r\n\0')
+            probe.settimeout(3)
+            if b'200' not in probe.recv(1024):
+                raise AssertionError('listener did not recover after sniff/handshake errors')
+        timed_out = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
+        time.sleep(16)  # YARPC muxlistener's pinned sniff deadline is 15 seconds.
+        timed_out.settimeout(2)
+        if timed_out.recv(1) != b'':
+            raise AssertionError('silent sniff peer was not closed at the 15 second deadline')
+        timed_out.close()
+        with socket.create_connection(('127.0.0.1', matching_http), timeout=3) as probe:
+            probe.sendall(b'POST /matching HTTP/1.1\r\nHost: localhost\r\n'
+                          b'Rpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\n'
+                          b'Rpc-Procedure: Meta::health\r\nContent-Length: 1\r\n\r\n\0')
+            probe.settimeout(3)
+            if b'200' not in probe.recv(1024):
+                raise AssertionError('listener did not recover after sniff timeout')
+        subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
+                        '-run', '^(TestRustMatchingNativeThrift|TestRustMatchingTLS)$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=180,
+                       env={**os.environ, 'CADENCE_MATCHING_TLS_HTTP': f'https://localhost:{matching_http}/matching',
+                            'CADENCE_MATCHING_PLAINTEXT_HTTP': f'http://127.0.0.1:{matching_http}/matching',
+                            'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{matching_http}/matching',
+                            'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
+                            'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
+                            'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')})
+    finally:
+        permissive_server.terminate()
+        try:
+            permissive_server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            permissive_server.kill()
+            permissive_server.wait()
+
+for mode, config_text in (
+        ('default', tls_config_path.read_text().replace('        TLSMode: enforced\n', '')),
+        ('disabled', tls_config_path.read_text().replace('TLSMode: enforced', 'TLSMode: disabled'))):
+    plain_mode_path = artifacts / f'server-{mode}-tls.yaml'
+    plain_mode_path.write_text(config_text)
+    with (artifacts / f'server-{mode}-tls.log').open('w') as log:
+        plain_mode_command = command.copy()
+        plain_mode_command[plain_mode_command.index('--config') + 1] = str(plain_mode_path)
+        plain_mode_server = subprocess.Popen(plain_mode_command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 30
+            while True:
+                if plain_mode_server.poll() is not None:
+                    raise RuntimeError(f'Rust {mode} TLS listener exited: {artifacts / f"server-{mode}-tls.log"}')
+                try:
+                    with socket.create_connection(('127.0.0.1', matching_http), timeout=0.2):
+                        break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f'Rust {mode} TLS Matching listener did not start')
+                    time.sleep(0.1)
+            subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
+                            '-run', '^TestRustMatchingPlainHTTP$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=60,
+                           env={**os.environ, 'CADENCE_MATCHING_PLAINTEXT_HTTP': f'http://127.0.0.1:{matching_http}/matching'})
+        finally:
+            plain_mode_server.terminate()
+            try:
+                plain_mode_server.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                plain_mode_server.kill()
+                plain_mode_server.wait()
 print(f'Native Matching Thrift compatibility passed; artifacts: {artifacts}')

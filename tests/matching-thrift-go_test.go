@@ -28,7 +28,11 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 	if os.Getenv("CADENCE_MATCHING_TCHANNEL") == "" {
 		t.Skip("requires native Rust Matching")
 	}
-	for _, mode := range []string{"tchannel", "http", "http-trailing-slash"} {
+	modes := []string{"tchannel", "http", "http-trailing-slash"}
+	if os.Getenv("CADENCE_MATCHING_TLS_HTTP") != "" {
+		modes = append(modes, "http-tls")
+	}
+	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			tr, err := tchannel.NewTransport(tchannel.ServiceName("matching-thrift-compat"))
 			if err != nil {
@@ -37,10 +41,20 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			var outbound transport.UnaryOutbound = tr.NewSingleOutbound(os.Getenv("CADENCE_MATCHING_TCHANNEL"))
 			if mode != "tchannel" {
 				endpoint := os.Getenv("CADENCE_MATCHING_HTTP")
-				if mode == "http-trailing-slash" {
-					endpoint += "/"
+				if mode == "http-tls" {
+					endpoint = os.Getenv("CADENCE_MATCHING_TLS_HTTP")
+					root := x509.NewCertPool()
+					certificate, err := os.ReadFile(os.Getenv("CADENCE_MATCHING_TLS_CERT"))
+					if err != nil || !root.AppendCertsFromPEM(certificate) {
+						t.Fatalf("load test TLS root: %v", err)
+					}
+					outbound = yhttp.NewTransport().NewSingleOutbound(endpoint, yhttp.OutboundTLSConfiguration(&tls.Config{RootCAs: root, ServerName: "localhost"}))
+				} else {
+					if mode == "http-trailing-slash" {
+						endpoint += "/"
+					}
+					outbound = yhttp.NewTransport().NewSingleOutbound(endpoint)
 				}
-				outbound = yhttp.NewTransport().NewSingleOutbound(endpoint)
 			}
 			dispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-thrift-compat", Outbounds: yarpc.Outbounds{
 				"cadence-matching": {Unary: outbound}, "cadence-frontend": {Unary: tr.NewSingleOutbound(os.Getenv("CADENCE_FRONTEND_TCHANNEL"))},
@@ -231,7 +245,7 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 func TestRustMatchingTLS(t *testing.T) {
 	endpoint := os.Getenv("CADENCE_MATCHING_TLS_HTTP")
 	if endpoint == "" {
-		t.Skip("requires enforced TLS Matching listener")
+		t.Skip("requires TLS Matching listener")
 	}
 	tr := yhttp.NewTransport()
 	root := x509.NewCertPool()
@@ -252,6 +266,52 @@ func TestRustMatchingTLS(t *testing.T) {
 	health, err := metaclient.New(dispatcher.ClientConfig("cadence-matching")).Health(ctx)
 	if err != nil || !health.GetOk() {
 		t.Fatalf("TLS Meta::health: %v %v", health, err)
+	}
+	if plain := os.Getenv("CADENCE_MATCHING_PLAINTEXT_HTTP"); plain != "" {
+		plainDispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-plaintext-compat", Outbounds: yarpc.Outbounds{
+			"cadence-matching": {Unary: yhttp.NewTransport().NewSingleOutbound(plain)},
+		}})
+		if err := plainDispatcher.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer plainDispatcher.Stop()
+		health, err := metaclient.New(plainDispatcher.ClientConfig("cadence-matching")).Health(ctx)
+		if err != nil || !health.GetOk() {
+			t.Fatalf("plaintext Meta::health: %v %v", health, err)
+		}
+	}
+	if os.Getenv("CADENCE_MATCHING_EXPECT_PLAINTEXT_REJECT") != "" {
+		plain := "http://127.0.0.1:" + os.Getenv("CADENCE_MATCHING_PORT") + "/matching"
+		plainDispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-plaintext-rejected", Outbounds: yarpc.Outbounds{
+			"cadence-matching": {Unary: yhttp.NewTransport().NewSingleOutbound(plain)},
+		}})
+		if err := plainDispatcher.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer plainDispatcher.Stop()
+		if _, err := metaclient.New(plainDispatcher.ClientConfig("cadence-matching")).Health(ctx); err == nil {
+			t.Fatal("enforced listener accepted plaintext YARPC call")
+		}
+	}
+}
+
+func TestRustMatchingPlainHTTP(t *testing.T) {
+	endpoint := os.Getenv("CADENCE_MATCHING_PLAINTEXT_HTTP")
+	if endpoint == "" {
+		t.Skip("requires plaintext Matching listener")
+	}
+	dispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-plaintext-compat", Outbounds: yarpc.Outbounds{
+		"cadence-matching": {Unary: yhttp.NewTransport().NewSingleOutbound(endpoint)},
+	}})
+	if err := dispatcher.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer dispatcher.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	health, err := metaclient.New(dispatcher.ClientConfig("cadence-matching")).Health(ctx)
+	if err != nil || !health.GetOk() {
+		t.Fatalf("plaintext Meta::health: %v %v", health, err)
 	}
 }
 func waitForPoller(t *testing.T, ctx context.Context, matching matchingserviceclient.Interface, domain string, list *s.TaskList) {

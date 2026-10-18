@@ -43,23 +43,14 @@ fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net
 async fn matching_http_tls(
     http: &config::HttpConfig,
 ) -> anyhow::Result<Option<axum_server::tls_rustls::RustlsConfig>> {
-    let mode = http.tls_mode.as_str();
-    if !matches!(mode, "" | "disabled" | "permissive" | "enforced") {
+    let mode = http.tls_mode.as_deref().unwrap_or("disabled");
+    if !matches!(mode, "disabled" | "permissive" | "enforced") {
         anyhow::bail!("unknown TLSMode {mode:?}; expected disabled, permissive, or enforced");
     }
     let tls = http.tls.as_ref();
-    if mode == "enforced" && !tls.is_some_and(|tls| tls.enabled) {
-        anyhow::bail!("Matching HTTP TLSMode enforced requires tls.enabled: true");
-    }
     let Some(tls) = tls.filter(|tls| tls.enabled) else {
         return Ok(None);
     };
-    if mode != "enforced" {
-        anyhow::bail!(
-            "Matching HTTP TLS enabled requires TLSMode: enforced; mode {:?} is unsupported",
-            http.tls_mode
-        );
-    }
     if tls.require_client_auth
         || !tls.ca_file.is_empty()
         || !tls.ca_files.is_empty()
@@ -69,16 +60,232 @@ async fn matching_http_tls(
     {
         anyhow::bail!("Matching HTTP TLS configured CA/client-auth/host-verification/serverName/sslmode options are unsupported");
     }
-    if tls.cert_file.is_empty() || tls.key_file.is_empty() {
-        anyhow::bail!("Matching HTTP TLS enforced mode requires certFile and keyFile");
+    if mode == "disabled" {
+        if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert_file, &tls.key_file)
+                .await
+                .map_err(|error| anyhow::anyhow!("creating TLS config for HTTP: {error}"))?;
+        }
+        return Ok(None);
     }
-    let config =
+    let config = if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
         axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert_file, &tls.key_file)
             .await
             .map_err(|error| {
                 anyhow::anyhow!("loading Matching HTTP TLS certificate/key: {error}")
-            })?;
+            })?
+    } else {
+        let no_certificate = std::sync::Arc::new(NoServerCertificate);
+        let server = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(no_certificate);
+        axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(server))
+    };
     Ok(Some(config))
+}
+
+#[derive(Debug)]
+struct NoServerCertificate;
+impl rustls::server::ResolvesServerCert for NoServerCertificate {
+    fn resolve(
+        &self,
+        _client_hello: rustls::server::ClientHello<'_>,
+    ) -> Option<std::sync::Arc<rustls::sign::CertifiedKey>> {
+        None
+    }
+}
+
+async fn serve_matching_http_permissive(
+    addr: std::net::SocketAddr,
+    app: axum::Router,
+    config: axum_server::tls_rustls::RustlsConfig,
+) -> anyhow::Result<()> {
+    use axum::serve::Listener;
+    use std::io;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use std::time::Duration;
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+    use tokio::sync::{mpsc, Semaphore};
+    use tokio::task::JoinSet;
+
+    trait Io: AsyncRead + AsyncWrite {}
+    impl<T: AsyncRead + AsyncWrite> Io for T {}
+    type BoxIo = Box<dyn Io + Unpin + Send>;
+
+    struct PrefixedStream {
+        prefix: std::io::Cursor<Vec<u8>>,
+        stream: tokio::net::TcpStream,
+    }
+    impl AsyncRead for PrefixedStream {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            if self.prefix.position() < self.prefix.get_ref().len() as u64 {
+                let remaining = &self.prefix.get_ref()[self.prefix.position() as usize..];
+                let n = remaining.len().min(buf.remaining());
+                buf.put_slice(&remaining[..n]);
+                let position = self.prefix.position();
+                self.prefix.set_position(position + n as u64);
+                return Poll::Ready(Ok(()));
+            }
+            Pin::new(&mut self.stream).poll_read(cx, buf)
+        }
+    }
+    impl AsyncWrite for PrefixedStream {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Pin::new(&mut self.stream).poll_write(cx, buf)
+        }
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.stream).poll_flush(cx)
+        }
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.stream).poll_shutdown(cx)
+        }
+    }
+    enum Stream {
+        Plain(PrefixedStream),
+        Tls(Box<tokio_rustls::server::TlsStream<PrefixedStream>>),
+    }
+    impl AsyncRead for Stream {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            match &mut *self {
+                Self::Plain(s) => Pin::new(s).poll_read(cx, buf),
+                Self::Tls(s) => Pin::new(s).poll_read(cx, buf),
+            }
+        }
+    }
+    impl AsyncWrite for Stream {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            match &mut *self {
+                Self::Plain(s) => Pin::new(s).poll_write(cx, buf),
+                Self::Tls(s) => Pin::new(s).poll_write(cx, buf),
+            }
+        }
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            match &mut *self {
+                Self::Plain(s) => Pin::new(s).poll_flush(cx),
+                Self::Tls(s) => Pin::new(s).poll_flush(cx),
+            }
+        }
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            match &mut *self {
+                Self::Plain(s) => Pin::new(s).poll_shutdown(cx),
+                Self::Tls(s) => Pin::new(s).poll_shutdown(cx),
+            }
+        }
+    }
+    const SNIFF_TIMEOUT: Duration = Duration::from_secs(15);
+    const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
+    const MAX_PENDING: usize = 128;
+    type ConnectionResult = (io::Result<Stream>, std::net::SocketAddr);
+    struct MixedListener {
+        listener: tokio::net::TcpListener,
+        acceptor: tokio_rustls::TlsAcceptor,
+        addr: std::net::SocketAddr,
+        completed: mpsc::Receiver<ConnectionResult>,
+        sender: mpsc::Sender<ConnectionResult>,
+        tasks: JoinSet<()>,
+        permits: std::sync::Arc<Semaphore>,
+    }
+    async fn classify_and_handshake(
+        stream: tokio::net::TcpStream,
+        acceptor: tokio_rustls::TlsAcceptor,
+        peer: std::net::SocketAddr,
+        sniff_timeout: Duration,
+        handshake_timeout: Duration,
+    ) -> ConnectionResult {
+        let mut stream = stream;
+        let mut header = vec![0; 5];
+        let sniff = tokio::time::timeout(sniff_timeout, stream.read_exact(&mut header));
+        if let Err(error) = sniff
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TLS sniff timed out"))
+            .and_then(|result| result.map(|_| ()))
+        {
+            return (Err(error), peer);
+        }
+        let stream = PrefixedStream {
+            prefix: std::io::Cursor::new(header.clone()),
+            stream,
+        };
+        let is_tls = header[0] == 0x16 && header[1] == 0x03 && header[2] >= 1;
+        let connection = if is_tls {
+            match tokio::time::timeout(handshake_timeout, acceptor.accept(stream)).await {
+                Ok(Ok(tls)) => Stream::Tls(Box::new(tls)),
+                Ok(Err(error)) => return (Err(io::Error::other(error)), peer),
+                Err(_) => {
+                    return (
+                        Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "TLS handshake timed out",
+                        )),
+                        peer,
+                    )
+                }
+            }
+        } else {
+            Stream::Plain(stream)
+        };
+        (Ok(connection), peer)
+    }
+    impl Listener for MixedListener {
+        type Io = BoxIo;
+        type Addr = std::net::SocketAddr;
+        async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+            loop {
+                tokio::select! {
+                    accepted = self.listener.accept() => {
+                        let (stream, peer) = match accepted { Ok(v) => v, Err(_) => continue };
+                        let Ok(permit) = self.permits.clone().try_acquire_owned() else { drop(stream); continue; };
+                        let tx = self.sender.clone();
+                        let acceptor = self.acceptor.clone();
+                        self.tasks.spawn(async move {
+                            let _permit = permit;
+                            let result = classify_and_handshake(stream, acceptor, peer, SNIFF_TIMEOUT, HANDSHAKE_TIMEOUT).await;
+                            let _ = tx.send(result).await;
+                        });
+                    }
+                    result = self.completed.recv() => {
+                        let Some((Ok(io), peer)) = result else { continue; };
+                        return (Box::new(io), peer);
+                    }
+                    _ = self.tasks.join_next(), if !self.tasks.is_empty() => {}
+                }
+            }
+        }
+        fn local_addr(&self) -> io::Result<Self::Addr> {
+            Ok(self.addr)
+        }
+    }
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let addr = listener.local_addr()?;
+    let (sender, completed) = mpsc::channel(MAX_PENDING);
+    let listener = MixedListener {
+        listener,
+        acceptor: tokio_rustls::TlsAcceptor::from(config.get_inner()),
+        addr,
+        completed,
+        sender,
+        tasks: JoinSet::new(),
+        permits: std::sync::Arc::new(Semaphore::new(MAX_PENDING)),
+    };
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -101,7 +308,7 @@ mod matching_http_listener_tests {
             .to_string()
             .contains("HTTP port is not set"));
         let tls: config::HttpConfig = serde_yaml::from_str("tls: {enabled: true}").unwrap();
-        assert!(matching_http_tls(&tls).await.is_err());
+        assert!(matching_http_tls(&tls).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -110,26 +317,33 @@ mod matching_http_listener_tests {
             serde_yaml::from_str("TLSMode: enforced").unwrap();
         assert!(matching_http_tls(&enforced_without_tls)
             .await
-            .err()
             .unwrap()
-            .to_string()
-            .contains("requires tls.enabled"));
-        let enforced_with_tls_disabled: config::HttpConfig = serde_yaml::from_str(
-            "TLSMode: enforced\ntls: {enabled: false}",
-        )
-        .unwrap();
+            .is_none());
+        let enforced_with_tls_disabled: config::HttpConfig =
+            serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: false}").unwrap();
         assert!(matching_http_tls(&enforced_with_tls_disabled)
             .await
-            .err()
             .unwrap()
-            .to_string()
-            .contains("requires tls.enabled"));
+            .is_none());
+        let permissive_without_tls: config::HttpConfig =
+            serde_yaml::from_str("TLSMode: permissive").unwrap();
+        assert!(matching_http_tls(&permissive_without_tls)
+            .await
+            .unwrap()
+            .is_none());
 
         let uppercase: config::HttpConfig = serde_yaml::from_str(
             "TLSMode: Enforced\ntls: {enabled: true, certFile: cert, keyFile: key}",
         )
         .unwrap();
         assert!(matching_http_tls(&uppercase)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("unknown TLSMode"));
+        let empty: config::HttpConfig = serde_yaml::from_str("TLSMode: ''").unwrap();
+        assert!(matching_http_tls(&empty)
             .await
             .err()
             .unwrap()
@@ -145,18 +359,11 @@ mod matching_http_listener_tests {
             .err()
             .unwrap()
             .to_string()
-            .contains("requires TLSMode: enforced"));
+            .contains("loading Matching HTTP TLS certificate/key"));
 
-        let missing_cert: config::HttpConfig = serde_yaml::from_str(
-            "TLSMode: enforced\ntls: {enabled: true, keyFile: key}",
-        )
-        .unwrap();
-        assert!(matching_http_tls(&missing_cert)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("requires certFile and keyFile"));
+        let missing_cert: config::HttpConfig =
+            serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: true, keyFile: key}").unwrap();
+        assert!(matching_http_tls(&missing_cert).await.unwrap().is_some());
 
         let invalid_cert = tempfile::NamedTempFile::new().unwrap();
         let invalid_key = tempfile::NamedTempFile::new().unwrap();
@@ -624,11 +831,26 @@ async fn main() -> anyhow::Result<()> {
                                 matching_service.clone(),
                                 http.procedures.clone(),
                             );
-                            if let Some(tls_config) = matching_http_tls_config.clone() {
+                            let http = matching_rpc
+                                .and_then(|rpc| rpc.http.as_ref())
+                                .expect("configured Matching HTTP");
+                            if http.tls_mode.as_deref() == Some("enforced")
+                                && http.tls.as_ref().is_some_and(|tls| tls.enabled)
+                            {
+                                let tls_config = matching_http_tls_config
+                                    .clone()
+                                    .expect("validated enforced TLS configuration");
                                 axum_server::bind_rustls(addr, tls_config)
                                     .serve(app.into_make_service())
                                     .await
                                     .map_err(anyhow::Error::from)
+                            } else if http.tls_mode.as_deref() == Some("permissive")
+                                && http.tls.as_ref().is_some_and(|tls| tls.enabled)
+                            {
+                                let tls_config = matching_http_tls_config
+                                    .clone()
+                                    .expect("validated permissive TLS configuration");
+                                serve_matching_http_permissive(addr, app, tls_config).await
                             } else {
                                 let listener = tokio::net::TcpListener::bind(addr).await?;
                                 axum::serve(listener, app).await.map_err(anyhow::Error::from)

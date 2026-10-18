@@ -35,5 +35,96 @@
 ## Remaining parity gaps
 
 - Auto-selection mirrors `go/common/rpc/localip.go` address scoring and first-highest tie behavior. `if-addrs` does not expose interface UP flags, so configured non-loopback addresses are treated as UP; UP/down-interface scoring remains a parity gap.
-- TLS parity remains partial. Implemented here: enabled + enforced server TLS with certificate/key loading and TLS-only listener, plus rejection of unsupported configured client-auth/CA/verification settings and unsupported enabled modes. Not implemented here: Go CA file trust behavior, mutual TLS/client authentication, host verification/server-name config, and permissive mode. Go builds HTTP TLS only when `HTTP.TLS.Enabled`, then passes the configured mode. No broad TLS parity claim is made.
+- TLS parity remains partial. Implemented here: default/disabled, permissive mixed TLS/plaintext, and enforced TLS-only server behavior, plus certificate/key handling and rejection of unsupported configured client-auth/CA/verification settings. Not implemented here: Go CA file trust behavior, mutual TLS/client authentication, and host verification/server-name config. Go builds HTTP TLS only when `HTTP.TLS.Enabled`, then passes the configured mode. No broad TLS parity claim is made.
 - This slice does not complete Matching service replacement or any Matching migration gate.
+
+## YARPC HTTP TLS mode parity (2026-10-18)
+
+Recovered and completed the interrupted `http-permissive-standard-10` draft
+(`58637404a` in sibling worktree `t3-cf940e1b`). Matching HTTP now follows
+YARPC v1.88.0 mode behavior when `rpc.http.tls.enabled` is true:
+
+- Missing `TLSMode` defaults to `disabled`; `disabled` serves plaintext only.
+- `permissive` sniffs the initial TLS record and accepts TLS and plaintext on
+  the same bound port.
+- `enforced` accepts TLS only and rejects plaintext during the TLS handshake.
+- Exact lowercase values are accepted; unknown/case-variant values fail
+  startup. If TLS is absent or disabled, YARPC does not pass its mode/config to
+  the HTTP inbound, so the listener remains plaintext even with an `enforced`
+  field present.
+- TLS cert/key loading follows Go's pair semantics. When both are provided,
+  invalid or mismatched PEM fails startup; if either is omitted, startup is
+  allowed and TLS handshakes have no server certificate. CA/client-auth and
+  host-verification options remain explicitly unsupported in Rust.
+
+Evidence from this worktree, using the warmed target at
+`/home/ubuntu/.t3/worktrees/cadence-rust/t3-0a3d52d6/rust/target` and the pinned
+Go IDL submodule `bfbf273b41b9e36ce21e47a49600d22d73e4614c`:
+
+- `cargo test -p cadence-server --bin cadence-server matching_http_listener_tests -- --nocapture`: 3 passed.
+- `cargo clippy -p cadence-server --all-targets -- -D warnings`: passed.
+- `python3 tests/run-matching-thrift-compat.py --server-bin <built cadence-server>`: passed. The Go-generated suite exercised all ten Matching methods over plaintext and trusted TLS on the same permissive listener, plus TChannel and both HTTP path spellings. It also checked enforced plaintext rejection, default/disabled plaintext with `tls.enabled`, invalid TLS modes and cert/key files, procedure allowlisting, and JSON listener isolation. Artifacts: `/tmp/matching-thrift-compat-qkes1qi4`; runner log: `/tmp/cadence-permissive-final-probe.log`.
+
+This closes only Matching HTTP TLS mode behavior. Advanced TLS configuration,
+interface-UP selection and the broader Matching/service migration remain open.
+
+## Fragmented and concurrent permissive accepts (2026-10-18)
+
+Repairing candidate `30805ee32f58c467d87ff74a10b9e333e8233650` on the latest
+Ringpop parent found that its single `TcpStream::peek` rejected a ClientHello
+when fewer than five bytes were available in the first read, and performed
+both sniffing and TLS negotiation inside `Listener::accept`, serializing every
+new client behind a silent or slow peer. The repaired listener accumulates the
+five byte record prefix under YARPC's 15 second sniff deadline, replays those
+bytes through a prefix stream, and runs sniff/handshake work in an owned
+`JoinSet` capped at 128 in-flight sockets. TLS negotiation is bounded at the
+YARPC v1.88.0 deadline of 120 seconds. Dropping the listener drops the
+`JoinSet`, aborting outstanding connection tasks; timed out and failed
+connections are dropped without blocking subsequent accepts.
+
+Pinned source references under `$GOPATH/pkg/mod/go.uber.org/yarpc@v1.88.0`:
+
+- `transport/internal/tls/muxlistener/tls_checker.go` checks five bytes for
+  content type `22`, major version `3`, minor version `>= 1`.
+- `transport/internal/tls/muxlistener/listener.go` sets 15 seconds for sniffing
+  and 120 seconds for TLS handshake; its `serve` accepts sockets continuously
+  and dispatches each to a goroutine. Its `matchTLSConnection` applies the
+  sniff read deadline and clears it afterward.
+- `transport/internal/tls/muxlistener/conn_sniffer.go` buffers consumed sniff
+  bytes and replays them to the selected protocol handler.
+- Note: YARPC's `isTLSClientHelloRecord` performs one `Read`, so a short read is
+  treated as plaintext. The repaired Rust listener intentionally waits for all
+  five bytes to satisfy the required byte-fragmented ClientHello behavior while
+  retaining YARPC's timeout, prefix replay, and classification predicate.
+
+TLS config behavior was checked against `go/common/rpc/params.go` and
+`go/common/config/tls.go`: `TLS.Enabled` gates `ToTLSConfig` and the mode is
+only forwarded when enabled; disabled mode is a raw plaintext listener;
+`ToTLSConfig` loads a certificate only when both cert and key are nonempty,
+otherwise startup succeeds and TLS handshakes have no server certificate.
+When both paths are present, read/parse/mismatch errors are returned during
+startup. Therefore an `enforced` field without enabled TLS still results in
+plaintext, and enabled TLS with incomplete cert/key does not fail startup.
+
+Bound validation in `tests/run-matching-thrift-compat.py` covers a
+one-byte-at-a-time TLS ClientHello with a successful `Meta::health` request,
+plaintext and TLS clients behind an initially silent peer and behind a stalled
+TLS handshake, recovery after peer close/handshake errors, and closure/recovery
+after the 15 second sniff timeout. These live checks now passed on the repaired
+binary; earlier stopped-build notes below are superseded by the final run.
+
+Final repair verification in the isolated checkout at `t3-b9747ee8`, starting
+from parent `b2143c8ca` and recovering the permissive-mode changes from
+`30805ee32` plus the uncommitted repair diff from sibling worktree `t3-54eb476d`:
+
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-b9747ee8/rust/target cargo test -p cadence-server --bin cadence-server matching_http_listener_tests -- --nocapture`: exit 0, 3 passed. Log: `/tmp/http-repair-focused.log`.
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-b9747ee8/rust/target cargo build --locked -p cadence-server`: exit 0. Log: `/tmp/http-repair-build.log`.
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-b9747ee8/rust/target cargo clippy --locked -p cadence-server --all-targets -- -D warnings`: exit 0. Log: `/tmp/http-repair-clippy.log`.
+- `python3 tests/run-matching-thrift-compat.py --server-bin rust/target/debug/cadence-server`: exit 0. Log: `/tmp/http-repair-compat.log`; generated server configs, logs and certificates: `/tmp/matching-thrift-compat-7atapa07`.
+- The live runner passed all ten Go-generated Matching methods on the permissive listener over plaintext HTTP and trusted TLS HTTP, plus TChannel and HTTP trailing-slash paths. It also passed default/disabled plaintext behavior, enforced TLS plaintext rejection, allowlist and JSON-route isolation, cert/key startup rejection, fragmented ClientHello, simultaneous plaintext and TLS service behind silent/stalled connections, sniff timeout closure and post-timeout recovery.
+- The runner verifies concurrent service behind stalled handshakes and the 15 second sniff timeout, but does not wait 120 seconds to observe the TLS handshake deadline or explicitly cancel the listener while handshakes are pending. The 120 second deadline and `JoinSet` drop-abort lifecycle are implemented and reviewed; direct runtime assertions for those two lifecycle events remain open.
+- All four exit marker files (`/tmp/http-repair-focused.exit`, `/tmp/http-repair-build.exit`, `/tmp/http-repair-clippy.exit`, `/tmp/http-repair-compat.exit`) contain `0`. `tokio-rustls 0.26.6` was already represented in `rust/Cargo.lock`; no lockfile update was required.
+
+The cancelled task's T3 thread read returned `thread_not_found`; recovery used
+the extant worktree, its uncommitted diff and this memory file. No source was
+modified in the sibling or parent worktrees. No push was performed.
