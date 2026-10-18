@@ -1,3 +1,10 @@
+## Outbound JSON transport repaired and integrated 2026-10-18
+
+standard-37 passed4adversarial tests incl29truncated headers,argument/id/type/flag/checksum cases,CRC32/CRC32C fragmentation,elapsed INIT TTL; strict locked serverClippy,real Go outbound200KB/errors/deadline/disconnect and Go inbound regression. Parent reviewed checked parser and typed application errors. Integrated8bcc48481+595a3614e+755052150. Exact malformed Go rejection text not compared; cancellation closes socket,no explicit CANCEL. Worker cleaned own target after evidence.
+Next Luna Standard JOIN-only sender accepted running:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-join-sender-standard-38-20261018
+No bootstrap retry/readiness/probe/main wiring in slice; real original Go node required. LiveGCstandard-36 separate active. Matching only/incomplete.
+
 ## Outbound JSON draft reviewed 2026-10-18
 
 b2441650e NOT integrated. Worker real-Go interop incl200KB fragmented req/reply,null/empty headers,errors/deadline/drop cancellation +4inbound tests,Go inbound probe,strict Clippy all passed. Parent found response parser unchecked p[q] at CALL_RES app flag after flags;1-byte payload can panic. Also audit args/checksum/INIT/remaining TTL and typed errors. Luna Standard repair accepted:
