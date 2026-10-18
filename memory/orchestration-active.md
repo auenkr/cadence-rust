@@ -1,3 +1,11 @@
+## Async continuation 2026-10-18
+
+Checkpoint eac0ba82a pushed origin/master; Ringpop JSON boundary integrated bfce02825 + 3aed4e915. Prior permissive standard-10 interrupted, no pending runs.
+Two new isolated Codex gpt-6-luna workers, serviceTier=default:
+- HTTP recovery/implementation: node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Ahttp-permissive-standard-11-20261018
+- Production Ringpop source contract/next slice research: node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-provider-contract-standard-8-20261018
+Both accepted running, no pending questions. Read results on notification; do not duplicate. No broad accumulated regression yet on latest parent.
+
 # Disk recovered / JSON validation resumed — 2026-10-17
 
 JSON final round6 remained incomplete: candidate duplicate 88df45ace, no final
