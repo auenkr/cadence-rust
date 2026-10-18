@@ -1,0 +1,248 @@
+{
+  "checksumMismatchFullSync": {
+    "changes": [
+      {
+        "source": "local",
+        "sourceIncarnationNumber": 41,
+        "address": "local",
+        "incarnationNumber": 41,
+        "status": "alive",
+        "labels": {
+          "zone": "west"
+        },
+        "timestamp": -62135596800
+      },
+      {
+        "source": "local",
+        "sourceIncarnationNumber": 41,
+        "address": "other",
+        "incarnationNumber": 8,
+        "status": "alive",
+        "timestamp": -62135596800
+      },
+      {
+        "source": "local",
+        "sourceIncarnationNumber": 41,
+        "address": "tomb",
+        "incarnationNumber": 6,
+        "status": "faulty",
+        "tombstone": true,
+        "timestamp": -62135596800
+      }
+    ],
+    "fullSync": true,
+    "state": {
+      "changes": [],
+      "pending": 0,
+      "counters": {}
+    }
+  },
+  "failedCallbackNotInvoked": {
+    "afterFailedDelivery": {
+      "changes": [
+        {
+          "source": "peer",
+          "sourceIncarnationNumber": 0,
+          "address": "failed",
+          "incarnationNumber": 3,
+          "status": "alive",
+          "timestamp": -62135596800
+        },
+        {
+          "source": "new",
+          "sourceIncarnationNumber": 0,
+          "address": "peer",
+          "incarnationNumber": 2,
+          "status": "suspect",
+          "timestamp": 19
+        }
+      ],
+      "pending": 2,
+      "counters": {
+        "failed": 0,
+        "peer": 1
+      }
+    },
+    "issued": [
+      {
+        "source": "new",
+        "sourceIncarnationNumber": 0,
+        "address": "peer",
+        "incarnationNumber": 2,
+        "status": "suspect",
+        "timestamp": 19
+      },
+      {
+        "source": "peer",
+        "sourceIncarnationNumber": 0,
+        "address": "failed",
+        "incarnationNumber": 3,
+        "status": "alive",
+        "timestamp": -62135596800
+      }
+    ]
+  },
+  "maxPByPingableCount": {
+    "0": 0,
+    "1": 15,
+    "10": 30,
+    "100": 45,
+    "8": 15,
+    "9": 15,
+    "98": 30,
+    "99": 30,
+    "999": 45
+  },
+  "receiverSourceIncarnationFilter": {
+    "changes": [
+      {
+        "source": "sender",
+        "sourceIncarnationNumber": 10,
+        "address": "keep-incarnation",
+        "incarnationNumber": 2,
+        "status": "alive",
+        "timestamp": -62135596800
+      },
+      {
+        "source": "other",
+        "sourceIncarnationNumber": 9,
+        "address": "keep-source",
+        "incarnationNumber": 3,
+        "status": "alive",
+        "timestamp": -62135596800
+      }
+    ],
+    "state": {
+      "changes": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 9,
+          "address": "drop",
+          "incarnationNumber": 1,
+          "status": "alive",
+          "timestamp": -62135596800
+        },
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 10,
+          "address": "keep-incarnation",
+          "incarnationNumber": 2,
+          "status": "alive",
+          "timestamp": -62135596800
+        },
+        {
+          "source": "other",
+          "sourceIncarnationNumber": 9,
+          "address": "keep-source",
+          "incarnationNumber": 3,
+          "status": "alive",
+          "timestamp": -62135596800
+        }
+      ],
+      "pending": 3,
+      "counters": {
+        "drop": 0,
+        "keep-incarnation": 1,
+        "keep-source": 1
+      }
+    }
+  },
+  "recordChange": {
+    "changes": [
+      {
+        "source": "s2",
+        "sourceIncarnationNumber": 8,
+        "address": "peer",
+        "incarnationNumber": 3,
+        "status": "suspect",
+        "timestamp": 12
+      }
+    ],
+    "pending": 1,
+    "counters": {
+      "peer": 0
+    }
+  },
+  "repeatedSuccessfulSends": [
+    {
+      "changes": [
+        {
+          "source": "local",
+          "sourceIncarnationNumber": 41,
+          "address": "repeat",
+          "incarnationNumber": 4,
+          "status": "alive",
+          "timestamp": -62135596800
+        }
+      ],
+      "pending": 1,
+      "counters": {
+        "repeat": 1
+      }
+    },
+    {
+      "changes": [
+        {
+          "source": "local",
+          "sourceIncarnationNumber": 41,
+          "address": "repeat",
+          "incarnationNumber": 4,
+          "status": "alive",
+          "timestamp": -62135596800
+        }
+      ],
+      "pending": 1,
+      "counters": {
+        "repeat": 2
+      }
+    },
+    {
+      "changes": [
+        {
+          "source": "local",
+          "sourceIncarnationNumber": 41,
+          "address": "repeat",
+          "incarnationNumber": 4,
+          "status": "alive",
+          "timestamp": -62135596800
+        }
+      ],
+      "pending": 0,
+      "counters": {}
+    },
+    {
+      "changes": [],
+      "pending": 0,
+      "counters": {}
+    }
+  ],
+  "senderCallbackReplacement": {
+    "afterCallback": {
+      "changes": [
+        {
+          "source": "new",
+          "sourceIncarnationNumber": 0,
+          "address": "peer",
+          "incarnationNumber": 2,
+          "status": "suspect",
+          "timestamp": 19
+        }
+      ],
+      "pending": 1,
+      "counters": {
+        "peer": 1
+      }
+    },
+    "issued": [
+      {
+        "source": "old",
+        "sourceIncarnationNumber": 0,
+        "address": "peer",
+        "incarnationNumber": 1,
+        "status": "alive",
+        "timestamp": -62135596800
+      }
+    ]
+  },
+  "source": "github.com/uber/ringpop-go v0.10.0 swim/disseminator.go"
+}

@@ -11,7 +11,9 @@ import stat
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = Path("/home/ubuntu/go/pkg/mod/github.com/uber/ringpop-go@v0.10.0")
 TEST = ROOT / "tests/ringpop-member-primitives-oracle_test.go"
+DISSEMINATOR_TEST = ROOT / "tests/ringpop-disseminator-oracle_test.go"
 FIXTURE = ROOT / "rust/crates/cadence-common/tests/fixtures/ringpop_member_primitives.json"
+DISSEMINATOR_FIXTURE = ROOT / "rust/crates/cadence-common/tests/fixtures/ringpop_disseminator.json"
 
 if not (MODULE / "swim/member.go").is_file():
     raise SystemExit(f"pinned Ringpop module not found: {MODULE}")
@@ -31,13 +33,15 @@ with tempfile.TemporaryDirectory(prefix="ringpop-member-oracle-") as temp:
     overlay = temp / "overlay.json"
     output = Path(temp) / "ringpop_member_primitives.json"
     virtual_test = copied_module / "swim/zz_cadence_member_primitives_oracle_test.go"
-    overlay.write_text(json.dumps({"Replace": {str(virtual_test): str(TEST)}}))
-    env = {**os.environ, "CADENCE_RINGPOP_MEMBER_OUTPUT": str(output)}
+    virtual_disseminator_test = copied_module / "swim/zz_cadence_disseminator_oracle_test.go"
+    overlay.write_text(json.dumps({"Replace": {str(virtual_test): str(TEST), str(virtual_disseminator_test): str(DISSEMINATOR_TEST)}}))
+    env = {**os.environ, "CADENCE_RINGPOP_MEMBER_OUTPUT": str(output), "CADENCE_RINGPOP_DISSEMINATOR_OUTPUT": str(temp / "ringpop_disseminator.json")}
     subprocess.run(
         ["go", "test", "-overlay", str(overlay), "./swim",
-         "-run", "^TestGenerateRingpopMemberPrimitiveFixtures$", "-count=1"],
+         "-run", "^TestGenerateRingpop(MemberPrimitive|Disseminator)Fixtures$", "-count=1"],
         cwd=copied_module, env=env, check=True,
     )
     FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE.write_bytes(output.read_bytes())
-print(f"Generated {FIXTURE.relative_to(ROOT)} from ringpop-go v0.10.0")
+    DISSEMINATOR_FIXTURE.write_bytes((temp / "ringpop_disseminator.json").read_bytes())
+print(f"Generated {FIXTURE.relative_to(ROOT)} and {DISSEMINATOR_FIXTURE.relative_to(ROOT)} from ringpop-go v0.10.0")
