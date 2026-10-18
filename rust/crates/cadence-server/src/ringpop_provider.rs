@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ringpop_tchannel::{RingpopError, RingpopHandler, RingpopResponse};
+use crate::tchannel_json_client::{self, JsonCallError};
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RingpopRequestCounts {
@@ -96,6 +98,77 @@ impl RingpopNode {
         self.state.lock().expect("Ringpop state poisoned").counts
     }
 
+    /// Send one Ringpop v0.10.0 JOIN call to the selected seed and apply its
+    /// returned membership with the same `AddJoinList` semantics as Go.
+    /// This deliberately does not select hosts, retry, or change readiness.
+    pub async fn join_seed(
+        &self,
+        seed: &str,
+        timeout: Duration,
+    ) -> Result<JoinResponse, JsonCallError> {
+        let request = {
+            let node = self.state.lock().expect("Ringpop state poisoned");
+            let local = node.memberlist.member(&node.address).expect("local member");
+            JoinRequest {
+                app: node.app.clone(),
+                source: local.address.clone(),
+                incarnation: local.incarnation,
+                timeout: i64::try_from(timeout.as_nanos()).unwrap_or(i64::MAX),
+                labels: local.labels.clone(),
+            }
+        };
+        let response = tchannel_json_client::call(
+            seed,
+            "ringpop",
+            "/protocol/join",
+            None,
+            &serde_json::to_value(&request).expect("JoinRequest serialization"),
+            timeout,
+        )
+        .await?;
+        // Decode the complete response before touching membership. Go's
+        // encoding/json likewise completes the response decode before
+        // JoinGroup calls AddJoinList; malformed JSON cannot partially apply.
+        let join: JoinResponse = serde_json::from_value(response.body)
+            .map_err(|error| JsonCallError::Transport(anyhow::anyhow!(error)))?;
+        let changes = join.membership.as_deref().unwrap_or_default();
+        let mut node = self.state.lock().expect("Ringpop state poisoned");
+        // Go memberlist.Update returns without applying anything when the
+        // node stopped while the JOIN request was in flight.
+        if node.stopped {
+            return Ok(join);
+        }
+        let local_address = node.address.clone();
+        let State {
+            memberlist,
+            disseminator,
+            ..
+        } = &mut *node;
+        apply_join_list(
+            memberlist,
+            disseminator,
+            &local_address,
+            changes,
+            || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64
+            },
+            |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+        );
+        Ok(join)
+    }
+
+    /// Stable snapshot boundary for bootstrap owners and compatibility checks.
+    pub fn membership_snapshot(&self) -> (Vec<Member>, u32) {
+        let node = self.state.lock().expect("Ringpop state poisoned");
+        (
+            node.memberlist.members().to_vec(),
+            node.memberlist.checksum(),
+        )
+    }
+
     pub fn dissemination_counts(&self) -> BTreeMap<String, usize> {
         self.state
             .lock()
@@ -147,6 +220,39 @@ impl RingpopNode {
         R: FnMut(usize) -> usize,
     {
         handle_ping(&self.state, body, next_incarnation, insert_position)
+    }
+}
+
+/// Apply the exact accepted-change pipeline used by Go's
+/// `Node.handleChanges` followed by `memberlist.AddJoinList`.
+fn apply_join_list<F, R>(
+    memberlist: &mut Memberlist,
+    disseminator: &mut Disseminator,
+    local_address: &str,
+    changes: &[Change],
+    next_incarnation: F,
+    insert_position: R,
+) where
+    F: FnMut() -> i64,
+    R: FnMut(usize) -> usize,
+{
+    let update = memberlist.update(changes, next_incarnation, insert_position);
+    if !update.accepted.is_empty() {
+        let pingable_members = memberlist
+            .members()
+            .iter()
+            .filter(|member| {
+                member.address != local_address
+                    && (member.status == ALIVE || member.status == SUSPECT)
+            })
+            .count();
+        disseminator.adjust_max_propagations(pingable_members);
+    }
+    for change in update.accepted {
+        disseminator.record(change.clone());
+        if change.address != local_address {
+            disseminator.clear_address(&change.address);
+        }
     }
 }
 
@@ -280,8 +386,112 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ringpop_tchannel::{RingpopHandler, RingpopResponse};
     use cadence_common::ringpop_wire::{Change, Ping, ALIVE};
     use std::collections::BTreeMap;
+
+    #[derive(serde::Deserialize)]
+    struct JoinAddJoinListOracle {
+        cases: Vec<JoinAddJoinListCase>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct JoinAddJoinListCase {
+        name: String,
+        now_millis: i64,
+        local: Member,
+        members: Vec<Member>,
+        input: Vec<Change>,
+        final_members: Vec<Member>,
+        checksum: u32,
+        initial_queued: BTreeMap<String, JoinQueuedOracle>,
+        queued: BTreeMap<String, JoinQueuedOracle>,
+        max_p: usize,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct JoinQueuedOracle {
+        change: Change,
+        propagated: usize,
+    }
+
+    #[test]
+    fn join_addjoinlist_matches_original_go_refutation_fixtures() {
+        let oracle: JoinAddJoinListOracle = serde_json::from_str(include_str!(
+            "../tests/fixtures/ringpop_join_addjoinlist.json"
+        ))
+        .expect("original Go AddJoinList fixture");
+        assert_eq!(oracle.cases.len(), 4);
+        for case in oracle.cases {
+            let mut members = case.members.clone();
+            members.sort_by(|a, b| a.address.cmp(&b.address));
+            let local = case.local.clone();
+            let initial_remote = members
+                .into_iter()
+                .filter(|member| member.address != local.address)
+                .collect();
+            let mut memberlist = Memberlist::from_snapshot(local.clone(), initial_remote);
+            let mut disseminator = Disseminator::new(15);
+            for (address, pending) in &case.initial_queued {
+                disseminator.record(pending.change.clone());
+                for _ in 0..pending.propagated {
+                    disseminator.complete_sender(std::slice::from_ref(&pending.change), true);
+                }
+                assert_eq!(
+                    disseminator.propagation_counts().get(address),
+                    Some(&pending.propagated),
+                    "{} initial counter for {address}",
+                    case.name
+                );
+            }
+            apply_join_list(
+                &mut memberlist,
+                &mut disseminator,
+                &local.address,
+                &case.input,
+                || case.now_millis,
+                |_| 0,
+            );
+            let mut got_members = memberlist.members().to_vec();
+            got_members.sort_by(|a, b| a.address.cmp(&b.address));
+            assert_eq!(got_members, case.final_members, "{} members", case.name);
+            assert_eq!(
+                memberlist.checksum(),
+                case.checksum,
+                "{} checksum",
+                case.name
+            );
+            assert_eq!(
+                disseminator.max_propagations(),
+                case.max_p,
+                "{} maxP",
+                case.name
+            );
+            let got_counts = disseminator.propagation_counts();
+            let expected_counts: BTreeMap<_, _> = case
+                .queued
+                .iter()
+                .map(|(address, queued)| (address.clone(), queued.propagated))
+                .collect();
+            assert_eq!(got_counts, expected_counts, "{} counters", case.name);
+            let got_changes: BTreeMap<_, _> = disseminator
+                .issue_sender()
+                .into_iter()
+                .map(|change| (change.address.clone(), change))
+                .collect();
+            let expected_changes: BTreeMap<_, _> = case
+                .queued
+                .into_iter()
+                .map(|(address, queued)| (address, queued.change))
+                .collect();
+            assert_eq!(
+                got_changes, expected_changes,
+                "{} queued changes",
+                case.name
+            );
+        }
+    }
 
     fn node() -> RingpopNode {
         RingpopNode::new(
@@ -294,6 +504,217 @@ mod tests {
             },
             true,
         )
+    }
+
+    async fn outbound_test_server(
+        handler: RingpopHandler,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = probe.local_addr().unwrap();
+        drop(probe);
+        let task = tokio::spawn(async move {
+            let _ = crate::tchannel::serve_ringpop(address, handler).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        (address.to_string(), task)
+    }
+
+    #[tokio::test]
+    async fn outbound_join_empty_nil_failure_malformed_and_deadline_leave_state_unchanged() {
+        let cases: Vec<(RingpopHandler, bool)> = vec![
+            (
+                RingpopHandler::new(|_, _, _| async {
+                    Ok(RingpopResponse { headers: None, body: br#"{"app":"other","coordinator":"not-checked","membership":null,"membershipChecksum":999}"#.to_vec() })
+                }),
+                true,
+            ),
+            (
+                RingpopHandler::new(|_, _, _| async {
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: br#"{"membership":[]}"#.to_vec(),
+                    })
+                }),
+                true,
+            ),
+            (
+                RingpopHandler::new(|_, _, _| async {
+                    Err(RingpopError::Application("seed rejected JOIN".into()))
+                }),
+                false,
+            ),
+            (
+                RingpopHandler::new(|_, _, _| async {
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: b"{malformed".to_vec(),
+                    })
+                }),
+                false,
+            ),
+            (
+                RingpopHandler::new(|_, _, _| async {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: br#"{"membership":[]}"#.to_vec(),
+                    })
+                }),
+                false,
+            ),
+        ];
+        for (index, (handler, succeeds)) in cases.into_iter().enumerate() {
+            let (address, server) = outbound_test_server(handler).await;
+            let node = node();
+            let before = node.membership_snapshot();
+            let timeout = if index == 4 {
+                std::time::Duration::from_millis(50)
+            } else {
+                std::time::Duration::from_millis(500)
+            };
+            let result = node.join_seed(&address, timeout).await;
+            if succeeds {
+                let response = result.expect("Go-compatible nil membership response");
+                if index == 0 {
+                    assert!(response.membership.is_none());
+                } else {
+                    assert_eq!(response.membership, Some(vec![]));
+                }
+            } else {
+                assert!(result.is_err(), "case {index} unexpectedly succeeded");
+            }
+            assert_eq!(
+                node.membership_snapshot(),
+                before,
+                "case {index} partially mutated membership"
+            );
+            server.abort();
+        }
+
+        let handler = RingpopHandler::new(|_, _, _| async {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            Ok(RingpopResponse {
+                headers: None,
+                body: br#"{"membership":[]}"#.to_vec(),
+            })
+        });
+        let (address, server) = outbound_test_server(handler).await;
+        let node = node();
+        let before = node.membership_snapshot();
+        let cancelled_node = node.clone();
+        let call = tokio::spawn(async move {
+            cancelled_node
+                .join_seed(&address, std::time::Duration::from_secs(2))
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        call.abort();
+        assert_eq!(
+            node.membership_snapshot(),
+            before,
+            "dropping the JOIN future partially mutated membership"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn outbound_join_refutes_local_equal_and_newer_suspect_or_faulty_changes() {
+        for (status, incarnation) in [
+            ("suspect", 100),
+            ("suspect", 101),
+            ("faulty", 100),
+            ("faulty", 101),
+        ] {
+            let mut membership = vec![
+                serde_json::json!({"source":"seed","sourceIncarnationNumber":1,"address":"127.0.0.1:7933","incarnationNumber":incarnation,"status":status,"labels":{"serviceName":"remote"},"timestamp":0}),
+                serde_json::json!({"source":"seed","sourceIncarnationNumber":1,"address":"remote-accepted","incarnationNumber":1,"status":"alive","labels":{"serviceName":"remote"},"timestamp":0}),
+            ];
+            membership.extend((0..9).map(|index| {
+                serde_json::json!({
+                    "source":"seed","sourceIncarnationNumber":1,
+                    "address":format!("peer-{index}"),"incarnationNumber":1,
+                    "status":"alive","labels":{"serviceName":"remote"},"timestamp":0
+                })
+            }));
+            let response = serde_json::json!({
+                "app":"seed-app", "coordinator":"seed", "membership":membership,
+                "membershipChecksum":0
+            });
+            let handler = RingpopHandler::new(move |_, _, _| {
+                let response = response.clone();
+                async move {
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: serde_json::to_vec(&response).unwrap(),
+                    })
+                }
+            });
+            let (address, server) = outbound_test_server(handler).await;
+            let node = node();
+            {
+                let mut state = node.state.lock().unwrap();
+                state.disseminator.record(Change {
+                    address: "remote-accepted".into(),
+                    status: ALIVE.into(),
+                    incarnation: 7,
+                    ..Change::default()
+                });
+                state.disseminator.record(Change {
+                    address: "untouched".into(),
+                    status: ALIVE.into(),
+                    incarnation: 8,
+                    ..Change::default()
+                });
+            }
+            node.join_seed(&address, std::time::Duration::from_secs(2))
+                .await
+                .unwrap();
+            let state = node.state.lock().unwrap();
+            let local = state.memberlist.member("127.0.0.1:7933").unwrap();
+            assert_eq!(
+                local.status, ALIVE,
+                "{status} at incarnation {incarnation} did not refute"
+            );
+            assert!(local.incarnation > incarnation);
+            assert_eq!(local.labels.as_ref().unwrap()["serviceName"], "matching");
+            let pending = state.disseminator.propagation_counts();
+            assert_eq!(pending.get("127.0.0.1:7933"), Some(&0));
+            assert_eq!(pending.get("untouched"), Some(&0));
+            assert!(!pending.contains_key("remote-accepted"));
+            // Ten accepted remote alive members are pingable, so Go's
+            // 15*ceil(log10(n+1)) adjusts maxP from 15 to 30.
+            assert_eq!(state.disseminator.max_propagations(), 30);
+            drop(state);
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn outbound_join_response_after_stop_is_not_applied() {
+        let handler = RingpopHandler::new(|_, _, _| async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            Ok(RingpopResponse {
+                headers: None,
+                body: br#"{"membership":[{"source":"seed","sourceIncarnationNumber":1,"address":"peer","incarnationNumber":1,"status":"alive"}]}"#.to_vec(),
+            })
+        });
+        let (address, server) = outbound_test_server(handler).await;
+        let node = node();
+        let before = node.membership_snapshot();
+        let joiner = {
+            let node = node.clone();
+            tokio::spawn(async move {
+                node.join_seed(&address, std::time::Duration::from_secs(2))
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        node.stop();
+        joiner.await.unwrap().unwrap();
+        assert_eq!(node.membership_snapshot(), before);
+        assert_eq!(node.dissemination_counts().get("127.0.0.1:7933"), Some(&0));
+        assert!(!node.dissemination_counts().contains_key("peer"));
+        server.abort();
     }
 
     #[test]

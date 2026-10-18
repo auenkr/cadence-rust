@@ -1,0 +1,1141 @@
+{
+  "cases": [
+    {
+      "name": "suspect_equal",
+      "nowMillis": 1700000000123,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100,
+        "labels": {
+          "serviceName": "matching",
+          "zone": "west"
+        }
+      },
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100,
+          "labels": {
+            "serviceName": "matching",
+            "zone": "west"
+          }
+        },
+        {
+          "address": "peer-0",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        }
+      ],
+      "input": [
+        {
+          "source": "seed",
+          "sourceIncarnationNumber": 8,
+          "address": "local",
+          "incarnationNumber": 100,
+          "status": "suspect",
+          "labels": {
+            "serviceName": "remote"
+          },
+          "timestamp": -62135596800
+        },
+        {
+          "source": "seed",
+          "sourceIncarnationNumber": 8,
+          "address": "peer-0",
+          "incarnationNumber": 2,
+          "status": "suspect",
+          "labels": {
+            "serviceName": "history"
+          },
+          "timestamp": -62135596800
+        }
+      ],
+      "finalMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 1700000000123,
+          "labels": {
+            "serviceName": "matching",
+            "zone": "west"
+          }
+        },
+        {
+          "address": "peer-0",
+          "status": "suspect",
+          "incarnationNumber": 2,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        }
+      ],
+      "checksum": 324530661,
+      "initialQueued": {
+        "local": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "local",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 0
+        },
+        "peer-0": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "peer-0",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 4
+        },
+        "untouched": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "untouched",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 6
+        }
+      },
+      "queued": {
+        "local": {
+          "change": {
+            "source": "local",
+            "sourceIncarnationNumber": 1700000000123,
+            "address": "local",
+            "incarnationNumber": 1700000000123,
+            "status": "alive",
+            "labels": {
+              "serviceName": "matching",
+              "zone": "west"
+            },
+            "timestamp": -62135596800
+          },
+          "propagated": 0
+        },
+        "untouched": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "untouched",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 6
+        }
+      },
+      "maxP": 30
+    },
+    {
+      "name": "suspect_newer",
+      "nowMillis": 1700000000123,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100,
+        "labels": {
+          "serviceName": "matching",
+          "zone": "west"
+        }
+      },
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100,
+          "labels": {
+            "serviceName": "matching",
+            "zone": "west"
+          }
+        },
+        {
+          "address": "peer-0",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        }
+      ],
+      "input": [
+        {
+          "source": "seed",
+          "sourceIncarnationNumber": 8,
+          "address": "local",
+          "incarnationNumber": 101,
+          "status": "suspect",
+          "labels": {
+            "serviceName": "remote"
+          },
+          "timestamp": -62135596800
+        },
+        {
+          "source": "seed",
+          "sourceIncarnationNumber": 8,
+          "address": "peer-0",
+          "incarnationNumber": 2,
+          "status": "suspect",
+          "labels": {
+            "serviceName": "history"
+          },
+          "timestamp": -62135596800
+        }
+      ],
+      "finalMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 1700000000123,
+          "labels": {
+            "serviceName": "matching",
+            "zone": "west"
+          }
+        },
+        {
+          "address": "peer-0",
+          "status": "suspect",
+          "incarnationNumber": 2,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        }
+      ],
+      "checksum": 324530661,
+      "initialQueued": {
+        "local": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "local",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 0
+        },
+        "peer-0": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "peer-0",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 4
+        },
+        "untouched": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "untouched",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 6
+        }
+      },
+      "queued": {
+        "local": {
+          "change": {
+            "source": "local",
+            "sourceIncarnationNumber": 1700000000123,
+            "address": "local",
+            "incarnationNumber": 1700000000123,
+            "status": "alive",
+            "labels": {
+              "serviceName": "matching",
+              "zone": "west"
+            },
+            "timestamp": -62135596800
+          },
+          "propagated": 0
+        },
+        "untouched": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "untouched",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 6
+        }
+      },
+      "maxP": 30
+    },
+    {
+      "name": "faulty_equal",
+      "nowMillis": 1700000000123,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100,
+        "labels": {
+          "serviceName": "matching",
+          "zone": "west"
+        }
+      },
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100,
+          "labels": {
+            "serviceName": "matching",
+            "zone": "west"
+          }
+        },
+        {
+          "address": "peer-0",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        }
+      ],
+      "input": [
+        {
+          "source": "seed",
+          "sourceIncarnationNumber": 8,
+          "address": "local",
+          "incarnationNumber": 100,
+          "status": "faulty",
+          "labels": {
+            "serviceName": "remote"
+          },
+          "timestamp": -62135596800
+        },
+        {
+          "source": "seed",
+          "sourceIncarnationNumber": 8,
+          "address": "peer-0",
+          "incarnationNumber": 2,
+          "status": "suspect",
+          "labels": {
+            "serviceName": "history"
+          },
+          "timestamp": -62135596800
+        }
+      ],
+      "finalMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 1700000000123,
+          "labels": {
+            "serviceName": "matching",
+            "zone": "west"
+          }
+        },
+        {
+          "address": "peer-0",
+          "status": "suspect",
+          "incarnationNumber": 2,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        }
+      ],
+      "checksum": 324530661,
+      "initialQueued": {
+        "local": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "local",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 0
+        },
+        "peer-0": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "peer-0",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 4
+        },
+        "untouched": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "untouched",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 6
+        }
+      },
+      "queued": {
+        "local": {
+          "change": {
+            "source": "local",
+            "sourceIncarnationNumber": 1700000000123,
+            "address": "local",
+            "incarnationNumber": 1700000000123,
+            "status": "alive",
+            "labels": {
+              "serviceName": "matching",
+              "zone": "west"
+            },
+            "timestamp": -62135596800
+          },
+          "propagated": 0
+        },
+        "untouched": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "untouched",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 6
+        }
+      },
+      "maxP": 30
+    },
+    {
+      "name": "faulty_newer",
+      "nowMillis": 1700000000123,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100,
+        "labels": {
+          "serviceName": "matching",
+          "zone": "west"
+        }
+      },
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100,
+          "labels": {
+            "serviceName": "matching",
+            "zone": "west"
+          }
+        },
+        {
+          "address": "peer-0",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        }
+      ],
+      "input": [
+        {
+          "source": "seed",
+          "sourceIncarnationNumber": 8,
+          "address": "local",
+          "incarnationNumber": 101,
+          "status": "faulty",
+          "labels": {
+            "serviceName": "remote"
+          },
+          "timestamp": -62135596800
+        },
+        {
+          "source": "seed",
+          "sourceIncarnationNumber": 8,
+          "address": "peer-0",
+          "incarnationNumber": 2,
+          "status": "suspect",
+          "labels": {
+            "serviceName": "history"
+          },
+          "timestamp": -62135596800
+        }
+      ],
+      "finalMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 1700000000123,
+          "labels": {
+            "serviceName": "matching",
+            "zone": "west"
+          }
+        },
+        {
+          "address": "peer-0",
+          "status": "suspect",
+          "incarnationNumber": 2,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 1,
+          "labels": {
+            "serviceName": "history"
+          }
+        }
+      ],
+      "checksum": 324530661,
+      "initialQueued": {
+        "local": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "local",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 0
+        },
+        "peer-0": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "peer-0",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 4
+        },
+        "untouched": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "untouched",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 6
+        }
+      },
+      "queued": {
+        "local": {
+          "change": {
+            "source": "local",
+            "sourceIncarnationNumber": 1700000000123,
+            "address": "local",
+            "incarnationNumber": 1700000000123,
+            "status": "alive",
+            "labels": {
+              "serviceName": "matching",
+              "zone": "west"
+            },
+            "timestamp": -62135596800
+          },
+          "propagated": 0
+        },
+        "untouched": {
+          "change": {
+            "source": "",
+            "sourceIncarnationNumber": 0,
+            "address": "untouched",
+            "incarnationNumber": 1,
+            "status": "alive",
+            "timestamp": -62135596800
+          },
+          "propagated": 6
+        }
+      },
+      "maxP": 30
+    }
+  ],
+  "source": "github.com/uber/ringpop-go v0.10.0 swim/memberlist.go AddJoinList + Update + Node.handleChanges"
+}

@@ -30,7 +30,11 @@ try:
             time.sleep(.1)
     env = {**probe_env, "CADENCE_RINGPOP_TCHANNEL": f"127.0.0.1:{port}"}
     subprocess.run(["go", "test", "-overlay", str(overlay), "./common/peerprovider/ringpopprovider", "-run", "^TestRustRealRingpopNode$", "-count=1", "-v"], cwd=root / "go", env=env, check=True, timeout=180)
+    deadline = time.monotonic() + 10
     counts = json.loads(state_file.read_text())
+    while (counts["join"] < 4 or counts["ping"] != 16) and time.monotonic() < deadline:
+        time.sleep(.05)
+        counts = json.loads(state_file.read_text())
     if counts["join"] < 4 or counts["ping"] != 16:
         raise RuntimeError(f"unexpected real handler counters: {counts}")
 finally:

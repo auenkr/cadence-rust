@@ -1,0 +1,8 @@
+    Blocking waiting for file lock on build directory
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-279a3b9f/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 58.20s
+=== RUN   TestRustRealRingpopNode
+--- PASS: TestRustRealRingpopNode (0.07s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.105s
+Real RingpopNode Go client probe passed; evidence: /tmp/ringpop-node-compat-z09hotcm
