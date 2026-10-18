@@ -1,3 +1,10 @@
+## Frozen integrated Matching regression passed 2026-10-18
+
+standard-31 source3072698e passed34/34 full compatibility checks incl Rust Matching +Go Frontend/History/Worker with NO Go Matching,524 workspace tests0fail,strict locked workspace/all-target Clippy,native Thrift/TLS,Ringpop JSON/wire. Report a052d703a cherry-picked; artifacts ~/.cache/cadence-rust-test-artifacts/matching-frozen-3072698e/. This excludes later inbound protocol integration, separately focused validated. No whole Matching completion claim.
+Next independent read-only production gap audit Luna Standard:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-production-gap-audit-standard-35-20261018
+Accepted running; no builds, excludes outbound transport standard-34 active work. Disk now32GB free; next cleanup should inspect terminal regression target/cache usage before removing reproducible outputs, preserve reports/logs/source/active targets.
+
 ## Outbound round returned no implementation 2026-10-18
 
 standard-33 returned no code/commit/tests; outbound TChannel client+join/ping all remain absent. Narrowed to transport-only real-Go client slice, Luna Standard:
