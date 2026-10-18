@@ -160,8 +160,9 @@ an advertised local identity. No SWIM join sender/member merge was added.
 ## Outbound JSON transport repair on latest parent (2026-10-18)
 
 Applied candidate `b2441650ebf2f4c7224d7db55691e4c021f509ca` on latest local
-parent `1878bcdfde3c4b83bfa8c983374316f3c5390cf6` as commit `8bcc48481`, then
-repaired and adversarially validated the response decoder.
+parent `1878bcdfde3c4b83bfa8c983374316f3c5390cf6` as commit
+`8bcc48481b279d26275498d17723cde0e120d5c0`. Decoder repair and adversarial
+validation are in `595a3614e0d2b8a7451b615ce8c473d1b2c8796e`.
 
 - CALL_RES fixed fields now use checked reads for flags, application code,
   tracing, transport-header count/strings, checksum type/value, and argument
