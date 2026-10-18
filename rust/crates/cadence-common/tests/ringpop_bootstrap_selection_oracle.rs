@@ -11,7 +11,7 @@ struct Fixture {
 struct Case {
     name: String,
     local: String,
-    seeds: Vec<String>,
+    seeds: Option<Vec<String>>,
     requested_timeout_nanos: i64,
     requested_max_join_duration_nanos: i64,
     requested_size: i64,
@@ -49,7 +49,7 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
     .unwrap();
     for case in fixture.cases {
         let local = case.local.as_str();
-        let seeds = case.seeds.clone();
+        let seeds = case.seeds.clone().unwrap_or_default();
         assert_eq!(
             case.bootstrap_hosts.len(),
             seeds.len() + usize::from(!seeds.iter().any(|s| s == local)),
@@ -93,12 +93,12 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
             selector.options.max_join_duration_nanos,
             case.max_join_duration_nanos
         );
-        assert_eq!(selector.options.size, case.size);
         assert_eq!(selector.options.parallelism, case.parallelism);
         assert_eq!(
             selector.effective_size,
-            case.size
-                .min(i64::try_from(selector.potential.len()).unwrap_or(i64::MAX))
+            case.size,
+            "{} effective size",
+            case.name
         );
         let joined = case.joined.unwrap_or_default();
         let mut chooser = First;

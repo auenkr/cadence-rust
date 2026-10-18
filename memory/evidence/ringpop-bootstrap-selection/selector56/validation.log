@@ -1,0 +1,55 @@
+=== RUN   TestGoCaptureHostMatrix
+--- PASS: TestGoCaptureHostMatrix (0.00s)
+=== RUN   TestGenerateRingpopBootstrapSelectionFixtures
+--- PASS: TestGenerateRingpopBootstrapSelectionFixtures (0.00s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.056s
+verified 11 original-Go selection fixtures without modifying checked fixture
+go_verify_1=0
+=== RUN   TestGoCaptureHostMatrix
+--- PASS: TestGoCaptureHostMatrix (0.00s)
+=== RUN   TestGenerateRingpopBootstrapSelectionFixtures
+--- PASS: TestGenerateRingpopBootstrapSelectionFixtures (0.00s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.024s
+verified 11 original-Go selection fixtures without modifying checked fixture
+go_verify_2=0
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-07b23ec1/rust/crates/cadence-common)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.90s
+     Running tests/ringpop_bootstrap_selection_oracle.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target/debug/deps/ringpop_bootstrap_selection_oracle-86925d64a056762c)
+
+running 4 tests
+test capture_host_matches_go_split_host_port_matrix ... ok
+test go_int64_group_cap_wraps_and_partial_round_exhausts_exactly ... ok
+test rust_selector_consumes_pinned_original_go_selection_cases ... ok
+test requested_size_is_capped_and_exhausted_round_restarts ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+rust_focused_test=0
+    Checking libc v0.2.190
+    Checking cfg-if v1.0.5
+    Checking getrandom v0.2.17
+    Checking zerocopy v0.8.63
+    Checking siphasher v1.0.4
+    Checking phf_shared v0.12.1
+    Checking num-traits v0.2.19
+    Checking ppv-lite86 v0.2.21
+    Checking rand_core v0.6.4
+    Checking serde_core v1.0.229
+    Checking rand_chacha v0.3.1
+    Checking chrono v0.4.45
+    Checking phf v0.12.1
+    Checking thiserror v2.0.21
+    Checking serde v1.0.229
+    Checking chrono-tz v0.10.4
+    Checking rand v0.8.8
+    Checking zmij v1.0.23
+    Checking farmhash v1.1.5
+    Checking itoa v1.0.18
+    Checking memchr v2.8.3
+    Checking serde_json v1.0.154
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-07b23ec1/rust/crates/cadence-common)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 23.64s
+strict_clippy=0
+FINAL_EXIT=0

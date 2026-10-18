@@ -83,5 +83,12 @@ selection cap.
 
 Two original-Go verification runs and the host/port matrix passed. Logs are in
 `selector55/go-run-1.log` and `selector55/go-run-2.log`; `go.exit` contains 0.
-Rust focused test and strict all-target common clippy remain to be run after the
-active writer53 Cargo process releases its target/build slot.
+The follow-up validation is complete in `selector56/validation.log` with final
+exit `0` in `selector56/validation.exit`. It ran the Go oracle twice with no
+fixture drift, all four Rust differential tests, and strict locked all-target
+Clippy for `cadence-common`. Rust used the completed shared target at
+`/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target` with one build
+job. The fixture's `seeds: null` case is decoded as an empty seed list; its
+recorded size is the Go selector's effective pre-`Init` cap, so the test checks
+`effective_size` directly rather than comparing it to the uncapped Rust option
+or recalculating after joined members are filtered.
