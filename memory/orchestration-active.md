@@ -1,3 +1,10 @@
+## Exact mixed test artifact selection integrated — 2026-10-18
+
+Reviewedfee2d6bae,integrated. CargoJSONcompiler-artifactexactmatching_deliveryexecutablepassedviaenvtoCJS,missing/ambiguouserror. ActualmixedrestartPASSwithinvalidlookalikebinaryincache;Pythonsyntax/nodecheck/diffcheckpassed. No productionchange. Controller65independentlyactive.
+Normal-speedLuna67static/JSONfilediscoveryproviderconfig+actualGodifferentialaccepted,separatemodule,noDNS/SRV/main/readinessyet:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-discovery-provider-contract-standard-67-20261018
+Matching incomplete.
+
 ## Live mixed process restart PASSED — 2026-10-18
 
 Revieweda455cd254,testsource+report;integrated50c3190d4. Sourcea1ee92c58RustMatchingSIGKILLwith1pendingSQLiterow,reopenssameDB/listener,existingSDKworkflow/activitycomplete,exactly1finalHistorycompletion,GoFrontendHistoryWorkerremainalive,NOGoMatching. AdjacentnormalmixedSDKretry/timeout/query/isolationregressionpassed. Artifacts~/.cache/cadence-rust-test-artifacts/matching-process-restart63/. Disk9.2GBfreeafterworkercleanup.
