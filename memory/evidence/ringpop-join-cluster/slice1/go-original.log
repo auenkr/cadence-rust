@@ -1,0 +1,13 @@
+=== RUN   TestOriginalJoinClusterChecksDeadlineAfterGroup
+--- PASS: TestOriginalJoinClusterChecksDeadlineAfterGroup (0.00s)
+=== RUN   TestOriginalJoinDelayerWindowsAndOptionEdges
+=== RUN   TestOriginalJoinDelayerWindowsAndOptionEdges/negative_initial
+=== RUN   TestOriginalJoinDelayerWindowsAndOptionEdges/negative_cap
+--- PASS: TestOriginalJoinDelayerWindowsAndOptionEdges (0.00s)
+    --- PASS: TestOriginalJoinDelayerWindowsAndOptionEdges/negative_initial (0.00s)
+    --- PASS: TestOriginalJoinDelayerWindowsAndOptionEdges/negative_cap (0.00s)
+=== RUN   TestOriginalGoDurationStringFractionalFixtures
+--- PASS: TestOriginalGoDurationStringFractionalFixtures (0.00s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.020s
+Selected outbound JOIN compatibility overlay tests passed against pinned Go Ringpop v0.10.0

@@ -11,6 +11,7 @@ use cadence_common::ringpop_wire::{
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::{future::Future, pin::Pin};
 
 use crate::ringpop_tchannel::{RingpopError, RingpopHandler, RingpopResponse};
 use crate::tchannel_json_client::{self, JsonCallError};
@@ -30,11 +31,209 @@ pub struct JoinGroupResult {
     pub failures: Vec<String>,
 }
 
-/// Mutable state owned by one bounded bootstrap sender. A future JoinCluster
-/// controller can retain this across attempts without moving retry policy here.
+/// Mutable state owned by one bootstrap sender across JOIN retry attempts.
 pub struct JoinGroupState {
     pub selection: BootstrapSelection,
     attempts: i64,
+    delayer: ExponentialJoinDelayer,
+}
+
+/// Injectable time and delay boundary for the Go JoinCluster retry loop.
+pub trait JoinClock {
+    fn reset(&mut self);
+    fn elapsed(&mut self) -> Duration;
+    fn sleep_nanos<'a>(
+        &'a mut self,
+        duration_nanos: i64,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn random_below(&mut self, upper_exclusive: u64) -> u64;
+}
+
+pub struct SystemJoinClock(std::time::Instant);
+
+impl Default for SystemJoinClock {
+    fn default() -> Self {
+        Self(std::time::Instant::now())
+    }
+}
+
+impl JoinClock for SystemJoinClock {
+    fn reset(&mut self) {
+        self.0 = std::time::Instant::now();
+    }
+
+    fn elapsed(&mut self) -> Duration {
+        self.0.elapsed()
+    }
+
+    fn sleep_nanos<'a>(
+        &'a mut self,
+        duration_nanos: i64,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(tokio::time::sleep(if duration_nanos > 0 {
+            Duration::from_nanos(duration_nanos as u64)
+        } else {
+            Duration::ZERO
+        }))
+    }
+
+    fn random_below(&mut self, upper_exclusive: u64) -> u64 {
+        rand::Rng::gen_range(&mut rand::thread_rng(), 0..upper_exclusive)
+    }
+}
+
+/// Ringpop's exponential JOIN delay, including its shifting jitter window.
+/// Go converts durations to whole milliseconds before calculating the window.
+pub struct ExponentialJoinDelayer {
+    initial_ms: i64,
+    max_ms: i64,
+    next_min_ms: i64,
+    num_delays: u32,
+    max_reached: bool,
+}
+
+impl Default for ExponentialJoinDelayer {
+    fn default() -> Self {
+        Self::new(Duration::from_millis(100), Duration::from_secs(60))
+    }
+}
+
+impl ExponentialJoinDelayer {
+    pub fn new(initial: Duration, max: Duration) -> Self {
+        Self::new_signed(
+            initial.as_nanos().min(i64::MAX as u128) as i64,
+            max.as_nanos().min(i64::MAX as u128) as i64,
+        )
+    }
+
+    pub fn new_signed(initial_nanos: i64, max_nanos: i64) -> Self {
+        Self {
+            initial_ms: initial_nanos / 1_000_000,
+            max_ms: max_nanos / 1_000_000,
+            next_min_ms: 0,
+            num_delays: 0,
+            max_reached: false,
+        }
+    }
+
+    pub fn delay_nanos(&mut self, clock: &mut impl JoinClock) -> i64 {
+        let uncapped = (self.initial_ms as f64) * 2f64.powf(self.num_delays as f64);
+        let capped = (self.max_ms as f64).min(uncapped);
+        let upper = (capped - self.next_min_ms as f64) as i64;
+        let jittered = if capped == self.next_min_ms as f64 {
+            capped as i64
+        } else if upper > 0 {
+            (clock.random_below(upper as u64) as i64).wrapping_add(self.next_min_ms)
+        } else {
+            // Go's Intn panics for a nonpositive bound. Keep that option edge
+            // observable instead of silently normalizing invalid durations.
+            panic!("invalid JOIN delay random bound: {upper}")
+        };
+        self.max_reached |= uncapped >= self.max_ms as f64;
+        self.next_min_ms = capped as i64;
+        let duration = jittered.wrapping_mul(1_000_000);
+        self.num_delays = self.num_delays.wrapping_add(1);
+        duration
+    }
+
+    pub fn max_delay_reached(&self) -> bool {
+        self.max_reached
+    }
+}
+
+/// The error and partial successes returned by Go's `JoinCluster` on failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinClusterError(pub String, pub Vec<String>);
+
+fn go_duration_string(nanos: i64) -> String {
+    let sign = if nanos < 0 { "-" } else { "" };
+    let magnitude = nanos.unsigned_abs();
+    if magnitude == 0 {
+        return "0s".to_owned();
+    }
+    if magnitude >= 60_000_000_000 {
+        let total_seconds = magnitude / 1_000_000_000;
+        let hours = total_seconds / 3_600;
+        let minutes = (total_seconds % 3_600) / 60;
+        let seconds = total_seconds % 60;
+        let fractional = magnitude % 1_000_000_000;
+        let second_text = if fractional == 0 {
+            format!("{seconds}s")
+        } else {
+            let fraction = format!("{fractional:09}").trim_end_matches('0').to_owned();
+            format!("{seconds}.{fraction}s")
+        };
+        return if hours > 0 {
+            format!("{sign}{hours}h{minutes}m{second_text}")
+        } else {
+            format!("{sign}{minutes}m{second_text}")
+        };
+    }
+    let (unit, scale) = if magnitude >= 1_000_000_000 {
+        ("s", 1_000_000_000)
+    } else if magnitude >= 1_000_000 {
+        ("ms", 1_000_000)
+    } else if magnitude >= 1_000 {
+        ("µs", 1_000)
+    } else {
+        return format!("{sign}{magnitude}ns");
+    };
+    let whole = magnitude / scale;
+    let fraction = magnitude % scale;
+    if fraction == 0 {
+        format!("{sign}{whole}{unit}")
+    } else {
+        let digits = match scale {
+            1_000_000_000 => format!("{fraction:09}").trim_end_matches('0').to_owned(),
+            1_000_000 => format!("{fraction:06}"),
+            _ => format!("{fraction:03}"),
+        };
+        format!("{sign}{whole}.{}{}", digits.trim_end_matches('0'), unit)
+    }
+}
+
+/// Drive complete JoinGroup attempts until the Go success threshold or the
+/// post-group strict deadline check is reached. `clock` controls elapsed time
+/// and retry sleep; dropping this future cancels the current group naturally.
+pub async fn join_cluster(
+    node: &RingpopNode,
+    sender: &mut JoinGroupState,
+    clock: &mut impl JoinClock,
+) -> Result<Vec<String>, JoinClusterError> {
+    clock.reset();
+    let mut joined = Vec::new();
+    if sender.selection.single_node {
+        return Ok(joined);
+    }
+    let max_nanos = sender.selection.options.max_join_duration_nanos;
+    loop {
+        if node.is_destroyed() {
+            return Err(JoinClusterError(
+                "node destroyed while attempting to join cluster".to_owned(),
+                joined,
+            ));
+        }
+        let group = node.join_group(sender, &joined).await;
+        joined.extend(group.successes);
+        if i64::try_from(joined.len()).unwrap_or(i64::MAX) >= sender.selection.effective_size {
+            return Ok(joined);
+        }
+        let elapsed = clock.elapsed();
+        let elapsed_nanos = elapsed.as_nanos().min(i64::MAX as u128) as i64;
+        if elapsed_nanos > max_nanos {
+            return Err(JoinClusterError(
+                format!(
+                    "join duration of {} exceeded max {}",
+                    go_duration_string(elapsed_nanos),
+                    go_duration_string(max_nanos)
+                ),
+                joined,
+            ));
+        }
+        // Delayer belongs to the sender across loop iterations.
+        let delay = sender.delayer.delay_nanos(clock);
+        clock.sleep_nanos(delay).await;
+    }
 }
 
 impl JoinGroupState {
@@ -42,6 +241,7 @@ impl JoinGroupState {
         Self {
             selection,
             attempts: 0,
+            delayer: ExponentialJoinDelayer::default(),
         }
     }
 
@@ -67,6 +267,7 @@ struct State {
     address: String,
     ready: bool,
     stopped: bool,
+    destroyed: bool,
     requires_app_in_ping: bool,
     memberlist: Memberlist,
     disseminator: Disseminator,
@@ -91,6 +292,7 @@ impl RingpopNode {
                 address: local_member.address.clone(),
                 ready: false,
                 stopped: false,
+                destroyed: false,
                 requires_app_in_ping,
                 memberlist: Memberlist::new(local_member),
                 disseminator,
@@ -106,6 +308,16 @@ impl RingpopNode {
 
     pub fn stop(&self) {
         self.state.lock().expect("Ringpop state poisoned").stopped = true;
+    }
+
+    pub fn destroy(&self) {
+        let mut state = self.state.lock().expect("Ringpop state poisoned");
+        state.destroyed = true;
+        state.stopped = true;
+    }
+
+    pub fn is_destroyed(&self) -> bool {
+        self.state.lock().expect("Ringpop state poisoned").destroyed
     }
 
     pub fn lifecycle(&self) -> RingpopLifecycle {
@@ -539,6 +751,204 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct FakeJoinClock {
+        elapsed: Duration,
+        elapsed_reads: Vec<Duration>,
+        sleeps: Vec<i64>,
+        random: u64,
+        sleep_started: Option<Arc<std::sync::atomic::AtomicBool>>,
+    }
+
+    impl JoinClock for FakeJoinClock {
+        fn reset(&mut self) {}
+        fn elapsed(&mut self) -> Duration {
+            let value = self.elapsed_reads.first().copied().unwrap_or(self.elapsed);
+            if !self.elapsed_reads.is_empty() {
+                self.elapsed_reads.remove(0);
+            }
+            value
+        }
+        fn sleep_nanos<'a>(
+            &'a mut self,
+            duration_nanos: i64,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            self.sleeps.push(duration_nanos);
+            if let Some(started) = &self.sleep_started {
+                started.store(true, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(tokio::time::sleep(Duration::from_nanos(
+                    duration_nanos.max(0) as u64,
+                )))
+            } else {
+                Box::pin(std::future::ready(()))
+            }
+        }
+        fn random_below(&mut self, upper_exclusive: u64) -> u64 {
+            self.random.min(upper_exclusive - 1)
+        }
+    }
+
+    #[test]
+    fn exponential_join_delayer_matches_go_window_and_cap() {
+        let mut clock = FakeJoinClock {
+            random: 9,
+            ..Default::default()
+        };
+        let mut delay =
+            ExponentialJoinDelayer::new(Duration::from_millis(100), Duration::from_millis(250));
+        assert_eq!(delay.delay_nanos(&mut clock), 9_000_000);
+        assert_eq!(delay.delay_nanos(&mut clock), 109_000_000);
+        assert_eq!(delay.delay_nanos(&mut clock), 209_000_000);
+        assert_eq!(delay.delay_nanos(&mut clock), 250_000_000);
+        assert_eq!(delay.delay_nanos(&mut clock), 250_000_000);
+        assert!(delay.max_delay_reached());
+        assert!(clock.sleeps.is_empty());
+    }
+
+    #[test]
+    fn exponential_join_delayer_matches_zero_and_negative_duration_edges() {
+        let mut clock = FakeJoinClock::default();
+        let mut zero_initial = ExponentialJoinDelayer::new_signed(0, 1_000_000);
+        assert_eq!(zero_initial.delay_nanos(&mut clock), 0);
+        assert!(!zero_initial.max_delay_reached());
+        let mut zero_cap = ExponentialJoinDelayer::new_signed(1_000_000, 0);
+        assert_eq!(zero_cap.delay_nanos(&mut clock), 0);
+        assert!(zero_cap.max_delay_reached());
+
+        for (initial, max) in [(-1_000_000, 1_000_000), (1_000_000, -1_000_000)] {
+            let mut invalid = ExponentialJoinDelayer::new_signed(initial, max);
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                invalid.delay_nanos(&mut clock);
+            }))
+            .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn join_cluster_checks_success_before_deadline_and_keeps_negative_threshold() {
+        use cadence_common::ringpop_bootstrap_selection::{BootstrapSelection, Options};
+        let node = node();
+        let selection = BootstrapSelection::new(
+            "127.0.0.1:7933",
+            &["127.0.0.2:7933".to_owned()],
+            Options::from_signed(1, -1, -2, 1),
+        );
+        let mut sender = JoinGroupState::new(selection);
+        let mut clock = FakeJoinClock::default();
+        assert_eq!(
+            join_cluster(&node, &mut sender, &mut clock).await.unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(sender.attempts(), 1);
+        assert!(clock.elapsed_reads.is_empty());
+        assert!(clock.sleeps.is_empty());
+
+        let self_only = BootstrapSelection::new("127.0.0.1:7933", &[], Options::default());
+        assert!(self_only.single_node);
+        let mut self_sender = JoinGroupState::new(self_only);
+        assert_eq!(
+            join_cluster(&node, &mut self_sender, &mut clock)
+                .await
+                .unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(self_sender.attempts(), 0);
+    }
+
+    #[tokio::test]
+    async fn join_cluster_deadline_is_strict_and_checked_after_each_group() {
+        use cadence_common::ringpop_bootstrap_selection::{BootstrapSelection, Options};
+        let node = node();
+        let selection = BootstrapSelection::new(
+            "127.0.0.1:7933",
+            &["127.0.0.1:1".to_owned()],
+            Options::from_signed(1, 1, 3, 1),
+        );
+        let mut sender = JoinGroupState::new(selection);
+        let mut clock = FakeJoinClock {
+            elapsed_reads: vec![Duration::from_nanos(1), Duration::from_nanos(2)],
+            random: 0,
+            ..Default::default()
+        };
+        let error = join_cluster(&node, &mut sender, &mut clock)
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, "join duration of 2ns exceeded max 1ns");
+        assert!(error.1.is_empty());
+        assert_eq!(sender.attempts(), 2);
+        assert_eq!(clock.sleeps, vec![0]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn join_cluster_retry_sleep_yields_and_is_cancelled_on_drop() {
+        use cadence_common::ringpop_bootstrap_selection::{BootstrapSelection, Options};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let node = node();
+        let selection = BootstrapSelection::new(
+            "127.0.0.1:7933",
+            &["127.0.0.1:1".to_owned()],
+            Options::from_signed(1, 1, 10_000, 1),
+        );
+        let mut sender = JoinGroupState::new(selection);
+        let started = Arc::new(AtomicBool::new(false));
+        let mut clock = FakeJoinClock {
+            random: u64::MAX,
+            sleep_started: Some(started.clone()),
+            ..Default::default()
+        };
+        let join = tokio::spawn(async move { join_cluster(&node, &mut sender, &mut clock).await });
+        tokio::time::timeout(Duration::from_millis(50), async {
+            while !started.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("retry delay should start");
+
+        // This task runs on the same single-thread executor while the retry is
+        // sleeping. Dropping the JoinCluster future interrupts that delay.
+        let other = tokio::spawn(async {
+            tokio::task::yield_now().await;
+            42
+        });
+        assert_eq!(other.await.unwrap(), 42);
+        join.abort();
+        assert!(join.await.unwrap_err().is_cancelled());
+    }
+
+    #[test]
+    fn go_duration_string_preserves_fractional_precision() {
+        assert_eq!(go_duration_string(1_001_234), "1.001234ms");
+        assert_eq!(go_duration_string(1_000_001), "1.000001ms");
+        assert_eq!(go_duration_string(1_234), "1.234µs");
+        assert_eq!(go_duration_string(1_001), "1.001µs");
+        assert_eq!(go_duration_string(1_000_000_001), "1.000000001s");
+        assert_eq!(go_duration_string(-1_234), "-1.234µs");
+    }
+
+    #[tokio::test]
+    async fn join_cluster_distinguishes_destroyed_from_stopped() {
+        use cadence_common::ringpop_bootstrap_selection::{BootstrapSelection, Options};
+        let node = node();
+        node.stop();
+        assert!(!node.is_destroyed());
+        node.destroy();
+        let selection = BootstrapSelection::new(
+            "127.0.0.1:7933",
+            &["127.0.0.1:1".to_owned()],
+            Options::default(),
+        );
+        let mut sender = JoinGroupState::new(selection);
+        let mut clock = FakeJoinClock::default();
+        let error = join_cluster(&node, &mut sender, &mut clock)
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, "node destroyed while attempting to join cluster");
+        assert!(error.1.is_empty());
+        assert_eq!(sender.attempts(), 0);
+    }
     use crate::ringpop_tchannel::{RingpopHandler, RingpopResponse};
     use cadence_common::ringpop_wire::{Change, Ping, ALIVE};
     use std::collections::BTreeMap;

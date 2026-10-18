@@ -91,6 +91,7 @@ impl Options {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapSelection {
     local: String,
+    pub single_node: bool,
     pub bootstrap_hosts: Vec<String>,
     pub potential: Vec<String>,
     pub preferred: Vec<String>,
@@ -120,6 +121,10 @@ impl BootstrapSelection {
             }
         }
         let local_host = capture_host(local);
+        let single_node = hosts.len() == 1
+            && hosts
+                .get(local_host)
+                .is_some_and(|addresses| addresses.len() == 1 && addresses[0] == local);
         let potential = hosts
             .values()
             .flatten()
@@ -168,6 +173,7 @@ impl BootstrapSelection {
             .min(i64::try_from(potential.len()).unwrap_or(i64::MAX));
         Self {
             local: local.to_owned(),
+            single_node,
             bootstrap_hosts,
             potential,
             preferred,

@@ -6,7 +6,9 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/uber-common/bark"
 	"github.com/uber/ringpop-go/discovery/statichosts"
 	"github.com/uber/tchannel-go"
 )
@@ -88,6 +90,112 @@ func TestRustOutboundJoinAgainstGo(t *testing.T) {
 		output, err := failed.CombinedOutput()
 		if err == nil || !strings.Contains(string(output), tc.message) {
 			t.Fatalf("expected original Go join rejection %q, err=%v output=%s", tc.message, err, output)
+		}
+	}
+}
+
+// Exercise the original, unmodified JoinCluster loop with a complete failed
+// group and an already-expired signed deadline. The no-op delayer keeps this
+// source comparison bounded; timing is asserted only by the safe inequality.
+func TestOriginalJoinClusterChecksDeadlineAfterGroup(t *testing.T) {
+	ch, err := tchannel.NewChannel("ringpop-join-cluster-oracle", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ch.Close()
+	if err = ch.ListenAndServe("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	seed := ch.PeerInfo().HostPort
+	peer := NewNode("other-app", seed, ch.GetSubChannel("ringpop"), nil)
+	defer peer.Destroy()
+	if _, err = peer.Bootstrap(&BootstrapOptions{DiscoverProvider: statichosts.New(seed)}); err != nil {
+		t.Fatal(err)
+	}
+	localChannel, err := tchannel.NewChannel("ringpop-join-cluster-client", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer localChannel.Close()
+	local := NewNode("cadence", "127.0.0.1:7934", localChannel.GetSubChannel("ringpop"), nil)
+	local.discoverProvider = statichosts.New(seed)
+	sender, err := newJoinSender(local, &joinOpts{
+		timeout: time.Second, size: 1, maxJoinDuration: -1,
+		parallelismFactor: 1, delayer: &nullDelayer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	joined, err := sender.JoinCluster()
+	if err == nil || !strings.Contains(err.Error(), "join duration of") {
+		t.Fatalf("expected original Go deadline error after failed group; joined=%v err=%v", joined, err)
+	}
+	if time.Since(start) <= 0 || sender.numTries != 1 {
+		t.Fatalf("deadline/group ordering mismatch: elapsed=%v attempts=%d", time.Since(start), sender.numTries)
+	}
+}
+
+// This uses ringpop-go's real internal delay implementation with only its
+// randomizer and sleeper replaced, matching the Rust deterministic seam.
+func TestOriginalJoinDelayerWindowsAndOptionEdges(t *testing.T) {
+	var sleeps []time.Duration
+	var bounds []int
+	d := &exponentialDelayer{
+		logger:       bark.NewNopLogger(),
+		initialDelay: 100 * time.Millisecond,
+		maxDelay:     250 * time.Millisecond,
+		randomizer:   func(bound int) int { bounds = append(bounds, bound); return 9 },
+		sleeper:      func(delay time.Duration) { sleeps = append(sleeps, delay) },
+	}
+	want := []time.Duration{9 * time.Millisecond, 109 * time.Millisecond, 209 * time.Millisecond, 250 * time.Millisecond, 250 * time.Millisecond}
+	for i, expected := range want {
+		if got := d.delay(); got != expected {
+			t.Fatalf("delay %d = %v, want %v", i, got, expected)
+		}
+	}
+	if !d.maxDelayReached || len(bounds) != 3 || len(sleeps) != len(want) {
+		t.Fatalf("bounds=%v sleeps=%v maxReached=%v", bounds, sleeps, d.maxDelayReached)
+	}
+	zero := &exponentialDelayer{logger: bark.NewNopLogger(), initialDelay: 0, maxDelay: 0, randomizer: func(int) int { t.Fatal("zero cap must not jitter"); return 0 }, sleeper: func(time.Duration) {}}
+	if got := zero.delay(); got != 0 || !zero.maxDelayReached {
+		t.Fatalf("zero option: delay=%v maxReached=%v", got, zero.maxDelayReached)
+	}
+	for _, tc := range []struct {
+		name         string
+		initial, max time.Duration
+	}{
+		{"negative initial", -time.Millisecond, time.Second},
+		{"negative cap", time.Millisecond, -time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected Go Intn negative-bound panic")
+				}
+			}()
+			d, _ := newExponentialDelayer("test", &delayOpts{initial: tc.initial, max: tc.max, randomizer: func(bound int) int {
+				if bound <= 0 {
+					panic("invalid argument to Intn")
+				}
+				return 0
+			}, sleeper: func(time.Duration) {}})
+			d.delay()
+		})
+	}
+}
+
+func TestOriginalGoDurationStringFractionalFixtures(t *testing.T) {
+	for _, tc := range []struct {
+		nanos int64
+		want  string
+	}{
+		{1_001_234, "1.001234ms"}, {1_000_001, "1.000001ms"},
+		{1_234, "1.234µs"}, {1_001, "1.001µs"},
+		{1_000_000_001, "1.000000001s"}, {-1_234, "-1.234µs"},
+	} {
+		if got := time.Duration(tc.nanos).String(); got != tc.want {
+			t.Errorf("Duration(%d).String() = %q, want %q", tc.nanos, got, tc.want)
 		}
 	}
 }

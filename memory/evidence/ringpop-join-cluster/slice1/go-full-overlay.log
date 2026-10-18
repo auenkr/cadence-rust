@@ -1,0 +1,18 @@
+=== RUN   TestRustOutboundJoinAgainstGo
+--- PASS: TestRustOutboundJoinAgainstGo (0.02s)
+=== RUN   TestOriginalJoinClusterChecksDeadlineAfterGroup
+--- PASS: TestOriginalJoinClusterChecksDeadlineAfterGroup (0.00s)
+=== RUN   TestRustOutboundJoinGroupAgainstGo
+    zz_cadence_ringpop_outbound_join_test.go:178: Rust JoinGroup: exit status 1: Error: invalid socket address
+--- FAIL: TestRustOutboundJoinGroupAgainstGo (0.00s)
+FAIL
+FAIL	github.com/uber/ringpop-go/swim	0.038s
+FAIL
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/t3-4ecaef6a/tests/run-ringpop-outbound-join-compat.py", line 27, in <module>
+    subprocess.run(['go', 'test', '-overlay', str(overlay), './swim', '-run', test_regex, '-count=1', '-v'], cwd=copied, env=env, check=True, timeout=180)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['go', 'test', '-overlay', '/tmp/ringpop-outbound-join-m8v32myf/overlay.json', './swim', '-run', '^(TestRustOutboundJoin(Group)?AgainstGo|TestOriginalJoinClusterChecksDeadlineAfterGroup)$', '-count=1', '-v']' returned non-zero exit status 1.
