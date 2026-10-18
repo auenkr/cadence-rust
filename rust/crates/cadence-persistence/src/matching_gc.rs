@@ -23,6 +23,19 @@ impl TaskGarbageCollector {
         max_interval: Duration,
         force: bool,
         now: Instant,
+        delete: impl FnMut(i64, i64) -> Result<usize, E>,
+    ) -> Result<usize, E> {
+        self.run_with_batch_provider(ack, || i64::from(batch.get()), max_interval, force, now, delete)
+    }
+
+    /// Sample Go's signed batch property after acquiring the GC serialization lock.
+    pub fn run_with_batch_provider<E>(
+        &self,
+        ack: i64,
+        batch_provider: impl FnOnce() -> i64,
+        max_interval: Duration,
+        force: bool,
+        now: Instant,
         mut delete: impl FnMut(i64, i64) -> Result<usize, E>,
     ) -> Result<usize, E> {
         let mut state = match self.state.try_lock() {
@@ -30,8 +43,9 @@ impl TaskGarbageCollector {
             Err(std::sync::TryLockError::WouldBlock) => return Ok(0),
             Err(std::sync::TryLockError::Poisoned(_)) => panic!("Matching GC lock poisoned"),
         };
+        let batch = batch_provider();
         let backlog = ack.wrapping_sub(state.ack);
-        let due = backlog >= i64::from(batch.get())
+        let due = backlog >= batch
             || (backlog > 0
                 && (force
                     || state
@@ -43,9 +57,12 @@ impl TaskGarbageCollector {
         state.last_delete = Some(now);
         let mut deleted = 0;
         loop {
-            let count = delete(ack, i64::from(batch.get()))?;
+            let count = match delete(ack, batch) {
+                Ok(count) => count,
+                Err(_) => return Ok(deleted),
+            };
             deleted += count;
-            if count < batch.get() as usize {
+            if (count as i128) < i128::from(batch) {
                 state.ack = ack;
                 return Ok(deleted);
             }
@@ -88,9 +105,9 @@ mod tests {
                 .then(|| gc.state.lock().unwrap());
             let mut calls = Vec::new();
             let mut position = 0;
-            let result = gc.run(
+            let result = gc.run_with_batch_provider(
                 case["ack"].as_i64().unwrap(),
-                NonZeroU32::new(case["batch"].as_u64().unwrap() as u32).unwrap(),
+                || case["batch"].as_i64().unwrap(),
                 Duration::from_secs(1),
                 case["force"].as_bool().unwrap_or_default(),
                 now,
@@ -122,14 +139,7 @@ mod tests {
                 "{}",
                 case["name"]
             );
-            assert_eq!(
-                result.is_err(),
-                case["results"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|count| count.as_i64().unwrap() < 0)
-            );
+            assert!(result.is_ok());
         }
     }
     #[test]
@@ -153,7 +163,7 @@ mod tests {
                 now + interval + Duration::from_nanos(1),
                 |_, _| Err(())
             ),
-            Err(())
+            Ok(0)
         );
         assert_eq!(gc.ack_level(), 0);
         let result: Result<usize, ()> = gc.run(
@@ -177,5 +187,61 @@ mod tests {
             Ok(1)
         );
         assert_eq!(gc.ack_level(), 1);
+    }
+
+    #[test]
+    fn signed_batch_provider_is_sampled_under_lock_and_reaches_delete_unchanged() {
+        let gc = TaskGarbageCollector::default();
+        let now = Instant::now();
+        let busy = gc.state.lock().unwrap();
+        let sampled = std::sync::atomic::AtomicUsize::new(0);
+        let result: Result<usize, ()> = gc.run_with_batch_provider(
+            1,
+            || { sampled.fetch_add(1, std::sync::atomic::Ordering::SeqCst); 4_294_967_296 },
+            Duration::from_secs(1),
+            true,
+            now,
+            |_, _| panic!("busy collector must not delete"),
+        );
+        assert_eq!(result, Ok(0));
+        assert_eq!(sampled.load(std::sync::atomic::Ordering::SeqCst), 0);
+        drop(busy);
+
+        let seen = std::sync::atomic::AtomicI64::new(0);
+        let result: Result<usize, ()> = gc.run_with_batch_provider(
+            1,
+            || { sampled.fetch_add(1, std::sync::atomic::Ordering::SeqCst); 4_294_967_296 },
+            Duration::from_secs(1),
+            true,
+            now,
+            |_, batch| { seen.store(batch, std::sync::atomic::Ordering::SeqCst); Ok(0) },
+        );
+        assert_eq!(result, Ok(0));
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 4_294_967_296);
+        assert_eq!(sampled.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(gc.ack_level(), 1);
+    }
+
+    #[test]
+    fn zero_and_negative_batches_keep_go_error_and_repeat_boundaries_bounded() {
+        let gc = TaskGarbageCollector::default();
+        let now = Instant::now();
+        let mut calls = 0;
+        let result: Result<usize, ()> = gc.run_with_batch_provider(
+            1, || 0, Duration::from_secs(1), true, now,
+            |_, batch| { assert_eq!(batch, 0); calls += 1; Err(()) },
+        );
+        assert_eq!(result, Ok(0));
+        assert_eq!(calls, 1);
+        assert_eq!(gc.ack_level(), 0);
+
+        let mut calls = 0;
+        let result: Result<usize, ()> = gc.run_with_batch_provider(
+            1, || -2, Duration::from_secs(1), true, now,
+            |_, batch| { assert_eq!(batch, -2); calls += 1; if calls == 3 { Err(()) } else { Ok(9) } },
+        );
+        assert_eq!(result, Ok(18));
+        assert_eq!(calls, 3);
+        assert_eq!(gc.ack_level(), 0);
     }
 }

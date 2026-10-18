@@ -13,19 +13,17 @@ timer samples when the owner is created and after each maintenance attempt,
   `task_list_manager.go`, which reads the value once before constructing
   `liveness.NewLiveness`. `matching.maxTasklistIdleTime` remains unused because
   the inspected Go manager path does not consume it.
-- `matching.maxTaskDeleteBatchSize` remains explicitly unwired. Do not coerce
-it to `NonZeroU32`: Go samples its signed `int` once inside `tryDeleteNextBatch`
-after acquiring the lock, then passes it to storage and loops while `n >=
-batchSize`. The Rust collector currently accepts `NonZeroU32`, and its SQLite
-store accepts `i64` but rejects a zero limit. A correct port must retain signed
-batch values through the GC/store boundary and test the loop using a bounded
-injected-store oracle (never invoke a zero-sized GC loop without a bound or
-cancellation). Go's SQL store passes the `int` limit to the SQL plugin and
-reports `RowsAffected`; precise zero, negative, and oversized effects therefore
-need backend-specific oracle evidence before wiring the live setting. On a
-64-bit Go build the dynamic setting is a signed 64-bit `int`; values above the
-Rust store's `i64` range cannot originate from it, while values above `u32::MAX`
-are still valid and must not saturate if Rust is to preserve the signed range.
+- `matching.maxTaskDeleteBatchSize` is wired through the task-list filtered
+  admin dynamic-config provider to the durable queue's GC. The value stays
+  signed `i64` through the lock-protected GC read and SQLite `LIMIT`. Zero
+  reaches storage, where the Go SQLite plugin rejects it; the collector breaks
+  on that error without advancing its cursor. Negative values reach SQLite,
+  whose negative `LIMIT` deletes all eligible rows; Go then repeats because a
+  nonnegative row count cannot be less than a negative batch. Keep that loop
+  behavior covered only with a bounded injected error after observed calls.
+  Positive values above `u32::MAX` remain intact. See
+  `memory/evidence/matching-live-config-2026-10-18.md` for the Go backend and
+  collector oracle results.
 
 Go sources checked: `go/service/matching/config/config.go`,
 `go/service/matching/tasklist/task_list_manager.go`, `task_reader.go`,
@@ -37,8 +35,10 @@ were corrected without removing the timeout behavior.
 
 Implementation: `rust/crates/cadence-server/src/grpc_matching.rs`,
 `matching_registry.rs`, and `rust/crates/cadence-persistence/src/matching_queue.rs`.
-The current GC default remains unchanged (100 rows, one second between small
-drains); the live dynamic setting is unfinished.
+The GC fallback remains 100 rows with the existing one-second interval. Every
+default durable queue GC invocation reads the live setting; its value is
+sampled after the collector lock is acquired. The explicit batch override is
+retained for focused collector tests.
 
 No Matching completion claim is made; see `memory/service-migration-plan.md`
 for the remaining gates.

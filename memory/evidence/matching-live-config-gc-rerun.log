@@ -1,0 +1,14 @@
+ok  	github.com/uber/cadence/service/matching/tasklist	0.060s
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-1acf1d52/rust/crates/cadence-persistence)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.62s
+     Running unittests src/lib.rs (target/debug/deps/cadence_persistence-c18f31471858d2e1)
+
+running 4 tests
+test matching_gc::tests::matching_gc_time_boundary_is_strict_and_failure_defers_small_retry ... ok
+test matching_gc::tests::matching_gc_original_go_fixtures ... ok
+test matching_gc::tests::signed_batch_provider_is_sampled_under_lock_and_reaches_delete_unchanged ... ok
+test matching_gc::tests::zero_and_negative_batches_keep_go_error_and_repeat_boundaries_bounded ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 178 filtered out; finished in 0.01s
+
+Verified 15 original-Go GC cases

@@ -378,6 +378,20 @@ mod tests {
         ));
     }
     #[test]
+    fn matching_sqlite_preserves_go_signed_limit_behavior() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteTaskStore::create(directory.path().join("signed-limit.db"), BlobEncoding::ThriftRW).unwrap();
+        let key = key("signed-limit");
+        store.lease(&key, 0, 0, 10).unwrap();
+        store.create_tasks(&key, 1, &[task(1), task(2), task(3)]).unwrap();
+        assert!(matches!(store.complete_tasks_less_than(&key, 3, 0), Err(StorageError::MissingLimit)));
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 3);
+        assert_eq!(store.complete_tasks_less_than(&key, 3, -1).unwrap(), 3);
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
+        store.create_tasks(&key, 1, &[task(4), task(5)]).unwrap();
+        assert_eq!(store.complete_tasks_less_than(&key, 5, i64::from(u32::MAX) + 1).unwrap(), 2);
+    }
+    #[test]
     fn matching_sqlite_namespaces_and_task_types_are_isolated() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("tasks.db");

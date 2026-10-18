@@ -43,7 +43,8 @@ func TestRustMatchingGC(t *testing.T) {
 			t.Fatal(err)
 		}
 		manager, deps := setupMocksForTaskListManager(t, id, types.TaskListKindNormal)
-		manager.config.MaxTaskDeleteBatchSize = func() int { return c.Batch }
+		batchReads := 0
+		manager.config.MaxTaskDeleteBatchSize = func() int { batchReads++; return c.Batch }
 		manager.config.MaxTimeBetweenTaskDeletes = time.Second
 		gc := manager.taskGC
 		gc.ackLevel = c.Cursor
@@ -76,6 +77,9 @@ func TestRustMatchingGC(t *testing.T) {
 		if position != len(c.Results) {
 			t.Fatalf("%s: unused deletion responses", c.Name)
 		}
+		if want := map[bool]int{true: 0, false: 1}[c.Busy]; batchReads != want {
+			t.Fatalf("%s: batch property reads=%d want=%d", c.Name, batchReads, want)
+		}
 		c.ExpectedCursor = gc.ackLevel
 		c.Attempted = !gc.lastDeleteTime.Equal(initial)
 	}
@@ -85,5 +89,73 @@ func TestRustMatchingGC(t *testing.T) {
 	}
 	if err = os.WriteFile(os.Getenv("CADENCE_GC_OUTPUT"), append(data, '\n'), 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRustMatchingGCSignedBounds(t *testing.T) {
+	id, err := NewIdentifier("domain", "queue", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, deps := setupMocksForTaskListManager(t, id, types.TaskListKindNormal)
+	manager.config.MaxTimeBetweenTaskDeletes = time.Hour
+
+	manager.config.MaxTaskDeleteBatchSize = func() int { return 0 }
+	zeroCalls := 0
+	deps.mockTaskManager.EXPECT().CompleteTasksLessThan(gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, *persistence.CompleteTasksLessThanRequest) (*persistence.CompleteTasksLessThanResponse, error) {
+		zeroCalls++
+		return nil, errors.New("SQLite plugin missing limit parameter")
+	}).Times(1)
+	manager.taskGC.RunNow(1)
+	if zeroCalls != 1 || manager.taskGC.ackLevel != 0 {
+		t.Fatalf("zero batch: calls=%d ack=%d", zeroCalls, manager.taskGC.ackLevel)
+	}
+
+	manager.config.MaxTaskDeleteBatchSize = func() int { return -2 }
+	negativeCalls := 0
+	deps.mockTaskManager.EXPECT().CompleteTasksLessThan(gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, *persistence.CompleteTasksLessThanRequest) (*persistence.CompleteTasksLessThanResponse, error) {
+		negativeCalls++
+		if negativeCalls == 3 {
+			return nil, errors.New("bounded oracle stop")
+		}
+		return &persistence.CompleteTasksLessThanResponse{TasksCompleted: 3}, nil
+	}).Times(3)
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				t.Fatalf("unexpected panic: %v", recovered)
+			}
+		}()
+		manager.taskGC.RunNow(1)
+	}()
+	if negativeCalls != 3 || manager.taskGC.ackLevel != 0 {
+		t.Fatalf("negative batch bounded attempts: calls=%d ack=%d", negativeCalls, manager.taskGC.ackLevel)
+	}
+}
+
+func TestRustMatchingGCLiveBatchReadFrequency(t *testing.T) {
+	id, err := NewIdentifier("domain", "queue", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, deps := setupMocksForTaskListManager(t, id, types.TaskListKindNormal)
+	configured, reads := 1, 0
+	manager.config.MaxTaskDeleteBatchSize = func() int { reads++; return configured }
+	var limits []int
+	deps.mockTaskManager.EXPECT().CompleteTasksLessThan(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, request *persistence.CompleteTasksLessThanRequest) (*persistence.CompleteTasksLessThanResponse, error) {
+		limits = append(limits, request.Limit)
+		if len(limits) == 1 {
+			configured = 2
+			return &persistence.CompleteTasksLessThanResponse{TasksCompleted: 1}, nil
+		}
+		return &persistence.CompleteTasksLessThanResponse{TasksCompleted: 0}, nil
+	}).Times(3)
+	manager.taskGC.RunNow(1)
+	manager.taskGC.RunNow(2)
+	if reads != 2 {
+		t.Fatalf("batch property sampled %d times for two attempts", reads)
+	}
+	if len(limits) != 3 || limits[0] != 1 || limits[1] != 1 || limits[2] != 2 {
+		t.Fatalf("batch values across drain and live update: %v", limits)
 	}
 }

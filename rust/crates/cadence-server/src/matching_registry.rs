@@ -133,6 +133,8 @@ pub struct QueueRegistry {
     /// Go `cfg.IdleTasklistCheckInterval(domain, taskList, type)` in
     /// nanoseconds, read once per owner for liveness TTL and idle checks.
     idle_tasklist_check_interval: Option<SyncWaitProvider>,
+    /// Go's signed, task-list-filtered `MaxTaskDeleteBatchSize` provider.
+    max_task_delete_batch_size: Option<TaskDeleteBatchSizeProvider>,
 }
 /// Live adaptive-scaler configuration per domain/task-list/type, mirroring
 /// Go's `TaskListConfig` scaler reads. `None` keeps the scaler parked.
@@ -153,6 +155,8 @@ pub type IsolationProvider = Arc<
 /// Live read-partition-count provider used to size the dispatch limiter and to
 /// divide dispatch rate, mirroring Go's `NumTasklistReadPartitions`.
 pub type SyncWaitProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
+/// Go's signed `MaxTaskDeleteBatchSize` value, filtered by domain/list/type.
+pub type TaskDeleteBatchSizeProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 /// Partition-tree degree used to resolve a child partition's parent for
 /// add/poll forwarding, mirroring Go's `ForwarderMaxChildrenPerNode`.
 pub type ForwardDegreeProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
@@ -474,6 +478,7 @@ impl QueueRegistry {
             min_burst: None,
             update_ack_interval: None,
             idle_tasklist_check_interval: None,
+            max_task_delete_batch_size: None,
         }
     }
     pub(crate) fn with_local_poll_service(mut self, factory: LocalPollFactory) -> Self {
@@ -600,6 +605,10 @@ impl QueueRegistry {
         self.idle_tasklist_check_interval = Some(provider);
         self
     }
+    pub fn with_max_task_delete_batch_size(mut self, provider: TaskDeleteBatchSizeProvider) -> Self {
+        self.max_task_delete_batch_size = Some(provider);
+        self
+    }
     #[cfg(test)]
     pub(crate) fn isolation_provider_for_test(&self) -> IsolationProvider {
         self.isolation
@@ -694,6 +703,15 @@ impl QueueRegistry {
                         )
                         .map_err(|error| Status::unavailable(error.to_string()))?,
                     );
+                    {
+                        let provider = registry.max_task_delete_batch_size.clone();
+                        let domain = domain.clone();
+                        let name = lookup.1.clone();
+                        let task_type = lookup.2;
+                        queue.set_gc_batch_size_provider(Arc::new(move || {
+                            provider.as_ref().map(|p| p(&domain, &name, task_type)).unwrap_or(100)
+                        }));
+                    }
                     let partitions = match crate::matching_partition::PartitionCache::load(
                             &registry.store,
                             &queue,

@@ -27,6 +27,21 @@ fn domain_name_for(
         .and_then(|response| response.domain_info.map(|info| info.name))
         .filter(|name| !name.is_empty())
 }
+fn task_delete_batch_size_provider(
+    domains: cadence_persistence::InMemoryDomainStore,
+    overlay: Arc<Mutex<crate::admin::DynamicConfigOverlay>>,
+) -> crate::matching_registry::TaskDeleteBatchSizeProvider {
+    Arc::new(move |domain_id, task_list, task_type| {
+        let config = overlay.lock().expect("admin lock");
+        cadence_persistence::dynamic_config::task_list_integer(
+            config.property_values("matching.maxTaskDeleteBatchSize"),
+            domain_name_for(&domains, domain_id).as_deref(),
+            task_list,
+            task_type,
+            100,
+        )
+    })
+}
 /// Go `taskListManagerImpl.AddTask` QPS reporting: an arrival counts toward the
 /// root, and toward its isolation group when the task carries one.
 fn report_arrival(
@@ -525,6 +540,7 @@ impl Matching {
                 )
             })
         };
+        let max_task_delete_batch_size = task_delete_batch_size_provider(domains.clone(), overlay.clone());
         let scaler_config: crate::matching_registry::ScalerConfigProvider = {
             let domains = domains.clone();
             let overlay = overlay.clone();
@@ -737,6 +753,7 @@ impl Matching {
             .with_record_started_timeout(record_started_timeout)
             .with_update_ack_interval(update_ack_interval)
             .with_idle_tasklist_check_interval(idle_tasklist_check_interval)
+            .with_max_task_delete_batch_size(max_task_delete_batch_size)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
         let mut matching = Self::new(state);

@@ -51,6 +51,7 @@ pub struct DurableTaskQueue {
     reader: Arc<ReaderGate>,
     ack: AckManager,
     gc: crate::matching_gc::TaskGarbageCollector,
+    gc_batch_size_provider: Mutex<Option<Arc<dyn Fn() -> i64 + Send + Sync>>>,
     stopped: AtomicBool,
     stop_waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
@@ -182,6 +183,7 @@ impl DurableTaskQueue {
             range_size,
             ack,
             gc: crate::matching_gc::TaskGarbageCollector::default(),
+            gc_batch_size_provider: Mutex::new(None),
             stopped: AtomicBool::new(false),
             stop_waker: Mutex::new(None),
             writer: Mutex::new(()),
@@ -545,11 +547,18 @@ impl DurableTaskQueue {
     }
     /// Go defaults: 100 rows per delete batch, one second between small drains.
     pub fn run_garbage_collection(&self, force: bool) -> Result<usize> {
-        self.run_garbage_collection_with(
-            force,
-            NonZeroU32::new(100).unwrap(),
-            std::time::Duration::from_secs(1),
-        )
+        let provider = self.gc_batch_size_provider.lock().expect("matching GC config lock").clone();
+        match provider {
+            Some(provider) => self.run_garbage_collection_with_batch_provider(
+                force, move || provider(), std::time::Duration::from_secs(1),
+            ),
+            None => self.run_garbage_collection_with(
+                force, NonZeroU32::new(100).unwrap(), std::time::Duration::from_secs(1),
+            ),
+        }
+    }
+    pub fn set_gc_batch_size_provider(&self, provider: Arc<dyn Fn() -> i64 + Send + Sync>) {
+        *self.gc_batch_size_provider.lock().expect("matching GC config lock") = Some(provider);
     }
     pub fn run_garbage_collection_with(
         &self,
@@ -561,6 +570,23 @@ impl DurableTaskQueue {
         Ok(self.gc.run(
             ack,
             batch,
+            max_interval,
+            force,
+            std::time::Instant::now(),
+            |ack, limit| self.store.complete_tasks_less_than(&self.key, ack, limit),
+        )?)
+    }
+    /// Live signed batch provider sampled after the GC lock is acquired.
+    pub fn run_garbage_collection_with_batch_provider(
+        &self,
+        force: bool,
+        batch_provider: impl FnOnce() -> i64,
+        max_interval: std::time::Duration,
+    ) -> Result<usize> {
+        let (_, ack, _) = self.ack.levels();
+        Ok(self.gc.run_with_batch_provider(
+            ack,
+            batch_provider,
             max_interval,
             force,
             std::time::Instant::now(),
@@ -711,6 +737,34 @@ mod tests {
                 .adaptive_partition_config,
             None
         );
+    }
+    #[test]
+    fn matching_queue_live_gc_batch_provider_is_used_for_each_attempt() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("gc.db"), BlobEncoding::ThriftRW).unwrap());
+        let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
+        let configured = Arc::new(std::sync::atomic::AtomicI64::new(1));
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let value = configured.clone();
+        let count = reads.clone();
+        queue.set_gc_batch_size_provider(Arc::new(move || {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            value.load(std::sync::atomic::Ordering::SeqCst)
+        }));
+        let written = queue.append(&[data(), data()], 2).unwrap();
+        let batch = queue.read_batch(10, n(10), 3).unwrap();
+        for task in batch.tasks { queue.complete(task.task_id).unwrap(); }
+        assert_eq!(queue.run_garbage_collection(true).unwrap(), 2);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(written.len(), 2);
+
+        configured.store(2, std::sync::atomic::Ordering::SeqCst);
+        let later = queue.append(&[data()], 4).unwrap();
+        let batch = queue.read_batch(10, n(10), 5).unwrap();
+        for task in batch.tasks { queue.complete(task.task_id).unwrap(); }
+        assert_eq!(queue.run_garbage_collection(true).unwrap(), 1);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(later.len(), 1);
     }
     #[test]
     fn matching_queue_partition_update_fences_stale_owner_without_publishing() {

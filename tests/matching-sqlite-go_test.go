@@ -124,5 +124,39 @@ func TestRustMatchingSQLiteInterop(t *testing.T) {
 		if err != nil || result.TasksCompleted != 1 {
 			t.Fatalf("bad deletion: %+v %v", result, err)
 		}
+		// Exercise Go's actual SQLite persistence path with signed SQL LIMITs.
+		limitList := "signed-limit-oracle"
+		limitLease, err := store.LeaseTaskList(ctx, &p.LeaseTaskListRequest{DomainID: domain, TaskList: limitList, CurrentTimeStamp: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = store.CreateTasks(ctx, &p.CreateTasksRequest{TaskListInfo: limitLease.TaskListInfo, CurrentTimeStamp: now, Tasks: []*p.CreateTaskInfo{
+			{TaskID: 1, Data: &p.TaskInfo{DomainID: domain, WorkflowID: "limit-1", RunID: run}},
+			{TaskID: 2, Data: &p.TaskInfo{DomainID: domain, WorkflowID: "limit-2", RunID: run}},
+			{TaskID: 3, Data: &p.TaskInfo{DomainID: domain, WorkflowID: "limit-3", RunID: run}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = store.CompleteTasksLessThan(ctx, &p.CompleteTasksLessThanRequest{DomainID: domain, TaskListName: limitList, TaskID: 3, Limit: 0})
+		if err == nil {
+			t.Fatal("Go SQLite plugin must reject a zero LIMIT")
+		}
+		all, err := store.GetTasks(ctx, &p.GetTasksRequest{DomainID: domain, TaskList: limitList, ReadLevel: 0, BatchSize: 10})
+		if err != nil || len(all.Tasks) != 3 {
+			t.Fatalf("zero limit changed rows: tasks=%d err=%v", len(all.Tasks), err)
+		}
+		negative, err := store.CompleteTasksLessThan(ctx, &p.CompleteTasksLessThanRequest{DomainID: domain, TaskListName: limitList, TaskID: 3, Limit: -1})
+		if err != nil || negative.TasksCompleted != 3 {
+			t.Fatalf("negative SQLite LIMIT should delete all rows: result=%+v err=%v", negative, err)
+		}
+		_, err = store.CreateTasks(ctx, &p.CreateTasksRequest{TaskListInfo: limitLease.TaskListInfo, CurrentTimeStamp: now, Tasks: []*p.CreateTaskInfo{{TaskID: 4, Data: &p.TaskInfo{DomainID: domain, WorkflowID: "limit-large", RunID: run}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		large, err := store.CompleteTasksLessThan(ctx, &p.CompleteTasksLessThanRequest{DomainID: domain, TaskListName: limitList, TaskID: 4, Limit: int(^uint32(0)) + 1})
+		if err != nil || large.TasksCompleted != 1 {
+			t.Fatalf("large signed SQLite LIMIT was truncated: result=%+v err=%v", large, err)
+		}
 	}
 }

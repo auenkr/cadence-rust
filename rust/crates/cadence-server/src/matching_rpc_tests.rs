@@ -505,6 +505,34 @@ async fn matching_rpc_scopes_partition_counts_to_task_list_and_type() {
     assert_eq!(other.activity_task_list_partitions.len(), 1);
 }
 
+#[tokio::test]
+async fn matching_rpc_live_gc_batch_config_is_filtered_and_resampled() {
+    let (_dir, _store, matching, key) = fixture();
+    use cadence_api::{admin::{DynamicConfigFilter, DynamicConfigValue}, enums::EncodingType, types::DataBlob};
+    let blob = |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+    let overlay = matching.frontend.state.admin.dynamic_config.clone();
+    let update = |value: i64| {
+        overlay.lock().unwrap().update(false, "matching.maxTaskDeleteBatchSize", vec![DynamicConfigValue {
+            value: blob(serde_json::json!(value)),
+            filters: vec![
+                DynamicConfigFilter { name: "domainName".into(), value: blob(serde_json::json!("domain")) },
+                DynamicConfigFilter { name: "taskListName".into(), value: blob(serde_json::json!("queue")) },
+                DynamicConfigFilter { name: "taskType".into(), value: blob(serde_json::json!(0)) },
+            ],
+        }]);
+    };
+    update(0);
+    let domain = key.domain_id.to_string();
+    let provider = super::task_delete_batch_size_provider(matching.frontend.state.domains.clone(), overlay.clone());
+    assert_eq!(provider(&domain, "queue", 0), 0);
+    assert_eq!(provider(&domain, "other", 0), 100, "task-list filter must be honored");
+    assert_eq!(provider("unknown-domain", "queue", 0), 100, "domain filter must be honored");
+    assert_eq!(provider(&domain, "queue", 1), 100, "task-type filter must be honored");
+
+    update(1);
+    assert_eq!(provider(&domain, "queue", 0), 1, "an existing provider observes updated live config");
+}
+
 /// Minimal History used by the query test: only `GetMutableState` is
 /// overridden, every other RPC keeps the generated `unimplemented` default.
 struct FakeHistory {

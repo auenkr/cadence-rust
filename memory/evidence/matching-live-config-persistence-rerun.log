@@ -1,0 +1,44 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running unittests src/lib.rs (target/debug/deps/cadence_persistence-c18f31471858d2e1)
+
+running 37 tests
+test domains::tests::matching_domain_activity_follows_local_failover_and_attribute_rules ... ok
+test executions::advanced_tests::matching_partition_refresh_versions_and_recovery ... ok
+test executions::advanced_tests::matching_partition_go_fixtures ... ok
+test matching_blob::tests::matching_blob_create_expiry_matches_go_sql ... ok
+test matching_blob::tests::matching_blob_original_go_fixtures ... ok
+test matching_blob::tests::matching_blob_unknown_fields_and_malformed_input ... ok
+test matching_gc::tests::matching_gc_original_go_fixtures ... ok
+test matching_gc::tests::matching_gc_time_boundary_is_strict_and_failure_defers_small_retry ... ok
+test matching_gc::tests::zero_and_negative_batches_keep_go_error_and_repeat_boundaries_bounded ... ok
+test matching_gc::tests::signed_batch_provider_is_sampled_under_lock_and_reaches_delete_unchanged ... ok
+test matching_queue::tests::matching_queue_cancelled_admission_leaves_later_batch_rows_unread ... ok
+test matching_queue::tests::matching_queue_concurrent_reads_claim_each_task_once ... ok
+test matching_queue::tests::matching_queue_cross_domain_rows_keep_source_key_and_target_fence ... ok
+test matching_queue::tests::matching_queue_expiry_clock_advances_between_row_admissions ... ok
+test matching_queue::tests::matching_queue_expiry_boundaries_and_scan_budget ... ok
+test matching_queue::tests::matching_queue_failure_rewrite_is_durable_before_ack ... ok
+test matching_queue::tests::matching_queue_lease_backoff_allows_durable_reads_and_ack_updates ... ok
+test matching_queue::tests::matching_queue_live_gc_batch_provider_is_used_for_each_attempt ... ok
+test matching_queue::tests::matching_queue_lease_retries_sql_failure_and_stops_on_terminal_renewal ... ok
+test matching_queue::tests::matching_queue_original_go_expiry_fixtures ... ok
+test matching_queue::tests::matching_queue_original_go_blocked_admission_fixtures ... ok
+test matching_queue::tests::matching_queue_owned_turn_retains_unadmitted_rows_across_threads ... ok
+test matching_queue::tests::matching_queue_partition_metadata_survives_ack_rollover_and_reopen ... ok
+test matching_queue::tests::matching_queue_original_go_reader_fixtures ... ok
+test matching_queue::tests::matching_queue_partition_update_fences_stale_owner_without_publishing ... ok
+test matching_queue::tests::matching_queue_partition_storage_failure_keeps_previous_metadata ... ok
+test matching_queue::tests::matching_queue_ranges_out_of_order_ack_and_recovery ... ok
+test matching_queue::tests::matching_queue_stop_does_not_wait_for_inflight_state_lock ... ok
+test matching_retry::tests::matching_retry_original_go_outcomes ... ok
+test matching_sqlite::interop_tests::matching_sqlite_go_database_interop ... ignored, requires original-Go SQLite seed; run tests/run-matching-storage-compat.py
+test matching_sqlite::tests::matching_sqlite_atomic_batches_bounds_expiry_and_deletes ... ok
+test matching_sqlite::tests::matching_sqlite_leases_fence_writes_and_survive_reopen ... ok
+test matching_sqlite::tests::matching_sqlite_namespaces_and_task_types_are_isolated ... ok
+test matching_sqlite::tests::matching_sqlite_preserves_go_signed_limit_behavior ... ok
+test matching_sqlite::tests::matching_sqlite_schema_matches_go ... ok
+test visibility::tests::like_is_case_insensitive_prefix_matching_in_go_visibility ... ok
+test matching_queue::tests::matching_queue_reader_retries_transient_query_without_losing_task ... ok
+
+test result: ok. 36 passed; 0 failed; 1 ignored; 0 measured; 145 filtered out; finished in 0.37s
+

@@ -241,5 +241,16 @@
     ],
     "expected_cursor": 2,
     "attempted": true
+  },
+  {
+    "name": "signed-large-batch",
+    "cursor": 0,
+    "ack": 1,
+    "batch": 4294967296,
+    "force": true,
+    "results": [0],
+    "calls": [[1, 4294967296]],
+    "expected_cursor": 1,
+    "attempted": true
   }
 ]

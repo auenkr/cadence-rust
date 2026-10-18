@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='cadence-gc-') as directory:
     output = Path(directory) / 'output.json'
     overlay = Path(directory) / 'overlay.json'
     overlay.write_text(json.dumps({'Replace': {str(root/'go/service/matching/tasklist/rust_gc_test.go'): str(root/'tests/matching-gc-go_test.go')}}))
-    subprocess.run(['go','test','-overlay',str(overlay),'./service/matching/tasklist','-run','^TestRustMatchingGC$','-count=1'],cwd=root/'go',env={**os.environ,'CADENCE_GC_INPUT':str(fixture),'CADENCE_GC_OUTPUT':str(output)},check=True)
+    subprocess.run(['go','test','-overlay',str(overlay),'./service/matching/tasklist','-run','^TestRustMatchingGC.*$','-count=1'],cwd=root/'go',env={**os.environ,'CADENCE_GC_INPUT':str(fixture),'CADENCE_GC_OUTPUT':str(output)},check=True)
     actual=json.loads(output.read_text())
     if args.regenerate: fixture.write_text(json.dumps(actual,indent=2)+'\n')
     elif actual != json.loads(fixture.read_text()): raise RuntimeError('original Go GC fixtures drifted')
