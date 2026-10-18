@@ -1,3 +1,5 @@
+Integration hash correction: worker-reported full base8bcc48481b279d26275498d17723cde0e120d5c0 was invalid; used original equivalent b2441650e. Actual parent integrations a58a583ee,9f546f403,6106a95ec. JOINworker38 checkout started before integration due failed hash; if transport absent there, apply b2441650e+595a3614e+755052150 (or these parent equivalents) before implementation. No code lost.
+
 ## Outbound JSON transport repaired and integrated 2026-10-18
 
 standard-37 passed4adversarial tests incl29truncated headers,argument/id/type/flag/checksum cases,CRC32/CRC32C fragmentation,elapsed INIT TTL; strict locked serverClippy,real Go outbound200KB/errors/deadline/disconnect and Go inbound regression. Parent reviewed checked parser and typed application errors. Integrated8bcc48481+595a3614e+755052150. Exact malformed Go rejection text not compared; cancellation closes socket,no explicit CANCEL. Worker cleaned own target after evidence.
