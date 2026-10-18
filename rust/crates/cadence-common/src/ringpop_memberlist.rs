@@ -1,15 +1,12 @@
-//! Bounded deterministic port of Ringpop v0.10.0 `swim.memberlist.Update`.
+//! Deterministic core of Ringpop v0.10.0 `swim.memberlist.Update`.
 //!
-//! Each call processes only the first `MAX_UPDATE_CHANGES` inputs in order;
-//! callers must submit any remainder in another call. The caller supplies the
+//! Each call processes every input change in order. The caller supplies the
 //! local incarnation value and insertion index, so this core invents neither
 //! clock nor random-position behavior. Transport, events and dissemination
 //! remain outside this slice.
 use crate::ringpop_member::{memberlist_checksum, should_process_gossip};
 use crate::ringpop_wire::{Change, Member};
 use std::collections::BTreeMap;
-
-pub const MAX_UPDATE_CHANGES: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemberlistUpdate {
@@ -51,8 +48,8 @@ impl Memberlist {
 
     /// `next_incarnation` is called exactly once per accepted local refutation.
     /// `insert_position` is called once for each accepted unknown remote member
-    /// with the current member count; its result is clamped to the Go slice's
-    /// valid insertion range.
+    /// with the current member count; its result is clamped to Go's
+    /// `rand.Intn(member_count)` range, which excludes the end position.
     pub fn update<F, R>(
         &mut self,
         changes: &[Change],
@@ -65,7 +62,7 @@ impl Memberlist {
     {
         let mut accepted = Vec::new();
         let mut refuted_local = false;
-        for incoming in changes.iter().take(MAX_UPDATE_CHANGES) {
+        for incoming in changes {
             let mut change = incoming.clone().validate_incoming();
             let gossip = Member {
                 address: change.address.clone(),
@@ -96,7 +93,8 @@ impl Memberlist {
             } else if let Some(index) = old_index {
                 self.members[index] = gossip;
             } else {
-                let index = insert_position(self.members.len()).min(self.members.len());
+                let index =
+                    insert_position(self.members.len()).min(self.members.len().saturating_sub(1));
                 self.members.insert(index, gossip.clone());
                 for value in self.by_address.values_mut() {
                     if *value >= index {
@@ -160,5 +158,74 @@ mod tests {
         assert_ne!(old_sum, result.checksum);
         assert_eq!(result.accepted[2].address, "self");
         assert_eq!(result.accepted[2].status, ALIVE);
+    }
+
+    #[test]
+    fn update_processes_complete_batch_larger_than_sixty_four() {
+        let mut list = Memberlist::new(member("self", ALIVE, 10));
+        let changes: Vec<_> = (0..70)
+            .map(|i| change(&format!("remote-{i}"), ALIVE, 1))
+            .collect();
+        let mut insertion_calls = 0;
+        let result = list.update(
+            &changes,
+            || unreachable!("no local refutation expected"),
+            |len| {
+                insertion_calls += 1;
+                len - 1
+            },
+        );
+
+        assert_eq!(result.accepted.len(), 70);
+        assert_eq!(insertion_calls, 70);
+        assert_eq!(list.members().len(), 71);
+        assert!(list.member("remote-69").is_some());
+    }
+
+    #[test]
+    fn local_refutation_uses_new_incarnation_and_local_member_fields() {
+        let mut local = member("self", ALIVE, 10);
+        local.labels = Some([("zone".to_owned(), "west".to_owned())].into());
+        let mut list = Memberlist::new(local);
+        let mut incoming = change("self", SUSPECT, 11);
+        incoming.source = "remote".into();
+        incoming.source_incarnation = 55;
+        incoming.timestamp = crate::ringpop_wire::Timestamp(1234);
+
+        let mut clock_calls = 0;
+        let result = list.update(
+            &[incoming],
+            || {
+                clock_calls += 1;
+                12
+            },
+            |_| unreachable!(),
+        );
+        assert_eq!(clock_calls, 1);
+        let applied = &result.accepted[0];
+        assert_eq!(applied.source, "self");
+        assert_eq!(applied.source_incarnation, 12);
+        assert_eq!(applied.address, "self");
+        assert_eq!(applied.incarnation, 12);
+        assert_eq!(applied.status, ALIVE);
+        assert!(!applied.tombstone);
+        assert_eq!(applied.labels, list.member("self").unwrap().labels);
+        assert_eq!(applied.timestamp, Default::default());
+        assert_eq!(list.member("self").unwrap().incarnation, 12);
+    }
+
+    #[test]
+    fn insertion_position_clamps_to_go_random_range_excluding_end() {
+        let mut list = Memberlist::new(member("self", ALIVE, 10));
+        list.update(&[change("first", ALIVE, 1)], || unreachable!(), |_| 0);
+        list.update(
+            &[change("second", ALIVE, 1)],
+            || unreachable!(),
+            |_| usize::MAX,
+        );
+
+        assert_eq!(list.members()[0].address, "first");
+        assert_eq!(list.members()[1].address, "second");
+        assert_eq!(list.members()[2].address, "self");
     }
 }
