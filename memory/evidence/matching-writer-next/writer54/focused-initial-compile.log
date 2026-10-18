@@ -1,0 +1,19 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-526d085d/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-526d085d/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-526d085d/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-526d085d/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-526d085d/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-526d085d/rust/crates/cadence-server)
+error[E0596]: cannot borrow `first.accepted` as mutable, as `first` is not declared as mutable
+   --> crates/cadence-server/src/matching_writer.rs:240:41
+    |
+240 |                 if let Some(accepted) = first.accepted.take() {
+    |                                         ^^^^^^^^^^^^^^ cannot borrow as mutable
+    |
+help: consider changing this to be mutable
+    |
+229 |                 let mut first = if let Some(rendezvous) = &rendezvous {
+    |                     +++
+
+For more information about this error, try `rustc --explain E0596`.
+error: could not compile `cadence-server` (lib test) due to 1 previous error

@@ -4,9 +4,9 @@
 //! provider, and its append API accepts slices rather than individual calls.
 use std::{
     sync::{
-        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+        Arc, Mutex,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -224,6 +224,10 @@ mod tests {
         response_timeout: String,
         cancelled_after_enqueue: String,
         stopped: String,
+        #[serde(default)]
+        rendezvous_batch: Option<usize>,
+        #[serde(default)]
+        rendezvous_accepted: Option<usize>,
     }
     #[test]
     fn consumes_original_go_trace_fixture() {
@@ -231,7 +235,13 @@ mod tests {
             "../../../../tests/fixtures/matching-writer-next.json"
         ))
         .unwrap();
-        assert_eq!(traces.len(), 8);
+        assert_eq!(traces.len(), 9);
+        let zero_ready = traces
+            .iter()
+            .find(|trace| trace.rendezvous_batch.is_some())
+            .unwrap();
+        assert_eq!(zero_ready.rendezvous_batch, Some(4));
+        assert_eq!(zero_ready.rendezvous_accepted, Some(8));
         for trace in traces {
             assert!(trace.capacity >= 0);
             // Go's test replaces appendCh with capacity 8 after recording the
@@ -410,7 +420,10 @@ mod tests {
         let first = thread::spawn(move || first_actor.append(1, Duration::from_secs(2)));
         entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         let (response, _response_rx) = mpsc::sync_channel(1);
-        actor.sender.try_send(Request { value: 2, response }).unwrap();
+        actor
+            .sender
+            .try_send(Request { value: 2, response })
+            .unwrap();
 
         let (started_tx, started_rx) = mpsc::channel();
         let waiting_actor = actor.clone();
@@ -426,8 +439,14 @@ mod tests {
         let result = waiting.join().unwrap();
         let elapsed = began.elapsed();
         assert_eq!(result, Err(WriterError::ServiceBusy));
-        assert!(elapsed >= Duration::from_millis(100), "wait ended too early: {elapsed:?}");
-        assert_eq!(actor.append(4, Duration::from_millis(10)), Err(WriterError::Stopped));
+        assert!(
+            elapsed >= Duration::from_millis(100),
+            "wait ended too early: {elapsed:?}"
+        );
+        assert_eq!(
+            actor.append(4, Duration::from_millis(10)),
+            Err(WriterError::Stopped)
+        );
 
         release_tx.send(()).unwrap();
         let _ = first.join();
@@ -447,7 +466,10 @@ mod tests {
         let first = thread::spawn(move || first_actor.append(1, Duration::from_secs(2)));
         entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         let (response, _response_rx) = mpsc::sync_channel(1);
-        actor.sender.try_send(Request { value: 2, response }).unwrap();
+        actor
+            .sender
+            .try_send(Request { value: 2, response })
+            .unwrap();
         let cancelled = Arc::new(AtomicBool::new(false));
         let waiting_actor = actor.clone();
         let token = cancelled.clone();

@@ -9,6 +9,7 @@ use std::{
     },
     time::Duration,
 };
+use std::collections::VecDeque;
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tonic::Status;
 #[derive(Clone, Copy)]
@@ -69,8 +70,7 @@ struct Request {
     accepted: Option<oneshot::Sender<()>>,
 }
 struct Rendezvous {
-    permits: tokio::sync::Semaphore,
-    slot: Mutex<Option<(u64, Request)>>,
+    waiters: Mutex<VecDeque<(u64, Request)>>,
     notify: Notify,
     next_id: AtomicU64,
 }
@@ -82,10 +82,8 @@ struct AdmissionGuard {
 impl Drop for AdmissionGuard {
     fn drop(&mut self) {
         if self.armed {
-            let mut slot = self.rendezvous.slot.lock().expect("Matching rendezvous slot lock");
-            if slot.as_ref().is_some_and(|(id, _)| *id == self.id) {
-                slot.take();
-            }
+            let mut waiters = self.rendezvous.waiters.lock().expect("Matching rendezvous queue lock");
+            if let Some(index) = waiters.iter().position(|(id, _)| *id == self.id) { waiters.remove(index); }
         }
     }
 }
@@ -95,7 +93,7 @@ async fn receive_rendezvous(
 ) -> Option<Request> {
     loop {
         let notified = rendezvous.notify.notified();
-        if let Some((_, mut request)) = rendezvous.slot.lock().expect("Matching rendezvous slot lock").take() {
+        if let Some((_, mut request)) = rendezvous.waiters.lock().expect("Matching rendezvous queue lock").pop_front() {
             if let Some(accepted) = request.accepted.take() { let _ = accepted.send(()); }
             return Some(request);
         }
@@ -104,6 +102,11 @@ async fn receive_rendezvous(
             _ = notified => (),
         }
     }
+}
+fn try_receive_rendezvous(rendezvous: &Rendezvous) -> Option<Request> {
+    let (_, mut request) = rendezvous.waiters.lock().expect("Matching rendezvous queue lock").pop_front()?;
+    if let Some(accepted) = request.accepted.take() { let _ = accepted.send(()); }
+    Some(request)
 }
 struct Inner {
     sender: mpsc::Sender<Request>,
@@ -174,8 +177,7 @@ impl TaskWriter {
         let capacity = usize::try_from(capacity)
             .expect("negative matching outstanding task append threshold");
         let rendezvous = (capacity == 0).then(|| Arc::new(Rendezvous {
-            permits: tokio::sync::Semaphore::new(0),
-            slot: Mutex::new(None),
+            waiters: Mutex::new(VecDeque::new()),
             notify: Notify::new(),
             next_id: AtomicU64::new(1),
         }));
@@ -199,8 +201,7 @@ impl TaskWriter {
         tokio::spawn(async move {
             let mut receiver = receiver;
             loop {
-                let mut first = if let Some(rendezvous) = &rendezvous {
-                    rendezvous.permits.add_permits(1);
+                let first = if let Some(rendezvous) = &rendezvous {
                     match receive_rendezvous(rendezvous, &mut stopped_rx).await {
                         Some(request) => request,
                         None => break,
@@ -211,18 +212,29 @@ impl TaskWriter {
                         request = receiver.recv() => match request { Some(request) => request, None => break },
                     }
                 };
-                if let Some(accepted) = first.accepted.take() { let _ = accepted.send(()); }
                 if *stopped_rx.borrow() || queue.is_stopped() {
                     break;
                 }
                 // Sample outside any config lock held by this actor and before
                 // probing the queue, matching Go getWriteBatch timing.
-                let batch = drain_batch_with(&mut vec![first], &mut receiver, || {
+                let batch = if let Some(rendezvous) = &rendezvous {
+                    let mut batch = vec![first];
+                    let mut additional = 0i64;
+                    loop {
+                        let maximum = live_config.as_ref().map(|provider| provider().0).unwrap_or(config.max_batch_size);
+                        if additional >= maximum { break; }
+                        match try_receive_rendezvous(rendezvous) {
+                            Some(request) => { batch.push(request); additional += 1; }
+                            None => break,
+                        }
+                    }
+                    batch
+                } else { drain_batch_with(&mut vec![first], &mut receiver, || {
                     live_config
                         .as_ref()
                         .map(|provider| provider().0)
                         .unwrap_or(config.max_batch_size)
-                });
+                }) };
                 let data = batch
                     .iter()
                     .map(|request| request.task.clone())
@@ -328,19 +340,11 @@ impl TaskWriter {
         let (response, receiver) = oneshot::channel();
         let request = Request { task, response, accepted: None };
         if let Some(rendezvous) = &self.inner.rendezvous {
-            let permit = tokio::select! {
-                permit = rendezvous.permits.acquire() => match permit {
-                    Ok(permit) => permit,
-                    Err(_) => return Err(full().into()),
-                },
-                _ = tokio::time::sleep_until(deadline) => return Err(full().into()),
-            };
-            if tokio::time::Instant::now() >= deadline { return Err(full().into()); }
             let (accepted, accepted_rx) = oneshot::channel();
             let mut request = request;
             request.accepted = Some(accepted);
             let id = rendezvous.next_id.fetch_add(1, Ordering::Relaxed);
-            *rendezvous.slot.lock().expect("Matching rendezvous slot lock") = Some((id, request));
+            rendezvous.waiters.lock().expect("Matching rendezvous queue lock").push_back((id, request));
             let mut admission = AdmissionGuard { rendezvous: rendezvous.clone(), id, armed: true };
             rendezvous.notify.notify_one();
             match tokio::time::timeout_at(deadline, accepted_rx).await {
@@ -348,7 +352,6 @@ impl TaskWriter {
                 _ => return Err(full().into()),
             }
             drop(admission);
-            drop(permit);
         } else {
             let mut request = request;
             request.accepted = None;
@@ -379,6 +382,67 @@ mod tests {
     };
     use std::num::NonZeroU32;
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn zero_capacity_handoffs_are_fifo_and_never_overwrite_waiters() {
+        for pass in 0..3 {
+            let rendezvous = Arc::new(Rendezvous {
+                waiters: Mutex::new(VecDeque::new()),
+                notify: Notify::new(),
+                next_id: AtomicU64::new(1),
+            });
+            let mut accepted = Vec::new();
+            for contender in 0..24 {
+                let rendezvous = rendezvous.clone();
+                accepted.push(tokio::spawn(async move {
+                    let (response, _response_rx) = oneshot::channel();
+                    let (accept_tx, accept_rx) = oneshot::channel();
+                    let id = (pass * 100 + contender) as u64;
+                    let request = Request {
+                        task: WriteTask { data: TaskData { workflow_id: id.to_string(), ..Default::default() }, source_domain: Uuid::from_u128(1), schedule_to_start_seconds: 0 },
+                        response,
+                        accepted: Some(accept_tx),
+                    };
+                    let ticket = rendezvous.next_id.fetch_add(1, Ordering::Relaxed);
+                    rendezvous.waiters.lock().unwrap().push_back((ticket, request));
+                    let _guard = AdmissionGuard { rendezvous: rendezvous.clone(), id: ticket, armed: true };
+                    rendezvous.notify.notify_one();
+                    accept_rx.await.unwrap();
+                    id
+                }));
+            }
+            tokio::task::yield_now().await;
+            while rendezvous.waiters.lock().unwrap().len() != 24 { tokio::task::yield_now().await; }
+            let mut stopped = watch::channel(false).1;
+            let first = receive_rendezvous(&rendezvous, &mut stopped).await.unwrap();
+            let mut ids = vec![first.task.data.workflow_id.parse::<u64>().unwrap()];
+            while let Some(request) = try_receive_rendezvous(&rendezvous) {
+                ids.push(request.task.data.workflow_id.parse::<u64>().unwrap());
+            }
+            assert_eq!(ids.len(), 24);
+            assert_eq!(rendezvous.waiters.lock().unwrap().len(), 0);
+            let mut completed = Vec::new();
+            for waiter in accepted { completed.push(waiter.await.unwrap()); }
+            ids.sort_unstable(); completed.sort_unstable();
+            assert_eq!(ids, completed);
+        }
+    }
+
+    #[tokio::test]
+    async fn zero_capacity_unaccepted_cancellation_removes_published_offer() {
+        let rendezvous = Arc::new(Rendezvous { waiters: Mutex::new(VecDeque::new()), notify: Notify::new(), next_id: AtomicU64::new(1) });
+        let (response, _response_rx) = oneshot::channel();
+        let (accepted, _accepted_rx) = oneshot::channel();
+        let request = Request { task: WriteTask { data: TaskData::default(), source_domain: Uuid::from_u128(1), schedule_to_start_seconds: 0 }, response, accepted: Some(accepted) };
+        let id = rendezvous.next_id.fetch_add(1, Ordering::Relaxed);
+        rendezvous.waiters.lock().unwrap().push_back((id, request));
+        {
+            let _cancelled = AdmissionGuard { rendezvous: rendezvous.clone(), id, armed: true };
+            assert_eq!(rendezvous.waiters.lock().unwrap().len(), 1);
+        }
+        assert!(rendezvous.waiters.lock().unwrap().is_empty());
+        assert!(try_receive_rendezvous(&rendezvous).is_none());
+    }
 
     #[tokio::test]
     async fn matching_writer_rewrite_retry_uses_original_go_outcomes() {

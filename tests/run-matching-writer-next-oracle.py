@@ -19,7 +19,11 @@ with tempfile.TemporaryDirectory(prefix="cadence-writer-next-") as tmp:
     output = tmp / "events.json"
     overlay.write_text(json.dumps({"Replace": {str(ROOT / "go/service/matching/tasklist/rust_writer_next_test.go"): str(TEST)}}))
     env = {**os.environ, "CADENCE_WRITER_NEXT_OUTPUT": str(output)}
-    result = subprocess.run(["go", "test", "-overlay", str(overlay), "./service/matching/tasklist", "-run", "^TestRustMatchingWriterNextOracle$", "-count=1"], cwd=ROOT / "go", env=env, check=True, text=True, capture_output=True)
+    result = subprocess.run(["go", "test", "-overlay", str(overlay), "./service/matching/tasklist", "-run", "^TestRustMatchingWriterNextOracle$", "-count=1"], cwd=ROOT / "go", env=env, text=True, capture_output=True)
+    if result.returncode:
+        print(result.stdout, end="")
+        print(result.stderr, end="")
+        raise SystemExit(result.returncode)
     print(result.stdout, end="")
     actual = json.loads(output.read_text())
     if a.regenerate:

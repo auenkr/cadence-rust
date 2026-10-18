@@ -59,6 +59,20 @@
       0
     ],
     "remaining": 5,
+    "enqueue_timeout": "",
+    "response_timeout": "",
+    "cancelled_after_enqueue": "",
+    "stopped": "",
+    "rendezvous_batch": 4,
+    "rendezvous_accepted": 8
+  },
+  {
+    "capacity": 0,
+    "maximum": 0,
+    "batch": [
+      0
+    ],
+    "remaining": 5,
     "enqueue_timeout": "task queue is full and timed out waiting to enqueue",
     "response_timeout": "",
     "cancelled_after_enqueue": "",

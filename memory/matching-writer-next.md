@@ -319,3 +319,42 @@ Evidence for this slice is under `memory/evidence/matching-writer-next/writer53/
 Matching is still incomplete. This bounded slice does not claim mixed-cluster
 SDK parity or service completion; the full mixed regression and Matching parity
 audit remain separate work.
+
+## Zero-capacity sender handoff repair (2026-10-18)
+
+Applied candidate `9bd9cfdd7ae663b6a3e778869fe222f508c4600a` to isolated
+checkout commit `9162aa7dd`, then repaired its zero-capacity rendezvous. The
+candidate's reusable semaphore plus one request slot could accumulate permits
+across receive passes and overwrite an accepted request when concurrent
+appenders published. The replacement uses a mutex-protected FIFO of *waiting
+senders*: publication adds an unaccepted sender, and the actor atomically
+removes one and acknowledges it. Cancellation/timeout removes an offer only if
+it remains waiting. There is no reusable permit or accepted request buffer.
+
+The actor's zero-capacity batch drain now runs Go's live max-batch loop over
+already-waiting senders. The Go overlay adds an actual unbuffered-channel case:
+with eight blocked senders and max batch 3, `getWriteBatch` takes three beyond
+the first and accepts all eight across two batches. The oracle records counts,
+not sender order, because Go scheduling makes request order nondeterministic.
+The Rust test gates the actor, queues 24 simultaneous contenders, verifies all
+24 handoffs exactly once over three successive receive passes, and checks that
+the waiting queue empties. A cancellation guard test verifies that an offer
+withdrawn before receive leaves no request to accept. Existing production
+coverage still checks the busy actor, canceled admission, accepted persistence
+across Stop, construction-time filtered capacity, and batch sampling.
+
+Evidence under `memory/evidence/matching-writer-next/writer54/`:
+
+* `go-oracle.log` / `.exit`: `python3 tests/run-matching-writer-next-oracle.py`
+  — exit 0, original Go package passed and verified 9 traces, including the
+  new unbuffered ready-sender batch trace.
+* `focused-retry.log` / `.exit`: `CARGO_BUILD_JOBS=1 cargo test --locked -p
+  cadence-server --lib matching_writer -- --nocapture` — exit 0, 10 passed,
+  0 failed, 192 filtered.
+* `clippy.log` / `.exit`: `CARGO_BUILD_JOBS=1 cargo clippy --locked -p
+  cadence-server --all-targets -- -D warnings` — exit 0.
+
+The original `writer53` Go trace had only buffered channel cases. The new
+`writer54` oracle covers the previously untested ready-rendezvous batch case.
+Mixed Go/Rust cluster validation, the full Matching audit, and service
+completion are still outstanding.
