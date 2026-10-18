@@ -1,3 +1,10 @@
+## Memberlist draft review 2026-10-18
+
+Candidate ed35c38ca +3f2f3ce34 not integrated. Rust regression/Clippy passed but requested original-Go Update oracle absent. Parent found unauthorized MAX_UPDATE_CHANGES=64 truncation, rejected as logic change. Split Luna Standard tasks:
+- node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amemberlist-original-go-oracle-standard-25-20261018
+- node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amemberlist-behavior-repair-standard-26-20261018
+See actual returned IDs if MCP prefix changes. Scope original-Go generator vs Rust source repair/checks; final consumer gate required. HTTP recovery standard-23 remains separate active work.
+
 ## Storage maintenance 2026-10-18
 
 User reiterated storage cleanup. Parent measured ~68GB free of 96GB; worktrees ~5.7GB. Active HTTP cargo/rustc uses t3-b9747ee8 target, preserved. Cleaned terminal dissemination validation t3-3cdc7b86 generated target with cargo clean: 1132 files, 449.4MiB removed. Source/commits/oracle fixtures/logs/exit markers preserved; no active process referenced cleaned target. Keep retaining only useful warm caches and clean terminal generated outputs after integration. Matching service scope unchanged.
