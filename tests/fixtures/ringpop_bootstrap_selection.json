@@ -1,0 +1,258 @@
+{
+  "cases": [
+    {
+      "name": "empty-seeds-self-only",
+      "bootstrapHosts": [
+        "127.0.0.1:3000"
+      ],
+      "potential": null,
+      "preferred": null,
+      "nonPreferred": null,
+      "group": null,
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 0,
+      "parallelism": 2
+    },
+    {
+      "name": "normalization-self-and-exact-duplicate",
+      "bootstrapHosts": [
+        "127.0.0.1:3000",
+        "127.0.0.1:3001",
+        "127.0.0.1:3001",
+        "127.0.0.2:4000"
+      ],
+      "potential": [
+        "127.0.0.1:3001",
+        "127.0.0.1:3001",
+        "127.0.0.2:4000"
+      ],
+      "preferred": [
+        "127.0.0.2:4000"
+      ],
+      "nonPreferred": [
+        "127.0.0.1:3001",
+        "127.0.0.1:3001"
+      ],
+      "group": [
+        "127.0.0.1:3001",
+        "127.0.0.1:3001",
+        "127.0.0.2:4000"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 3,
+      "parallelism": 2
+    },
+    {
+      "name": "remote-host-preference",
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.1:2",
+        "192.0.2.1:3",
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "potential": [
+        "192.0.2.1:2",
+        "192.0.2.1:3",
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "nonPreferred": [
+        "192.0.2.1:2",
+        "192.0.2.1:3"
+      ],
+      "group": [
+        "192.0.2.1:2",
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 3,
+      "parallelism": 1
+    },
+    {
+      "name": "joined-exclusion",
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.1:2",
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "potential": [
+        "192.0.2.1:2",
+        "192.0.2.3:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "nonPreferred": [
+        "192.0.2.1:2"
+      ],
+      "joined": [
+        "192.0.2.2:1"
+      ],
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 3,
+      "parallelism": 1
+    },
+    {
+      "name": "requested-size-capped-to-potential",
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "potential": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "nonPreferred": null,
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 2,
+      "parallelism": 3
+    },
+    {
+      "name": "zero-options-default",
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "potential": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "nonPreferred": null,
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 3,
+      "parallelism": 2
+    },
+    {
+      "name": "negative-options-retained",
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "potential": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "nonPreferred": null,
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1"
+      ],
+      "timeoutNanos": -2000000000,
+      "maxJoinDurationNanos": -7000000000,
+      "size": -3,
+      "parallelism": -4
+    },
+    {
+      "name": "explicit-nonzero-options",
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1",
+        "192.0.2.6:1",
+        "192.0.2.7:1"
+      ],
+      "potential": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1",
+        "192.0.2.6:1",
+        "192.0.2.7:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1",
+        "192.0.2.6:1",
+        "192.0.2.7:1"
+      ],
+      "nonPreferred": null,
+      "group": [
+        "192.0.2.2:1",
+        "192.0.2.3:1",
+        "192.0.2.4:1",
+        "192.0.2.5:1",
+        "192.0.2.6:1",
+        "192.0.2.7:1"
+      ],
+      "timeoutNanos": 250000000,
+      "maxJoinDurationNanos": 4000000000,
+      "size": 2,
+      "parallelism": 3
+    },
+    {
+      "name": "exhausted-round-reset",
+      "bootstrapHosts": [
+        "192.0.2.1:1",
+        "192.0.2.2:1"
+      ],
+      "potential": [
+        "192.0.2.2:1"
+      ],
+      "preferred": [
+        "192.0.2.2:1"
+      ],
+      "nonPreferred": null,
+      "group": [
+        "192.0.2.2:1"
+      ],
+      "timeoutNanos": 1000000000,
+      "maxJoinDurationNanos": 120000000000,
+      "size": 1,
+      "parallelism": 1
+    }
+  ],
+  "source": "github.com/uber/ringpop-go v0.10.0 swim/join_sender.go newJoinSender + SelectGroup"
+}

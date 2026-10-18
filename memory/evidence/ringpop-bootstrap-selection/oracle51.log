@@ -1,0 +1,5 @@
+=== RUN   TestGenerateRingpopBootstrapSelectionFixtures
+--- PASS: TestGenerateRingpopBootstrapSelectionFixtures (0.00s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.018s
+verified 9 original-Go selection fixtures: tests/fixtures/ringpop_bootstrap_selection.json
