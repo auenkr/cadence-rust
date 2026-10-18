@@ -1,3 +1,15 @@
+## Current checkpoint — 2026-10-18
+
+Integrated Ringpop injectable TChannel JSON boundary as bfce02825 and deadline repair as 3aed4e915. Worker validated 4 TChannel tests, strict all-target Clippy, actual Go JSON headers/null/empty, deadlines, malformed JSON, application errors and unknown service/method; ten-method Matching TChannel/HTTP and enforced TLS regression passed. This is NOT production Ringpop/SWIM.
+
+HTTP permissive task standard-10 ended interrupted, no pending child runs; recover its work before implementation. Existing enforced TLS, maintenance ack/idle and membership lifecycle integrated. Full combined workspace/mixed runner has not been rerun on latest integrated source.
+
+All services remain incomplete. Continue Matching -> History -> Frontend -> Worker. Remaining Matching includes real Ringpop discovery, production wiring, permissive/advanced TLS, exact interface UP selection, live GC signed backend semantics and other documented config/shard-distributor gaps. Never claim full migration from focused adapter tests.
+
+Workers: Codex gpt-6-luna with explicit serviceTier=default (normal speed). Long commands in named windows of tmux cadence-rust; CARGO_BUILD_JOBS=1, reuse warmed caches, no broad formatting or worker remote writes. Disk currently 12GB free; preserve source and evidence.
+
+See orchestration-active.md and ringpop-tchannel-next.md for evidence/history.
+
 ## User-requested progress checkpoint — 2026-10-17
 
 Checkpoint includes the previously uncommitted recordTaskStartedTimeout draft in

@@ -1,3 +1,204 @@
+# Disk recovered / JSON validation resumed — 2026-10-17
+
+JSON final round6 remained incomplete: candidate duplicate 88df45ace, no final
+live probe/Clippy due filesystem 100%. Worker cleanup rejected by guard. Parent
+inspected processes (no cargo/rustc active), used standard cargo clean on inactive
+t3-7a9c12cc/rust/target: removed 18.0GiB generated files only, preserving source,
+commits/worktrees/logs/fixtures. No direct deletion bypass used.
+New Standard Luna task `ringpop-json-validated-standard-7` with task prefix
+`node:delegated-task:command%3Amcp%3A4e49b790-fcf6-4e93-ab99-4c6e7e3eea46%3Adelegate-task%3A`
+continues exact original brief, final live null/{} headers/cancellation/deadline
+and existing Thrift/TLS probe + strict Clippy. Do not integrate candidate yet.
+
+# TChannel JSON candidate requires final live rerun — 2026-10-17
+
+994a12bde candidate returned: injectable JSON boundary, Go probe + Thrift probe
+passed before final null/{} header refinement; final Clippy passed, live rerun
+blocked by disk full (parent df shows 1.2GB available). NOT integrated yet.
+Assigned Standard Luna `ringpop-json-final-standard-6` with task prefix
+`node:delegated-task:command%3Amcp%3A44df19db-da43-408d-9a20-ab543ad502ac%3Adelegate-task%3A`: reclaim
+ONLY reproducible build artifacts of terminal workers after process checks,
+preserve all source/worktrees/evidence, reuse warm cache and rerun final Go JSON
+and current Thrift/TLS regression plus strict Clippy. Partial work t3-0a3d52d6.
+Actual SWIM/provider not implemented; injectable transport only.
+
+# Enforced HTTPS integrated — 2026-10-17
+
+Parent reviewed and cherry-picked feddeed2f + 514ed3059 (equivalent enforced TLS
+candidate+repair). Three config tests, strict server all-target Clippy and complete
+Go transport runner passed: all ten methods/TChannel/both HTTP paths, allowlist/
+isolation, invalid/missing/mismatched cert failures, trusted Go TLS health and
+plaintext TLS-alert rejection. Enforced missing/disabled TLS now rejects startup.
+Advanced CA/client-auth/host-verification/permissive remain unsupported.
+New Standard Luna `http-permissive-standard-10` (23bdfb7a prefix) implements exact
+Go mode/default/disabled/permissive behavior with real bound Go-client probes.
+Full accumulated workspace/mixed-service compatibility still due; no role complete.
+
+# Beam rate limit / JSON task reassigned — 2026-10-17
+
+beam-ringpop-tchannel-json-4 failed: "Rate limit exceeded. Please try again later."
+No completed evidence accepted. Reassigned original bounded task plus partial-work
+recovery to Codex Luna Standard: `ringpop-tchannel-luna-standard-5` (23bdfb7a prefix).
+No Beam quota retries/rotation. Scope still injectable TChannel JSON boundary and
+actual Go client tests; real SWIM/discovery remains separate and incomplete.
+
+# Enforced TLS candidate review — 2026-10-17
+
+Round8 candidate 81cda2028 implements typed config/basic enforced cert-key TLS.
+Worker reports real trusted health handshake/plaintext rejection and strict
+all-target Clippy. NOT integrated: parent found enforced + missing/disabled TLS
+returns plaintext early, mode parser needs Go validation, old compatibility runner
+still expects unsupported-TLS error. Assigned Standard Luna
+`http-tls-review-standard-9` (23bdfb7a prefix) to fix and run complete live Go HTTP
+probe and actual production TLS configuration path. CA/client-auth/permissive and
+other advanced TLS settings remain explicitly unsupported; no full parity claim.
+
+# Ack/idle integration; TLS continuation — 2026-10-17
+
+Accepted maintenance split 0ef88e59c: ack+idle only, GC retains prior default.
+143 Matching/2 GC tests + strict workspace Clippy passed in worker. Cherry-picked
+with conflict resolved preserving isolation_provider_for_test plus existing staged
+timeout helper annotation. No rejected GC nonpositive/saturation semantics added.
+TLS round7 incomplete, no commit/finished tests; draft preserved t3-0ae06c81.
+New Standard Luna task `http-tls-enforced-standard-8` (23bdfb7a prefix) narrowed to
+working enforced TLS + typed cert config and real handshake/plaintext rejection
+regression. Unsupported remaining modes/config must stay explicit; never plaintext
+fallback. No TLS draft integrated, full accumulated checks still due.
+
+# Plaintext HTTP transport integrated — 2026-10-17
+
+http-live-standard-6 completed bc1f410e5/af5e5e8c6/efca7b995; parent reviewed and
+cherry-picked. Real Go clients passed all ten Matching methods over TChannel and
+both HTTP path spellings, allowlist/JSON isolation/TLS fail-closed checks, disabled
+Matching HTTP listener checks and strict server all-target Clippy. Full accumulated
+workspace/compatibility still due. JSON catch-all previously leaked Matching and is
+now gated by matching_http_isolated; combined Frontend Meta semantics need review.
+New Standard Luna task `http-tls-standard-7` (23bdfb7a prefix) implements typed
+TLS/YARPC modes and real handshakes; verifies combined Frontend Meta behavior.
+UP-interface bind selection and production membership still open. No role complete.
+
+# Lifecycle integrated / maintenance withheld — 2026-10-17
+
+Lifecycle validation round5: 9 tests + actual-Go address oracle passed; strict
+all-target Clippy blocked by existing unused isolation_provider_for_test helper,
+allow-dead_code run passed. Parent integrated candidate stack through 6c4035c42,
+including 0a241e4e5 timing/drop/mapping repairs and be49d3459 oracle expectation.
+No production Ringpop discovery/startup claim; full accumulated gates still due.
+Maintenance round4 reported 143 Matching/5 GC tests and strict workspace Clippy,
+but parent REJECTED InvalidGcBatchSize nonpositive rejection/u32 saturation as
+Go logic deviations. No maintenance commits integrated. New Standard Luna task
+`maintenance-go-semantics-standard-5` (23bdfb7a prefix) must preserve signed/range
+semantics or split acceptable ack/idle work leaving GC explicitly unfinished.
+
+# Ringpop wire models integrated — 2026-10-17
+
+Parent reviewed and cherry-picked bbd18983b + 6fd77c22d. Empty label maps now
+omitted for direct construction. Worker completed full actual-Go runner (11 Rust
+tests) and strict common all-target Clippy. Scope models/fixtures only, not SWIM.
+Followup Beam `beam-ringpop-tchannel-json-4` (23bdfb7a prefix) builds injectable
+JSON TChannel transport boundary with actual Go-client probe, no fake production
+membership responder. Preserve existing Thrift and running Luna scopes. No pushes.
+
+# Beam wire model candidate review — 2026-10-17
+
+Candidate bbd18983b adds common/ringpop_wire models, Go generator/fixtures and runner;
+8 focused tests/common all-target Clippy reported passed. Not integrated yet.
+Parent source review found Some(empty labels) serializes {} despite Go omitempty;
+normalization only occurs on deserialize. Beam follow-up `beam-ringpop-model-review-3`
+(23bdfb7a prefix) fixes direct construction, verifies timestamp/null handling and runs
+full actual-Go fixture runner plus common Clippy. No duplicate research/test-fix
+commits needed; parent already contains them/equivalents. No remote writes permitted.
+
+# HTTP round5 / prerequisite integrated — 2026-10-17
+
+Round5 returned bd1316159 (history test-only compile fix), dc7bd7e35 (duplicate
+b53f0df9), e27016fa7 (duplicate ccbaaea6). Four matching_history tests passed;
+HTTP work itself unfinished, no strict Clippy/live tests. Parent inspected and
+cherry-picked ONLY bd1316159, unblocking tests for subsequent worktrees.
+New task `http-live-standard-6` (23bdfb7a prefix), Standard Luna, narrowed to
+real bound HTTP/Go-generated client/allowlist/JSON isolation evidence and fixes.
+CARGO_BUILD_JOBS=1 required after reported OS compile kill. TLS/modes and exact
+UP-interface flags remain explicitly open; no HTTP candidate integrated yet.
+
+# Lifecycle repair result awaiting executable tests — 2026-10-17
+
+Round4 returned repair 06041e5c3 after candidate d8776890a/56fd25c16/3a79b10e4
+(cherry-pick duplicates f0f235e92/0f0f06962/fe2c5ca0e). Parent reviewed repair:
+Go address-change-only timestamp, hint coalescing, Drop abort and parser changes.
+Go oracle/check --lib/library Clippy passed; Rust tests/all-target Clippy blocked
+by checkpoint timeout-test compile errors. Not integrated yet.
+Assigned `membership-lifecycle-validation-standard-5` (23bdfb7a prefix), Standard
+Luna, explicitly authorized minimal separate test-only fixes, reuse existing fix
+if available, execute regressions/oracle/all-target Clippy and repair failures.
+Preserved round4 worktree t3-312cf341. Real Ringpop remains absent.
+
+# Beam wire contract result — 2026-10-17
+
+Research d339c6774aebf498cbab553bd425d744e2ff15d8 accepted as source inventory
+only after parent spot-check of join/ping/Change JSON fields and application errors;
+cherry-picked into parent. No protocol implementation/parity claimed. Caveat:
+plan suggests skipping empty Vec values, incorrect for Go fields without omitempty;
+new task must correct this and distinguish nil=null from empty=[].
+Worker reported pushing t3/ringpop-wire-contract despite explicit no-push brief.
+No remote branch deleted. New Beam task `beam-ringpop-model-fixtures-2` (23bdfb7a
+prefix) explicitly forbids Git network writes, implements isolated serde models
+and actual Go golden fixtures, preserves nil/empty/tombstone/timestamp semantics,
+and returns local commits plus focused test/Clippy evidence. Do not trust research
+as exhaustive until generated Go fixtures verify its serialization assumptions.
+
+# Beam Free worker authorized — 2026-10-17
+
+User additionally authorizes OpenCode Beam Free. Luna remains Standard speed.
+Live capabilities: opencode available/canRunChildTask, models list empty; explicit
+opencode/beam-free delegation accepted running. Task suffix
+`beam-ringpop-wire-contract-1` (23bdfb7a prefix), isolated research-only checkout.
+Scope exact pinned Go Ringpop TChannel JSON join/ping/ping-req wire inventory;
+only memory/ringpop-wire-contract.md permitted, commit artifact, no code changes.
+Review source evidence before accepting. This does not replace active Luna tasks.
+
+# HTTP follow-up blocked validation — 2026-10-17
+
+http-parity-standard-4 completed partial work: 860344fb duplicates b53f0df9,
+ccbaaea6 adds bind scoring and TLS contract findings. Not integrated or validated.
+if-addrs lacks UP flags, TLS still unimplemented. Validation blocked by saved
+timeout draft tests (MetadataValue Option mismatch and client() shadowing).
+New Standard Luna task `http-parity-standard-5` (23bdfb7a prefix) explicitly owns
+minimal prerequisite test fixes in a SEPARATE first commit, then completes real
+HTTP/TLS/bind implementation/tests. Parent can integrate prerequisite separately.
+Preserved worktree: /home/ubuntu/.t3/worktrees/cadence-rust/t3-b6a636f7.
+
+# Maintenance result and review — 2026-10-17
+
+standard-3 maintenance completed candidate 14df0c8c05eb00a761b40d4220d18cefe6a5a8d3;
+141 focused tests and strict workspace Clippy reported passing. Not integrated.
+Parent flagged live deadline vs flush fallback precedence, idle TTL/cadence sampling,
+GC conversion/provider reads and lack of background-loop regressions; large formatting
+diff also needs reduction. Standard Luna task `maintenance-parity-standard-4` with
+23bdfb7a prefix now repairs and validates these against actual Go behavior. Brief
+explicitly preserves checkpointed recordTaskStartedTimeout draft during overlap.
+
+# HTTP listener result and continuation — 2026-10-17
+
+standard-3 HTTP completed candidate b53f0df940581c8610857c88a7ebd58d8d4fe72a.
+Worker reports 3 focused tests and strict server all-target Clippy passed.
+Parent source review: actual configured separate listener and allowlist exist;
+TLS only rejected, default bind still wildcard, no live bound-listener evidence.
+Not integrated. Assigned codex Luna Standard continuation suffix
+`http-parity-standard-4` (23bdfb7a task prefix): exact Go bind/TLS semantics,
+real HTTP/client/isolation tests, explicit bounded gaps if TLS remains unfinished.
+No whole-service completion claim.
+
+# Membership lifecycle result and review — 2026-10-17
+
+standard-3 membership completed: commits d8776890a, 56fd25c16, 3a79b10e4.
+Worker reports 6 focused tests and strict server all-target Clippy passed.
+Not integrated yet. Parent reviewed source and assigned exact Go parity follow-up:
+refresh timing/pending hints, failed snapshot throttling, Drop during hung snapshot,
+and actual-Go address parsing differentials. New task suffix:
+`membership-lifecycle-review-standard-4` with round-3 prefix (23bdfb7a).
+Codex Luna explicitly Standard speed. Candidate remains lifecycle abstraction only;
+production Ringpop provider/startup integration and multi-process tests remain open.
+
 # Recovery round 3 — 2026-10-17
 
 All three standard-2 task_status results were cancelled, with no completed
