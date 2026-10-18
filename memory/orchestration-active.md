@@ -1,3 +1,9 @@
+## Bootstrap notes accepted; executable oracle missing — 2026-10-18
+
+Integrated source-backed research1d10b531d asb8cf3028b. No executable oracle or Rust production implementation returned; notes explicitly incomplete. Narrow normal-speed Luna51 accepted actual pinned newJoinSender/SelectGroup selection-only overlay fixtures,excluding network/retry/readiness:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-bootstrap-selection-oracle-standard-51-20261018
+Livewriter49 separately active. Matching incomplete.
+
 ## Direct PING integrated; bootstrap contract next — 2026-10-18
 
 Reviewedbc2dd676a against pinned ping_sender.go success callback ordering; integratedfd3a3f12b. Worker13provider+4JSONtests,actualGoPINGpeer,JOIN/inbound regressions,strict serverClippy passed. Response decode precedes state mutation;successful sender callback before response merge,stopped merge guarded. No timers/probe scheduling/bootstrap readiness yet.
