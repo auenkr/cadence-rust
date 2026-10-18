@@ -1,3 +1,10 @@
+## Parity round incomplete; split acceptance 2026-10-18
+
+standard-10 stopped with uncommitted precedence repair at t3-0df1b5d9 (HEAD 2d27bcab0). Build still running in cadence-rust:ringpop-member-repair; no confirmed checks/oracle. Candidate remains unintegrated. Split into bounded Luna Standard tasks:
+- node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-go-oracle-standard-11-20261018 — actual Go generator/fixtures only.
+- node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-member-repair-save-standard-12-20261018 — recover repair, confirm focused tests/Clippy, commit; no duplicate oracle work.
+Both accepted running. HTTP standard-11 remains separate active work; preserve visible test edits. Next combine oracle + repaired Rust and add consuming differential tests before integration.
+
 ## Member core review 2026-10-18
 
 Candidate 7f86a56c3 remains UNINTEGRATED. Worker passed 3 unit tests but omitted Go differential fixtures/wire runner and could not confirm Clippy. Parent found concrete should_process_gossip bug: lower status precedence falls through to label-checksum comparison instead of immediate false (original member.go). Repair + full bounded acceptance assigned to Luna Standard:
