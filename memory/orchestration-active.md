@@ -1,3 +1,10 @@
+## Ringpop core continuation 2026-10-18
+
+Research a905c8b8f completed and reviewed against original member.go checksum/merge rules. It was already on parent master when returned (despite isolated request); empty cherry-pick skipped, no changes lost. New worker explicitly told stay in assigned worktree.
+Active member-core implementation with actual-Go differential fixtures:
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-member-core-standard-9-20261018
+Codex gpt-6-luna serviceTier=default. Scope pure checksums/merge primitives; no partial provider readiness. HTTP permissive standard-11 still running, no pending question. Production SWIM and full migration remain incomplete.
+
 ## Async continuation 2026-10-18
 
 Checkpoint eac0ba82a pushed origin/master; Ringpop JSON boundary integrated bfce02825 + 3aed4e915. Prior permissive standard-10 interrupted, no pending runs.
