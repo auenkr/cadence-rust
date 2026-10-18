@@ -30,6 +30,7 @@ pub use semaphores::{
 pub mod matching_blob;
 pub mod matching_sqlite;
 pub mod matching_queue;
+pub mod matching_writer_actor;
 
 pub mod matching_gc;
 

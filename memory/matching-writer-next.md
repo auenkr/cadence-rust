@@ -1,8 +1,8 @@
 # Matching task writer: next implementation slice
 
-Status: Go oracle and design evidence only; no Rust implementation or build in
-this round. Matching remains incomplete. Original production Go files were not
-modified.
+Status: A standalone bounded Rust actor primitive is implemented and tested.
+`DurableTaskQueue` call paths are not wired to it, so Matching writer parity is
+incomplete. Original production Go files were not modified.
 
 ## Original Go contract
 
@@ -124,4 +124,37 @@ to implementation acceptance below.
    ordering; append caller cancellation and queue owner removal do not deadlock
    registry, owner, or persistence locks.
 
-No Rust work was performed, no service was advanced, no commit/push was made.
+## Rust actor slice (2026-10-18)
+
+Added `cadence_persistence::matching_writer_actor::MatchingWriterActor`, an
+owned standard-library thread actor. It has fixed construction capacity,
+`sync_channel(0)` rendezvous semantics, a live batch-size provider, synchronous
+per-request response cells, one monotonic timeout for admission and response,
+ServiceBusy on admission timeout, accepted-work retention after caller timeout
+or cancellation, nonblocking response fanout, and stop without queue drain.
+Negative capacity returns `WriterError::InvalidCapacity` at construction.
+This preserves the Go startup failure boundary while presenting a typed Rust
+error instead of Go's `make(chan, negative)` panic.
+
+The primitive is intentionally not connected to `DurableTaskQueue`: that owner
+currently exposes slice appends, has no Matching config-provider inputs, and
+holds its writer mutex across synchronous persistence. Wiring requires converting
+each append to an actor request while aggregating batch task IDs, source-domain
+rows, pending-task timeouts, persistence errors, and caller results without
+changing allocation and max-read-level order. Keep this concrete integration
+work as the next Matching writer slice; do not add configuration getters that
+pretend the actor is live.
+
+Rust unit tests consume `tests/fixtures/matching-writer-next.json` produced by
+the original Go writer, validate all 8 source traces and exercise rendezvous,
+negative construction, timeout, and cancellation against a gated fake
+persistence handler. The fixture-driven assertion is useful for documented Go
+error strings and batch limits, but does not yet drive every trace event through
+the actor. Stop while a synchronous handler is in progress joins that handler;
+this is an ownership/lifecycle detail to reassess during integration. The
+current primitive does not itself map caller context errors into Go's wrapped
+`context canceled` / `deadline exceeded` strings; callers receive typed Rust
+variants.
+
+Evidence: `memory/evidence/matching-writer-next/`. Matching remains incomplete;
+there is no mixed Go/Rust service test or integration test from this slice.
