@@ -1,3 +1,7 @@
+## Dissemination repair checks confirmed 2026-10-18
+
+standard-19 completed candidate 2e56a05ad + repair f4f966b3e (equivalent 6c71b6774 + 187f4aeff), final f6cd28372 adds narrow too_many_arguments allowance + evidence. Confirmed explicit integration target 2 tests, strict common all-target Clippy, member oracle 1 test and Go wire runner/11 Rust tests passed. Parent reviewed repair diff and lint scope. Still UNINTEGRATED pending actual dissemination consumer standard-20, checked running. Final validation stack needs f6cd28372 or equivalent lint fix plus consumer commit. Floating-point propagation bound parity remains pending actual-Go vectors. HTTP repair standard-16 separate active work.
+
 ## Dissemination original-Go oracle returned 2026-10-18
 
 5044177ec calls original pinned Go methods; generator passed and repeat was byte-identical. Parent reviewed snapshots/callback/filter/full-sync/maxP scenarios. Remaining holes: failedSent map ordering unsorted, maxP 0/1 and equal-checksum/fully-filtered cases absent. Assigned Rust consumer plus these oracle coverage fixes:
