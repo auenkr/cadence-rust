@@ -1,3 +1,10 @@
+## HTTP exact-Go listener integrated 2026-10-18
+
+standard-29 passed focused tests, locked server build, strict all-target Clippy, full ten-method bound Go Matching runner and Ringpop JSON transport. Parent reviewed single-read short=>plaintext and removed arbitrary 128 drop cap; lifecycle/timeout tests included. Integrated 126afe824 +6b2a8dffc +0cd4e7f16 as fdb29e6e1,a5649fca4,3072698e1. Earlier parent dirty HTTP test draft preserved in named git stash (not reapplied; validated commit supersedes).
+Frozen integrated Matching regression assigned Luna Standard:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-integrated-regression-standard-31-20261018
+Accepted running: workspace tests/strict lint, accumulated compatibility including Rust Matching with Go Frontend/History/Worker and SDK; no Matching completion claim. Protocol standard-30 separately active; no other-service migration. Advanced TLS/UP scoring and production discovery etc remain incomplete.
+
 ## Memberlist core integrated 2026-10-18
 
 Final standard-28 passed all combined gates exit 0:112-case original Go Update oracle, focused unit, member/dissemination oracles, wire compatibility, strict locked common all-target Clippy, two Go generations/no drift. Integrated 65adea85d,f3537eb21,40e5808a1,292b5524f,9e6504863 +final evidence 25186c5a6 cherry-pick. Worker cleaned own target 479.8MiB, ~62GB free.
