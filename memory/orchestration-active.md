@@ -1,3 +1,7 @@
+Next Matching discovery dependency assigned Luna Standard:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-memberlist-standard-24-20261018
+Accepted running: deterministic memberlist updates/local refutation plus original-Go differential, no future-service work or partial provider readiness.
+
 ## Dissemination integrated after combined checks 2026-10-18
 
 Recovery standard-22 validated combined tree 0655292c3; evidence 1ee2a55b7. All exit 0: both original-Go fixture generators/no drift, 11 wire tests + Go wire oracle, 2 dissemination integration tests, dissemination oracle, member oracle, strict locked common all-target Clippy. Logs /tmp/cadence-standard-21-0655292/. Integrated as b25d3480b,27cc30f64,c047406ac,fb8b490e4,1916c4e30. Matching remains current/incomplete; production SWIM not implemented. HTTP recovery standard-23 separate active work.
