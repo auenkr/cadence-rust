@@ -37,10 +37,13 @@ async function run() {
   fs.mkdirSync(work, { recursive: true });
   const ready = path.join(work, 'ready'), stop = path.join(work, 'stop'), fixture = path.join(work, 'fixture.json');
    fs.writeFileSync(fixture, JSON.stringify({ domain, domain_id: domainId, workflow_id: '', run_id: '', task_list: taskList.name, history_peer: process.argv[3], kind: 'server', schedule_id: 0, database: path.join(work, 'matching.db'), output: ready, listen: process.argv[4], stop_file: stop, idle_trigger: path.join(work, 'idle-trigger'), idle_done: path.join(work, 'idle-done'), isolation_groups: ['zone-a', 'zone-b'] }));
-  const target = process.env.CARGO_TARGET_DIR || path.resolve(__dirname, '../rust/target');
-  const testBinary = fs.readdirSync(path.join(target, 'debug/deps')).map(name => path.join(target, 'debug/deps', name))
-    .find(file => path.basename(file).startsWith('matching_delivery-') && !file.endsWith('.d') && fs.statSync(file).isFile() && (fs.statSync(file).mode & 0o111));
-  if (!testBinary) throw new Error(`matching_delivery test executable not found under ${target}/debug/deps`);
+  const reportedTestBinary = process.env.CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE;
+  if (!reportedTestBinary) throw new Error('CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE must identify the executable reported by Cargo');
+  const testBinary = path.resolve(reportedTestBinary);
+  if (!fs.existsSync(testBinary) || !fs.statSync(testBinary).isFile()
+      || (process.platform !== 'win32' && !(fs.statSync(testBinary).mode & 0o111))) {
+    throw new Error(`Cargo-reported matching_delivery test executable is missing or not executable: ${testBinary}`);
+  }
   function startRust(label) {
     for (const file of [ready, stop]) if (fs.existsSync(file)) fs.unlinkSync(file);
     const output = fs.openSync(path.join(work, `rust-server-${label}.log`), 'w');

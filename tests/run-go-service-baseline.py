@@ -7,6 +7,7 @@ Run in tmux cadence-rust. Default mode is an all-Go baseline.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import socket
@@ -38,13 +39,32 @@ if not args.binary and not args.go_mixed_server_bin:
         else:
             build = ['go', 'build', '-p', '1', '-ldflags=-s -w', '-o', str(binary), '.']
         subprocess.run(build, cwd=root / 'go/cmd/server', stdout=output, stderr=subprocess.STDOUT, check=True, timeout=1200)
+matching_test_executable = None
 if args.matching_delivery or args.rust_matching or args.matching_restart:
     # Compile before booting Go or starting workflow deadlines. The probe's
     # per-workflow timeout must measure delivery, not linker resource contention.
-    with (work / 'rust-build.log').open('w') as output:
-        subprocess.run(['cargo', 'test', '--manifest-path', str(root / 'rust/Cargo.toml'),
-            '-p', 'cadence-server', '--test', 'matching_delivery', '--no-run'],
-            cwd=root, stdout=output, stderr=subprocess.STDOUT, check=True, timeout=1200)
+    build = subprocess.run(['cargo', 'test', '--manifest-path', str(root / 'rust/Cargo.toml'),
+        '-p', 'cadence-server', '--test', 'matching_delivery', '--no-run', '--message-format=json'],
+        cwd=root, capture_output=True, text=True, timeout=1200)
+    (work / 'rust-build.log').write_text(build.stdout + build.stderr)
+    if build.returncode:
+        raise subprocess.CalledProcessError(build.returncode, build.args)
+    artifacts = []
+    for line in build.stdout.splitlines():
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        target = message.get('target', {})
+        executable = message.get('executable')
+        if (message.get('reason') == 'compiler-artifact' and target.get('name') == 'matching_delivery'
+                and 'test' in target.get('kind', []) and executable):
+            artifacts.append(Path(executable).resolve())
+    if len(artifacts) != 1:
+        raise RuntimeError(f'Cargo reported {len(artifacts)} matching_delivery test executables; expected exactly one. See {work / "rust-build.log"}')
+    matching_test_executable = artifacts[0]
+    if not matching_test_executable.is_file() or not os.access(matching_test_executable, os.X_OK):
+        raise RuntimeError(f'Cargo-reported matching_delivery test executable is missing or not executable: {matching_test_executable}')
 config = work / 'config'
 config.mkdir(exist_ok=True)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
@@ -111,7 +131,11 @@ with (work / 'server.log').open('w') as log:
             else:
                 probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
                     f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
-            result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
+            probe_environment = None
+            if matching_test_executable and (args.rust_matching or args.matching_restart):
+                probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
+            result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
+                env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
             'topology': 'Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'),
             'goServicesPid': server.pid, 'goServicesAliveAfterProbe': server.poll() is None,
