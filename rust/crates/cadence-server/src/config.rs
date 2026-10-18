@@ -31,6 +31,105 @@ pub struct Config {
     pub cluster_metadata: Option<ClusterMetadata>,
     #[serde(default, rename = "clusterMetadata")]
     pub legacy_cluster_metadata: Option<ClusterMetadata>,
+    /// Ringpop peer discovery options used by Matching. These are parsed here
+    /// for Go-compatible configuration; runtime wiring is intentionally separate.
+    #[serde(default)]
+    pub ringpop: RingpopConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RingpopConfig {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default, rename = "broadcastAddress")]
+    pub broadcast_address: String,
+    #[serde(default, rename = "bootstrapMode")]
+    pub bootstrap_mode: BootstrapMode,
+    #[serde(default, rename = "bootstrapHosts")]
+    pub bootstrap_hosts: Vec<String>,
+    #[serde(default, rename = "bootstrapFile")]
+    pub bootstrap_file: String,
+    /// Go time.Duration in signed nanoseconds; zero is replaced with 10 seconds by Validate.
+    #[serde(default, rename = "maxJoinDuration", deserialize_with = "de_go_duration")]
+    pub max_join_duration_nanos: i64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub enum BootstrapMode { #[default] None, File, Hosts, Custom, Dns, DnsSrv }
+
+impl<'de> Deserialize<'de> for BootstrapMode {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let s = String::deserialize(d)?;
+        match s.to_lowercase().as_str() {
+            "hosts" => Ok(Self::Hosts), "file" => Ok(Self::File), "custom" => Ok(Self::Custom),
+            "dns" => Ok(Self::Dns), "dns-srv" => Ok(Self::DnsSrv),
+            _ => Err(Error::custom(format!("invalid ringpop bootstrap mode {s:?}"))),
+        }
+    }
+}
+
+impl RingpopConfig {
+    pub fn validate(&mut self) -> anyhow::Result<()> {
+        if self.name.is_empty() { anyhow::bail!("ringpop config missing `name` param"); }
+        if self.max_join_duration_nanos == 0 { self.max_join_duration_nanos = 10_000_000_000; }
+        match self.bootstrap_mode {
+            BootstrapMode::File if self.bootstrap_file.is_empty() => anyhow::bail!("ringpop config missing bootstrap file param"),
+            BootstrapMode::Hosts | BootstrapMode::Dns | BootstrapMode::DnsSrv if self.bootstrap_hosts.is_empty() => anyhow::bail!("ringpop config missing boostrap hosts param"),
+            BootstrapMode::Custom => anyhow::bail!("ringpop bootstrapMode custom is not supported"),
+            // Go fmt %q applied to the zero-valued integer enum renders the
+            // corresponding NUL rune, including the literal escape.
+            BootstrapMode::None => anyhow::bail!("ringpop config with unknown boostrap mode '\\x00'"),
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+fn de_go_duration<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+    use serde::de::Error;
+    let value = serde_yaml::Value::deserialize(d)?;
+    match value {
+        serde_yaml::Value::Null => Ok(0),
+        serde_yaml::Value::Number(n) => n.as_i64().ok_or_else(|| Error::custom(format!("invalid duration {n:?}"))),
+        serde_yaml::Value::String(s) => parse_go_duration(&s).map_err(Error::custom),
+        other => Err(Error::custom(format!("invalid duration {other:?}"))),
+    }
+}
+
+fn parse_go_duration(input: &str) -> Result<i64, String> {
+    let (negative, mut rest) = if let Some(r) = input.strip_prefix('-') { (true, r) } else if let Some(r) = input.strip_prefix('+') { (false, r) } else { (false, input) };
+    if rest.is_empty() { return Err(format!("invalid duration {input:?}")); }
+    if rest == "0" { return Ok(0); }
+    let mut total = 0u128;
+    while !rest.is_empty() {
+        let number_end = rest.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(rest.len());
+        if number_end == 0 { return Err(format!("invalid duration {input:?}")); }
+        let number = &rest[..number_end];
+        rest = &rest[number_end..];
+        let (unit, scale) = [("ns", 1u128), ("us", 1_000), ("µs", 1_000), ("μs", 1_000), ("ms", 1_000_000), ("s", 1_000_000_000), ("m", 60_000_000_000), ("h", 3_600_000_000_000)]
+            .into_iter().find(|(u, _)| rest.starts_with(u)).ok_or_else(|| format!("invalid duration {input:?}"))?;
+        if number.matches('.').count() > 1 { return Err(format!("invalid duration {input:?}")); }
+        let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
+        if whole.is_empty() && fraction.is_empty() { return Err(format!("invalid duration {input:?}")); }
+        let whole: u128 = if whole.is_empty() { 0 } else { whole.parse().map_err(|_| format!("invalid duration {input:?}"))? };
+        let integral = whole.checked_mul(scale).ok_or_else(|| format!("invalid duration {input:?}"))?;
+        let fraction = if fraction.is_empty() { 0 } else {
+            if !fraction.bytes().all(|b| b.is_ascii_digit()) { return Err(format!("invalid duration {input:?}")); }
+            // Beyond 19 decimal places the remainder is less than a tenth of
+            // a nanosecond even for the largest unit (hour), so it cannot
+            // affect Go's integer nanosecond result.
+            let digits = &fraction[..fraction.len().min(19)];
+            let numerator: u128 = digits.parse().map_err(|_| format!("invalid duration {input:?}"))?;
+            let denominator = 10u128.pow(digits.len() as u32);
+            numerator.checked_mul(scale).ok_or_else(|| format!("invalid duration {input:?}"))? / denominator
+        };
+        total = total.checked_add(integral).and_then(|v| v.checked_add(fraction)).ok_or_else(|| format!("invalid duration {input:?}"))?;
+        rest = &rest[unit.len()..];
+    }
+    let limit = if negative { 1u128 << 63 } else { i64::MAX as u128 };
+    if total > limit { return Err(format!("invalid duration {input:?}")); }
+    if negative { Ok((-(total as i128)) as i64) } else { Ok(total as i64) }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -239,6 +338,8 @@ impl Config {
         if !errors.is_empty() { anyhow::bail!(errors.join("; ")); }
         Ok(())
     }
+
+    pub fn validate_ringpop(&mut self) -> anyhow::Result<()> { self.ringpop.validate() }
 }
 
 /// Expand `${VAR:default}`, `${VAR}`, and `$VAR` from the environment,
@@ -418,5 +519,25 @@ clusterMetadata:
         let mut cfg = Config::default();
         cfg.persistence.num_history_shards = -1;
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn ringpop_configuration_maps_defaults_validation_and_signed_values() {
+        let mut cfg = Config::from_yaml("ringpop: {name: matching, bootstrapMode: HoStS, bootstrapHosts: [' x:1 ', 'x:1'], maxJoinDuration: 30s}").unwrap();
+        assert_eq!(cfg.ringpop.bootstrap_mode, BootstrapMode::Hosts);
+        assert_eq!(cfg.ringpop.bootstrap_hosts, [" x:1 ", "x:1"]);
+        assert_eq!(cfg.ringpop.max_join_duration_nanos, 30_000_000_000);
+        cfg.validate_ringpop().unwrap();
+        let mut zero = Config::from_yaml("ringpop: {name: x, bootstrapMode: file, bootstrapFile: seeds.json}").unwrap();
+        zero.validate_ringpop().unwrap();
+        assert_eq!(zero.ringpop.max_join_duration_nanos, 10_000_000_000);
+        let mut negative = Config::from_yaml("ringpop: {name: x, bootstrapMode: hosts, bootstrapHosts: [a], maxJoinDuration: -2ms}").unwrap();
+        negative.validate_ringpop().unwrap();
+        assert_eq!(negative.ringpop.max_join_duration_nanos, -2_000_000);
+        let err = Config::from_yaml("ringpop: {name: x, bootstrapMode: custom}").unwrap().ringpop;
+        assert!(err.clone().validate().unwrap_err().to_string().contains("custom is not supported"));
+        let missing = Config::from_yaml("ringpop: {name: x, bootstrapMode: hosts}").unwrap().ringpop;
+        assert!(missing.clone().validate().unwrap_err().to_string().contains("boostrap hosts"));
+        assert!(Config::from_yaml("ringpop: {name: x, bootstrapMode: weird}").is_err());
     }
 }

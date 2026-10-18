@@ -1,0 +1,6 @@
+=== RUN   TestBootstrapProviderActualOracle
+BOOTSTRAP_PROVIDER_ORACLE={"configErrors":{"custom":"ringpop bootstrapMode custom is not supported","missingFile":"ringpop config missing bootstrap file param","missingHosts":"ringpop config missing boostrap hosts param","missingName":"ringpop config missing `name` param","unknownMode":"ringpop config with unknown boostrap mode '\\x00'"},"configHosts":[" x ","x","x"],"configMaxJoinDurationNanos":10000000000,"configMode":2,"durations":{"fraction":1000000001,"max":9223372036854775807,"min":-9223372036854775808},"emptyFile":[],"file":["first:1","first:1"," raw "],"fileAfterUpdate":["updated:2"],"malformedErrorType":"*json.SyntaxError","missingErrorType":"*fs.PathError","objectErrorType":"*json.UnmarshalTypeError","static":[" a:1 ","a:1","a:1","[::1]:2"]}
+--- PASS: TestBootstrapProviderActualOracle (0.00s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.044s
+actual Go provider output matches tests/fixtures/ringpop_bootstrap_provider.json

@@ -1,0 +1,80 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-server)
+error[E0277]: can't compare `Vec<std::string::String>` with `serde_json::Value`
+   --> crates/cadence-server/src/ringpop_discovery.rs:104:9
+    |
+104 | ...   assert_eq!(StaticHosts::new(static_hosts).hosts().unwrap(), fixture["static"]);
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no implementation for `Vec<std::string::String> == serde_json::Value`
+    |
+    = help: the trait `PartialEq<serde_json::Value>` is not implemented for `Vec<std::string::String>`
+    = help: the following other types implement trait `PartialEq<Rhs>`:
+              `Vec<T, A1>` implements `PartialEq<Vec<U, A2>>`
+              `Vec<T, A>` implements `PartialEq<&[U; N]>`
+              `Vec<T, A>` implements `PartialEq<&[U]>`
+              `Vec<T, A>` implements `PartialEq<&mut [U]>`
+              `Vec<T, A>` implements `PartialEq<[U; N]>`
+              `Vec<T, A>` implements `PartialEq<[U]>`
+              `Vec<u8>` implements `PartialEq<ByteStr>`
+              `Vec<u8>` implements `PartialEq<ByteString>`
+            and 2 others
+
+error[E0277]: can't compare `Vec<std::string::String>` with `serde_json::Value`
+   --> crates/cadence-server/src/ringpop_discovery.rs:109:9
+    |
+109 |         assert_eq!(file.hosts().unwrap(), fixture["file"]);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no implementation for `Vec<std::string::String> == serde_json::Value`
+    |
+    = help: the trait `PartialEq<serde_json::Value>` is not implemented for `Vec<std::string::String>`
+    = help: the following other types implement trait `PartialEq<Rhs>`:
+              `Vec<T, A1>` implements `PartialEq<Vec<U, A2>>`
+              `Vec<T, A>` implements `PartialEq<&[U; N]>`
+              `Vec<T, A>` implements `PartialEq<&[U]>`
+              `Vec<T, A>` implements `PartialEq<&mut [U]>`
+              `Vec<T, A>` implements `PartialEq<[U; N]>`
+              `Vec<T, A>` implements `PartialEq<[U]>`
+              `Vec<u8>` implements `PartialEq<ByteStr>`
+              `Vec<u8>` implements `PartialEq<ByteString>`
+            and 2 others
+
+error[E0277]: can't compare `Vec<std::string::String>` with `serde_json::Value`
+   --> crates/cadence-server/src/ringpop_discovery.rs:111:9
+    |
+111 |         assert_eq!(file.hosts().unwrap(), fixture["fileAfterUpdate"]);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no implementation for `Vec<std::string::String> == serde_json::Value`
+    |
+    = help: the trait `PartialEq<serde_json::Value>` is not implemented for `Vec<std::string::String>`
+    = help: the following other types implement trait `PartialEq<Rhs>`:
+              `Vec<T, A1>` implements `PartialEq<Vec<U, A2>>`
+              `Vec<T, A>` implements `PartialEq<&[U; N]>`
+              `Vec<T, A>` implements `PartialEq<&[U]>`
+              `Vec<T, A>` implements `PartialEq<&mut [U]>`
+              `Vec<T, A>` implements `PartialEq<[U; N]>`
+              `Vec<T, A>` implements `PartialEq<[U]>`
+              `Vec<u8>` implements `PartialEq<ByteStr>`
+              `Vec<u8>` implements `PartialEq<ByteString>`
+            and 2 others
+
+error[E0277]: can't compare `Vec<std::string::String>` with `serde_json::Value`
+   --> crates/cadence-server/src/ringpop_discovery.rs:115:9
+    |
+115 |         assert_eq!(cfg.ringpop.bootstrap_hosts, fixture["configHosts"]);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no implementation for `Vec<std::string::String> == serde_json::Value`
+    |
+    = help: the trait `PartialEq<serde_json::Value>` is not implemented for `Vec<std::string::String>`
+    = help: the following other types implement trait `PartialEq<Rhs>`:
+              `Vec<T, A1>` implements `PartialEq<Vec<U, A2>>`
+              `Vec<T, A>` implements `PartialEq<&[U; N]>`
+              `Vec<T, A>` implements `PartialEq<&[U]>`
+              `Vec<T, A>` implements `PartialEq<&mut [U]>`
+              `Vec<T, A>` implements `PartialEq<[U; N]>`
+              `Vec<T, A>` implements `PartialEq<[U]>`
+              `Vec<u8>` implements `PartialEq<ByteStr>`
+              `Vec<u8>` implements `PartialEq<ByteString>`
+            and 2 others
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `cadence-server` (lib test) due to 4 previous errors

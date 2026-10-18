@@ -1,0 +1,5 @@
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-proto)
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-api)
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-thrift)
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-8bb4397c/rust/crates/cadence-persistence)

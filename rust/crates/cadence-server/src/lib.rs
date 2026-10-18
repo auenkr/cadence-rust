@@ -23,6 +23,7 @@ pub mod tchannel;
 pub mod tchannel_json_client;
 pub mod ringpop_tchannel;
 pub mod ringpop_provider;
+pub mod ringpop_discovery;
 pub mod yarpc;
 
 #[allow(clippy::result_large_err)]

@@ -21,6 +21,7 @@ tonic-reflection = "0.12"
 crc32fast = "1"
 crc32c = "0.6"
 anyhow = "1"
+thiserror = "2"
 axum = { version = "0.8", features = ["json"] }
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
