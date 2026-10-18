@@ -69,6 +69,7 @@ struct Inner {
     stop: watch::Sender<bool>,
     queue: Arc<DurableTaskQueue>,
     config: WriterConfig,
+    live_config: Option<Arc<dyn Fn() -> (i64, i64) + Send + Sync>>,
     // Go deliberately leaves appendCh open on stop. Keep the receiver alive
     // while handles exist so a caller already waiting to enqueue times out.
     parked: Mutex<Option<mpsc::Receiver<Request>>>,
@@ -101,6 +102,14 @@ fn drain_batch<T>(mut batch: Vec<T>, receiver: &mut mpsc::Receiver<T>, maximum: 
 }
 impl TaskWriter {
     pub fn new(queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig) -> Self {
+        Self::new_with_live_config(queue, notify, config, None)
+    }
+    /// Install Go's per-task-list writer settings. The provider is called only
+    /// after the first request is received and once for each append attempt.
+    pub fn new_with_live_config(
+        queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
+        live_config: Option<Arc<dyn Fn() -> (i64, i64) + Send + Sync>>,
+    ) -> Self {
         assert!(
             config.outstanding_appends > 0,
             "rendezvous append channels require separate support"
@@ -112,6 +121,7 @@ impl TaskWriter {
             stop,
             queue: queue.clone(),
             config,
+            live_config: live_config.clone(),
             parked: Mutex::new(None),
         });
         let stop_signal = inner.stop.clone();
@@ -130,7 +140,10 @@ impl TaskWriter {
                 if *stopped_rx.borrow() || queue.is_stopped() {
                     break;
                 }
-                let batch = drain_batch(vec![first], &mut receiver, config.max_batch_size);
+                // Sample outside any config lock held by this actor and before
+                // probing the queue, matching Go getWriteBatch timing.
+                let max_batch_size = live_config.as_ref().map(|provider| provider().0).unwrap_or(config.max_batch_size);
+                let batch = drain_batch(vec![first], &mut receiver, max_batch_size);
                 let data = batch
                     .iter()
                     .map(|request| request.task.clone())
@@ -228,7 +241,11 @@ impl TaskWriter {
         if self.inner.queue.is_stopped() || *self.inner.stop.borrow() {
             return Err(stopped().into());
         }
-        let deadline = tokio::time::Instant::now() + self.inner.config.append_timeout;
+        // Each append attempt (including rewrite retries) gets a fresh sample.
+        let timeout_nanos = self.inner.live_config.as_ref().map(|provider| provider().1)
+            .unwrap_or_else(|| self.inner.config.append_timeout.as_nanos().min(i64::MAX as u128) as i64);
+        let now = tokio::time::Instant::now();
+        let deadline = if timeout_nanos <= 0 { now } else { now + Duration::from_nanos(timeout_nanos as u64) };
         let (response, receiver) = oneshot::channel();
         match tokio::time::timeout_at(deadline, self.inner.sender.send(Request { task, response }))
             .await
@@ -362,6 +379,7 @@ mod tests {
                     append_timeout: Duration::from_millis(10),
                     ..WriterConfig::default()
                 },
+                live_config: None,
                 parked: Mutex::new(Some(receiver)),
             }),
         };

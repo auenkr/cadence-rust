@@ -135,6 +135,7 @@ pub struct QueueRegistry {
     idle_tasklist_check_interval: Option<SyncWaitProvider>,
     /// Go's signed, task-list-filtered `MaxTaskDeleteBatchSize` provider.
     max_task_delete_batch_size: Option<TaskDeleteBatchSizeProvider>,
+    writer_live: Option<WriterLiveProvider>,
 }
 /// Live adaptive-scaler configuration per domain/task-list/type, mirroring
 /// Go's `TaskListConfig` scaler reads. `None` keeps the scaler parked.
@@ -157,6 +158,7 @@ pub type IsolationProvider = Arc<
 pub type SyncWaitProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
 /// Go's signed `MaxTaskDeleteBatchSize` value, filtered by domain/list/type.
 pub type TaskDeleteBatchSizeProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
+pub type WriterLiveProvider = Arc<dyn Fn(&str, &str, i32) -> (i64, i64) + Send + Sync>;
 /// Partition-tree degree used to resolve a child partition's parent for
 /// add/poll forwarding, mirroring Go's `ForwarderMaxChildrenPerNode`.
 pub type ForwardDegreeProvider = Arc<dyn Fn(&str, &str, i32) -> i64 + Send + Sync>;
@@ -479,6 +481,7 @@ impl QueueRegistry {
             update_ack_interval: None,
             idle_tasklist_check_interval: None,
             max_task_delete_batch_size: None,
+            writer_live: None,
         }
     }
     pub(crate) fn with_local_poll_service(mut self, factory: LocalPollFactory) -> Self {
@@ -607,6 +610,10 @@ impl QueueRegistry {
     }
     pub fn with_max_task_delete_batch_size(mut self, provider: TaskDeleteBatchSizeProvider) -> Self {
         self.max_task_delete_batch_size = Some(provider);
+        self
+    }
+    pub fn with_writer_live(mut self, provider: WriterLiveProvider) -> Self {
+        self.writer_live = Some(provider);
         self
     }
     #[cfg(test)]
@@ -796,10 +803,19 @@ impl QueueRegistry {
                             domain.clone(),
                         )
                             .with_liveness(liveness.clone());
-                    let writer = crate::matching_writer::TaskWriter::new(
+                    let writer_live = registry.writer_live.as_ref().map(|provider| {
+                        let domain = lookup.0.to_string();
+                        let list = lookup.1.clone();
+                        let task_type = lookup.2;
+                        let provider = provider.clone();
+                        Arc::new(move || provider(&domain, &list, task_type))
+                            as Arc<dyn Fn() -> (i64, i64) + Send + Sync>
+                    });
+                    let writer = crate::matching_writer::TaskWriter::new_with_live_config(
                         queue.clone(),
                         dispatcher.task_notification(),
                         crate::matching_writer::WriterConfig::default(),
+                        writer_live,
                     );
                     let min_burst = registry
                         .min_burst
