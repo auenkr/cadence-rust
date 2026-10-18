@@ -28,4 +28,7 @@ The orchestrator model will be divinding the work into subagents so things can s
 For doing actual work use cheap dump model(But give them enugh instruction so they can work independtly)
 
 Worker AGENT:
-Like gpt 6 luna. Normal speed mode(Not fast mode)
+Like gpt 6 luna, or opencode free model. Normal speed mode(Not fast mode)
+
+## NOTE
+This machine have only 100GB storage, so clean up the things which are not needed or saved already.
