@@ -1,3 +1,10 @@
+## Writer primitive integrated with remaining admission-stop gap — 2026-10-18
+
+Integrated candidate4a8591c0f+7e2448340+eaf39ebd9 as812a082ae,c835fbede,29fca72dd. Nine actor tests, originalGo8traces, strict persistenceClippy passed in worker. Actual callback batches now compared; timeout/cancel/stop covered separate actor tests, not all error strings differentially. Drop detaches backend, explicit join remains. No production queue wiring. Polling and primitive negative-capacity Result remain documented limits.
+Parent compared original go/service/matching/tasklist/task_writer.go: admission select has NO stopCh after initial check; actor repeated stopped check differs for already waiting admission. Focused normal-speed Luna repair45 accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-admission-stop-standard-45-20261018
+Requires actualGo gated stop-during-admission oracle plus Rust regression before durable queue wiring. JOIN42 independently active. Matching incomplete.
+
 ## Writer recovery43 review — 2026-10-18
 
 Candidate a5200df8328d5157011d060d987b6046db546959 remains UNINTEGRATED with base6c1bd6fa4. Seven actor tests, originalGo8fixtures and strict persistenceClippy passed; actual Rust-vs-Go8trace comparison still missing. Parent inspected Drop: still synchronously joins potentially blocked backend, admission/response polling persists, negative-capacity policy needs exact Go review. Focused Luna normal-speed follow-up accepted:
