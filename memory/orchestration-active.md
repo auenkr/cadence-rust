@@ -1,3 +1,19 @@
+Recovery43 accepted running: node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-primitive-recovery-standard-43-20261018
+
+## Resume checkpoint — 2026-10-18 (after handoff)
+
+Matching remains current and incomplete. Follow service order Matching -> History -> Frontend -> Worker. Root AGENTS.md already records service-by-service mixed original-Go testing and storage rules.
+
+Parent source fbe5b6fbc is clean. Integrated since frozen combined regression: inbound JOIN/PING, checked outbound TChannel JSON, live signed GC config, writer original-Go oracle. Latest full combined evidence remains source3072698e: 34/34 compatibility stages,524 tests,strict workspace Clippy,mixed original Go Frontend/History/Worker + Rust Matching with no Go Matching. Later slices have focused validation only.
+
+Writer repair41 returned INCOMPLETE, uncommitted, and edited server matching_writer.rs instead of persistence candidate actor. Preserve worktree t3-3dfb4a95, do not integrate it. Recovery43 explicitly starts candidate6c1bd6fa409ec4eabaf792b0fcb9b0ecf8fcce39, repairs persistence primitive and executes real Rust-vs-Go traces before queue integration.
+
+JOIN state repair42 remains running; candidate9770e3870 is not integrated. Must record local accepted refutation and propagation max events; preserve newest integrated transport parser when transplanting.
+
+Full task prefix node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3A applies to matching-join-state-parity-standard-42-20261018. Recovery43 task ID is recorded in orchestration-active.md after acceptance. Workers Luna normal speed serviceTier=default. No duplicate active work. Disk33GB free; active caches preserved.
+
+Next: review completed slices against actual Go, integrate only validated code, wire accepted writer primitive into durable queue, finish discovery and remaining production audit gaps, rerun frozen full combined validation. No service completion claim.
+
 ## JOIN sender review 2026-10-18
 
 9770e3870 NOT integrated. Real Go join/AddJoinList checksum,focused provider/parser,Clippy,inbound transport passed. Parent found local accepted refutation omitted from dissemination (only remote clears); propagation-bound event handling also missing. Candidate bundles duplicate transport module from old parent; preserve newer integrated parser on transplant. Luna Standard repair/originalGo local-state differential accepted:
