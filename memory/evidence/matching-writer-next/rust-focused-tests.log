@@ -1,12 +1,14 @@
-   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-4843bdd9/rust/crates/cadence-persistence)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.69s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.56s
      Running unittests src/lib.rs (target/debug/deps/cadence_persistence-c18f31471858d2e1)
 
-running 4 tests
+running 7 tests
 test matching_writer_actor::tests::cancellation_after_acceptance_keeps_write_and_fanout_nonblocking ... ok
+test matching_writer_actor::tests::cancellation_while_waiting_for_rendezvous_admission_is_observed ... ok
 test matching_writer_actor::tests::consumes_original_go_trace_fixture ... ok
+test matching_writer_actor::tests::handler_response_count_mismatch_is_reported ... ok
+test matching_writer_actor::tests::stop_returns_while_handler_is_blocked_and_join_is_explicit ... ok
 test matching_writer_actor::tests::zero_capacity_is_rendezvous_and_cancellation_keeps_accepted_work ... ok
 test matching_writer_actor::tests::accepted_timeout_does_not_cancel_the_fake_persistence_write ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 182 filtered out; finished in 0.11s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 182 filtered out; finished in 0.12s
 

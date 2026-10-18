@@ -158,3 +158,34 @@ variants.
 
 Evidence: `memory/evidence/matching-writer-next/`. Matching remains incomplete;
 there is no mixed Go/Rust service test or integration test from this slice.
+
+## Rust writer actor follow-up (commit pending)
+
+Cherry-picked candidate `6c1bd6fa409ec4eabaf792b0fcb9b0ecf8fcce39` into
+this worktree as the persistence-owned primitive. Follow-up fixes cover
+cancellation while waiting for admission (as well as response wait), immediate
+no-drain `stop()` with a separate explicit `join()`, and exact response-count
+validation instead of silently truncating `zip` fanout. Added deterministic
+fake-handler tests for each behavior. Capacity remains a Go-construction
+contract: negative capacity returns `InvalidCapacity` at this generic Rust
+primitive boundary; no clamping was added.
+
+The actor's receiver uses a 10ms timed receive to notice atomic stop; channel
+admission retries at 2ms and cancellation response polling at up to 10ms. The
+standard-library bounded channel cannot wake these waits from the separate
+atomic tokens, so these are bounded polling intervals, not wake-driven waits.
+A custom condvar queue/token design remains preferable if tighter cancellation
+latency is required. Explicit `join()` and `Drop` can wait for a synchronous
+handler; only `stop()` is immediate.
+
+Validation: `CARGO_BUILD_JOBS=1 cargo test --locked -p cadence-persistence
+--lib matching_writer_actor` passed 7 tests. `cargo fmt --all -- --check` was
+not usable as a repository-wide gate because it reports pre-existing formatting
+diffs across unrelated crates; the edited actor file was formatted directly.
+The Go fixture reader still validates fixture values only; it does not compare
+Rust actor event traces with Go event traces. Thus all eight scenarios in the
+fixture have not yet been run as a Rust-vs-Go differential suite, and actor
+parity remains incomplete. Strict locked all-target persistence Clippy passed
+with `CARGO_BUILD_JOBS=1 cargo clippy --locked -p cadence-persistence
+--all-targets -- -D warnings` (exit 0). The Go oracle passed and reproduced all
+8 fixture traces; a Rust-vs-Go event-by-event differential suite remains open.

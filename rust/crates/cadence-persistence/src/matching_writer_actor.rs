@@ -26,10 +26,16 @@ pub enum WriterError<E> {
     InvalidCapacity,
     #[error("writer failed: {0}")]
     Write(E),
+    #[error("writer handler returned {actual} responses for {expected} requests")]
+    ResponseCountMismatch { expected: usize, actual: usize },
+}
+enum HandlerResult<R, E> {
+    Item(Result<R, E>),
+    CountMismatch { expected: usize, actual: usize },
 }
 struct Request<T, R, E> {
     value: T,
-    response: mpsc::SyncSender<Result<R, E>>,
+    response: mpsc::SyncSender<HandlerResult<R, E>>,
 }
 /// One owner thread serializes handler calls. Capacity is fixed at creation;
 /// the batch provider is sampled on each receive pass.
@@ -70,8 +76,8 @@ where
     pub fn append(&self, value: T, timeout: Duration) -> Result<R, WriterError<E>> {
         self.append_cancellable(value, timeout, Arc::new(AtomicBool::new(false)))
     }
-    /// Cancellation is observed only after admission; accepted work remains in
-    /// the actor and its bounded response cell cannot block response fanout.
+    /// Cancellation is checked during admission and response waiting. Accepted
+    /// work remains in the actor and its bounded response cell cannot block fanout.
     pub fn append_cancellable(
         &self,
         value: T,
@@ -91,6 +97,9 @@ where
             if self.stopped.load(Ordering::Acquire) {
                 return Err(WriterError::Stopped);
             }
+            if cancelled.load(Ordering::Acquire) {
+                return Err(WriterError::Cancelled);
+            }
             match self.sender.try_send(request) {
                 Ok(()) => break,
                 Err(TrySendError::Disconnected(_)) => return Err(WriterError::Stopped),
@@ -99,7 +108,7 @@ where
                     if Instant::now() >= deadline {
                         return Err(WriterError::ServiceBusy);
                     }
-                    thread::sleep(Duration::from_millis(1));
+                    thread::sleep(Duration::from_millis(2));
                 }
             }
         }
@@ -114,9 +123,12 @@ where
             if left.is_zero() {
                 return Err(WriterError::ResponseTimeout);
             }
-            match rx.recv_timeout(left.min(Duration::from_millis(2))) {
-                Ok(Ok(response)) => return Ok(response),
-                Ok(Err(error)) => return Err(WriterError::Write(error)),
+            match rx.recv_timeout(left.min(Duration::from_millis(10))) {
+                Ok(HandlerResult::Item(Ok(response))) => return Ok(response),
+                Ok(HandlerResult::Item(Err(error))) => return Err(WriterError::Write(error)),
+                Ok(HandlerResult::CountMismatch { expected, actual }) => {
+                    return Err(WriterError::ResponseCountMismatch { expected, actual })
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() >= deadline => {
                     return Err(WriterError::ResponseTimeout)
                 }
@@ -128,9 +140,12 @@ where
             }
         }
     }
-    /// Stop is no-drain. Join can wait for an in-progress synchronous handler.
+    /// Stop is no-drain and returns immediately, even while a handler is in flight.
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Release);
+    }
+    /// Join separately when the handler is known to be able to finish.
+    pub fn join(&self) {
         if let Some(join) = self.join.lock().expect("writer join lock").take() {
             let _ = join.join();
         }
@@ -151,8 +166,9 @@ fn actor_loop<T, R, E>(
     handler: impl Fn(Vec<T>) -> Vec<Result<R, E>>,
 ) {
     while !stopped.load(Ordering::Acquire) {
-        let first = match receiver.recv_timeout(Duration::from_millis(2)) {
+        let first = match receiver.recv_timeout(Duration::from_millis(10)) {
             Ok(request) => request,
+            Err(mpsc::RecvTimeoutError::Timeout) if stopped.load(Ordering::Acquire) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
@@ -169,8 +185,17 @@ fn actor_loop<T, R, E>(
         }
         let (values, responses): (Vec<_>, Vec<_>) =
             batch.into_iter().map(|r| (r.value, r.response)).unzip();
-        for (response, result) in responses.into_iter().zip(handler(values)) {
-            let _ = response.try_send(result);
+        let results = handler(values);
+        let expected = responses.len();
+        let actual = results.len();
+        if actual != expected {
+            for response in responses {
+                let _ = response.try_send(HandlerResult::CountMismatch { expected, actual });
+            }
+        } else {
+            for (response, result) in responses.into_iter().zip(results) {
+                let _ = response.try_send(HandlerResult::Item(result));
+            }
         }
     }
 }
@@ -239,6 +264,7 @@ mod tests {
             Err(WriterError::InvalidCapacity)
         ));
         actor.stop();
+        actor.join();
         assert_eq!(
             actor.append(1, Duration::from_millis(5)),
             Err(WriterError::Stopped)
@@ -271,6 +297,7 @@ mod tests {
         }
         assert_eq!(writes.load(Ordering::SeqCst), 1);
         a.stop();
+        a.join();
     }
     #[test]
     fn cancellation_after_acceptance_keeps_write_and_fanout_nonblocking() {
@@ -304,5 +331,69 @@ mod tests {
         }
         assert_eq!(writes.load(Ordering::SeqCst), 1);
         actor.stop();
+        actor.join();
+    }
+
+    #[test]
+    fn cancellation_while_waiting_for_rendezvous_admission_is_observed() {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let actor = Arc::new(
+            MatchingWriterActor::<u8, u8, ()>::new(0, Arc::new(|| 0), move |items| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                items.into_iter().map(Ok).collect()
+            })
+            .unwrap(),
+        );
+        let first_actor = actor.clone();
+        let first = thread::spawn(move || first_actor.append(0, Duration::from_secs(2)));
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let caller = actor.clone();
+        let token = cancelled.clone();
+        let append =
+            thread::spawn(move || caller.append_cancellable(1, Duration::from_secs(2), token));
+        thread::sleep(Duration::from_millis(20));
+        cancelled.store(true, Ordering::Release);
+        assert_eq!(append.join().unwrap(), Err(WriterError::Cancelled));
+        release_tx.send(()).unwrap();
+        assert_eq!(first.join().unwrap(), Ok(0));
+        actor.stop();
+        actor.join();
+    }
+
+    #[test]
+    fn stop_returns_while_handler_is_blocked_and_join_is_explicit() {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let actor = MatchingWriterActor::<u8, u8, ()>::new(1, Arc::new(|| 0), move |items| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            items.into_iter().map(Ok).collect()
+        })
+        .unwrap();
+        let caller = Arc::new(actor);
+        let a = caller.clone();
+        let append = thread::spawn(move || a.append(1, Duration::from_secs(1)));
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        caller.stop();
+        assert_eq!(append.join().unwrap(), Err(WriterError::Stopped));
+        release_tx.send(()).unwrap();
+        caller.join();
+    }
+
+    #[test]
+    fn handler_response_count_mismatch_is_reported() {
+        let actor = MatchingWriterActor::<u8, u8, ()>::new(1, Arc::new(|| 1), |_| vec![]).unwrap();
+        assert_eq!(
+            actor.append(1, Duration::from_secs(1)),
+            Err(WriterError::ResponseCountMismatch {
+                expected: 1,
+                actual: 0
+            })
+        );
+        actor.stop();
+        actor.join();
     }
 }
