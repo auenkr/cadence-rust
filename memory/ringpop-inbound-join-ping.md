@@ -133,6 +133,11 @@ optional Node service workflow probe exited 1 because `@grpc/grpc-js` was
 missing in that worktree. This dependency failure is unrelated to this Ringpop
 slice; the requested Rust/Go Ringpop and native Matching HTTP/TLS checks passed.
 
-The candidate was transplanted as `fb0e71376` after parent commit
-`5482560aa8b9bc81a4a0af92aa09bc9a716b056f`; the repair commit follows it.
+Ordered commits on this worktree:
+
+1. Latest HTTP/TLS parent: `5482560aa8b9bc81a4a0af92aa09bc9a716b056f`.
+2. Candidate `3dbd1b11be01288f6f2bd1fcae1882d0627a4c43` transplanted onto that
+   parent as `fb0e7137668141fde848037518efb88ca9921213`.
+3. Inbound boundary repair and validation: `313d8e7d7e5c7313add58c163d11dbe07a359ac6`.
+
 No production SWIM/Matching completion is claimed.
