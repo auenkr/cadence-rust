@@ -1,3 +1,10 @@
+## Deterministic member core integrated 2026-10-18
+
+Final parity standard-14 passed original Go fixture regeneration/no drift, Rust oracle consumer, 4 unit tests, strict common all-target Clippy, Go wire oracle + 11 Rust wire tests. Integrated exact validated stack as 86a5c8221, dcd28da6f, f36646209, 0a8ee08c1, 429d7da02. Production Ringpop/SWIM still absent.
+Next Luna Standard isolated implementation task:
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-disseminator-standard-15-20261018
+Scope deterministic change dissemination core with original-Go oracle; allowed bounded queue/counter slice if needed, no main wiring. HTTP permissive standard-11 checked running with no pending question; preserve visible parent test edits. Full accumulated workspace/mixed runner still not rerun on latest integrated source.
+
 ## Expanded oracle ready; final combined gate 2026-10-18
 
 Consumer ce179937a ran original Go generator successfully and found exactly known precedence mismatch against UNREPAIRED candidate; other comparisons passed. Parent reviewed consumer assertion accumulation and failure assertion. Final isolated Luna Standard task combines base 7f86a56c3 + repair 610dd4fe9 + oracle 07b654686 + consumer ce179937a, reruns Go fixture generation/no drift, Rust differential/unit, strict Clippy and wire runner:
