@@ -26,14 +26,34 @@ pub struct Memberlist {
 impl Memberlist {
     pub fn new(local: Member) -> Self {
         let checksum = memberlist_checksum(std::slice::from_ref(&local));
+        let mut list = Self::from_snapshot(local, vec![]);
+        list.checksum = checksum;
+        list
+    }
+
+    /// Construct a memberlist from an explicit initial snapshot. This is
+    /// intended for deterministic oracle consumers and recovery fixtures.
+    #[doc(hidden)]
+    pub fn from_snapshot(local: Member, initial_remote_members: Vec<Member>) -> Self {
         let local_address = local.address.clone();
-        let mut by_address = BTreeMap::new();
-        by_address.insert(local_address.clone(), 0);
+        let mut members = vec![local];
+        members.extend(
+            initial_remote_members
+                .into_iter()
+                .filter(|m| m.address != local_address),
+        );
+        let by_address = members
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.address.clone(), i))
+            .collect();
+        // Ringpop's manually constructed oracle snapshots begin with the
+        // cached checksum at zero; Update recomputes it after accepted gossip.
         Self {
             local_address,
-            members: vec![local],
+            members,
             by_address,
-            checksum,
+            checksum: 0,
         }
     }
     pub fn members(&self) -> &[Member] {

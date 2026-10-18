@@ -14,8 +14,12 @@ import (
 )
 
 type updateSnapshot struct {
-	Name     string   `json:"name"`
-	Input    []Change `json:"input"`
+	Name           string    `json:"name"`
+	NowUnixSeconds int64     `json:"nowUnixSeconds"`
+	NowNanoseconds int       `json:"nowNanoseconds"`
+	InitialLocal   Member    `json:"initialLocal"`
+	InitialMembers []Member  `json:"initialMembers"`
+	Input          []Change  `json:"input"`
 	Applied  []Change `json:"applied"`
 	Members  []Member `json:"members"`
 	Checksum uint32   `json:"checksum"`
@@ -90,11 +94,16 @@ func captureUpdate(t *testing.T, name string, local Member, old *Member, inputs 
 	n.memberlist = ml
 	n.disseminator = newDisseminator(n)
 	n.stateTransitions = newStateTransitions(n, StateTimeouts{})
+	initialLocal := *ml.local
+	initialMembers := make([]Member, 0, len(ml.members.list))
+	for _, member := range ml.members.list {
+		initialMembers = append(initialMembers, *member)
+	}
 	copyInput := append([]Change(nil), inputs...)
 	// Call the pinned Ringpop implementation directly. Update may normalize
 	// incoming changes in place; preserving this slice captures its exact input.
 	applied := ml.Update(copyInput)
 	members := ml.GetMembers()
 	sort.Slice(members, func(i, j int) bool { return members[i].Address < members[j].Address })
-	generatedUpdateCases = append(generatedUpdateCases, updateSnapshot{Name: name, Input: inputs, Applied: applied, Members: members, Checksum: ml.Checksum(), Local: *ml.local})
+	generatedUpdateCases = append(generatedUpdateCases, updateSnapshot{Name: name, NowUnixSeconds: now.Unix(), NowNanoseconds: now.Nanosecond(), InitialLocal: initialLocal, InitialMembers: initialMembers, Input: inputs, Applied: applied, Members: members, Checksum: ml.Checksum(), Local: *ml.local})
 }

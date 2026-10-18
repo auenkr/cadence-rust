@@ -2,6 +2,20 @@
   "cases": [
     {
       "name": "remote_insert_update",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -74,6 +88,20 @@
     },
     {
       "name": "unknown_tombstone_rejected",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -101,6 +129,26 @@
     },
     {
       "name": "local_stale_equal_newer_refutation",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100,
+        "labels": {
+          "zone": "west"
+        }
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100,
+          "labels": {
+            "zone": "west"
+          }
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -162,6 +210,25 @@
     },
     {
       "name": "alive_to_alive_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -194,6 +261,25 @@
     },
     {
       "name": "alive_to_alive_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -226,6 +312,25 @@
     },
     {
       "name": "alive_to_alive_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -267,6 +372,25 @@
     },
     {
       "name": "alive_to_suspect_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -299,6 +423,25 @@
     },
     {
       "name": "alive_to_suspect_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -340,6 +483,25 @@
     },
     {
       "name": "alive_to_suspect_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -381,6 +543,25 @@
     },
     {
       "name": "alive_to_faulty_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -413,6 +594,25 @@
     },
     {
       "name": "alive_to_faulty_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -454,6 +654,25 @@
     },
     {
       "name": "alive_to_faulty_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -495,6 +714,25 @@
     },
     {
       "name": "alive_to_leave_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -527,6 +765,25 @@
     },
     {
       "name": "alive_to_leave_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -568,6 +825,25 @@
     },
     {
       "name": "alive_to_leave_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -609,6 +885,25 @@
     },
     {
       "name": "alive_to_tombstone_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -641,6 +936,25 @@
     },
     {
       "name": "alive_to_tombstone_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -682,6 +996,25 @@
     },
     {
       "name": "alive_to_tombstone_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -723,6 +1056,25 @@
     },
     {
       "name": "alive_to_unknown_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -755,6 +1107,25 @@
     },
     {
       "name": "alive_to_unknown_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -787,6 +1158,25 @@
     },
     {
       "name": "alive_to_unknown_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -828,6 +1218,25 @@
     },
     {
       "name": "suspect_to_alive_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -860,6 +1269,25 @@
     },
     {
       "name": "suspect_to_alive_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -892,6 +1320,25 @@
     },
     {
       "name": "suspect_to_alive_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -933,6 +1380,25 @@
     },
     {
       "name": "suspect_to_suspect_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -965,6 +1431,25 @@
     },
     {
       "name": "suspect_to_suspect_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -997,6 +1482,25 @@
     },
     {
       "name": "suspect_to_suspect_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1038,6 +1542,25 @@
     },
     {
       "name": "suspect_to_faulty_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1070,6 +1593,25 @@
     },
     {
       "name": "suspect_to_faulty_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1111,6 +1653,25 @@
     },
     {
       "name": "suspect_to_faulty_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1152,6 +1713,25 @@
     },
     {
       "name": "suspect_to_leave_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1184,6 +1764,25 @@
     },
     {
       "name": "suspect_to_leave_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1225,6 +1824,25 @@
     },
     {
       "name": "suspect_to_leave_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1266,6 +1884,25 @@
     },
     {
       "name": "suspect_to_tombstone_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1298,6 +1935,25 @@
     },
     {
       "name": "suspect_to_tombstone_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1339,6 +1995,25 @@
     },
     {
       "name": "suspect_to_tombstone_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1380,6 +2055,25 @@
     },
     {
       "name": "suspect_to_unknown_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1412,6 +2106,25 @@
     },
     {
       "name": "suspect_to_unknown_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1444,6 +2157,25 @@
     },
     {
       "name": "suspect_to_unknown_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1485,6 +2217,25 @@
     },
     {
       "name": "faulty_to_alive_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1517,6 +2268,25 @@
     },
     {
       "name": "faulty_to_alive_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1549,6 +2319,25 @@
     },
     {
       "name": "faulty_to_alive_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1590,6 +2379,25 @@
     },
     {
       "name": "faulty_to_suspect_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1622,6 +2430,25 @@
     },
     {
       "name": "faulty_to_suspect_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1654,6 +2481,25 @@
     },
     {
       "name": "faulty_to_suspect_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1695,6 +2541,25 @@
     },
     {
       "name": "faulty_to_faulty_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1727,6 +2592,25 @@
     },
     {
       "name": "faulty_to_faulty_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1759,6 +2643,25 @@
     },
     {
       "name": "faulty_to_faulty_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1800,6 +2703,25 @@
     },
     {
       "name": "faulty_to_leave_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1832,6 +2754,25 @@
     },
     {
       "name": "faulty_to_leave_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1873,6 +2814,25 @@
     },
     {
       "name": "faulty_to_leave_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1914,6 +2874,25 @@
     },
     {
       "name": "faulty_to_tombstone_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1946,6 +2925,25 @@
     },
     {
       "name": "faulty_to_tombstone_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -1987,6 +2985,25 @@
     },
     {
       "name": "faulty_to_tombstone_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2028,6 +3045,25 @@
     },
     {
       "name": "faulty_to_unknown_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2060,6 +3096,25 @@
     },
     {
       "name": "faulty_to_unknown_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2092,6 +3147,25 @@
     },
     {
       "name": "faulty_to_unknown_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2133,6 +3207,25 @@
     },
     {
       "name": "leave_to_alive_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2165,6 +3258,25 @@
     },
     {
       "name": "leave_to_alive_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2197,6 +3309,25 @@
     },
     {
       "name": "leave_to_alive_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2238,6 +3369,25 @@
     },
     {
       "name": "leave_to_suspect_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2270,6 +3420,25 @@
     },
     {
       "name": "leave_to_suspect_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2302,6 +3471,25 @@
     },
     {
       "name": "leave_to_suspect_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2343,6 +3531,25 @@
     },
     {
       "name": "leave_to_faulty_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2375,6 +3582,25 @@
     },
     {
       "name": "leave_to_faulty_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2407,6 +3633,25 @@
     },
     {
       "name": "leave_to_faulty_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2448,6 +3693,25 @@
     },
     {
       "name": "leave_to_leave_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2480,6 +3744,25 @@
     },
     {
       "name": "leave_to_leave_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2512,6 +3795,25 @@
     },
     {
       "name": "leave_to_leave_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2553,6 +3855,25 @@
     },
     {
       "name": "leave_to_tombstone_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2585,6 +3906,25 @@
     },
     {
       "name": "leave_to_tombstone_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2626,6 +3966,25 @@
     },
     {
       "name": "leave_to_tombstone_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2667,6 +4026,25 @@
     },
     {
       "name": "leave_to_unknown_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2699,6 +4077,25 @@
     },
     {
       "name": "leave_to_unknown_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2731,6 +4128,25 @@
     },
     {
       "name": "leave_to_unknown_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2772,6 +4188,25 @@
     },
     {
       "name": "tombstone_to_alive_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2804,6 +4239,25 @@
     },
     {
       "name": "tombstone_to_alive_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2836,6 +4290,25 @@
     },
     {
       "name": "tombstone_to_alive_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2877,6 +4350,25 @@
     },
     {
       "name": "tombstone_to_suspect_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2909,6 +4401,25 @@
     },
     {
       "name": "tombstone_to_suspect_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2941,6 +4452,25 @@
     },
     {
       "name": "tombstone_to_suspect_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -2982,6 +4512,25 @@
     },
     {
       "name": "tombstone_to_faulty_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3014,6 +4563,25 @@
     },
     {
       "name": "tombstone_to_faulty_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3046,6 +4614,25 @@
     },
     {
       "name": "tombstone_to_faulty_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3087,6 +4674,25 @@
     },
     {
       "name": "tombstone_to_leave_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3119,6 +4725,25 @@
     },
     {
       "name": "tombstone_to_leave_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3151,6 +4776,25 @@
     },
     {
       "name": "tombstone_to_leave_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3192,6 +4836,25 @@
     },
     {
       "name": "tombstone_to_tombstone_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3224,6 +4887,25 @@
     },
     {
       "name": "tombstone_to_tombstone_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3256,6 +4938,25 @@
     },
     {
       "name": "tombstone_to_tombstone_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3297,6 +4998,25 @@
     },
     {
       "name": "tombstone_to_unknown_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3329,6 +5049,25 @@
     },
     {
       "name": "tombstone_to_unknown_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3361,6 +5100,25 @@
     },
     {
       "name": "tombstone_to_unknown_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3402,6 +5160,25 @@
     },
     {
       "name": "unknown_to_alive_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3434,6 +5211,25 @@
     },
     {
       "name": "unknown_to_alive_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3475,6 +5271,25 @@
     },
     {
       "name": "unknown_to_alive_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3516,6 +5331,25 @@
     },
     {
       "name": "unknown_to_suspect_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3548,6 +5382,25 @@
     },
     {
       "name": "unknown_to_suspect_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3589,6 +5442,25 @@
     },
     {
       "name": "unknown_to_suspect_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3630,6 +5502,25 @@
     },
     {
       "name": "unknown_to_faulty_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3662,6 +5553,25 @@
     },
     {
       "name": "unknown_to_faulty_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3703,6 +5613,25 @@
     },
     {
       "name": "unknown_to_faulty_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3744,6 +5673,25 @@
     },
     {
       "name": "unknown_to_leave_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3776,6 +5724,25 @@
     },
     {
       "name": "unknown_to_leave_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3817,6 +5784,25 @@
     },
     {
       "name": "unknown_to_leave_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3858,6 +5844,25 @@
     },
     {
       "name": "unknown_to_tombstone_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3890,6 +5895,25 @@
     },
     {
       "name": "unknown_to_tombstone_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3931,6 +5955,25 @@
     },
     {
       "name": "unknown_to_tombstone_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -3972,6 +6015,25 @@
     },
     {
       "name": "unknown_to_unknown_inc_older",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -4004,6 +6066,25 @@
     },
     {
       "name": "unknown_to_unknown_inc_equal",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -4036,6 +6117,25 @@
     },
     {
       "name": "unknown_to_unknown_inc_newer",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
       "input": [
         {
           "source": "sender",
@@ -4077,6 +6177,20 @@
     },
     {
       "name": "batch_80_no_truncation",
+      "nowUnixSeconds": 1700000000,
+      "nowNanoseconds": 123000000,
+      "initialLocal": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      },
+      "initialMembers": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        }
+      ],
       "input": [
         {
           "source": "batch",

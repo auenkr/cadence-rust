@@ -1,0 +1,22 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-ecd46278/rust/crates/cadence-common)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.63s
+     Running tests/ringpop_memberlist_update_oracle.rs (target/debug/deps/ringpop_memberlist_update_oracle-55698274a46d7c63)
+
+running 1 test
+
+thread 'pinned_ringpop_memberlist_update_oracle' (503111) panicked at crates/cadence-common/tests/ringpop_memberlist_update_oracle.rs:146:5:
+oracle mismatches (3):
+batch_80_no_truncation accepted changes: expected 80, got 64
+batch_80_no_truncation final members differ
+batch_80_no_truncation checksum: expected 1108685336, got 2911329867
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test pinned_ringpop_memberlist_update_oracle ... FAILED
+
+failures:
+
+failures:
+    pinned_ringpop_memberlist_update_oracle
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p cadence-common --test ringpop_memberlist_update_oracle`
