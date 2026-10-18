@@ -69,8 +69,9 @@ pub fn should_process_gossip(old: Option<&Member>, gossip: &Member) -> bool {
         std::cmp::Ordering::Equal => {}
     }
     match state_precedence(&gossip.status).cmp(&state_precedence(&old.status)) {
-        std::cmp::Ordering::Greater => return true,
-        std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => {
             labels_checksum(gossip.labels.as_ref()) > labels_checksum(old.labels.as_ref())
         }
     }
@@ -99,6 +100,25 @@ mod tests {
         assert!(!should_process_gossip(Some(&old), &member("tombstone", 2)));
         assert!(!should_process_gossip(None, &member("tombstone", 4)));
         assert!(should_process_gossip(None, &member("mystery", 4)));
+    }
+
+    #[test]
+    fn lower_precedence_rejects_gossip_even_with_higher_signed_label_checksum() {
+        let mut old = member("suspect", 4);
+        let mut gossip = member("alive", 4);
+        let old_labels = BTreeMap::from([("k".to_string(), "old".to_string())]);
+        old.labels = Some(old_labels.clone());
+        let mut higher = None;
+        for i in 0..100_000 {
+            let labels = BTreeMap::from([("k".to_string(), format!("candidate-{i}"))]);
+            if labels_checksum(Some(&labels)) > labels_checksum(Some(&old_labels)) {
+                higher = Some(labels);
+                break;
+            }
+        }
+        gossip.labels = higher;
+        assert!(labels_checksum(gossip.labels.as_ref()) > labels_checksum(Some(&old_labels)));
+        assert!(!should_process_gossip(Some(&old), &gossip));
     }
 
     #[test]

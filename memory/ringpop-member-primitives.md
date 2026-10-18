@@ -25,3 +25,23 @@ strict all-target Clippy were still running in tmux window
 this implementation. A complete Go-generated oracle fixture has not yet been
 committed; do not claim differential parity until one is generated from the
 pinned Go routines and compared against Rust.
+
+## Precedence repair verification
+
+A follow-up repair fixes `should_process_gossip`: lower state precedence now
+returns `false` immediately, and signed label checksums are compared only when
+precedence is equal, matching the pinned Go `swim/member.go` implementation.
+Regression coverage constructs an alive gossip member whose signed labels
+checksum exceeds that of an existing suspect member and verifies it is rejected.
+
+Verification in the repair worktree on 2026-10-18:
+
+- `CARGO_BUILD_JOBS=1 cargo test -p cadence-common ringpop_member -- --nocapture`:
+  exit 0, 4 passed.
+- `CARGO_BUILD_JOBS=1 cargo clippy -p cadence-common --all-targets -- -D warnings`:
+  exit 0.
+- `python3 tests/run-ringpop-wire-compat.py`: exit 0; Go wire fixture check and
+  11 Rust wire tests passed.
+
+A Go-generated differential oracle for the member checksums and merge behavior
+is still pending; the wire compatibility result does not establish that parity.
