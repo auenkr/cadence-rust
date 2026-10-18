@@ -31,3 +31,4 @@ pub mod rate_limiter;
 
 pub mod membership;
 pub mod ringpop_wire;
+pub mod ringpop_member;
