@@ -1,3 +1,11 @@
+## Direct PING integrated; bootstrap contract next — 2026-10-18
+
+Reviewedbc2dd676a against pinned ping_sender.go success callback ordering; integratedfd3a3f12b. Worker13provider+4JSONtests,actualGoPINGpeer,JOIN/inbound regressions,strict serverClippy passed. Response decode precedes state mutation;successful sender callback before response merge,stopped merge guarded. No timers/probe scheduling/bootstrap readiness yet.
+Luna normal-speed originalGo bootstrap contract/oracle50 accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-bootstrap-contract-standard-50-20261018
+Livewriter49 independently active. Matching incomplete.
+Storage: inspected pgrep/tmux,only active Cargo49 target t3-975b4b2d; cargo clean completed inactive targets t3-aaef0e84,t3-8526ec70,t3-68c85418 removed6.3+1.3+1.1GiB reported,preserved source/commits/evidence/activecache. Disk19GBfree after concurrent49build.
+
 ## Writer live settings draft needs behavior tests — 2026-10-18
 
 Candidate c3266b87d81c317f3d2b0d96cfcadc674a5b2fe8 NOT integrated. Parent reviewed4filediff: provider tuple filters domain/list/type, samples batch after first request and timeout each append attempt; nonpositive deadline immediate. Existing4writer tests,Go tasklist,strict serverClippy passed,NO added live/filter tests. Luna normal-speed49 accepted actual production dynamic-update and filter independence validation/fixes:
