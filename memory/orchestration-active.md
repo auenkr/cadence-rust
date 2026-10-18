@@ -1,3 +1,11 @@
+## Memberlist combined gate and HTTP exact behavior correction 2026-10-18
+
+HTTP 126afe824 returned 3 focused, locked build, strict Clippy, full live Go runner all exit 0, including concurrent stalled clients. NOT INTEGRATED: memory admits intentional read_exact fragmented TLS improvement unlike Go one-Read/short=>plaintext; parent earlier asked improvement but USER no-logic-change wins. MAX_PENDING=128 drop policy also needs source parity. Exact-Go repair assigned:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Ahttp-exact-go-parity-standard-29-20261018
+Memberlist consumer 0e14eb07a +oracle metadata: 112 cases, Go twice identical, draft consumer fails ONLY known 64/80 batch mismatch; others incl local refutation match. Combined with b5b912efd repair final gate:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amemberlist-final-parity-standard-28-20261018
+Both Luna Standard accepted running. Preserve parent dirty test draft until reviewed replacement integration. Matching only, no other-service migration.
+
 ## Memberlist repair checks returned 2026-10-18
 
 Repair b5b912efd289086bfdc4e5def6103c7f5c178ee3 removes invented 64 cap, adjusts insertion callback range excluding end, adds >64/local-field/insertion tests. Parent reviewed diff. Worker confirms 4 focused tests, member/dissemination oracle regressions and strict common all-target Clippy exit 0. Still UNINTEGRATED pending memberlist actual-Go consumer standard-27 (checked running). Final combined stack must include ed35c38ca +3f2f3ce34 +b5b912efd +cf0eb63ef +consumer before acceptance. Matching remains current/incomplete.
