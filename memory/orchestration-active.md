@@ -1,3 +1,9 @@
+## Writer recovery43 review — 2026-10-18
+
+Candidate a5200df8328d5157011d060d987b6046db546959 remains UNINTEGRATED with base6c1bd6fa4. Seven actor tests, originalGo8fixtures and strict persistenceClippy passed; actual Rust-vs-Go8trace comparison still missing. Parent inspected Drop: still synchronously joins potentially blocked backend, admission/response polling persists, negative-capacity policy needs exact Go review. Focused Luna normal-speed follow-up accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-trace-parity-standard-44-20261018
+Scope actual actor differential + nonblocking lifecycle, no queue integration. JOIN42 separately active. Matching remains incomplete.
+
 Recovery43 accepted running: node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-primitive-recovery-standard-43-20261018
 
 ## Resume checkpoint — 2026-10-18 (after handoff)
