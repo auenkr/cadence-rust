@@ -1,3 +1,7 @@
+## JOIN stale probe harness fixed — 2026-10-18
+
+Reviewed8dc7e18d0,integrated. DefaultJOINrunneralwaysbuildscurrentcheckoutandcopiesuniqueownedtempbinary;explicitoverridevalidatedexecutable,ownedcleanupfinally. FreshsingleJOIN+twopeerGROUPGo testsPASS,invalidoverrideexpectedexit1. Confirmscachedglobalbinarywasfailurecause;controllerdraftstillunintegratedforasync/delayerrepair65. Restart63independentlyactive. Disk2.5GBfree,mustpreserveactivecacheandavoidfreshbuilds. Matching incomplete.
+
 ## Controller62 incomplete; probe freshness diagnosis — 2026-10-18
 
 62applied88f963346as680065326only,no repaircommit/testscomplete. Parentreadrunner: global/tmp/cadence-ringpop-join-probe reusedifexists,likelyoldbinarywithout--group =>invalidsocketaddress. Splitnormal-speedLuna64harnessfreshbuild+realGoJOIN/GROUPregression and65asyncdelay/actualGodelayer/formatter/clockrepair:
