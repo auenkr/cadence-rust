@@ -1,5 +1,42 @@
 # Dedicated Matching HTTP listener (2026-10-17)
 
+## Follow-up correction (2026-10-18)
+
+The earlier claim that fragmented TLS ClientHello records should successfully
+handshake was an unauthorized behavior change. Go YARPC v1.88.0's
+`transport/internal/tls/muxlistener/tls_checker.go:isTLSClientHelloRecord`
+calls `Read` exactly once into a five-byte buffer. A short, non-error read is
+classified as plaintext. Rust now does one bounded read and uses that same
+classification, preserving the consumed bytes for the HTTP path. A read error
+or a 15 second sniff timeout closes the connection. TLS handshakes remain
+concurrent with a 120 second timeout, so a stalled peer does not block accepts.
+
+The candidate's `MAX_PENDING=128` / `try_acquire_owned` rejection behavior had
+no matching Go bound: YARPC's muxlistener starts one goroutine per accepted
+connection and tracks them with a wait group. Rust therefore has no invented
+pending-connection cap and uses independently spawned tasks. Dropping the
+listener's `JoinSet` aborts its connection tasks on listener cancellation.
+
+The compatibility harness's fragmented ClientHello case now forces the first
+read to be one byte and checks the plaintext response path. This replaces the
+prior Rust-only success expectation. The Rust production timeouts remain 15s
+sniff / 120s handshake; the connection test's independent probe verifies that
+a stalled handshake cannot cause accept head-of-line blocking. Earlier listener
+test evidence and the ten-method Go runner still apply, but those checks do not
+constitute Matching service completion.
+
+### Correction validation record
+
+- `cargo test --locked -p cadence-server matching_http_listener_tests -- --nocapture` (from `rust/`, `CARGO_BUILD_JOBS=1`, this worktree's `rust/target`): exit 0; 3 listener tests passed. Full output is in `memory/http-parity-cargo.log`.
+- `cargo clippy --locked -p cadence-server --all-targets -- -D warnings`: exit 0.
+- `cargo build --locked -p cadence-server`: exit 0.
+- `python3 tests/run-matching-thrift-compat.py --server-bin rust/target/debug/cadence-server`: exit 0. It first ran Go YARPC v1.88.0's `TestIsTLSClientHelloRecord` (including short-buffer/read-error cases); then all ten generated Go methods passed via TChannel, HTTP, and HTTP trailing slash, plus fragmented-short-read plaintext classification, TLS/plaintext, timeout/recovery, listener shutdown cancellation, and configuration mode probes. Output: `memory/http-parity-mixed-go.log`.
+- `cargo build --locked -p cadence-server --example ringpop_tchannel_probe --manifest-path rust/Cargo.toml` and `python3 tests/run-ringpop-tchannel-compat.py --server-example rust/target/debug/examples/ringpop_tchannel_probe`: both exit 0; original Go Ringpop TChannel compatibility passed. Same log as above.
+- First compatibility attempt passed the Go YARPC oracle and ten-method runner but the shutdown probe expected FIN and observed TCP RST (exit 1). The harness now accepts EOF or reset as connection closure; first-attempt evidence is retained in `memory/http-parity-mixed-go-attempt1.log` and `.exit`.
+- An initial build using a shared warm target was interrupted when another task began using it (exit 130); the successful checks above used the isolated worktree target. The interruption log is retained as `memory/http-parity-cargo-shared-interrupted.log` and `.exit`.
+
+These checks validate this HTTP transport slice only. They do not complete Matching or its remaining service parity audit. In particular, the 120-second handshake deadline remains exercised by the production code path but has no focused test with an injected short handshake timeout.
+
 ## Go behavior inspected
 
 - `go/common/config/config.go`: `rpc.http` is optional and includes port, procedure allowlist, TLS config, and TLS mode.

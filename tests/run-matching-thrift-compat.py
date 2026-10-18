@@ -18,6 +18,12 @@ parser.add_argument('--artifacts-dir', type=Path)
 args = parser.parse_args()
 artifacts = args.artifacts_dir or Path(tempfile.mkdtemp(prefix='matching-thrift-compat-'))
 artifacts.mkdir(parents=True, exist_ok=True)
+
+# Original YARPC v1.88.0 classifier tests are the oracle for short reads.
+subprocess.run(['go', 'test', 'go.uber.org/yarpc/transport/internal/tls/muxlistener',
+                '-run', '^TestIsTLSClientHelloRecord$', '-count=1', '-v'],
+               cwd=root / 'go', check=True, timeout=60)
+
 reservations = [socket.socket() for _ in range(7)]
 for listener in reservations:
     listener.bind(('127.0.0.1', 0))
@@ -139,6 +145,17 @@ with (artifacts / 'server.log').open('w') as log:
             except urllib.error.HTTPError as error:
                 if error.code != 404:
                     raise
+        # Listener shutdown must cancel connection tasks waiting in sniffing.
+        shutdown_probe = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
+        server.terminate()
+        server.wait(timeout=10)
+        shutdown_probe.settimeout(3)
+        try:
+            if shutdown_probe.recv(1) != b'':
+                raise AssertionError('listener shutdown did not close a pending sniff connection')
+        except ConnectionResetError:
+            pass  # Aborting the connection task may produce TCP RST rather than FIN.
+        shutdown_probe.close()
     finally:
         server.terminate()
         try:
@@ -215,8 +232,10 @@ with (artifacts / 'server-permissive.log').open('w') as log:
         finally:
             silent.close()
 
-        # Complete a real TLS handshake after sending the ClientHello in tiny
-        # writes, then issue the same allowlisted RPC over the TLS stream.
+        # YARPC performs one Read for its five-byte sniff. Force a short read,
+        # then finish the TLS record: Go classifies this as plaintext, so the
+        # request must not complete a TLS handshake. This guards parity for the
+        # deliberately fragmented case instead of asserting a Rust-only upgrade.
         raw = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
         raw.settimeout(3)
         incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
@@ -228,34 +247,12 @@ with (artifacts / 'server-permissive.log').open('w') as log:
             except ssl.SSLWantReadError:
                 pass
             hello = outgoing.read()
-            for byte in hello:
-                raw.sendall(bytes((byte,)))
-                time.sleep(0.001)
-            while True:
-                try:
-                    client.do_handshake()
-                    break
-                except ssl.SSLWantReadError:
-                    data = raw.recv(65536)
-                    if not data:
-                        raise AssertionError('server closed fragmented TLS ClientHello')
-                    incoming.write(data)
-                    pending = outgoing.read()
-                    if pending:
-                        raw.sendall(pending)
-            request = (b'POST /matching HTTP/1.1\r\nHost: localhost\r\n'
-                       b'Rpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\n'
-                       b'Rpc-Procedure: Meta::health\r\nContent-Length: 1\r\n\r\n\0')
-            client.write(request)
-            raw.sendall(outgoing.read())
-            while True:
-                try:
-                    response = client.read(4096)
-                    if b'200' not in response:
-                        raise AssertionError(f'fragmented TLS request returned {response!r}')
-                    break
-                except ssl.SSLWantReadError:
-                    incoming.write(raw.recv(65536))
+            raw.sendall(hello[:1])
+            time.sleep(0.1)  # Ensure the listener's single read returns short.
+            raw.sendall(hello[1:])
+            response = raw.recv(4096)
+            if b'HTTP/' not in response:
+                raise AssertionError(f'short-read TLS sniff did not follow plaintext path: {response!r}')
         finally:
             raw.close()
 

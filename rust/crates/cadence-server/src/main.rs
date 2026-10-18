@@ -106,7 +106,7 @@ async fn serve_matching_http_permissive(
     use std::task::{Context, Poll};
     use std::time::Duration;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
-    use tokio::sync::{mpsc, Semaphore};
+    use tokio::sync::mpsc;
     use tokio::task::JoinSet;
 
     trait Io: AsyncRead + AsyncWrite {}
@@ -191,16 +191,14 @@ async fn serve_matching_http_permissive(
     }
     const SNIFF_TIMEOUT: Duration = Duration::from_secs(15);
     const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
-    const MAX_PENDING: usize = 128;
     type ConnectionResult = (io::Result<Stream>, std::net::SocketAddr);
     struct MixedListener {
         listener: tokio::net::TcpListener,
         acceptor: tokio_rustls::TlsAcceptor,
         addr: std::net::SocketAddr,
-        completed: mpsc::Receiver<ConnectionResult>,
-        sender: mpsc::Sender<ConnectionResult>,
+        completed: mpsc::UnboundedReceiver<ConnectionResult>,
+        sender: mpsc::UnboundedSender<ConnectionResult>,
         tasks: JoinSet<()>,
-        permits: std::sync::Arc<Semaphore>,
     }
     async fn classify_and_handshake(
         stream: tokio::net::TcpStream,
@@ -210,20 +208,20 @@ async fn serve_matching_http_permissive(
         handshake_timeout: Duration,
     ) -> ConnectionResult {
         let mut stream = stream;
-        let mut header = vec![0; 5];
-        let sniff = tokio::time::timeout(sniff_timeout, stream.read_exact(&mut header));
-        if let Err(error) = sniff
-            .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TLS sniff timed out"))
-            .and_then(|result| result.map(|_| ()))
-        {
-            return (Err(error), peer);
-        }
+        let mut header = [0; 5];
+        let n = match tokio::time::timeout(sniff_timeout, stream.read(&mut header)).await {
+            Ok(Ok(n)) if n > 0 => n,
+            Ok(Ok(_)) => return (Err(io::Error::from(io::ErrorKind::UnexpectedEof)), peer),
+            Ok(Err(error)) => return (Err(error), peer),
+            Err(_) => return (Err(io::Error::new(io::ErrorKind::TimedOut, "TLS sniff timed out")), peer),
+        };
         let stream = PrefixedStream {
-            prefix: std::io::Cursor::new(header.clone()),
+            prefix: std::io::Cursor::new(header[..n].to_vec()),
             stream,
         };
-        let is_tls = header[0] == 0x16 && header[1] == 0x03 && header[2] >= 1;
+        // YARPC's isTLSClientHelloRecord performs one Read. A short read is
+        // deliberately classified as plaintext, even when it is fragmented TLS.
+        let is_tls = n == 5 && header[0] == 0x16 && header[1] == 0x03 && header[2] >= 1;
         let connection = if is_tls {
             match tokio::time::timeout(handshake_timeout, acceptor.accept(stream)).await {
                 Ok(Ok(tls)) => Stream::Tls(Box::new(tls)),
@@ -251,13 +249,11 @@ async fn serve_matching_http_permissive(
                 tokio::select! {
                     accepted = self.listener.accept() => {
                         let (stream, peer) = match accepted { Ok(v) => v, Err(_) => continue };
-                        let Ok(permit) = self.permits.clone().try_acquire_owned() else { drop(stream); continue; };
                         let tx = self.sender.clone();
                         let acceptor = self.acceptor.clone();
                         self.tasks.spawn(async move {
-                            let _permit = permit;
                             let result = classify_and_handshake(stream, acceptor, peer, SNIFF_TIMEOUT, HANDSHAKE_TIMEOUT).await;
-                            let _ = tx.send(result).await;
+                            let _ = tx.send(result);
                         });
                     }
                     result = self.completed.recv() => {
@@ -274,7 +270,9 @@ async fn serve_matching_http_permissive(
     }
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let addr = listener.local_addr()?;
-    let (sender, completed) = mpsc::channel(MAX_PENDING);
+    // Go's muxlistener starts one goroutine per accepted connection and has no
+    // application-level pending-connection cap.
+    let (sender, completed) = mpsc::unbounded_channel();
     let listener = MixedListener {
         listener,
         acceptor: tokio_rustls::TlsAcceptor::from(config.get_inner()),
@@ -282,7 +280,6 @@ async fn serve_matching_http_permissive(
         completed,
         sender,
         tasks: JoinSet::new(),
-        permits: std::sync::Arc::new(Semaphore::new(MAX_PENDING)),
     };
     axum::serve(listener, app).await?;
     Ok(())
