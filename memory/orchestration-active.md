@@ -1,3 +1,9 @@
+## Async controller repaired but final destroy-result mismatch — 2026-10-18
+
+3da7dc739unintegratedcontainswholecontrolleragainstprecontrollerparent,DO NOTapply88first. Worker22focusedtests+strictserver/commonClippy+isolatedGodelayer/controllerpass;peerfailureusesoldglobalprobe(parentfreshnessfixalreadyintegrated). ParentreviewDestroyedbranchreturnsjoined,butGoNIL,error;deadlinefailurecorrectlypreservespartialjoined. Normal-speedLuna68finaldestroycase+COMBINEDfreshGooverlayallcases+Rust/Clippy/PINGaccepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-controller-final-cross-validation-standard-68-20261018
+Discovery67independentlyactive. Matching incomplete,noReadygossipyet.
+
 ## Exact mixed test artifact selection integrated — 2026-10-18
 
 Reviewedfee2d6bae,integrated. CargoJSONcompiler-artifactexactmatching_deliveryexecutablepassedviaenvtoCJS,missing/ambiguouserror. ActualmixedrestartPASSwithinvalidlookalikebinaryincache;Pythonsyntax/nodecheck/diffcheckpassed. No productionchange. Controller65independentlyactive.
