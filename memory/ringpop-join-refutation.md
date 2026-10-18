@@ -10,6 +10,8 @@ The parent-integrated JSON TChannel client was preserved byte-for-byte. SHA-256 
 
 Candidate integration order: original candidate `9770e3870f1b6994ad6014c1e4e05e0a496732a` was transplanted onto parent `9fb9a46cc7636e0bbd083d6eb45ebb40fbb63e29`; the transport client was retained exactly from that parent. The Go fixture SHA-256 is `3a986174860269d6143e019e5d3226389c9cf8f5ed2cc5a970271b9e49ab92b8`.
 
+Repair commit: `57cd67e18978c0c86138997ffb29be04167651a3` (parent `9fb9a46cc7636e0bbd083d6eb45ebb40fbb63e29`).
+
 Validation completed in the `cadence-rust` tmux session. Exact commands and saved outputs:
 
 - `python3 tests/run-ringpop-join-addjoinlist-oracle.py` — passed; log `original-go-oracle-generate.log`.
