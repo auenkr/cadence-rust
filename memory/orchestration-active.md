@@ -1,3 +1,9 @@
+## Member core review 2026-10-18
+
+Candidate 7f86a56c3 remains UNINTEGRATED. Worker passed 3 unit tests but omitted Go differential fixtures/wire runner and could not confirm Clippy. Parent found concrete should_process_gossip bug: lower status precedence falls through to label-checksum comparison instead of immediate false (original member.go). Repair + full bounded acceptance assigned to Luna Standard:
+node:delegated-task:command%3Amcp%3A4600deb0-cdd0-4f71-a308-c325211a2e8e%3Adelegate-task%3Aringpop-member-parity-standard-10-20261018
+HTTP permissive standard-11 still running. Its test edits currently visible in parent checkout; preserve, do not stage unrelated active-worker source.
+
 ## Ringpop core continuation 2026-10-18
 
 Research a905c8b8f completed and reviewed against original member.go checksum/merge rules. It was already on parent master when returned (despite isolated request); empty cherry-pick skipped, no changes lost. New worker explicitly told stay in assigned worktree.
