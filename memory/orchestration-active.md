@@ -1,3 +1,9 @@
+## Production writer task47 returned no change — 2026-10-18
+
+Worker reverted incomplete draft; no source,commit,or tests returned. Split oversized production scope. Luna normal-speed48 accepted ONLY live maxTaskBatchSize and appendTaskTimeout filtered production provider wiring, preserving current actor/persistence:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-batch-timeout-standard-48-20261018
+Capacity/outstandingAppends zero rendezvous remains separate next task,not complete. DirectPING46 independently active. Matching incomplete. No progress claimed for47.
+
 ## Writer admission parity integrated — 2026-10-18
 
 Reviewed d1066640a actualGo stop-during-saturated-admission assertions +Rust10actor tests+strict persistenceClippy; integrated ab00d7818. Waiting admission retains context wait after stop; initial stopped/accepted stopped paths distinct. Primitive still not production wired.
