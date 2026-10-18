@@ -1,0 +1,5780 @@
+{
+  "cases": [
+    {
+      "name": "remote_insert_update",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 2,
+          "status": "alive",
+          "labels": {
+            "zone": "west"
+          },
+          "timestamp": 11
+        },
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 3,
+          "status": "suspect",
+          "labels": {
+            "zone": "east"
+          },
+          "timestamp": 12
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 2,
+          "status": "alive",
+          "labels": {
+            "zone": "west"
+          },
+          "timestamp": 11
+        },
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 3,
+          "status": "suspect",
+          "labels": {
+            "zone": "east"
+          },
+          "timestamp": 12
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 3,
+          "labels": {
+            "zone": "east"
+          }
+        }
+      ],
+      "checksum": 3126872530,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_tombstone_rejected",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "unknown-tomb",
+          "incarnationNumber": 9,
+          "status": "tombstone",
+          "timestamp": 21
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "local_stale_equal_newer_refutation",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "local",
+          "incarnationNumber": 99,
+          "status": "suspect",
+          "timestamp": 31
+        },
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "local",
+          "incarnationNumber": 100,
+          "status": "faulty",
+          "timestamp": 32
+        },
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "local",
+          "incarnationNumber": 101,
+          "status": "suspect",
+          "timestamp": 33
+        }
+      ],
+      "applied": [
+        {
+          "source": "local",
+          "sourceIncarnationNumber": 1700000000123,
+          "address": "local",
+          "incarnationNumber": 1700000000123,
+          "status": "alive",
+          "labels": {
+            "zone": "west"
+          },
+          "timestamp": -62135596800
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 1700000000123,
+          "labels": {
+            "zone": "west"
+          }
+        }
+      ],
+      "checksum": 1174672446,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 1700000000123,
+        "labels": {
+          "zone": "west"
+        }
+      }
+    },
+    {
+      "name": "alive_to_alive_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_alive_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_alive_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 735627379,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_suspect_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_suspect_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 900386886,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_suspect_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 4050518222,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_faulty_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_faulty_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 2715493897,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_faulty_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1671514212,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_leave_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_leave_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 796284752,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_leave_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 2161549103,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_tombstone_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_tombstone_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_tombstone_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_unknown_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_unknown_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "alive_to_unknown_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 3117996184,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_alive_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_alive_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_alive_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 735627379,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_suspect_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_suspect_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_suspect_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 4050518222,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_faulty_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_faulty_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 2715493897,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_faulty_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1671514212,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_leave_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_leave_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 796284752,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_leave_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 2161549103,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_tombstone_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_tombstone_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_tombstone_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_unknown_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_unknown_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "suspect_to_unknown_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 3117996184,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_alive_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_alive_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_alive_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 735627379,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_suspect_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_suspect_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_suspect_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 4050518222,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_faulty_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_faulty_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_faulty_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1671514212,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_leave_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_leave_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 796284752,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_leave_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 2161549103,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_tombstone_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_tombstone_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_tombstone_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_unknown_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_unknown_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "faulty_to_unknown_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 3117996184,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_alive_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_alive_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_alive_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 735627379,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_suspect_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_suspect_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_suspect_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 4050518222,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_faulty_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_faulty_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_faulty_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1671514212,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_leave_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_leave_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_leave_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 2161549103,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_tombstone_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_tombstone_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_tombstone_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_unknown_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_unknown_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "leave_to_unknown_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 3117996184,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_alive_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_alive_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_alive_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 735627379,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_suspect_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_suspect_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_suspect_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 4050518222,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_faulty_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_faulty_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_faulty_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1671514212,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_leave_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_leave_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_leave_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 2161549103,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_tombstone_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_tombstone_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_tombstone_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_unknown_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_unknown_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "tombstone_to_unknown_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 3117996184,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_alive_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_alive_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 1171820685,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_alive_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "alive",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 735627379,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_suspect_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_suspect_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 900386886,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_suspect_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "suspect",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "suspect",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 4050518222,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_faulty_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_faulty_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 2715493897,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_faulty_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "faulty",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "faulty",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1671514212,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_leave_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_leave_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 796284752,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_leave_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "leave",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "leave",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 2161549103,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_tombstone_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_tombstone_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_tombstone_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "tombstone",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "tombstone",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 1484219314,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_unknown_inc_older",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 9,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_unknown_inc_equal",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 10,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": null,
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 0,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "unknown_to_unknown_inc_newer",
+      "input": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "applied": [
+        {
+          "source": "sender",
+          "sourceIncarnationNumber": 7,
+          "address": "peer",
+          "incarnationNumber": 11,
+          "status": "unknown",
+          "timestamp": 40
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer",
+          "status": "unknown",
+          "incarnationNumber": 11
+        }
+      ],
+      "checksum": 3117996184,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    },
+    {
+      "name": "batch_80_no_truncation",
+      "input": [
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-0",
+          "incarnationNumber": 1,
+          "status": "alive",
+          "timestamp": 100
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-1",
+          "incarnationNumber": 2,
+          "status": "alive",
+          "timestamp": 101
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-2",
+          "incarnationNumber": 3,
+          "status": "alive",
+          "timestamp": 102
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-3",
+          "incarnationNumber": 4,
+          "status": "alive",
+          "timestamp": 103
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-4",
+          "incarnationNumber": 5,
+          "status": "alive",
+          "timestamp": 104
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-5",
+          "incarnationNumber": 6,
+          "status": "alive",
+          "timestamp": 105
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-6",
+          "incarnationNumber": 7,
+          "status": "alive",
+          "timestamp": 106
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-7",
+          "incarnationNumber": 8,
+          "status": "alive",
+          "timestamp": 107
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-8",
+          "incarnationNumber": 9,
+          "status": "alive",
+          "timestamp": 108
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-9",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 109
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-10",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 110
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-11",
+          "incarnationNumber": 12,
+          "status": "alive",
+          "timestamp": 111
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-12",
+          "incarnationNumber": 13,
+          "status": "alive",
+          "timestamp": 112
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-13",
+          "incarnationNumber": 14,
+          "status": "alive",
+          "timestamp": 113
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-14",
+          "incarnationNumber": 15,
+          "status": "alive",
+          "timestamp": 114
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-15",
+          "incarnationNumber": 16,
+          "status": "alive",
+          "timestamp": 115
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-16",
+          "incarnationNumber": 17,
+          "status": "alive",
+          "timestamp": 116
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-17",
+          "incarnationNumber": 18,
+          "status": "alive",
+          "timestamp": 117
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-18",
+          "incarnationNumber": 19,
+          "status": "alive",
+          "timestamp": 118
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-19",
+          "incarnationNumber": 20,
+          "status": "alive",
+          "timestamp": 119
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-20",
+          "incarnationNumber": 21,
+          "status": "alive",
+          "timestamp": 120
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-21",
+          "incarnationNumber": 22,
+          "status": "alive",
+          "timestamp": 121
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-22",
+          "incarnationNumber": 23,
+          "status": "alive",
+          "timestamp": 122
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-23",
+          "incarnationNumber": 24,
+          "status": "alive",
+          "timestamp": 123
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-24",
+          "incarnationNumber": 25,
+          "status": "alive",
+          "timestamp": 124
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-25",
+          "incarnationNumber": 26,
+          "status": "alive",
+          "timestamp": 125
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-26",
+          "incarnationNumber": 27,
+          "status": "alive",
+          "timestamp": 126
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-27",
+          "incarnationNumber": 28,
+          "status": "alive",
+          "timestamp": 127
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-28",
+          "incarnationNumber": 29,
+          "status": "alive",
+          "timestamp": 128
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-29",
+          "incarnationNumber": 30,
+          "status": "alive",
+          "timestamp": 129
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-30",
+          "incarnationNumber": 31,
+          "status": "alive",
+          "timestamp": 130
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-31",
+          "incarnationNumber": 32,
+          "status": "alive",
+          "timestamp": 131
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-32",
+          "incarnationNumber": 33,
+          "status": "alive",
+          "timestamp": 132
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-33",
+          "incarnationNumber": 34,
+          "status": "alive",
+          "timestamp": 133
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-34",
+          "incarnationNumber": 35,
+          "status": "alive",
+          "timestamp": 134
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-35",
+          "incarnationNumber": 36,
+          "status": "alive",
+          "timestamp": 135
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-36",
+          "incarnationNumber": 37,
+          "status": "alive",
+          "timestamp": 136
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-37",
+          "incarnationNumber": 38,
+          "status": "alive",
+          "timestamp": 137
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-38",
+          "incarnationNumber": 39,
+          "status": "alive",
+          "timestamp": 138
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-39",
+          "incarnationNumber": 40,
+          "status": "alive",
+          "timestamp": 139
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-40",
+          "incarnationNumber": 41,
+          "status": "alive",
+          "timestamp": 140
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-41",
+          "incarnationNumber": 42,
+          "status": "alive",
+          "timestamp": 141
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-42",
+          "incarnationNumber": 43,
+          "status": "alive",
+          "timestamp": 142
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-43",
+          "incarnationNumber": 44,
+          "status": "alive",
+          "timestamp": 143
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-44",
+          "incarnationNumber": 45,
+          "status": "alive",
+          "timestamp": 144
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-45",
+          "incarnationNumber": 46,
+          "status": "alive",
+          "timestamp": 145
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-46",
+          "incarnationNumber": 47,
+          "status": "alive",
+          "timestamp": 146
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-47",
+          "incarnationNumber": 48,
+          "status": "alive",
+          "timestamp": 147
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-48",
+          "incarnationNumber": 49,
+          "status": "alive",
+          "timestamp": 148
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-49",
+          "incarnationNumber": 50,
+          "status": "alive",
+          "timestamp": 149
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-50",
+          "incarnationNumber": 51,
+          "status": "alive",
+          "timestamp": 150
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-51",
+          "incarnationNumber": 52,
+          "status": "alive",
+          "timestamp": 151
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-52",
+          "incarnationNumber": 53,
+          "status": "alive",
+          "timestamp": 152
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-53",
+          "incarnationNumber": 54,
+          "status": "alive",
+          "timestamp": 153
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-54",
+          "incarnationNumber": 55,
+          "status": "alive",
+          "timestamp": 154
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-55",
+          "incarnationNumber": 56,
+          "status": "alive",
+          "timestamp": 155
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-56",
+          "incarnationNumber": 57,
+          "status": "alive",
+          "timestamp": 156
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-57",
+          "incarnationNumber": 58,
+          "status": "alive",
+          "timestamp": 157
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-58",
+          "incarnationNumber": 59,
+          "status": "alive",
+          "timestamp": 158
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-59",
+          "incarnationNumber": 60,
+          "status": "alive",
+          "timestamp": 159
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-60",
+          "incarnationNumber": 61,
+          "status": "alive",
+          "timestamp": 160
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-61",
+          "incarnationNumber": 62,
+          "status": "alive",
+          "timestamp": 161
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-62",
+          "incarnationNumber": 63,
+          "status": "alive",
+          "timestamp": 162
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-63",
+          "incarnationNumber": 64,
+          "status": "alive",
+          "timestamp": 163
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-64",
+          "incarnationNumber": 65,
+          "status": "alive",
+          "timestamp": 164
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-65",
+          "incarnationNumber": 66,
+          "status": "alive",
+          "timestamp": 165
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-66",
+          "incarnationNumber": 67,
+          "status": "alive",
+          "timestamp": 166
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-67",
+          "incarnationNumber": 68,
+          "status": "alive",
+          "timestamp": 167
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-68",
+          "incarnationNumber": 69,
+          "status": "alive",
+          "timestamp": 168
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-69",
+          "incarnationNumber": 70,
+          "status": "alive",
+          "timestamp": 169
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-70",
+          "incarnationNumber": 71,
+          "status": "alive",
+          "timestamp": 170
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-71",
+          "incarnationNumber": 72,
+          "status": "alive",
+          "timestamp": 171
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-72",
+          "incarnationNumber": 73,
+          "status": "alive",
+          "timestamp": 172
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-73",
+          "incarnationNumber": 74,
+          "status": "alive",
+          "timestamp": 173
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-74",
+          "incarnationNumber": 75,
+          "status": "alive",
+          "timestamp": 174
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-75",
+          "incarnationNumber": 76,
+          "status": "alive",
+          "timestamp": 175
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-76",
+          "incarnationNumber": 77,
+          "status": "alive",
+          "timestamp": 176
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-77",
+          "incarnationNumber": 78,
+          "status": "alive",
+          "timestamp": 177
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-78",
+          "incarnationNumber": 79,
+          "status": "alive",
+          "timestamp": 178
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-79",
+          "incarnationNumber": 80,
+          "status": "alive",
+          "timestamp": 179
+        }
+      ],
+      "applied": [
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-0",
+          "incarnationNumber": 1,
+          "status": "alive",
+          "timestamp": 100
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-1",
+          "incarnationNumber": 2,
+          "status": "alive",
+          "timestamp": 101
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-2",
+          "incarnationNumber": 3,
+          "status": "alive",
+          "timestamp": 102
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-3",
+          "incarnationNumber": 4,
+          "status": "alive",
+          "timestamp": 103
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-4",
+          "incarnationNumber": 5,
+          "status": "alive",
+          "timestamp": 104
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-5",
+          "incarnationNumber": 6,
+          "status": "alive",
+          "timestamp": 105
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-6",
+          "incarnationNumber": 7,
+          "status": "alive",
+          "timestamp": 106
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-7",
+          "incarnationNumber": 8,
+          "status": "alive",
+          "timestamp": 107
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-8",
+          "incarnationNumber": 9,
+          "status": "alive",
+          "timestamp": 108
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-9",
+          "incarnationNumber": 10,
+          "status": "alive",
+          "timestamp": 109
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-10",
+          "incarnationNumber": 11,
+          "status": "alive",
+          "timestamp": 110
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-11",
+          "incarnationNumber": 12,
+          "status": "alive",
+          "timestamp": 111
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-12",
+          "incarnationNumber": 13,
+          "status": "alive",
+          "timestamp": 112
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-13",
+          "incarnationNumber": 14,
+          "status": "alive",
+          "timestamp": 113
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-14",
+          "incarnationNumber": 15,
+          "status": "alive",
+          "timestamp": 114
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-15",
+          "incarnationNumber": 16,
+          "status": "alive",
+          "timestamp": 115
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-16",
+          "incarnationNumber": 17,
+          "status": "alive",
+          "timestamp": 116
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-17",
+          "incarnationNumber": 18,
+          "status": "alive",
+          "timestamp": 117
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-18",
+          "incarnationNumber": 19,
+          "status": "alive",
+          "timestamp": 118
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-19",
+          "incarnationNumber": 20,
+          "status": "alive",
+          "timestamp": 119
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-20",
+          "incarnationNumber": 21,
+          "status": "alive",
+          "timestamp": 120
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-21",
+          "incarnationNumber": 22,
+          "status": "alive",
+          "timestamp": 121
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-22",
+          "incarnationNumber": 23,
+          "status": "alive",
+          "timestamp": 122
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-23",
+          "incarnationNumber": 24,
+          "status": "alive",
+          "timestamp": 123
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-24",
+          "incarnationNumber": 25,
+          "status": "alive",
+          "timestamp": 124
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-25",
+          "incarnationNumber": 26,
+          "status": "alive",
+          "timestamp": 125
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-26",
+          "incarnationNumber": 27,
+          "status": "alive",
+          "timestamp": 126
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-27",
+          "incarnationNumber": 28,
+          "status": "alive",
+          "timestamp": 127
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-28",
+          "incarnationNumber": 29,
+          "status": "alive",
+          "timestamp": 128
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-29",
+          "incarnationNumber": 30,
+          "status": "alive",
+          "timestamp": 129
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-30",
+          "incarnationNumber": 31,
+          "status": "alive",
+          "timestamp": 130
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-31",
+          "incarnationNumber": 32,
+          "status": "alive",
+          "timestamp": 131
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-32",
+          "incarnationNumber": 33,
+          "status": "alive",
+          "timestamp": 132
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-33",
+          "incarnationNumber": 34,
+          "status": "alive",
+          "timestamp": 133
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-34",
+          "incarnationNumber": 35,
+          "status": "alive",
+          "timestamp": 134
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-35",
+          "incarnationNumber": 36,
+          "status": "alive",
+          "timestamp": 135
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-36",
+          "incarnationNumber": 37,
+          "status": "alive",
+          "timestamp": 136
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-37",
+          "incarnationNumber": 38,
+          "status": "alive",
+          "timestamp": 137
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-38",
+          "incarnationNumber": 39,
+          "status": "alive",
+          "timestamp": 138
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-39",
+          "incarnationNumber": 40,
+          "status": "alive",
+          "timestamp": 139
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-40",
+          "incarnationNumber": 41,
+          "status": "alive",
+          "timestamp": 140
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-41",
+          "incarnationNumber": 42,
+          "status": "alive",
+          "timestamp": 141
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-42",
+          "incarnationNumber": 43,
+          "status": "alive",
+          "timestamp": 142
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-43",
+          "incarnationNumber": 44,
+          "status": "alive",
+          "timestamp": 143
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-44",
+          "incarnationNumber": 45,
+          "status": "alive",
+          "timestamp": 144
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-45",
+          "incarnationNumber": 46,
+          "status": "alive",
+          "timestamp": 145
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-46",
+          "incarnationNumber": 47,
+          "status": "alive",
+          "timestamp": 146
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-47",
+          "incarnationNumber": 48,
+          "status": "alive",
+          "timestamp": 147
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-48",
+          "incarnationNumber": 49,
+          "status": "alive",
+          "timestamp": 148
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-49",
+          "incarnationNumber": 50,
+          "status": "alive",
+          "timestamp": 149
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-50",
+          "incarnationNumber": 51,
+          "status": "alive",
+          "timestamp": 150
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-51",
+          "incarnationNumber": 52,
+          "status": "alive",
+          "timestamp": 151
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-52",
+          "incarnationNumber": 53,
+          "status": "alive",
+          "timestamp": 152
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-53",
+          "incarnationNumber": 54,
+          "status": "alive",
+          "timestamp": 153
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-54",
+          "incarnationNumber": 55,
+          "status": "alive",
+          "timestamp": 154
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-55",
+          "incarnationNumber": 56,
+          "status": "alive",
+          "timestamp": 155
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-56",
+          "incarnationNumber": 57,
+          "status": "alive",
+          "timestamp": 156
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-57",
+          "incarnationNumber": 58,
+          "status": "alive",
+          "timestamp": 157
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-58",
+          "incarnationNumber": 59,
+          "status": "alive",
+          "timestamp": 158
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-59",
+          "incarnationNumber": 60,
+          "status": "alive",
+          "timestamp": 159
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-60",
+          "incarnationNumber": 61,
+          "status": "alive",
+          "timestamp": 160
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-61",
+          "incarnationNumber": 62,
+          "status": "alive",
+          "timestamp": 161
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-62",
+          "incarnationNumber": 63,
+          "status": "alive",
+          "timestamp": 162
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-63",
+          "incarnationNumber": 64,
+          "status": "alive",
+          "timestamp": 163
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-64",
+          "incarnationNumber": 65,
+          "status": "alive",
+          "timestamp": 164
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-65",
+          "incarnationNumber": 66,
+          "status": "alive",
+          "timestamp": 165
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-66",
+          "incarnationNumber": 67,
+          "status": "alive",
+          "timestamp": 166
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-67",
+          "incarnationNumber": 68,
+          "status": "alive",
+          "timestamp": 167
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-68",
+          "incarnationNumber": 69,
+          "status": "alive",
+          "timestamp": 168
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-69",
+          "incarnationNumber": 70,
+          "status": "alive",
+          "timestamp": 169
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-70",
+          "incarnationNumber": 71,
+          "status": "alive",
+          "timestamp": 170
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-71",
+          "incarnationNumber": 72,
+          "status": "alive",
+          "timestamp": 171
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-72",
+          "incarnationNumber": 73,
+          "status": "alive",
+          "timestamp": 172
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-73",
+          "incarnationNumber": 74,
+          "status": "alive",
+          "timestamp": 173
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-74",
+          "incarnationNumber": 75,
+          "status": "alive",
+          "timestamp": 174
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-75",
+          "incarnationNumber": 76,
+          "status": "alive",
+          "timestamp": 175
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-76",
+          "incarnationNumber": 77,
+          "status": "alive",
+          "timestamp": 176
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-77",
+          "incarnationNumber": 78,
+          "status": "alive",
+          "timestamp": 177
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-78",
+          "incarnationNumber": 79,
+          "status": "alive",
+          "timestamp": 178
+        },
+        {
+          "source": "batch",
+          "sourceIncarnationNumber": 4,
+          "address": "peer-79",
+          "incarnationNumber": 80,
+          "status": "alive",
+          "timestamp": 179
+        }
+      ],
+      "members": [
+        {
+          "address": "local",
+          "status": "alive",
+          "incarnationNumber": 100
+        },
+        {
+          "address": "peer-0",
+          "status": "alive",
+          "incarnationNumber": 1
+        },
+        {
+          "address": "peer-1",
+          "status": "alive",
+          "incarnationNumber": 2
+        },
+        {
+          "address": "peer-10",
+          "status": "alive",
+          "incarnationNumber": 11
+        },
+        {
+          "address": "peer-11",
+          "status": "alive",
+          "incarnationNumber": 12
+        },
+        {
+          "address": "peer-12",
+          "status": "alive",
+          "incarnationNumber": 13
+        },
+        {
+          "address": "peer-13",
+          "status": "alive",
+          "incarnationNumber": 14
+        },
+        {
+          "address": "peer-14",
+          "status": "alive",
+          "incarnationNumber": 15
+        },
+        {
+          "address": "peer-15",
+          "status": "alive",
+          "incarnationNumber": 16
+        },
+        {
+          "address": "peer-16",
+          "status": "alive",
+          "incarnationNumber": 17
+        },
+        {
+          "address": "peer-17",
+          "status": "alive",
+          "incarnationNumber": 18
+        },
+        {
+          "address": "peer-18",
+          "status": "alive",
+          "incarnationNumber": 19
+        },
+        {
+          "address": "peer-19",
+          "status": "alive",
+          "incarnationNumber": 20
+        },
+        {
+          "address": "peer-2",
+          "status": "alive",
+          "incarnationNumber": 3
+        },
+        {
+          "address": "peer-20",
+          "status": "alive",
+          "incarnationNumber": 21
+        },
+        {
+          "address": "peer-21",
+          "status": "alive",
+          "incarnationNumber": 22
+        },
+        {
+          "address": "peer-22",
+          "status": "alive",
+          "incarnationNumber": 23
+        },
+        {
+          "address": "peer-23",
+          "status": "alive",
+          "incarnationNumber": 24
+        },
+        {
+          "address": "peer-24",
+          "status": "alive",
+          "incarnationNumber": 25
+        },
+        {
+          "address": "peer-25",
+          "status": "alive",
+          "incarnationNumber": 26
+        },
+        {
+          "address": "peer-26",
+          "status": "alive",
+          "incarnationNumber": 27
+        },
+        {
+          "address": "peer-27",
+          "status": "alive",
+          "incarnationNumber": 28
+        },
+        {
+          "address": "peer-28",
+          "status": "alive",
+          "incarnationNumber": 29
+        },
+        {
+          "address": "peer-29",
+          "status": "alive",
+          "incarnationNumber": 30
+        },
+        {
+          "address": "peer-3",
+          "status": "alive",
+          "incarnationNumber": 4
+        },
+        {
+          "address": "peer-30",
+          "status": "alive",
+          "incarnationNumber": 31
+        },
+        {
+          "address": "peer-31",
+          "status": "alive",
+          "incarnationNumber": 32
+        },
+        {
+          "address": "peer-32",
+          "status": "alive",
+          "incarnationNumber": 33
+        },
+        {
+          "address": "peer-33",
+          "status": "alive",
+          "incarnationNumber": 34
+        },
+        {
+          "address": "peer-34",
+          "status": "alive",
+          "incarnationNumber": 35
+        },
+        {
+          "address": "peer-35",
+          "status": "alive",
+          "incarnationNumber": 36
+        },
+        {
+          "address": "peer-36",
+          "status": "alive",
+          "incarnationNumber": 37
+        },
+        {
+          "address": "peer-37",
+          "status": "alive",
+          "incarnationNumber": 38
+        },
+        {
+          "address": "peer-38",
+          "status": "alive",
+          "incarnationNumber": 39
+        },
+        {
+          "address": "peer-39",
+          "status": "alive",
+          "incarnationNumber": 40
+        },
+        {
+          "address": "peer-4",
+          "status": "alive",
+          "incarnationNumber": 5
+        },
+        {
+          "address": "peer-40",
+          "status": "alive",
+          "incarnationNumber": 41
+        },
+        {
+          "address": "peer-41",
+          "status": "alive",
+          "incarnationNumber": 42
+        },
+        {
+          "address": "peer-42",
+          "status": "alive",
+          "incarnationNumber": 43
+        },
+        {
+          "address": "peer-43",
+          "status": "alive",
+          "incarnationNumber": 44
+        },
+        {
+          "address": "peer-44",
+          "status": "alive",
+          "incarnationNumber": 45
+        },
+        {
+          "address": "peer-45",
+          "status": "alive",
+          "incarnationNumber": 46
+        },
+        {
+          "address": "peer-46",
+          "status": "alive",
+          "incarnationNumber": 47
+        },
+        {
+          "address": "peer-47",
+          "status": "alive",
+          "incarnationNumber": 48
+        },
+        {
+          "address": "peer-48",
+          "status": "alive",
+          "incarnationNumber": 49
+        },
+        {
+          "address": "peer-49",
+          "status": "alive",
+          "incarnationNumber": 50
+        },
+        {
+          "address": "peer-5",
+          "status": "alive",
+          "incarnationNumber": 6
+        },
+        {
+          "address": "peer-50",
+          "status": "alive",
+          "incarnationNumber": 51
+        },
+        {
+          "address": "peer-51",
+          "status": "alive",
+          "incarnationNumber": 52
+        },
+        {
+          "address": "peer-52",
+          "status": "alive",
+          "incarnationNumber": 53
+        },
+        {
+          "address": "peer-53",
+          "status": "alive",
+          "incarnationNumber": 54
+        },
+        {
+          "address": "peer-54",
+          "status": "alive",
+          "incarnationNumber": 55
+        },
+        {
+          "address": "peer-55",
+          "status": "alive",
+          "incarnationNumber": 56
+        },
+        {
+          "address": "peer-56",
+          "status": "alive",
+          "incarnationNumber": 57
+        },
+        {
+          "address": "peer-57",
+          "status": "alive",
+          "incarnationNumber": 58
+        },
+        {
+          "address": "peer-58",
+          "status": "alive",
+          "incarnationNumber": 59
+        },
+        {
+          "address": "peer-59",
+          "status": "alive",
+          "incarnationNumber": 60
+        },
+        {
+          "address": "peer-6",
+          "status": "alive",
+          "incarnationNumber": 7
+        },
+        {
+          "address": "peer-60",
+          "status": "alive",
+          "incarnationNumber": 61
+        },
+        {
+          "address": "peer-61",
+          "status": "alive",
+          "incarnationNumber": 62
+        },
+        {
+          "address": "peer-62",
+          "status": "alive",
+          "incarnationNumber": 63
+        },
+        {
+          "address": "peer-63",
+          "status": "alive",
+          "incarnationNumber": 64
+        },
+        {
+          "address": "peer-64",
+          "status": "alive",
+          "incarnationNumber": 65
+        },
+        {
+          "address": "peer-65",
+          "status": "alive",
+          "incarnationNumber": 66
+        },
+        {
+          "address": "peer-66",
+          "status": "alive",
+          "incarnationNumber": 67
+        },
+        {
+          "address": "peer-67",
+          "status": "alive",
+          "incarnationNumber": 68
+        },
+        {
+          "address": "peer-68",
+          "status": "alive",
+          "incarnationNumber": 69
+        },
+        {
+          "address": "peer-69",
+          "status": "alive",
+          "incarnationNumber": 70
+        },
+        {
+          "address": "peer-7",
+          "status": "alive",
+          "incarnationNumber": 8
+        },
+        {
+          "address": "peer-70",
+          "status": "alive",
+          "incarnationNumber": 71
+        },
+        {
+          "address": "peer-71",
+          "status": "alive",
+          "incarnationNumber": 72
+        },
+        {
+          "address": "peer-72",
+          "status": "alive",
+          "incarnationNumber": 73
+        },
+        {
+          "address": "peer-73",
+          "status": "alive",
+          "incarnationNumber": 74
+        },
+        {
+          "address": "peer-74",
+          "status": "alive",
+          "incarnationNumber": 75
+        },
+        {
+          "address": "peer-75",
+          "status": "alive",
+          "incarnationNumber": 76
+        },
+        {
+          "address": "peer-76",
+          "status": "alive",
+          "incarnationNumber": 77
+        },
+        {
+          "address": "peer-77",
+          "status": "alive",
+          "incarnationNumber": 78
+        },
+        {
+          "address": "peer-78",
+          "status": "alive",
+          "incarnationNumber": 79
+        },
+        {
+          "address": "peer-79",
+          "status": "alive",
+          "incarnationNumber": 80
+        },
+        {
+          "address": "peer-8",
+          "status": "alive",
+          "incarnationNumber": 9
+        },
+        {
+          "address": "peer-9",
+          "status": "alive",
+          "incarnationNumber": 10
+        }
+      ],
+      "checksum": 1108685336,
+      "local": {
+        "address": "local",
+        "status": "alive",
+        "incarnationNumber": 100
+      }
+    }
+  ],
+  "source": "github.com/uber/ringpop-go v0.10.0 swim/memberlist.go Update"
+}
