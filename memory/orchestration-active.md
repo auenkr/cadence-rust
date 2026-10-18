@@ -1,3 +1,10 @@
+## Live writer settings validated and integrated — 2026-10-18
+
+Reviewedc3266b87d+3e0e5a374;integrated0b96c8df0+a35944615. Go getWriteBatch samples MaxTaskBatchSize EACH loop condition,corrected candidate once-per-batch behavior. Actual production live batching/timeout,real provider filter independence,registrykey closure verified;6writer+1registry+1provider tests,originalGo oracle/tasklist,strict serverClippy passed. No latest wholecombinedrerun yet.
+Next normal-speedLuna53 construction-time filtered signedcapacity+zero-rendezvous accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-capacity-standard-53-20261018
+Selector52 independent. Disk16GBfree. Matching incomplete.
+
 ## Bootstrap Go selector oracle integrated — 2026-10-18
 
 Reviewed71b969b04 actual original newJoinSender/SelectGroup overlay9cases,integrated. Corrected earlier note: exactduplicate seeds preserved;joined excluded potential but not preferred/nonpreferred. Runner regenerates fixture unconditionally and random subsets may drift; next worker must implement nondeterminism-aware verify with explicit generation.
