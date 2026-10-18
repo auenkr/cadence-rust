@@ -1,6 +1,9 @@
 # Ringpop concurrent JOIN group slice
 
 Status: implemented, focused Rust and actual pinned-Go peer comparisons pass.
+Implementation commit: `9005ae105065e5b4de188626dad683a73cd0f066`.
+Pinned Go source hash for `swim/join_sender.go`:
+`b33fdb7b679dd3c53e8573442f1db5e0c197cffb3bf58a4295d0b4dbc4d094a6`.
 This is one `JoinGroup` attempt only. Matching remains incomplete; this does
 not add `JoinCluster` retry/deadline/delay behavior, provider/bootstrap wiring,
 readiness transitions, gossip startup, or service lifecycle integration.
