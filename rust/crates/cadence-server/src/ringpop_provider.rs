@@ -210,7 +210,7 @@ pub async fn join_cluster(
         if node.is_destroyed() {
             return Err(JoinClusterError(
                 "node destroyed while attempting to join cluster".to_owned(),
-                joined,
+                Vec::new(),
             ));
         }
         let group = node.join_group(sender, &joined).await;
@@ -759,6 +759,7 @@ mod tests {
         sleeps: Vec<i64>,
         random: u64,
         sleep_started: Option<Arc<std::sync::atomic::AtomicBool>>,
+        destroy_on_sleep: Option<RingpopNode>,
     }
 
     impl JoinClock for FakeJoinClock {
@@ -775,6 +776,9 @@ mod tests {
             duration_nanos: i64,
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
             self.sleeps.push(duration_nanos);
+            if let Some(node) = self.destroy_on_sleep.take() {
+                node.destroy();
+            }
             if let Some(started) = &self.sleep_started {
                 started.store(true, std::sync::atomic::Ordering::SeqCst);
                 Box::pin(tokio::time::sleep(Duration::from_nanos(
@@ -948,6 +952,117 @@ mod tests {
         assert_eq!(error.0, "node destroyed while attempting to join cluster");
         assert!(error.1.is_empty());
         assert_eq!(sender.attempts(), 0);
+    }
+
+    #[tokio::test]
+    async fn join_cluster_discards_partial_success_when_destroyed_between_groups() {
+        use cadence_common::ringpop_bootstrap_selection::{BootstrapSelection, Options};
+        let peer_member = Member {
+            address: "success-peer:7933".into(),
+            status: ALIVE.into(),
+            incarnation: 1,
+            labels: None,
+        };
+        let success_body = serde_json::to_vec(&JoinResponse {
+            app: "cadence-matching".into(),
+            coordinator: peer_member.address.clone(),
+            membership: Some(vec![Change {
+                address: peer_member.address.clone(),
+                incarnation: 1,
+                status: ALIVE.into(),
+                labels: None,
+                ..Default::default()
+            }]),
+            membership_checksum: 0,
+        })
+        .unwrap();
+        let (success_addr, success_server) =
+            outbound_test_server(RingpopHandler::new(move |_, _, _| {
+                let body = success_body.clone();
+                async move { Ok(RingpopResponse { headers: None, body }) }
+            }))
+            .await;
+        let (failure_addr, failure_server) =
+            outbound_test_server(RingpopHandler::new(|_, _, _| async move {
+                Err(RingpopError::Application("seed rejected JOIN".into()))
+            }))
+            .await;
+
+        let node = node();
+        let selection = BootstrapSelection::new(
+            "127.0.0.1:7933",
+            &[success_addr, failure_addr],
+            Options::from_signed(1_000_000_000, 2, 10_000, 1),
+        );
+        let mut sender = JoinGroupState::new(selection);
+        let mut clock = FakeJoinClock {
+            random: 0,
+            destroy_on_sleep: Some(node.clone()),
+            ..Default::default()
+        };
+        let error = join_cluster(&node, &mut sender, &mut clock)
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, "node destroyed while attempting to join cluster");
+        assert!(error.1.is_empty(), "destroyed result must discard prior successes");
+        assert_eq!(sender.attempts(), 1);
+        success_server.abort();
+        failure_server.abort();
+    }
+
+    #[tokio::test]
+    async fn join_cluster_deadline_retains_partial_success() {
+        use cadence_common::ringpop_bootstrap_selection::{BootstrapSelection, Options};
+        let peer_member = Member {
+            address: "success-peer:7933".into(),
+            status: ALIVE.into(),
+            incarnation: 1,
+            labels: None,
+        };
+        let success_body = serde_json::to_vec(&JoinResponse {
+            app: "cadence-matching".into(),
+            coordinator: peer_member.address.clone(),
+            membership: Some(vec![Change {
+                address: peer_member.address.clone(),
+                incarnation: 1,
+                status: ALIVE.into(),
+                labels: None,
+                ..Default::default()
+            }]),
+            membership_checksum: 0,
+        })
+        .unwrap();
+        let (success_addr, success_server) =
+            outbound_test_server(RingpopHandler::new(move |_, _, _| {
+                let body = success_body.clone();
+                async move { Ok(RingpopResponse { headers: None, body }) }
+            }))
+            .await;
+        let (failure_addr, failure_server) =
+            outbound_test_server(RingpopHandler::new(|_, _, _| async move {
+                Err(RingpopError::Application("seed rejected JOIN".into()))
+            }))
+            .await;
+
+        let node = node();
+        let selection = BootstrapSelection::new(
+            "127.0.0.1:7933",
+            &[success_addr.clone(), failure_addr],
+            Options::from_signed(1_000_000_000, -1, 2, 1),
+        );
+        let mut sender = JoinGroupState::new(selection);
+        let mut clock = FakeJoinClock {
+            elapsed: Duration::from_nanos(1),
+            ..Default::default()
+        };
+        let error = join_cluster(&node, &mut sender, &mut clock)
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, "join duration of 1ns exceeded max -1ns");
+        assert_eq!(error.1, vec![success_addr]);
+        assert_eq!(sender.attempts(), 1);
+        success_server.abort();
+        failure_server.abort();
     }
     use crate::ringpop_tchannel::{RingpopHandler, RingpopResponse};
     use cadence_common::ringpop_wire::{Change, Ping, ALIVE};

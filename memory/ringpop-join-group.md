@@ -147,9 +147,10 @@ The parent rollback was followed by this repair:
   precision, with original-Go string fixtures.
 - Modeled `Destroyed` separately from `Stopped`; the controller checks it at
   each round boundary and returns Go's `node destroyed while attempting to
-  join cluster` error. Deadline/destruction errors retain accumulated JOIN
-  successes, matching Go's `(nodesJoined, error)` return. A stopped but
-  non-destroyed node remains distinct.
+  join cluster` error and discards accumulated JOIN successes, matching the
+  original Go destroyed branch's `(nil, error)` return. Deadline errors retain
+  accumulated JOIN successes, matching Go's `(nodesJoined, error)` return. A
+  stopped but non-destroyed node remains distinct.
 - Compared the delayer to pinned ringpop-go v0.10.0 with actual Go source and
   injected randomizer/sleeper: exact integer-ms conversion, shifting jitter
   windows, cap behavior, and zero/negative option edges. Rust tests execute
@@ -168,12 +169,39 @@ Final reproducible evidence is under
 - `clippy.log`, `clippy.exit`: `cargo clippy --manifest-path rust/Cargo.toml
   -p cadence-server -p cadence-common --all-targets --locked -- -D warnings`
   passed (exit 0).
-- `go-full-overlay.log`, `go-full-overlay.exit`: the earlier full overlay's
-  two-peer `RustOutboundJoinGroupAgainstGo` probe still fails with
-  `Error: invalid socket address`; the one-peer probe and original-Go
-  controller tests pass. This is the separate stale binary runner assigned
-  to dependency 64. This repair did not change the runner or repeat the
-  two-peer failure run.
+- `go-combined.log`, `go-combined.exit`: the current runner freshly builds and
+  copies the Rust probe, then runs actual one-peer JOIN and two-peer GROUP
+  comparisons plus original Go JoinCluster deadline ordering, delayer edge
+  behavior, and fractional `time.Duration.String()` fixtures. All six test
+  groups passed (exit 0). The runner's default regex now includes the
+  original-Go controller/delayer/duration tests instead of requiring a
+  separate invocation.
+- `rust-final.log`, `rust-final.exit`: rerun on the integrated repair,
+  24 provider tests passed, including a successful first JOIN followed by
+  destruction during retry sleep; the destroyed result has no partial
+  successes. It also checks that a deadline error retains the first successful
+  JOIN (exit 0).
+- `clippy-combined.log`, `clippy-combined.exit`: strict locked all-target
+  Clippy for cadence-common and cadence-server passed (exit 0).
+- `ping-existing.log`, `ping-existing.exit`: the existing PING probe passed
+  against the pinned original Go peer (exit 0).
+
+Reproduce the final gates with the shared completed Rust target to avoid a
+second build cache:
+
+```sh
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target cargo test --locked -p cadence-server --lib ringpop_provider::tests
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target python3 tests/run-ringpop-outbound-join-compat.py
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target cargo clippy --manifest-path rust/Cargo.toml -p cadence-server -p cadence-common --all-targets --locked -- -D warnings
+RINGPOP_PING_PROBE=/tmp/cadence-ringpop-ping-probe CARGO_BUILD_JOBS=1 python3 tests/run-ringpop-outbound-ping-compat.py
+```
+
+The final Go overlay now includes `TestOriginalJoinClusterDestroyedDiscardsPartialSuccess` and a deadline case that first gets one successful JOIN; both assert the original Go return values. The matching Rust tests are `join_cluster_discards_partial_success_when_destroyed_between_groups` and `join_cluster_deadline_retains_partial_success`.
+
+The earlier `go-full-overlay.log` records the stale-probe-address failure
+before the fresh runner fix was integrated; it is superseded by
+`go-combined.log` for current compatibility evidence. The saved Rust suite
+and strict Clippy logs from the prior repair remain useful historical records.
 
 Pinned Go hashes remain `swim/join_sender.go`
 `b33fdb7b679dd3c53e8573442f1db5e0c197cffb3bf58a4295d0b4dbc4d094a6` and
@@ -182,9 +210,17 @@ Pinned Go hashes remain `swim/join_sender.go`
 Final source hashes at commit preparation:
 
 - `rust/crates/cadence-server/src/ringpop_provider.rs`:
-  `c69db1a6a49b9b8580bde8b68b579508df55f65d94210699e729a67e9bb7873c`
+  `a3ea3f90084c063cba063da7110d191467540131b1d171bf0545eaa8257d8487`
 - `rust/crates/cadence-common/src/ringpop_bootstrap_selection.rs`:
   `590c462f660f8384074544b86bbde26b48b67201108c91793cab35b3df793ede`
+
+Destroyed-branch compatibility correction in this follow-up:
+
+- `ringpop_provider.rs`: `join_cluster` now returns an empty partial-success
+  vector only on destruction; the post-group deadline error still returns the
+  accumulated vector. Regression: `join_cluster_discards_partial_success_when_destroyed_between_groups`.
+- Final `ringpop_provider.rs` SHA-256:
+  `a3ea3f90084c063cba063da7110d191467540131b1d171bf0545eaa8257d8487`
 
 Matching remains incomplete. The bounded change excludes readiness, gossip,
 and main/provider wiring and does not establish mixed-cluster compatibility

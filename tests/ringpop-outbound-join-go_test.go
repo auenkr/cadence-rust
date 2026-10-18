@@ -107,9 +107,23 @@ func TestOriginalJoinClusterChecksDeadlineAfterGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	seed := ch.PeerInfo().HostPort
-	peer := NewNode("other-app", seed, ch.GetSubChannel("ringpop"), nil)
+	peer := NewNode("cadence", seed, ch.GetSubChannel("ringpop"), nil)
 	defer peer.Destroy()
 	if _, err = peer.Bootstrap(&BootstrapOptions{DiscoverProvider: statichosts.New(seed)}); err != nil {
+		t.Fatal(err)
+	}
+	badChannel, err := tchannel.NewChannel("ringpop-join-cluster-bad-peer", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badChannel.Close()
+	if err = badChannel.ListenAndServe("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	badSeed := badChannel.PeerInfo().HostPort
+	badPeer := NewNode("other-app", badSeed, badChannel.GetSubChannel("ringpop"), nil)
+	defer badPeer.Destroy()
+	if _, err = badPeer.Bootstrap(&BootstrapOptions{DiscoverProvider: statichosts.New(badSeed)}); err != nil {
 		t.Fatal(err)
 	}
 	localChannel, err := tchannel.NewChannel("ringpop-join-cluster-client", nil)
@@ -118,9 +132,9 @@ func TestOriginalJoinClusterChecksDeadlineAfterGroup(t *testing.T) {
 	}
 	defer localChannel.Close()
 	local := NewNode("cadence", "127.0.0.1:7934", localChannel.GetSubChannel("ringpop"), nil)
-	local.discoverProvider = statichosts.New(seed)
+	local.discoverProvider = statichosts.New(seed, badSeed)
 	sender, err := newJoinSender(local, &joinOpts{
-		timeout: time.Second, size: 1, maxJoinDuration: -1,
+		timeout: time.Second, size: 2, maxJoinDuration: -1,
 		parallelismFactor: 1, delayer: &nullDelayer{},
 	})
 	if err != nil {
@@ -128,11 +142,69 @@ func TestOriginalJoinClusterChecksDeadlineAfterGroup(t *testing.T) {
 	}
 	start := time.Now()
 	joined, err := sender.JoinCluster()
-	if err == nil || !strings.Contains(err.Error(), "join duration of") {
+	if err == nil || !strings.Contains(err.Error(), "join duration of") || len(joined) != 1 {
 		t.Fatalf("expected original Go deadline error after failed group; joined=%v err=%v", joined, err)
 	}
 	if time.Since(start) <= 0 || sender.numTries != 1 {
 		t.Fatalf("deadline/group ordering mismatch: elapsed=%v attempts=%d", time.Since(start), sender.numTries)
+	}
+}
+
+type callbackJoinDelayer struct{ after func() }
+
+func (d *callbackJoinDelayer) delay() time.Duration {
+	d.after()
+	return 0
+}
+
+// The original Go destroyed branch discards successes accumulated by the
+// preceding group, unlike the deadline branch above.
+func TestOriginalJoinClusterDestroyedDiscardsPartialSuccess(t *testing.T) {
+	ch, err := tchannel.NewChannel("ringpop-join-cluster-destroyed-good", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ch.Close()
+	if err = ch.ListenAndServe("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	goodSeed := ch.PeerInfo().HostPort
+	good := NewNode("cadence", goodSeed, ch.GetSubChannel("ringpop"), nil)
+	defer good.Destroy()
+	if _, err = good.Bootstrap(&BootstrapOptions{DiscoverProvider: statichosts.New(goodSeed)}); err != nil {
+		t.Fatal(err)
+	}
+	badChannel, err := tchannel.NewChannel("ringpop-join-cluster-destroyed-bad", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badChannel.Close()
+	if err = badChannel.ListenAndServe("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	badSeed := badChannel.PeerInfo().HostPort
+	bad := NewNode("other-app", badSeed, badChannel.GetSubChannel("ringpop"), nil)
+	defer bad.Destroy()
+	if _, err = bad.Bootstrap(&BootstrapOptions{DiscoverProvider: statichosts.New(badSeed)}); err != nil {
+		t.Fatal(err)
+	}
+	localChannel, err := tchannel.NewChannel("ringpop-join-cluster-destroyed-client", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer localChannel.Close()
+	local := NewNode("cadence", "127.0.0.1:7934", localChannel.GetSubChannel("ringpop"), nil)
+	local.discoverProvider = statichosts.New(goodSeed, badSeed)
+	sender, err := newJoinSender(local, &joinOpts{
+		timeout: time.Second, size: 2, maxJoinDuration: time.Second,
+		parallelismFactor: 1, delayer: &callbackJoinDelayer{after: local.Destroy},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := sender.JoinCluster()
+	if err == nil || err.Error() != "node destroyed while attempting to join cluster" || joined != nil {
+		t.Fatalf("destroyed branch must discard prior group successes; joined=%v err=%v", joined, err)
 	}
 }
 

@@ -1,0 +1,5 @@
+=== RUN   TestRustOutboundPingAgainstGo
+--- PASS: TestRustOutboundPingAgainstGo (0.01s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.029s
+Rust outbound PING passed against a real pinned Go Ringpop node
