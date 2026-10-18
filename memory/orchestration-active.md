@@ -1,3 +1,10 @@
+## Writer original-Go contract/oracle returned 2026-10-18
+
+0da3c1dd5 original taskWriter overlay produced8verified event traces exit0; integrated. Covers capacity,batch,enqueue/response timeout,cancel-after-accept,stop; simultaneous select races remain nondeterministic,real15ms timers. Parent reviewed design and rejected note's invented negative-capacity recoverable error as automatic policy: Go construction fails/panics, no fallback.
+Next Luna Standard writer actor/queue implementation accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-writer-queue-standard-40-20261018
+May complete tested reusable actor primitive then explicit separate queue integration; must consume actual Go traces. JOINsender38 separately active. Matching only/incomplete.
+
 ## Live GC batch configuration integrated 2026-10-18
 
 31d7c2267 reviewed original under-lock read and signed loop/error behavior; integrated after15GoGCcases,36persistence tests,Go/RustSQLiteinterop,1server filtered/live provider test,strict workspace/all-targetClippy passed. No nonpositive rejection/saturation added; signed SQLite/delete-repeat semantics preserved with bounded tests. Worker cleaned4.7GB own inactive cache,37GB free reported.
