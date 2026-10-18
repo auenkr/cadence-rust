@@ -17,6 +17,8 @@ const schema = grpc.loadPackageDefinition(loader.loadSync(files, {
 })).uber.cadence;
 const api = schema.api.v1;
 const peer = process.argv[2] || '127.0.0.1:7833';
+const restartMode = process.argv[7] === 'restart';
+const goServicesPid = Number(process.argv[8] || 0);
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
 function call(service, method, request) {
   const metadata = new grpc.Metadata();
@@ -35,10 +37,20 @@ async function run() {
   fs.mkdirSync(work, { recursive: true });
   const ready = path.join(work, 'ready'), stop = path.join(work, 'stop'), fixture = path.join(work, 'fixture.json');
    fs.writeFileSync(fixture, JSON.stringify({ domain, domain_id: domainId, workflow_id: '', run_id: '', task_list: taskList.name, history_peer: process.argv[3], kind: 'server', schedule_id: 0, database: path.join(work, 'matching.db'), output: ready, listen: process.argv[4], stop_file: stop, idle_trigger: path.join(work, 'idle-trigger'), idle_done: path.join(work, 'idle-done'), isolation_groups: ['zone-a', 'zone-b'] }));
-  const output = fs.openSync(path.join(work, 'rust-server.log'), 'w');
-  const rust = spawn('cargo', ['test', '--manifest-path', path.resolve(__dirname, '../rust/Cargo.toml'), '-p', 'cadence-server', '--test', 'matching_delivery', 'matching_delivery_go_history', '--', '--ignored', '--exact'], { cwd: path.resolve(__dirname, '..'), env: { ...process.env, CARGO_BUILD_JOBS: '1', CADENCE_MATCHING_DELIVERY_FIXTURE: fixture }, stdio: ['ignore', output, output] });
-  fs.closeSync(output);
-  const exited = new Promise(resolve => rust.once('exit', (code, signal) => resolve({ code, signal })));
+  const target = process.env.CARGO_TARGET_DIR || path.resolve(__dirname, '../rust/target');
+  const testBinary = fs.readdirSync(path.join(target, 'debug/deps')).map(name => path.join(target, 'debug/deps', name))
+    .find(file => path.basename(file).startsWith('matching_delivery-') && !file.endsWith('.d') && fs.statSync(file).isFile() && (fs.statSync(file).mode & 0o111));
+  if (!testBinary) throw new Error(`matching_delivery test executable not found under ${target}/debug/deps`);
+  function startRust(label) {
+    for (const file of [ready, stop]) if (fs.existsSync(file)) fs.unlinkSync(file);
+    const output = fs.openSync(path.join(work, `rust-server-${label}.log`), 'w');
+    const child = spawn(testBinary, ['matching_delivery_go_history', '--ignored', '--exact'], { cwd: path.resolve(__dirname, '..'), env: { ...process.env, CADENCE_MATCHING_DELIVERY_FIXTURE: fixture }, stdio: ['ignore', output, output] });
+    fs.closeSync(output);
+    exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
+    return child;
+  }
+  let exited;
+  let rust = startRust('before-restart');
   try {
     const deadline = Date.now() + 180000;
     while (!fs.existsSync(ready)) {
@@ -50,6 +62,50 @@ async function run() {
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
     taskStartToCloseTimeout: { seconds: '10' }, input: payload('start'),
   };
+  let restartEvidence;
+  if (restartMode) {
+    const restartID = `restart-${id}`, restartTaskList = `restart-tasks-${id}`;
+    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
+    let restartStarted;
+    const restartProvisionDeadline = Date.now() + 15000;
+    for (;;) {
+      try { restartStarted = await call('WorkflowAPI', 'StartWorkflowExecution', restartRequest); break; }
+      catch (error) {
+        if (!error.details?.includes('DefaultDomainCache encounter case') || Date.now() >= restartProvisionDeadline) throw error;
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+    const database = path.join(work, 'matching.db');
+    const sqliteCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, restartTaskList], { encoding: 'utf8' });
+    const persistedDeadline = Date.now() + 20000;
+    let persisted;
+    while (Date.now() < persistedDeadline) {
+      persisted = sqliteCount();
+      if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(persisted?.status, 0, `could not inspect Matching SQLite queue: ${persisted?.stderr}`);
+    assert(Number(persisted.stdout.trim()) > 0, 'workflow task was not persisted before Matching restart');
+    const beforePid = rust.pid;
+    rust.kill('SIGKILL');
+    const beforeExit = await exited;
+    assert.equal(beforeExit.signal, 'SIGKILL', 'first Rust Matching process did not terminate');
+    if (goServicesPid) process.kill(goServicesPid, 0);
+    rust = startRust('after-restart');
+    const secondReadyDeadline = Date.now() + 180000;
+    while (!fs.existsSync(ready)) {
+      if (rust.exitCode !== null || rust.signalCode !== null || Date.now() > secondReadyDeadline) throw new Error(`Rust Matching failed to reopen durable SQLite queue; see ${work}/rust-server-after-restart.log`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
+    if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
+    const finalHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: restartID, runId: restartStarted.runId } });
+    const completions = finalHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(completions, 1, 'restart workflow must have exactly one visible completion');
+    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
+    // Reuse the second live process for the existing compatibility coverage below.
+  }
   let started;
   const provisionDeadline = Date.now() + 15000;
   for (;;) {
@@ -237,14 +293,14 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: 'passed', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: 'passed', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', peer, domain, execution, attributes }));
   } finally {
     fs.writeFileSync(stop, 'stop');
     let shutdownTimer;
     const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
     clearTimeout(shutdownTimer);
     if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
-    if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server.log`);
+    if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
   }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));

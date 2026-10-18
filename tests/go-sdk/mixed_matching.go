@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,24 @@ import (
 // The domain is provisioned by the mixed-service harness. Every worker poll and
 // task append crosses original Go Frontend/History and Rust Matching RPCs.
 func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interface, domain string) {
+	if workflowID := os.Getenv("CADENCE_MIXED_RESTART_WORKFLOW_ID"); workflowID != "" {
+		taskList := os.Getenv("CADENCE_MIXED_RESTART_TASK_LIST")
+		w := worker.New(rpc, domain, taskList, worker.Options{DisableStickyExecution: true})
+		w.RegisterWorkflow(EchoWorkflow)
+		w.RegisterActivity(EchoActivity)
+		if err := w.Start(); err != nil {
+			panic(err)
+		}
+		defer w.Stop()
+		run := client.NewClient(rpc, domain, nil).GetWorkflow(ctx, workflowID, "")
+		var result string
+		if err := run.Get(ctx, &result); err != nil {
+			panic(err)
+		}
+		require(result == "restart-proof", "restart SDK workflow result changed")
+		fmt.Println("Existing Go SDK resumed and completed the pre-restart workflow/activity")
+		return
+	}
 	taskList := "mixed-sdk-" + uuid.NewString()
 	w := worker.New(rpc, domain, taskList, worker.Options{DisableStickyExecution: true})
 	w.RegisterWorkflow(EchoWorkflow)

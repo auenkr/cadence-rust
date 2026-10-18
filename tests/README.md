@@ -396,6 +396,29 @@ successful poll, then verifies an unacknowledged queued workflow task survives
 unload and completes after lease reload. The fixture clock avoids a five-minute
 wait; workflow/History behavior remains in the original Go services.
 
+Mixed process-restart regression (same Go Frontend/History/Worker processes,
+no Go Matching, same durable Matching SQLite file):
+
+```sh
+CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-ce1e72cb/rust/target \
+  CARGO_BUILD_JOBS=1 python3 tests/run-go-service-baseline.py --matching-restart \
+  --artifacts-dir /tmp/matching-restart
+```
+
+This extends the mixed runner above. It starts the existing Rust
+`matching_delivery_go_history` server test from its compiled test executable,
+starts a workflow through Go Frontend, confirms its decision task row is in
+`matching.db`, then SIGKILLs that Rust process. The same integration executable
+reopens that same SQLite file on the same Matching gRPC address. The existing
+Go SDK then polls and runs the workflow's Echo activity through Go
+Frontend/History and Rust Matching. The check asserts one visible workflow
+completion and that the Go services process remains alive. The overlay server
+starts only `frontend,history,worker`; it does not start Go Matching. SDK
+activity/workflow timeout and retry behavior remains covered by the adjacent
+`--rust-matching` mixed regression; delivery redrive may be at least once, so
+this restart check makes no claim that retries cannot duplicate intermediate
+delivery. Logs and result JSON remain in the requested artifacts directory.
+
 Outbound TChannel JSON client interoperability check (pinned tchannel-go server):
 
 ```sh
