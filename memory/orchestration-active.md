@@ -1,3 +1,10 @@
+## Bootstrap selector integrated — 2026-10-18
+
+Reviewedfinal5d73ed1c8 signedcapnegativeconsumespool/zeroempty/positivebounded,16actualGo cases incloverflow/joinedcounts. Integratedac195+0a63+565a+5d73 as61d21896d,5f55e7751,efb1a3e6c,0c78cdd3f. Final57commitbundledfullselectorfromparent causingadd/addconflicts;resolvedexactvalidatedfinalfiles,verifiednodifftestedsource/tests/runner;fixtureonlydiffisallowedrandomsamehostfallbacksubset. Go2verify/fourRusttests/strictcommonClippy passed. No overallbootstrap controller yet.
+Normal-speedLuna59 SINGLEconcurrentJOINgroupaccepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-join-group-standard-59-20261018
+Rendezvous58 independentlyactive. Matching incomplete;fulllatestcombinedregressionpending.
+
 ## Production capacity candidate concurrency blocker — 2026-10-18
 
 9bd9cfdd7 NOTintegrated. Worker8writer+1filtertest,Go8oracle,strictserverClippypass. Parentfoundpermitaccumulation: receiveraddpermit eachpass,senderdropspermitreturnsit,nextpass>=2permits =>concurrentcallersoverwritesingleslot. Alsozero-batchdrainonlychecksunusedbufferedreceiver,notwaitingrendezvoussenders. Normal-speedLuna58 concurrencyrepair+meaningfulrepeated/multiplecaller/zerobatchingtestsaccepted:
