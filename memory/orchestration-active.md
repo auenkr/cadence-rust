@@ -1,3 +1,10 @@
+## JOIN local-state repair integrated — 2026-10-18
+
+Reviewed57cd67e18+d2c1bb0fb; integrated1db6d4a69+aafcfe95b. OriginalGo4case AddJoinList differential covers local refutation/labels/preexisting remote queue/maxP;12provider+4JSONtests,strict serverClippy,realGo inbound/outbound probes passed. Latest transport untouched. No bootstrap/readiness/timers/main wiring yet.
+Next Luna normal-speed direct PING only accepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-ringpop-direct-ping-standard-46-20261018
+Writer45 separately active for admission-stop parity. Disk22GB free,inspect inactive targets before cleanup,preserve active builds/evidence. Matching remains incomplete; full latest combined regression pending.
+
 ## Writer primitive integrated with remaining admission-stop gap — 2026-10-18
 
 Integrated candidate4a8591c0f+7e2448340+eaf39ebd9 as812a082ae,c835fbede,29fca72dd. Nine actor tests, originalGo8traces, strict persistenceClippy passed in worker. Actual callback batches now compared; timeout/cancel/stop covered separate actor tests, not all error strings differentially. Drop detaches backend, explicit join remains. No production queue wiring. Polling and primitive negative-capacity Result remain documented limits.
