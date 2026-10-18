@@ -1,3 +1,10 @@
+## Concurrent JOIN group integrated — 2026-10-18
+
+Reviewed9005ae105+8f52e6440+fcfd09fbb integrated67fd9011e+04f7261f3+efed6c306. Groupselectonce,attemptcounter,concurrentwaitall,existingatomicJOINmerge,signedtimeoutadapter,cancellationJoinSet. Worker2grouptests,JOIN/PINGregressions,2realGopeers,strictserverClippypassed. No overallretry/readinessyet.
+Normal-speedLuna61 JoinClusterretry/deadline/delayercontrolleraccepted:
+node:delegated-task:command%3Amcp%3Ac49dd1a0-b936-47ad-840e-e6e5f75e64a4%3Adelegate-task%3Amatching-join-cluster-controller-standard-61-20261018
+Fullfrozenregression60running3c8c5f98a excludesJOINgroup. Storagecheckedactiveprocesses60uses53cachet3-ce1e72cb;cleanedcompletedinactiveJOIN42cachet3-279a3b9f removed6.7GiBreported,disk8.1GBfree. Preservedsource/evidence/activecache. Matching incomplete.
+
 ## Production capacity/rendezvous integrated; full regression running — 2026-10-18
 
 Reviewed9bd9cfdd7+b05a5752e,integratedddf7ef097+3c8c5f98a. FIFOwaitingoffersreplaceaccumulatingpermit/singleslot;zerobatchdrainswaitingoffers,guardwithdrawalcancel. Worker10Rust+9actualGo traces+strictserverClippypassed. No fullmixedclaimyet.
