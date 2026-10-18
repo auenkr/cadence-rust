@@ -196,3 +196,13 @@ added for Go's exact rejection behavior on those malformed wire frames. This
 repair only covers the outbound JSON transport primitive; it does not establish
 Matching service completion, add discovery/SWIM sender behavior, or validate
 service-level restart/recovery.
+
+## Bounded PING-REQ inbound relay slice (2026-10-18)
+
+Pinned source oracle: `/home/ubuntu/go/pkg/mod/github.com/uber/ringpop-go@v0.10.0/swim/ping_request_handler.go`, `ping_request_sender.go`, `ping_sender.go`, and `ping_handler.go`. `handlePingRequest` checks Ready first; it updates request changes, attempts `sendPing(target, node.pingTimeout)`, merges target response changes only on successful ping, issues response changes for the original requester, and returns `pingStatus` false on direct target failure. `sendPing` advances its sender dissemination callback only on successful call/JSON decode. The pinned default `pingTimeout` is 1500ms; outer requester timeout defaults to 5000ms and is outside this inbound handler slice.
+
+Rust change: production `RingpopNode::handler` now dispatches `/protocol/ping-req`; its async relay releases the state mutex across direct `/protocol/ping` I/O, applies request/target memberlist updates and dissemination accounting, then serializes `PingResponse`. Added `ping_req` request count. Focused production-handler relay test covers a successful direct TChannel target. Rust node configuration still has no ping-timeout field, so this slice uses pinned default 1500ms (config extraction remains pending). Reverse full-sync and full bootstrap/readiness remain outside this slice.
+
+Evidence so far: `CARGO_BUILD_JOBS=1 cargo check -p cadence-server --locked` in `rust/` passed after fixing a borrow conflict. `rustfmt --edition 2021 --check rust/crates/cadence-server/src/ringpop_provider.rs` and `git diff --check` passed. A focused lib test build/run is underway; record its final exit before relying on this section. Workspace-wide `cargo fmt --check` is not a usable gate because it reports extensive pre-existing unrelated formatting differences; no workspace formatting was applied. No mixed Go/Rust three-node probe or strict locked Clippy run has been completed yet; Matching remains incomplete.
+- Focused test completed: `CARGO_BUILD_JOBS=1 cargo test --locked -p cadence-server --lib production_ping_req_handler_relays_direct_ping_and_returns_ping_response -- --nocapture` — exit 0, 1 passed; command run from `rust/`.
+- `CARGO_BUILD_JOBS=1 cargo clippy --locked -p cadence-server --all-targets -- -D warnings` — exit 0.

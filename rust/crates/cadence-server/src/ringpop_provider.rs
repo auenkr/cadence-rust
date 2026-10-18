@@ -6,7 +6,7 @@ use cadence_common::ringpop_bootstrap_selection::BootstrapSelection;
 use cadence_common::ringpop_disseminator::Disseminator;
 use cadence_common::ringpop_memberlist::Memberlist;
 use cadence_common::ringpop_wire::{
-    Change, JoinRequest, JoinResponse, Member, Ping, ALIVE, SUSPECT,
+    Change, JoinRequest, JoinResponse, Member, Ping, PingRequest, PingResponse, ALIVE, SUSPECT,
 };
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -21,6 +21,7 @@ use std::time::Duration;
 pub struct RingpopRequestCounts {
     pub join: u64,
     pub ping: u64,
+    pub ping_req: u64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
@@ -517,6 +518,129 @@ impl RingpopNode {
         Ok(ping)
     }
 
+    /// Relay one SWIM PING on behalf of a PING-REQ caller. Go's
+    /// `handlePingRequest` updates request changes, sends a normal PING (which
+    /// owns its sender dissemination callback), merges target changes only on
+    /// success, then responds with the relay's delta for the original caller.
+    async fn relay_ping_request(&self, request: PingRequest) -> Result<PingResponse, RingpopError> {
+        let (relay_ping, sent_changes, relay_address) = {
+            let mut node = self.state.lock().expect("Ringpop state poisoned");
+            node.counts.ping_req = node.counts.ping_req.saturating_add(1);
+            let relay_address = node.address.clone();
+            let update = node.memberlist.update(
+                request.changes.as_deref().unwrap_or_default(),
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64
+                },
+                |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+            );
+            if !update.accepted.is_empty() {
+                let pingable = node
+                    .memberlist
+                    .members()
+                    .iter()
+                    .filter(|m| {
+                        m.address != relay_address && (m.status == ALIVE || m.status == SUSPECT)
+                    })
+                    .count();
+                node.disseminator.adjust_max_propagations(pingable);
+                for change in update.accepted {
+                    node.disseminator.record(change);
+                }
+            }
+            let local = node
+                .memberlist
+                .member(&relay_address)
+                .expect("local member");
+            let changes = node.disseminator.issue_sender();
+            (
+                Ping {
+                    changes: Some(changes.clone()),
+                    checksum: node.memberlist.checksum(),
+                    source: local.address.clone(),
+                    source_incarnation: local.incarnation,
+                    app: node.app.clone(),
+                },
+                changes,
+                relay_address,
+            )
+        };
+        let response = tchannel_json_client::call(
+            &request.target,
+            "ringpop",
+            "/protocol/ping",
+            None,
+            &serde_json::to_value(relay_ping).expect("Ping serialization"),
+            Duration::from_millis(1500),
+        )
+        .await;
+        let (ping_ok, target_changes) = match response {
+            Ok(response) => match serde_json::from_value::<Ping>(response.body) {
+                Ok(ping) => {
+                    let mut node = self.state.lock().expect("Ringpop state poisoned");
+                    node.disseminator.complete_sender(&sent_changes, true);
+                    (true, ping.changes.unwrap_or_default())
+                }
+                Err(_) => (false, Vec::new()),
+            },
+            Err(_) => (false, Vec::new()),
+        };
+        if ping_ok {
+            let mut node = self.state.lock().expect("Ringpop state poisoned");
+            if !node.stopped {
+                let update = node.memberlist.update(
+                    &target_changes,
+                    || {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64
+                    },
+                    |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+                );
+                if !update.accepted.is_empty() {
+                    let count = node
+                        .memberlist
+                        .members()
+                        .iter()
+                        .filter(|m| {
+                            m.address != relay_address && (m.status == ALIVE || m.status == SUSPECT)
+                        })
+                        .count();
+                    node.disseminator.adjust_max_propagations(count);
+                    for change in update.accepted {
+                        node.disseminator.record(change);
+                    }
+                }
+            }
+        }
+        let mut node = self.state.lock().expect("Ringpop state poisoned");
+        let local = node
+            .memberlist
+            .member(&relay_address)
+            .expect("local member")
+            .clone();
+        let checksum = node.memberlist.checksum();
+        let members = node.memberlist.members().to_vec();
+        let (changes, _) = node.disseminator.issue_receiver(
+            &request.source,
+            request.source_incarnation,
+            request.checksum,
+            checksum,
+            &members,
+            &relay_address,
+            local.incarnation,
+        );
+        Ok(PingResponse {
+            ping_status: ping_ok,
+            target: request.target,
+            changes: Some(changes),
+        })
+    }
+
     /// Stable snapshot boundary for bootstrap owners and compatibility checks.
     pub fn membership_snapshot(&self) -> (Vec<Member>, u32) {
         let node = self.state.lock().expect("Ringpop state poisoned");
@@ -560,6 +684,22 @@ impl RingpopNode {
                         },
                         |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
                     ),
+                    "/protocol/ping-req" => {
+                        let request: PingRequest = decode(&body)?;
+                        {
+                            let node = state.lock().expect("Ringpop state poisoned");
+                            if !node.ready {
+                                return Err(RingpopError::Application(
+                                    "node is not ready to handle requests".into(),
+                                ));
+                            }
+                        }
+                        let owner = RingpopNode {
+                            state: Arc::clone(&state),
+                        };
+                        let response = owner.relay_ping_request(request).await?;
+                        encode(&response)
+                    }
                     _ => Err(RingpopError::System(format!(
                         "unknown Ringpop method: {method}"
                     ))),
@@ -979,7 +1119,12 @@ mod tests {
         let (success_addr, success_server) =
             outbound_test_server(RingpopHandler::new(move |_, _, _| {
                 let body = success_body.clone();
-                async move { Ok(RingpopResponse { headers: None, body }) }
+                async move {
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body,
+                    })
+                }
             }))
             .await;
         let (failure_addr, failure_server) =
@@ -1004,7 +1149,10 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.0, "node destroyed while attempting to join cluster");
-        assert!(error.1.is_empty(), "destroyed result must discard prior successes");
+        assert!(
+            error.1.is_empty(),
+            "destroyed result must discard prior successes"
+        );
         assert_eq!(sender.attempts(), 1);
         success_server.abort();
         failure_server.abort();
@@ -1035,7 +1183,12 @@ mod tests {
         let (success_addr, success_server) =
             outbound_test_server(RingpopHandler::new(move |_, _, _| {
                 let body = success_body.clone();
-                async move { Ok(RingpopResponse { headers: None, body }) }
+                async move {
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body,
+                    })
+                }
             }))
             .await;
         let (failure_addr, failure_server) =
@@ -1677,6 +1830,50 @@ mod tests {
         call.await.unwrap().unwrap();
         assert_eq!(node.membership_snapshot(), before);
         assert_eq!(node.dissemination_counts().get("127.0.0.1:7933"), Some(&1));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn production_ping_req_handler_relays_direct_ping_and_returns_ping_response() {
+        let node = node();
+        node.set_ready(true);
+        let target = RingpopHandler::new(|method, _, body| async move {
+            assert_eq!(method, "/protocol/ping");
+            let request: Ping = serde_json::from_slice(&body).unwrap();
+            let response = Ping {
+                source: "target".into(),
+                source_incarnation: 42,
+                checksum: 7,
+                changes: Some(vec![]),
+                ..request
+            };
+            Ok(RingpopResponse {
+                headers: None,
+                body: serde_json::to_vec(&response).unwrap(),
+            })
+        });
+        let (target_address, server) = outbound_test_server(target).await;
+        let handler = node.handler();
+        let request = PingRequest {
+            source: "requester".into(),
+            source_incarnation: 11,
+            target: target_address,
+            checksum: 0,
+            changes: Some(vec![]),
+        };
+        let response = handler
+            .call(
+                "/protocol/ping-req".into(),
+                None,
+                serde_json::to_vec(&request).unwrap(),
+            )
+            .await
+            .unwrap();
+        let response: PingResponse = serde_json::from_slice(&response.body).unwrap();
+        assert!(response.ping_status);
+        assert_eq!(response.target, request.target);
+        assert!(response.changes.is_some());
+        assert_eq!(node.request_counts().ping_req, 1);
         server.abort();
     }
 
