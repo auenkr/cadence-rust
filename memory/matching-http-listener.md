@@ -31,11 +31,13 @@ constitute Matching service completion.
 - `cargo clippy --locked -p cadence-server --all-targets -- -D warnings`: exit 0.
 - `cargo build --locked -p cadence-server`: exit 0.
 - `python3 tests/run-matching-thrift-compat.py --server-bin rust/target/debug/cadence-server`: exit 0. It first ran Go YARPC v1.88.0's `TestIsTLSClientHelloRecord` (including short-buffer/read-error cases); then all ten generated Go methods passed via TChannel, HTTP, and HTTP trailing slash, plus fragmented-short-read plaintext classification, TLS/plaintext, timeout/recovery, listener shutdown cancellation, and configuration mode probes. Output: `memory/http-parity-mixed-go.log`.
+- Final rerun after adding the 129-silent-connection pending-load probe: exit 0; all checks above passed against the rebuilt binary, including service progress while 129 connections were pending. Output: `memory/http-parity-final-go.log`, exit in `.exit`.
+- `cargo test --locked -p cadence-server --bin cadence-server tls_handshake_timeout_is_injectable -- --nocapture`: exit 0. The paused-time test injects a 10 ms timeout and verifies an incomplete TLS handshake returns `TimedOut`; full test, strict Clippy, and locked build output is `memory/http-timeout-cargo.log`, exit in `.exit`.
 - `cargo build --locked -p cadence-server --example ringpop_tchannel_probe --manifest-path rust/Cargo.toml` and `python3 tests/run-ringpop-tchannel-compat.py --server-example rust/target/debug/examples/ringpop_tchannel_probe`: both exit 0; original Go Ringpop TChannel compatibility passed. Same log as above.
 - First compatibility attempt passed the Go YARPC oracle and ten-method runner but the shutdown probe expected FIN and observed TCP RST (exit 1). The harness now accepts EOF or reset as connection closure; first-attempt evidence is retained in `memory/http-parity-mixed-go-attempt1.log` and `.exit`.
 - An initial build using a shared warm target was interrupted when another task began using it (exit 130); the successful checks above used the isolated worktree target. The interruption log is retained as `memory/http-parity-cargo-shared-interrupted.log` and `.exit`.
 
-These checks validate this HTTP transport slice only. They do not complete Matching or its remaining service parity audit. In particular, the 120-second handshake deadline remains exercised by the production code path but has no focused test with an injected short handshake timeout.
+These checks validate this HTTP transport slice only. They do not complete Matching or its remaining service parity audit.
 
 ## Go behavior inspected
 

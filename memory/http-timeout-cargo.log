@@ -1,0 +1,13 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-345e7984/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized] target(s) in 5.53s
+     Running unittests src/main.rs (target/debug/deps/cadence_server-e0c27fdd0422ecd2)
+
+running 1 test
+test matching_http_listener_tests::tls_handshake_timeout_is_injectable ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.01s
+
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-345e7984/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized] target(s) in 2.33s
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-345e7984/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized] target(s) in 11.19s

@@ -232,6 +232,23 @@ with (artifacts / 'server-permissive.log').open('w') as log:
         finally:
             silent.close()
 
+        # YARPC does not reject accepted connections at an application-level
+        # pending limit. Keep more than the candidate's old 128 peers silent,
+        # then confirm a later request still progresses.
+        pending = [socket.create_connection(('127.0.0.1', matching_http), timeout=3)
+                   for _ in range(129)]
+        try:
+            with socket.create_connection(('127.0.0.1', matching_http), timeout=3) as probe:
+                probe.sendall(b'POST /matching HTTP/1.1\r\nHost: localhost\r\n'
+                              b'Rpc-Service: cadence-matching\r\nRpc-Encoding: thrift\r\n'
+                              b'Rpc-Procedure: Meta::health\r\nContent-Length: 1\r\n\r\n\0')
+                probe.settimeout(3)
+                if b'200' not in probe.recv(1024):
+                    raise AssertionError('pending connection load blocked a later HTTP request')
+        finally:
+            for connection in pending:
+                connection.close()
+
         # YARPC performs one Read for its five-byte sniff. Force a short read,
         # then finish the TLS record: Go classifies this as plaintext, so the
         # request must not complete a TLS handshake. This guards parity for the

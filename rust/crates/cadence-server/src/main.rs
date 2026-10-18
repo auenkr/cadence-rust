@@ -95,6 +95,24 @@ impl rustls::server::ResolvesServerCert for NoServerCertificate {
     }
 }
 
+async fn accept_matching_tls<S>(
+    acceptor: tokio_rustls::TlsAcceptor,
+    stream: S,
+    timeout: std::time::Duration,
+) -> std::io::Result<tokio_rustls::server::TlsStream<S>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    match tokio::time::timeout(timeout, acceptor.accept(stream)).await {
+        Ok(Ok(tls)) => Ok(tls),
+        Ok(Err(error)) => Err(std::io::Error::other(error)),
+        Err(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "TLS handshake timed out",
+        )),
+    }
+}
+
 async fn serve_matching_http_permissive(
     addr: std::net::SocketAddr,
     app: axum::Router,
@@ -223,18 +241,9 @@ async fn serve_matching_http_permissive(
         // deliberately classified as plaintext, even when it is fragmented TLS.
         let is_tls = n == 5 && header[0] == 0x16 && header[1] == 0x03 && header[2] >= 1;
         let connection = if is_tls {
-            match tokio::time::timeout(handshake_timeout, acceptor.accept(stream)).await {
-                Ok(Ok(tls)) => Stream::Tls(Box::new(tls)),
-                Ok(Err(error)) => return (Err(io::Error::other(error)), peer),
-                Err(_) => {
-                    return (
-                        Err(io::Error::new(
-                            io::ErrorKind::TimedOut,
-                            "TLS handshake timed out",
-                        )),
-                        peer,
-                    )
-                }
+            match accept_matching_tls(acceptor, stream, handshake_timeout).await {
+                Ok(tls) => Stream::Tls(Box::new(tls)),
+                Err(error) => return (Err(error), peer),
             }
         } else {
             Stream::Plain(stream)
@@ -288,6 +297,28 @@ async fn serve_matching_http_permissive(
 #[cfg(test)]
 mod matching_http_listener_tests {
     use super::*;
+    #[tokio::test(start_paused = true)]
+    async fn tls_handshake_timeout_is_injectable() {
+        use tokio::io::AsyncWriteExt;
+
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(std::sync::Arc::new(NoServerCertificate));
+        let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accepting = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            accept_matching_tls(acceptor, stream, std::time::Duration::from_millis(10))
+                .await
+                .unwrap_err()
+                .kind()
+        });
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client.write_all(&[0x16, 0x03, 0x03, 0x00, 0x01]).await.unwrap();
+        assert_eq!(accepting.await.unwrap(), std::io::ErrorKind::TimedOut);
+    }
+
     #[test]
     fn configured_listener_uses_bind_policy() {
         let rpc: config::RpcConfig =
