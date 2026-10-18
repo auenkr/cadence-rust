@@ -19,3 +19,19 @@ repository root. The source module path is pinned to
 
 Evidence: generator completed successfully on 2026-10-18:
 `ok github.com/uber/ringpop-go/swim` and wrote the checked-in JSON fixture.
+
+Bounded consumer task update (2026-10-18): fixture now contains a complete
+6-by-6 status matrix at older, equal, and newer incarnations; nil-old inputs
+for all statuses; equal-state checksums greater, lower, and equal in both
+directions; signed checksum examples; and labelled Unicode plus equivalent
+maps assembled in different insertion orders. `toOracleMember` emits nil
+labels as JSON `null`, preserving the distinction from an allocated empty
+map. `rust/crates/cadence-common/tests/ringpop_member_oracle.rs` consumes the
+fixture and compares checksum, member string, gossip decision, and aggregate
+checksum results. The Go generator passed. The Rust consumer currently fails
+on exactly `lower_precedence_higher_checksum_must_reject process` (Rust true,
+oracle false), demonstrating that lower gossip precedence currently falls
+through to label checksum comparison. Other fixture comparisons ran without
+mismatches. This is expected pending the separately assigned implementation
+repair; do not claim parity until that repair is integrated and this test
+passes.

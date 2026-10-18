@@ -3,6 +3,7 @@ package swim
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"github.com/uber/ringpop-go/logging"
 	"os"
 	"testing"
@@ -47,8 +48,17 @@ func TestGenerateRingpopMemberPrimitiveFixtures(t *testing.T) {
 		gossip.checksumString(&b)
 		cases = append(cases, primitiveCase{Name: name, Old: oldJSON, Gossip: *toOracleMember(gossip), Process: shouldProcessGossip(old, gossip), LabelChecksum: gossip.Labels.checksum(), ChecksumString: b.String()})
 	}
+	for _, delta := range []int64{-1, 0, 1} {
+		for _, oldStatus := range statuses {
+			for _, gossipStatus := range statuses {
+				appendCase(fmt.Sprintf("matrix_%s_to_%s_inc_%d", oldStatus, gossipStatus, delta),
+					&Member{Address: "n", Status: oldStatus, Incarnation: 10},
+					&Member{Address: "n", Status: gossipStatus, Incarnation: 10 + delta})
+			}
+		}
+	}
 	for _, status := range statuses {
-		appendCase("status_"+status, &Member{Address: "n", Status: Alive, Incarnation: 10}, &Member{Address: "n", Status: status, Incarnation: 10})
+		appendCase("unknown_old_"+status, nil, &Member{Address: "n", Status: status, Incarnation: 10})
 	}
 	appendCase("tombstone_old_nil", nil, &Member{Address: "n", Status: Tombstone, Incarnation: 10})
 	appendCase("alive_old_nil", nil, &Member{Address: "n", Status: Alive, Incarnation: 10})
@@ -70,7 +80,8 @@ func TestGenerateRingpopMemberPrimitiveFixtures(t *testing.T) {
 	if higherPrecedenceGossip == nil {
 		t.Fatal("could not find higher checksum for precedence case")
 	}
-	appendCase("precedence_beats_higher_label_checksum", &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: lowerPrecedenceOld}, &Member{Address: "n", Status: Suspect, Incarnation: 10, Labels: higherPrecedenceGossip})
+	appendCase("precedence_beats_higher_label_checksum", &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: higherPrecedenceGossip}, &Member{Address: "n", Status: Suspect, Incarnation: 10, Labels: lowerPrecedenceOld})
+	appendCase("lower_precedence_higher_checksum_must_reject", &Member{Address: "n", Status: Suspect, Incarnation: 10, Labels: lowerPrecedenceOld}, &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: higherPrecedenceGossip})
 	var lowerOld, higherGossip LabelMap
 	for i := 0; i < 10000; i++ {
 		candidate := LabelMap{"candidate": string(rune('a'+i%26)) + string(rune('A'+i/26))}
@@ -87,6 +98,8 @@ func TestGenerateRingpopMemberPrimitiveFixtures(t *testing.T) {
 		t.Fatal("could not find increasing label checksum pair")
 	}
 	appendCase("higher_label_checksum", &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: lowerOld}, &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: higherGossip})
+	appendCase("lower_label_checksum", &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: higherGossip}, &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: lowerOld})
+	appendCase("equal_label_checksum", &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: lowerOld}, &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: lowerOld})
 	appendCase("unicode_empty_labels", &Member{Address: "n", Status: Alive, Incarnation: 10}, &Member{Address: "n-雪", Status: Alive, Incarnation: 10, Labels: LabelMap{"": "", "ключ": "значение🌱"}})
 	appendCase("nil_labels", &Member{Address: "n", Status: Alive, Incarnation: 10}, &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: nil})
 	appendCase("empty_labels", &Member{Address: "n", Status: Alive, Incarnation: 10}, &Member{Address: "n", Status: Alive, Incarnation: 10, Labels: LabelMap{}})
@@ -119,6 +132,9 @@ func TestGenerateRingpopMemberPrimitiveFixtures(t *testing.T) {
 	}{
 		{"sorted_with_tombstone", []oracleMember{{Address: "z", Status: Alive, Incarnation: 2}, {Address: "gone", Status: Tombstone, Incarnation: 8}, {Address: "a", Status: Suspect, Incarnation: 1}}},
 		{"empty", []oracleMember{}},
+		{"labelled_unicode", []oracleMember{{Address: "n-雪", Status: Alive, Incarnation: 7, Labels: map[string]string{"ключ": "значение🌱", "é": "雪"}}}},
+		{"label_insertion_order_a", []oracleMember{{Address: "n", Status: Alive, Incarnation: 8, Labels: map[string]string{"a": "1", "b": "2", "c": "3"}}}},
+		{"label_insertion_order_b", []oracleMember{{Address: "n", Status: Alive, Incarnation: 8, Labels: map[string]string{"c": "3", "b": "2", "a": "1"}}}},
 	} {
 		ml := &memberlist{node: &Node{}, logger: logging.Logger("fixture")}
 		for _, m := range tc.members {
@@ -150,7 +166,10 @@ func toOracleMember(m *Member) *oracleMember {
 	if m == nil {
 		return nil
 	}
-	labels := map[string]string{}
+	var labels map[string]string
+	if m.Labels != nil {
+		labels = map[string]string{}
+	}
 	for k, v := range m.Labels {
 		labels[k] = v
 	}

@@ -2,110 +2,2018 @@
   "source": "github.com/uber/ringpop-go v0.10.0 swim/member.go and swim/memberlist.go",
   "primitiveCases": [
     {
-      "name": "status_alive",
+      "name": "matrix_alive_to_alive_inc_-1",
       "old": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive9"
+    },
+    {
+      "name": "matrix_alive_to_suspect_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect9"
+    },
+    {
+      "name": "matrix_alive_to_faulty_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty9"
+    },
+    {
+      "name": "matrix_alive_to_leave_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave9"
+    },
+    {
+      "name": "matrix_alive_to_tombstone_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone9"
+    },
+    {
+      "name": "matrix_alive_to_unknown_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown9"
+    },
+    {
+      "name": "matrix_suspect_to_alive_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive9"
+    },
+    {
+      "name": "matrix_suspect_to_suspect_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect9"
+    },
+    {
+      "name": "matrix_suspect_to_faulty_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty9"
+    },
+    {
+      "name": "matrix_suspect_to_leave_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave9"
+    },
+    {
+      "name": "matrix_suspect_to_tombstone_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone9"
+    },
+    {
+      "name": "matrix_suspect_to_unknown_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown9"
+    },
+    {
+      "name": "matrix_faulty_to_alive_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive9"
+    },
+    {
+      "name": "matrix_faulty_to_suspect_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect9"
+    },
+    {
+      "name": "matrix_faulty_to_faulty_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty9"
+    },
+    {
+      "name": "matrix_faulty_to_leave_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave9"
+    },
+    {
+      "name": "matrix_faulty_to_tombstone_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone9"
+    },
+    {
+      "name": "matrix_faulty_to_unknown_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown9"
+    },
+    {
+      "name": "matrix_leave_to_alive_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive9"
+    },
+    {
+      "name": "matrix_leave_to_suspect_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect9"
+    },
+    {
+      "name": "matrix_leave_to_faulty_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty9"
+    },
+    {
+      "name": "matrix_leave_to_leave_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave9"
+    },
+    {
+      "name": "matrix_leave_to_tombstone_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone9"
+    },
+    {
+      "name": "matrix_leave_to_unknown_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown9"
+    },
+    {
+      "name": "matrix_tombstone_to_alive_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive9"
+    },
+    {
+      "name": "matrix_tombstone_to_suspect_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect9"
+    },
+    {
+      "name": "matrix_tombstone_to_faulty_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty9"
+    },
+    {
+      "name": "matrix_tombstone_to_leave_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave9"
+    },
+    {
+      "name": "matrix_tombstone_to_tombstone_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone9"
+    },
+    {
+      "name": "matrix_tombstone_to_unknown_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown9"
+    },
+    {
+      "name": "matrix_unknown_to_alive_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive9"
+    },
+    {
+      "name": "matrix_unknown_to_suspect_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect9"
+    },
+    {
+      "name": "matrix_unknown_to_faulty_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty9"
+    },
+    {
+      "name": "matrix_unknown_to_leave_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave9"
+    },
+    {
+      "name": "matrix_unknown_to_tombstone_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone9"
+    },
+    {
+      "name": "matrix_unknown_to_unknown_inc_-1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 9,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown9"
+    },
+    {
+      "name": "matrix_alive_to_alive_inc_0",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": false,
       "labelChecksum": 0,
       "checksumString": "nalive10"
     },
     {
-      "name": "status_suspect",
+      "name": "matrix_alive_to_suspect_inc_0",
       "old": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "suspect",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": true,
       "labelChecksum": 0,
       "checksumString": "nsuspect10"
     },
     {
-      "name": "status_faulty",
+      "name": "matrix_alive_to_faulty_inc_0",
       "old": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "faulty",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": true,
       "labelChecksum": 0,
       "checksumString": "nfaulty10"
     },
     {
-      "name": "status_leave",
+      "name": "matrix_alive_to_leave_inc_0",
       "old": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "leave",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": true,
       "labelChecksum": 0,
       "checksumString": "nleave10"
     },
     {
-      "name": "status_tombstone",
+      "name": "matrix_alive_to_tombstone_inc_0",
       "old": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "tombstone",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": true,
       "labelChecksum": 0,
       "checksumString": "ntombstone10"
     },
     {
-      "name": "status_unknown",
+      "name": "matrix_alive_to_unknown_inc_0",
       "old": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "unknown",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown10"
+    },
+    {
+      "name": "matrix_suspect_to_alive_inc_0",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "matrix_suspect_to_suspect_inc_0",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect10"
+    },
+    {
+      "name": "matrix_suspect_to_faulty_inc_0",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty10"
+    },
+    {
+      "name": "matrix_suspect_to_leave_inc_0",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave10"
+    },
+    {
+      "name": "matrix_suspect_to_tombstone_inc_0",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone10"
+    },
+    {
+      "name": "matrix_suspect_to_unknown_inc_0",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown10"
+    },
+    {
+      "name": "matrix_faulty_to_alive_inc_0",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "matrix_faulty_to_suspect_inc_0",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect10"
+    },
+    {
+      "name": "matrix_faulty_to_faulty_inc_0",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty10"
+    },
+    {
+      "name": "matrix_faulty_to_leave_inc_0",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave10"
+    },
+    {
+      "name": "matrix_faulty_to_tombstone_inc_0",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone10"
+    },
+    {
+      "name": "matrix_faulty_to_unknown_inc_0",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown10"
+    },
+    {
+      "name": "matrix_leave_to_alive_inc_0",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "matrix_leave_to_suspect_inc_0",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect10"
+    },
+    {
+      "name": "matrix_leave_to_faulty_inc_0",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty10"
+    },
+    {
+      "name": "matrix_leave_to_leave_inc_0",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave10"
+    },
+    {
+      "name": "matrix_leave_to_tombstone_inc_0",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone10"
+    },
+    {
+      "name": "matrix_leave_to_unknown_inc_0",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown10"
+    },
+    {
+      "name": "matrix_tombstone_to_alive_inc_0",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "matrix_tombstone_to_suspect_inc_0",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect10"
+    },
+    {
+      "name": "matrix_tombstone_to_faulty_inc_0",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty10"
+    },
+    {
+      "name": "matrix_tombstone_to_leave_inc_0",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nleave10"
+    },
+    {
+      "name": "matrix_tombstone_to_tombstone_inc_0",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone10"
+    },
+    {
+      "name": "matrix_tombstone_to_unknown_inc_0",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown10"
+    },
+    {
+      "name": "matrix_unknown_to_alive_inc_0",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "matrix_unknown_to_suspect_inc_0",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect10"
+    },
+    {
+      "name": "matrix_unknown_to_faulty_inc_0",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty10"
+    },
+    {
+      "name": "matrix_unknown_to_leave_inc_0",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave10"
+    },
+    {
+      "name": "matrix_unknown_to_tombstone_inc_0",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone10"
+    },
+    {
+      "name": "matrix_unknown_to_unknown_inc_0",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "nunknown10"
+    },
+    {
+      "name": "matrix_alive_to_alive_inc_1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive11"
+    },
+    {
+      "name": "matrix_alive_to_suspect_inc_1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect11"
+    },
+    {
+      "name": "matrix_alive_to_faulty_inc_1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty11"
+    },
+    {
+      "name": "matrix_alive_to_leave_inc_1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave11"
+    },
+    {
+      "name": "matrix_alive_to_tombstone_inc_1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone11"
+    },
+    {
+      "name": "matrix_alive_to_unknown_inc_1",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nunknown11"
+    },
+    {
+      "name": "matrix_suspect_to_alive_inc_1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive11"
+    },
+    {
+      "name": "matrix_suspect_to_suspect_inc_1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect11"
+    },
+    {
+      "name": "matrix_suspect_to_faulty_inc_1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty11"
+    },
+    {
+      "name": "matrix_suspect_to_leave_inc_1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave11"
+    },
+    {
+      "name": "matrix_suspect_to_tombstone_inc_1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone11"
+    },
+    {
+      "name": "matrix_suspect_to_unknown_inc_1",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nunknown11"
+    },
+    {
+      "name": "matrix_faulty_to_alive_inc_1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive11"
+    },
+    {
+      "name": "matrix_faulty_to_suspect_inc_1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect11"
+    },
+    {
+      "name": "matrix_faulty_to_faulty_inc_1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty11"
+    },
+    {
+      "name": "matrix_faulty_to_leave_inc_1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave11"
+    },
+    {
+      "name": "matrix_faulty_to_tombstone_inc_1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone11"
+    },
+    {
+      "name": "matrix_faulty_to_unknown_inc_1",
+      "old": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nunknown11"
+    },
+    {
+      "name": "matrix_leave_to_alive_inc_1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive11"
+    },
+    {
+      "name": "matrix_leave_to_suspect_inc_1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect11"
+    },
+    {
+      "name": "matrix_leave_to_faulty_inc_1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty11"
+    },
+    {
+      "name": "matrix_leave_to_leave_inc_1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave11"
+    },
+    {
+      "name": "matrix_leave_to_tombstone_inc_1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone11"
+    },
+    {
+      "name": "matrix_leave_to_unknown_inc_1",
+      "old": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nunknown11"
+    },
+    {
+      "name": "matrix_tombstone_to_alive_inc_1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive11"
+    },
+    {
+      "name": "matrix_tombstone_to_suspect_inc_1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect11"
+    },
+    {
+      "name": "matrix_tombstone_to_faulty_inc_1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty11"
+    },
+    {
+      "name": "matrix_tombstone_to_leave_inc_1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave11"
+    },
+    {
+      "name": "matrix_tombstone_to_tombstone_inc_1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone11"
+    },
+    {
+      "name": "matrix_tombstone_to_unknown_inc_1",
+      "old": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nunknown11"
+    },
+    {
+      "name": "matrix_unknown_to_alive_inc_1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive11"
+    },
+    {
+      "name": "matrix_unknown_to_suspect_inc_1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect11"
+    },
+    {
+      "name": "matrix_unknown_to_faulty_inc_1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty11"
+    },
+    {
+      "name": "matrix_unknown_to_leave_inc_1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave11"
+    },
+    {
+      "name": "matrix_unknown_to_tombstone_inc_1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone11"
+    },
+    {
+      "name": "matrix_unknown_to_unknown_inc_1",
+      "old": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 11,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nunknown11"
+    },
+    {
+      "name": "unknown_old_alive",
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nalive10"
+    },
+    {
+      "name": "unknown_old_suspect",
+      "gossip": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nsuspect10"
+    },
+    {
+      "name": "unknown_old_faulty",
+      "gossip": {
+        "address": "n",
+        "status": "faulty",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nfaulty10"
+    },
+    {
+      "name": "unknown_old_leave",
+      "gossip": {
+        "address": "n",
+        "status": "leave",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
+      "labelChecksum": 0,
+      "checksumString": "nleave10"
+    },
+    {
+      "name": "unknown_old_tombstone",
+      "gossip": {
+        "address": "n",
+        "status": "tombstone",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": 0,
+      "checksumString": "ntombstone10"
+    },
+    {
+      "name": "unknown_old_unknown",
+      "gossip": {
+        "address": "n",
+        "status": "unknown",
+        "incarnation": 10,
+        "labels": null
+      },
+      "shouldProcessGossip": true,
       "labelChecksum": 0,
       "checksumString": "nunknown10"
     },
@@ -115,7 +2023,7 @@
         "address": "n",
         "status": "tombstone",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": false,
       "labelChecksum": 0,
@@ -127,7 +2035,7 @@
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": true,
       "labelChecksum": 0,
@@ -139,13 +2047,13 @@
         "address": "n",
         "status": "alive",
         "incarnation": 11,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "leave",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": false,
       "labelChecksum": 0,
@@ -157,13 +2065,13 @@
         "address": "n",
         "status": "leave",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "alive",
         "incarnation": 11,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": true,
       "labelChecksum": 0,
@@ -175,13 +2083,13 @@
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": false,
       "labelChecksum": 0,
@@ -194,7 +2102,7 @@
         "status": "alive",
         "incarnation": 10,
         "labels": {
-          "precedence": "aA"
+          "precedence": "bA"
         }
       },
       "gossip": {
@@ -202,12 +2110,34 @@
         "status": "suspect",
         "incarnation": 10,
         "labels": {
-          "precedence": "bA"
+          "precedence": "aA"
         }
       },
       "shouldProcessGossip": true,
+      "labelChecksum": -1515038181,
+      "checksumString": "nsuspect10#labels-1515038181"
+    },
+    {
+      "name": "lower_precedence_higher_checksum_must_reject",
+      "old": {
+        "address": "n",
+        "status": "suspect",
+        "incarnation": 10,
+        "labels": {
+          "precedence": "aA"
+        }
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "precedence": "bA"
+        }
+      },
+      "shouldProcessGossip": false,
       "labelChecksum": -870966799,
-      "checksumString": "nsuspect10#labels-870966799"
+      "checksumString": "nalive10#labels-870966799"
     },
     {
       "name": "higher_label_checksum",
@@ -232,12 +2162,56 @@
       "checksumString": "nalive10#labels368546780"
     },
     {
+      "name": "lower_label_checksum",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "candidate": "bA"
+        }
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "candidate": "aA"
+        }
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": -104245378,
+      "checksumString": "nalive10#labels-104245378"
+    },
+    {
+      "name": "equal_label_checksum",
+      "old": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "candidate": "aA"
+        }
+      },
+      "gossip": {
+        "address": "n",
+        "status": "alive",
+        "incarnation": 10,
+        "labels": {
+          "candidate": "aA"
+        }
+      },
+      "shouldProcessGossip": false,
+      "labelChecksum": -104245378,
+      "checksumString": "nalive10#labels-104245378"
+    },
+    {
       "name": "unicode_empty_labels",
       "old": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n-雪",
@@ -258,13 +2232,13 @@
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "shouldProcessGossip": false,
       "labelChecksum": 0,
@@ -276,7 +2250,7 @@
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
@@ -294,7 +2268,7 @@
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
@@ -314,7 +2288,7 @@
         "address": "n",
         "status": "alive",
         "incarnation": 10,
-        "labels": {}
+        "labels": null
       },
       "gossip": {
         "address": "n",
@@ -360,6 +2334,56 @@
       "members": [],
       "genChecksumString": "",
       "computeChecksum": 3696677242
+    },
+    {
+      "name": "labelled_unicode",
+      "members": [
+        {
+          "address": "n-雪",
+          "status": "alive",
+          "incarnation": 7,
+          "labels": {
+            "é": "雪",
+            "ключ": "значение🌱"
+          }
+        }
+      ],
+      "genChecksumString": "n-雪alive7#labels288230387;",
+      "computeChecksum": 3033914028
+    },
+    {
+      "name": "label_insertion_order_a",
+      "members": [
+        {
+          "address": "n",
+          "status": "alive",
+          "incarnation": 8,
+          "labels": {
+            "a": "1",
+            "b": "2",
+            "c": "3"
+          }
+        }
+      ],
+      "genChecksumString": "nalive8#labels-182565792;",
+      "computeChecksum": 463793989
+    },
+    {
+      "name": "label_insertion_order_b",
+      "members": [
+        {
+          "address": "n",
+          "status": "alive",
+          "incarnation": 8,
+          "labels": {
+            "a": "1",
+            "b": "2",
+            "c": "3"
+          }
+        }
+      ],
+      "genChecksumString": "nalive8#labels-182565792;",
+      "computeChecksum": 463793989
     }
   ]
 }
