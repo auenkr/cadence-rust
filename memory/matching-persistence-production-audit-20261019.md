@@ -177,19 +177,21 @@ ignored as it is for Go's SQLite plugin.
 
 The mixed Go/Rust probe has been extended in source to use the configured DB
 for both directions: Go's TaskStore reads task-list metadata written by Rust,
-and Go's TaskStore inserts activity task ID 0 after Rust creates the matching
-queue. Rust's queue scan starts at read level -1 and queries `(read_level,
-max_read_level]`, so ID 0 is eligible and sorts before Rust's positive
-allocator IDs; after poll delivery, the Go TaskStore assertion checks that ID
-0 was consumed. The activity uses the valid scheduled event produced by the
-Go Frontend/History path. The compatibility runner passes the selected DB to
-the Go probe and checks that production startup did not create the private
-data-dir database.
+and Go's TaskStore inserts a distinct activity task ID 2 after Rust creates
+the matching queue and a first Rust task at ID 1. A fresh Go task list can
+restore ack level 0, so ID 0 would be skipped by Rust's strict
+`task_id > read_level` scan. The corrected probe first polls and starts the
+valid Rust-enqueued activity (advancing the reader), then polls for a second,
+distinct Go-enqueued activity at ID 2 and asserts its activity ID and input.
+It then waits up to five seconds for Rust's asynchronous GC to remove Go row
+2. Both activities use valid scheduled events produced by Go Frontend/History.
+The compatibility runner passes the selected DB to the Go probe and checks
+that production startup did not create the private data-dir database.
 
 This follow-up is **source-only and unvalidated**: History currently owns the
 shared build slot, so no compile, build, or tests have run for this delta. The
-probe's consumed-row assertion and the Rust wiring must be exercised after the
-slot is released. Even when that passes, this is only evidence for one
+probe's distinct Go task delivery and consumed-row assertion, plus the Rust
+wiring, must be exercised after the slot is released. Even when that passes, this is only evidence for one
 single-shard SQLite backend. It does not establish configured multi-shard SQL,
 Cassandra, every SQL plugin, or overall Matching service parity. Do not move
 to History migration until the configured-store probe, full Matching parity

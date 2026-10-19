@@ -113,7 +113,14 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			if err != nil || len(decision.TaskToken) == 0 || decision.GetStartedEventId() == 0 || decision.WorkflowExecution.GetRunId() != run.GetRunId() {
 				t.Fatalf("decision delivery: %v %v", decision, err)
 			}
-			_, err = frontend.RespondDecisionTaskCompleted(ctx, &s.RespondDecisionTaskCompletedRequest{TaskToken: decision.TaskToken, Identity: common.StringPtr("thrift-worker"), Decisions: []*s.Decision{{DecisionType: s.DecisionTypeScheduleActivityTask.Ptr(), ScheduleActivityTaskDecisionAttributes: &s.ScheduleActivityTaskDecisionAttributes{ActivityId: common.StringPtr("activity"), ActivityType: &s.ActivityType{Name: common.StringPtr("echo")}, TaskList: list, Input: []byte("input"), ScheduleToCloseTimeoutSeconds: common.Int32Ptr(30), ScheduleToStartTimeoutSeconds: common.Int32Ptr(30), StartToCloseTimeoutSeconds: common.Int32Ptr(30)}}}})
+			activityDecision := func(id, input string) *s.Decision {
+				return &s.Decision{DecisionType: s.DecisionTypeScheduleActivityTask.Ptr(), ScheduleActivityTaskDecisionAttributes: &s.ScheduleActivityTaskDecisionAttributes{
+					ActivityId: common.StringPtr(id), ActivityType: &s.ActivityType{Name: common.StringPtr("echo")}, TaskList: list,
+					Input: []byte(input), ScheduleToCloseTimeoutSeconds: common.Int32Ptr(30),
+					ScheduleToStartTimeoutSeconds: common.Int32Ptr(30), StartToCloseTimeoutSeconds: common.Int32Ptr(30),
+				}}
+			}
+			_, err = frontend.RespondDecisionTaskCompleted(ctx, &s.RespondDecisionTaskCompletedRequest{TaskToken: decision.TaskToken, Identity: common.StringPtr("thrift-worker"), Decisions: []*s.Decision{activityDecision("activity", "input"), activityDecision("go-queued-activity", "go-input")}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -121,28 +128,33 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var scheduleID int64
+			scheduleIDs := make(map[string]int64)
 			for _, event := range history.History.Events {
 				if event.ActivityTaskScheduledEventAttributes != nil {
-					scheduleID = event.GetEventId()
+					scheduleIDs[event.ActivityTaskScheduledEventAttributes.GetActivityId()] = event.GetEventId()
 				}
 			}
-			if scheduleID == 0 {
-				t.Fatal("missing activity schedule")
+			if scheduleIDs["activity"] == 0 || scheduleIDs["go-queued-activity"] == 0 {
+				t.Fatalf("missing activity schedules: %v", scheduleIDs)
 			}
-			err = matching.AddActivityTask(ctx, &m.AddActivityTaskRequest{DomainUUID: common.StringPtr(domainID), SourceDomainUUID: common.StringPtr(domainID), Execution: execution, TaskList: list, ScheduleId: common.Int64Ptr(scheduleID)})
+			err = matching.AddActivityTask(ctx, &m.AddActivityTaskRequest{DomainUUID: common.StringPtr(domainID), SourceDomainUUID: common.StringPtr(domainID), Execution: execution, TaskList: list, ScheduleId: common.Int64Ptr(scheduleIDs["activity"])})
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Insert an earlier task ID through Go's configured SQL TaskStore.
-			// Rust must poll and start this row, proving Go-to-Rust task delivery
-			// over the same configured database (the Rust-created row remains queued).
+			// Insert task ID 2 through Go's configured SQL TaskStore. Rust's fresh
+			// queue starts at ID 1, so its first poll starts the Rust-enqueued
+			// activity, advances the read level, and a second poll must then start
+			// this distinct Go-enqueued activity from the same configured database.
 			if path := os.Getenv("CADENCE_MATCHING_SQLITE_DB"); path != "" {
-				insertGoQueuedActivityTask(t, path, domainID, list.GetName(), workflowID, run.GetRunId(), scheduleID)
+				insertGoQueuedActivityTask(t, path, domainID, list.GetName(), workflowID, run.GetRunId(), scheduleIDs["go-queued-activity"])
 			}
 			activity, err := matching.PollForActivityTask(ctx, &m.PollForActivityTaskRequest{DomainUUID: common.StringPtr(domainID), PollerID: common.StringPtr(uuid.NewString()), PollRequest: &s.PollForActivityTaskRequest{TaskList: list, Identity: common.StringPtr("activity-worker"), TaskListMetadata: &s.TaskListMetadata{MaxTasksPerSecond: common.Float64Ptr(50)}}})
 			if err != nil || string(activity.Input) != "input" || activity.GetActivityId() != "activity" {
 				t.Fatalf("activity delivery: %v %v", activity, err)
+			}
+			goActivity, err := matching.PollForActivityTask(ctx, &m.PollForActivityTaskRequest{DomainUUID: common.StringPtr(domainID), PollerID: common.StringPtr(uuid.NewString()), PollRequest: &s.PollForActivityTaskRequest{TaskList: list, Identity: common.StringPtr("go-activity-worker"), TaskListMetadata: &s.TaskListMetadata{MaxTasksPerSecond: common.Float64Ptr(50)}}})
+			if err != nil || string(goActivity.Input) != "go-input" || goActivity.GetActivityId() != "go-queued-activity" {
+				t.Fatalf("Go-enqueued activity delivery: %v %v", goActivity, err)
 			}
 			if path := os.Getenv("CADENCE_MATCHING_SQLITE_DB"); path != "" {
 				assertGoQueuedActivityTaskConsumed(t, path, domainID, list.GetName())
@@ -282,7 +294,7 @@ func insertGoQueuedActivityTask(t *testing.T, path, domainID, taskList, workflow
 	_, err = store.CreateTasks(ctx, &p.CreateTasksRequest{
 		TaskListInfo:     metadata.TaskListInfo,
 		CurrentTimeStamp: time.Now(),
-		Tasks: []*p.CreateTaskInfo{{TaskID: 0, Data: &p.TaskInfo{
+		Tasks: []*p.CreateTaskInfo{{TaskID: 2, Data: &p.TaskInfo{
 			DomainID: domainID, WorkflowID: workflowID, RunID: runID, ScheduleID: scheduleID,
 			ScheduleToStartTimeoutSeconds: 30, ScheduleToCloseTimeoutSeconds: 30,
 			StartToCloseTimeoutSeconds: 30,
@@ -306,14 +318,23 @@ func assertGoQueuedActivityTaskConsumed(t *testing.T, path, domainID, taskList s
 		t.Fatal(err)
 	}
 	defer store.Close()
-	tasks, err := store.GetTasks(context.Background(), &p.GetTasksRequest{DomainID: domainID, TaskList: taskList, TaskType: 1, ReadLevel: -1, BatchSize: 100})
-	if err != nil {
-		t.Fatalf("Go TaskStore could not inspect Rust's post-poll queue: %v", err)
-	}
-	for _, task := range tasks.Tasks {
-		if task.TaskID == 0 {
-			t.Fatal("Go-enqueued task ID 0 remains queued after Rust Matching delivered the activity")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tasks, err := store.GetTasks(context.Background(), &p.GetTasksRequest{DomainID: domainID, TaskList: taskList, TaskType: 1, ReadLevel: -1, BatchSize: 100})
+		if err != nil {
+			t.Fatalf("Go TaskStore could not inspect Rust's post-poll queue: %v", err)
 		}
+		goTaskRemains := false
+		for _, task := range tasks.Tasks {
+			goTaskRemains = goTaskRemains || task.TaskID == 2
+		}
+		if !goTaskRemains {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Go-enqueued task ID 2 remains queued after Rust Matching delivered the distinct activity")
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
