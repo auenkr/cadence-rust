@@ -4,7 +4,7 @@ Source inspected: ac2c3c4fb (no production edits since ec059ca8e). Matching rema
 
 The existing mixed-service compatibility harness is valuable but starts the Cargo-reported ignored `matching_delivery_go_history` test executable (`tests/matching-service-compat.cjs`, startRust), not `cadence-server start`. The adapter injects independent History, domain metadata, lifecycle triggers and store dependencies. Its successful SDK/restart evidence does not prove production main wiring.
 
-Current production main (`rust/crates/cadence-server/src/main.rs`, durable assembly around729-786 and listener join806-894) still:
+Historical findings at ac2c3c4fb (see current status update below):
 
 - selects durable SQLite only with `--data-dir`; otherwise uses embedded in-memory Matching;
 - hardcodes outbound History to loopback plus configured History port, despite allowing only Matching role;
@@ -26,3 +26,20 @@ Immediate independent follow-up once a worker slot is free: runtime owner/lifecy
 ## Runtime-owner review, 2026-10-19
 
 The draft main signal branch awaited drain inside a `tokio::select!` arm while listener futures lived in the competing serving arm. Selecting the signal drops that arm, so it cannot establish that listeners continue accepting during drain. Parent requested pinned/owned serving lifetime polled through the drain, cleanup even on signal/drain errors, and an actual Go RPC during a nonzero drain. A port-open check or elapsed shutdown duration does not prove this behavior. This draft remains unaccepted until corrected and validated.
+
+## Accepted component update, 2026-10-19
+
+At root e1b78e5f1, production Matching runtime owns maintenance/drain shutdown
+and configured SQLite defaultStore domain-cache startup/refresh/callback teardown.
+Actual production binary Go native-Thrift probe passes ordinary/WAL failover
+visibility, HTTP/TChannel/TLS compatibility and embedded data-dir boot gates.
+The listener remains polled through drain in accepted runtime source. These
+replace the historical maintenance/snapshot findings above; they do not
+establish full mixed Go Frontend/History/Worker topology or SDK recovery.
+
+Shared Matching+Ringpop TChannel API and owned SWIM runtime are accepted, but
+main still does not instantiate/bootstrap the provider. Configured task writes
+still depend on data-dir; discovered History placement is not yet injected.
+Concrete provider and configured SQLite task factory are active source-only
+slices; routing is under combined validation. Keep the production mixed gate
+open until the actual binary passes the topology and failure cases above.
