@@ -128,3 +128,30 @@ validation. Can reuse cache warmed target after release. SWIM worker is
 source-only implementing concrete provider, prebound listener, local label/status
 and self-eviction primitives; production main recipe separate. Cache worker
 source-only plans configured SQLite task persistence next; no extra builds.
+
+## Routing and provider review continuation
+
+History rebased source chain onto e1b78e5f1: 7e2214bff,9cbd46f03,e116c1f4a,
+c4777e095,9652ecff3,c55c60a8d,6ad604825 plus compilation fixes. Shared RPC
+boundary test does not establish dispatcher/query end-to-end deadline proof.
+First builds found inference/missing farmhash dependency, then test fixture
+shadowing/Status comparison issues. Worker fixes in own worktree; sole heavy
+slot remains History. Final acceptance requires passing locked frozen-source
+gates, strict lint and Go oracle. No routing implementation integrated yet.
+
+Provider source-only candidate e6fc0fd79 in t3-6f14baa6 adds prebound shared
+listener/provider/local mutation/self-eviction/watch changes. Parent rejected
+250ms polling; replaced by membership watch. Further review caught a stale
+service==self guard that drops History members and local-index/IP-selection
+assumptions. Worker is correcting and preparing actual node interoperability
+tests; no build grant. Provider edits were accidentally made in shared root;
+worker saved patch/hashes, rebased isolated worktree onto783e020f1, copied and
+verified exact hashes, restored ONLY owned root paths. Root remains only
+user-modified AGENTS. No build ran on dirty root provider source.
+
+Task-store worker moved clean worktree onto91431dd31 and is source-only
+implementing defaultStore-configured single-shard SQLite queue factory. Parent
+required exact database path preservation, writer journal/busy options rather
+than reader exceptions, existing schema validation and actual Go read/write
+proof. Explicit unsupported backend/multishard errors are partial migration,
+not all-backend parity. No new target directories needed;42GBfree.
