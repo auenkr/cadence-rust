@@ -1,0 +1,10 @@
+gate	status
+persistence	failed
+cache	pending
+domain-failover	pending
+server-check	pending
+server-build	pending
+clippy	pending
+go-production-probe	pending
+persistence-go-interop	pending
+diff-check	pending

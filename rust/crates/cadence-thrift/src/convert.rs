@@ -71,6 +71,7 @@ wrap_enum!(
     GetTaskFailedCause,
     HistoryEventFilterType,
     IndexedValueType,
+    IsolationGroupState,
     ParentClosePolicy,
     PendingActivityState,
     PendingDecisionState,
@@ -467,7 +468,10 @@ impl FromThrift for ActiveClusterInfo {
 impl ToThrift for ActiveClusterInfo {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.fields.push((10, Value::Bytes(self.active_cluster_name.as_bytes().to_vec())));
+        f.fields.push((
+            10,
+            Value::Bytes(self.active_cluster_name.as_bytes().to_vec()),
+        ));
         f.fields.push((20, Value::I64(self.failover_version)));
         f.finish()
     }
@@ -476,7 +480,9 @@ impl ToThrift for ActiveClusterInfo {
 impl FromThrift for ClusterAttributeScope {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
-            cluster_attributes: s.opt_map_str::<ActiveClusterInfo>(10)?.filter(|m| !m.is_empty()),
+            cluster_attributes: s
+                .opt_map_str::<ActiveClusterInfo>(10)?
+                .filter(|m| !m.is_empty()),
         })
     }
 }
@@ -503,6 +509,34 @@ impl ToThrift for ActiveClusters {
         let mut f = Fields::new();
         f.omap_str_struct(11, &self.active_clusters_by_cluster_attribute);
         f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::types::IsolationGroupPartition {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            name: s.opt_string(10)?.unwrap_or_default(),
+            state: s.opt_enum(20)?,
+        })
+    }
+}
+
+impl FromThrift for IsolationGroupConfiguration {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            isolation_groups: s.opt_list(10)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl FromThrift for AsyncWorkflowConfiguration {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            enabled: s.opt_bool(10)?.unwrap_or_default(),
+            predefined_queue_name: s.opt_string(20)?.unwrap_or_default(),
+            queue_type: s.opt_string(30)?.unwrap_or_default(),
+            queue_config: s.opt_struct(40)?,
+        })
     }
 }
 
@@ -1566,7 +1600,8 @@ impl ToThrift for ResetWorkflowExecutionRequest {
         f.ostruct(20, self.workflow_execution.as_ref());
         f.sstr(30, &self.reason);
         if self.decision_finish_event_id != 0 {
-            f.fields.push((40, Value::I64(self.decision_finish_event_id)));
+            f.fields
+                .push((40, Value::I64(self.decision_finish_event_id)));
         }
         f.sstr(50, &self.request_id);
         f.obool(60, self.skip_signal_reapply);
@@ -2056,7 +2091,8 @@ impl ToThrift for ScheduleInfo {
             f.fields.push((90, Value::I64(self.buffered_fire_count)));
         }
         if self.running_workflow_count != 0 {
-            f.fields.push((100, Value::I64(self.running_workflow_count)));
+            f.fields
+                .push((100, Value::I64(self.running_workflow_count)));
         }
         f.finish()
     }

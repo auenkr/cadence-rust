@@ -35,7 +35,8 @@ fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net
                 best = Some((score, ip));
             }
         }
-        best.map(|(_, ip)| ip).ok_or_else(|| anyhow::anyhow!("no addresses to listen on"))?
+        best.map(|(_, ip)| ip)
+            .ok_or_else(|| anyhow::anyhow!("no addresses to listen on"))?
     };
     Ok(Some(std::net::SocketAddr::new(ip, http.port)))
 }
@@ -247,7 +248,15 @@ async fn serve_matching_http_permissive(
             Ok(Ok(n)) if n > 0 => n,
             Ok(Ok(_)) => return (Err(io::Error::from(io::ErrorKind::UnexpectedEof)), peer),
             Ok(Err(error)) => return (Err(error), peer),
-            Err(_) => return (Err(io::Error::new(io::ErrorKind::TimedOut, "TLS sniff timed out")), peer),
+            Err(_) => {
+                return (
+                    Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "TLS sniff timed out",
+                    )),
+                    peer,
+                )
+            }
         };
         let stream = PrefixedStream {
             prefix: std::io::Cursor::new(header[..n].to_vec()),
@@ -331,7 +340,10 @@ mod matching_http_listener_tests {
                 .kind()
         });
         let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
-        client.write_all(&[0x16, 0x03, 0x03, 0x00, 0x01]).await.unwrap();
+        client
+            .write_all(&[0x16, 0x03, 0x03, 0x00, 0x01])
+            .await
+            .unwrap();
         assert_eq!(accepting.await.unwrap(), std::io::ErrorKind::TimedOut);
     }
 
@@ -496,6 +508,11 @@ async fn main() -> anyhow::Result<()> {
             matching_tchannel_port,
             data_dir,
         } => {
+            // The no-config CLI is an explicit embedded development mode. It
+            // keeps the in-memory domain view used by standalone compatibility
+            // tests; an explicit YAML config must provide Matching's real
+            // supported persistence backend.
+            let embedded_development = config.is_none();
             let cfg = match config {
                 Some(path) => config::Config::from_file(path)?,
                 None => config::Config::development()?,
@@ -541,8 +558,13 @@ async fn main() -> anyhow::Result<()> {
                     .services
                     .get("matching")
                     .is_some_and(|matching| matching.rpc.http.is_some());
-            let metadata = cfg.cluster_metadata.as_ref().expect("validated cluster metadata");
-            state.current_cluster_name.clone_from(&metadata.current_cluster_name);
+            let metadata = cfg
+                .cluster_metadata
+                .as_ref()
+                .expect("validated cluster metadata");
+            state
+                .current_cluster_name
+                .clone_from(&metadata.current_cluster_name);
             state.cluster_metadata = metadata.metadata();
             let frontend_rpc = cfg.services.get("frontend").map(|s| &s.rpc);
             if let Some(limit) = frontend_rpc
@@ -711,14 +733,27 @@ async fn main() -> anyhow::Result<()> {
                     [0, 0, 0, 0]
                 },
                 matching_grpc_port
-                    .or_else(|| matching_rpc.as_ref().map(|r| r.grpc_port).filter(|p| *p > 0))
+                    .or_else(|| {
+                        matching_rpc
+                            .as_ref()
+                            .map(|r| r.grpc_port)
+                            .filter(|p| *p > 0)
+                    })
                     .unwrap_or(7835),
             ));
-            let matching_tchannel_addr = std::net::SocketAddr::new(matching_addr.ip(), matching_tchannel_port
-                .or_else(|| matching_rpc.as_ref().map(|r| r.port).filter(|p| *p > 0)).unwrap_or(7935));
+            let matching_tchannel_addr = std::net::SocketAddr::new(
+                matching_addr.ip(),
+                matching_tchannel_port
+                    .or_else(|| matching_rpc.as_ref().map(|r| r.port).filter(|p| *p > 0))
+                    .unwrap_or(7935),
+            );
             let run_matching = wanted.contains(&service::ServiceName::Matching);
             let matching_http_addr = if run_matching {
-                matching_rpc.as_ref().map(matching_http_addr).transpose()?.flatten()
+                matching_rpc
+                    .as_ref()
+                    .map(matching_http_addr)
+                    .transpose()?
+                    .flatten()
             } else {
                 None
             };
@@ -739,9 +774,19 @@ async fn main() -> anyhow::Result<()> {
                 println!("Cadence internal matching gRPC listening on {matching_addr}");
                 println!("Cadence internal matching Thrift/TChannel listening on {matching_tchannel_addr}");
             }
-            // MatchingRuntime owns the production handler and its background
-            // maintenance task. Dependencies are explicit; production membership
-            // and the shared domain cache remain separate pending adapters.
+            let matching_domain_cache = if run_matching && !embedded_development {
+                Some(
+                    cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store(
+                        &cfg.persistence,
+                        &state.current_cluster_name,
+                    )?,
+                )
+            } else {
+                None
+            };
+            // Explicit production config starts the durable cache before
+            // Matching, while no-config embedded mode retains the in-memory
+            // behavior and does not pretend that Cassandra is implemented.
             let mut matching_runtime = if run_matching {
                 let drain = cadence_server::matching_runtime::live_shutdown_drain_duration(
                     state.admin.dynamic_config.clone(),
@@ -770,18 +815,34 @@ async fn main() -> anyhow::Result<()> {
                             std::time::Duration::from_secs(1),
                             32 * 1024 * 1024,
                         );
-                        cadence_server::matching_runtime::MatchingRuntime::with_durable_queues(
-                            state.clone(),
-                            std::sync::Arc::new(store),
-                            history,
-                            std::num::NonZeroU32::new(100000).expect("task id range"),
-                            std::time::Duration::from_secs(60),
-                            drain,
-                        )
+                        match matching_domain_cache.clone() {
+                            Some(cache) => cadence_server::matching_runtime::MatchingRuntime::with_durable_queues_and_domain_cache(
+                                state.clone(),
+                                std::sync::Arc::new(store),
+                                history,
+                                std::num::NonZeroU32::new(100000).expect("task id range"),
+                                std::time::Duration::from_secs(60),
+                                drain,
+                                cache,
+                            ).await?,
+                            None => cadence_server::matching_runtime::MatchingRuntime::with_durable_queues(
+                                state.clone(),
+                                std::sync::Arc::new(store),
+                                history,
+                                std::num::NonZeroU32::new(100000).expect("task id range"),
+                                std::time::Duration::from_secs(60),
+                                drain,
+                            ),
+                        }
                     }
-                    None => cadence_server::matching_runtime::MatchingRuntime::in_memory(
-                        state.clone(), drain,
-                    ),
+                    None => match matching_domain_cache.clone() {
+                        Some(cache) => cadence_server::matching_runtime::MatchingRuntime::in_memory_with_domain_cache(
+                            state.clone(), drain, cache,
+                        ).await?,
+                        None => cadence_server::matching_runtime::MatchingRuntime::in_memory(
+                            state.clone(), drain,
+                        ),
+                    },
                 })
             } else {
                 None
@@ -862,14 +923,16 @@ async fn main() -> anyhow::Result<()> {
                     async {
                         if run_matching {
                             if let Some(addr) = matching_http_addr {
-                                let http = matching_rpc.as_ref()
+                                let http = matching_rpc
+                                    .as_ref()
                                     .and_then(|rpc| rpc.http.as_ref())
                                     .expect("configured Matching HTTP address");
                                 let app = cadence_server::thrift_matching::router_with_procedures(
                                     matching_service.clone(),
                                     http.procedures.clone(),
                                 );
-                                let http = matching_rpc.as_ref()
+                                let http = matching_rpc
+                                    .as_ref()
                                     .and_then(|rpc| rpc.http.as_ref())
                                     .expect("configured Matching HTTP");
                                 if http.tls_mode.as_deref() == Some("enforced")
@@ -921,8 +984,12 @@ async fn main() -> anyhow::Result<()> {
             };
             if serving_result.is_none() {
                 if serving.is_finished() {
-                    serving_result =
-                        Some(serving.await.map_err(anyhow::Error::from).and_then(|result| result));
+                    serving_result = Some(
+                        serving
+                            .await
+                            .map_err(anyhow::Error::from)
+                            .and_then(|result| result),
+                    );
                 } else if signal_result.is_some() {
                     serving.abort();
                     let _ = serving.await;

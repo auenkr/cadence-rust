@@ -100,7 +100,18 @@ fn metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSo
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+fn validate_typed_domain_config(
+    domain: &MatchingDomainMetadata,
+) -> Result<(), DomainMetadataSourceError> {
+    if let Some(error) = domain.config_decode_error.as_deref() {
+        return Err(DomainMetadataSourceError::permanent(format!(
+            "converting Matching domain metadata: {error}"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DomainMetadataPage {
     pub domains: Vec<MatchingDomainMetadata>,
     pub next_page_token: Option<Vec<u8>>,
@@ -125,6 +136,9 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
             _timeout,
         )
         .map_err(metadata_source_error)?;
+        for domain in &page.domains {
+            validate_typed_domain_config(domain)?;
+        }
         Ok(DomainMetadataPage {
             domains: page.domains,
             next_page_token: page.next_page_token,
@@ -137,8 +151,10 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
         id: Option<&str>,
         _timeout: Duration,
     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
-        MatchingDomainMetadataStore::get_domain_with_timeout(self, name, id, _timeout)
-            .map_err(metadata_source_error)
+        let domain = MatchingDomainMetadataStore::get_domain_with_timeout(self, name, id, _timeout)
+            .map_err(metadata_source_error)?;
+        validate_typed_domain_config(&domain)?;
+        Ok(domain)
     }
 }
 
@@ -250,6 +266,84 @@ pub struct MatchingDomainCache {
 }
 
 impl MatchingDomainCache {
+    /// Construct the production reader from Go's configured defaultStore.
+    /// The Matching reader currently supports only file-backed SQLite; it
+    /// never falls back to the JSON snapshot or another configured datastore.
+    pub fn from_default_store(
+        persistence: &crate::config::PersistenceConfig,
+        current_cluster: &str,
+    ) -> anyhow::Result<Arc<Self>> {
+        let name = persistence.default_store.trim();
+        if name.is_empty() {
+            anyhow::bail!("Matching domain cache requires persistence.defaultStore");
+        }
+        let datastore = persistence.datastores.get(name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Matching defaultStore {name:?} is not present in persistence.datastores"
+            )
+        })?;
+        if datastore.nosql.is_some() {
+            anyhow::bail!(
+                "Matching domain metadata reader does not support configured NoSQL defaultStore {name:?}"
+            );
+        }
+        let sql = datastore.sql.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Matching defaultStore {name:?} must configure SQL plugin sqlite")
+        })?;
+        if sql.plugin_name != "sqlite" {
+            anyhow::bail!(
+                "Matching domain metadata reader does not support SQL plugin {:?}; supported plugin is sqlite",
+                sql.plugin_name
+            );
+        }
+        if sql.database_name.trim().is_empty() || sql.database_name == ":memory:" {
+            anyhow::bail!(
+                "Matching domain metadata reader requires a file-backed SQLite databaseName"
+            );
+        }
+        // Go's SQLite plugin constructs `file:<databaseName>?<attrs>` without
+        // escaping DatabaseName. A literal '?' is therefore already the URI
+        // attribute separator, and appending our read-only mode would silently
+        // reinterpret the configured DSN. Percent-escaped `%3F` remains valid
+        // and is decoded by SQLite on both sides.
+        if sql.database_name.contains('?') {
+            anyhow::bail!(
+                "Matching domain metadata reader does not support SQLite databaseName containing URI query attributes"
+            );
+        }
+        let mut uri_mode = "rwc";
+        let mut busy_timeout = Duration::from_secs(60);
+        for (key, value) in &sql.connect_attributes {
+            let key = key.trim().to_ascii_lowercase();
+            let value = value.trim();
+            match key.as_str() {
+                "mode" => uri_mode = value,
+                "_pragma.busy_timeout" => {
+                    let milliseconds = value.parse::<u64>().map_err(|_| {
+                        anyhow::anyhow!("invalid SQLite _pragma.busy_timeout {value:?}")
+                    })?;
+                    busy_timeout = Duration::from_millis(milliseconds);
+                }
+                // Go applies these when opening its read/write SQL connection.
+                // The journal mode is stored on the database; it does not
+                // change SELECT results. `_timefmt` only encodes SQL time
+                // columns, while this reader takes times from Thrift DomainInfo
+                // blobs and therefore never invokes that codec.
+                "_pragma.journal_mode" | "_timefmt" => {}
+                _ => anyhow::bail!(
+                    "Matching domain metadata reader does not support SQLite connectAttribute {key:?}"
+                ),
+            }
+        }
+        let source = cadence_persistence::matching_domain_metadata::MatchingDomainMetadataStore::open_read_only_with_options(
+            &sql.database_name,
+            current_cluster,
+            uri_mode,
+            busy_timeout,
+        )?;
+        Ok(Arc::new(Self::new(Arc::new(source))))
+    }
+
     pub fn new(source: Arc<dyn DomainMetadataSource>) -> Self {
         Self::with_clock(source, Arc::new(SystemDomainCacheClock::default()))
     }
@@ -358,6 +452,12 @@ impl MatchingDomainCache {
         prepare: PrepareCallback,
         changed: DomainChangeCallback,
     ) {
+        // Refresh publishes callback notifications while holding refresh_lock.
+        // Take the same lock across registration and catch-up so a concurrent
+        // refresh cannot publish between callback installation and the
+        // catch-up snapshot. This uses the same refresh -> callbacks lock order
+        // as refresh_domains_locked and avoids a stale baseline race.
+        let _refresh = self.refresh_lock.lock().expect("domain refresh lock");
         let id = id.into();
         {
             let mut callbacks = self.callbacks.lock().expect("domain cache callback lock");
@@ -571,6 +671,19 @@ impl MatchingDomainCache {
                         .expect("domain cache source error lock") = Some(error.retryable);
                     DomainCacheError::Source(error.message)
                 })?;
+            if let Some(error) = page
+                .domains
+                .iter()
+                .find_map(|domain| domain.config_decode_error.as_deref())
+            {
+                *self
+                    .last_source_error_retryable
+                    .lock()
+                    .expect("domain cache source error lock") = Some(false);
+                return Err(DomainCacheError::Source(format!(
+                    "converting Matching domain metadata: {error}"
+                )));
+            }
             records.extend(page.domains);
             token = page.next_page_token;
             if token.is_none() {
@@ -626,6 +739,85 @@ mod tests {
     use super::*;
     use cadence_api::types::{DomainConfiguration, DomainInfo, DomainReplicationConfiguration};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc::{Receiver, SyncSender};
+
+    #[test]
+    fn production_source_uses_only_the_selected_sqlite_default_store() {
+        let empty = crate::config::PersistenceConfig::default();
+        assert!(MatchingDomainCache::from_default_store(&empty, "active")
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("persistence.defaultStore"));
+
+        let unsupported = crate::config::PersistenceConfig {
+            default_store: "no-sql".into(),
+            datastores: HashMap::from([(
+                "no-sql".into(),
+                crate::config::DatastoreConfig {
+                    nosql: Some(crate::config::NosqlConfig {
+                        plugin_name: "cassandra".into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        assert!(
+            MatchingDomainCache::from_default_store(&unsupported, "active")
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("does not support configured NoSQL")
+        );
+
+        let wrong_sql = crate::config::PersistenceConfig {
+            default_store: "mysql".into(),
+            datastores: HashMap::from([(
+                "mysql".into(),
+                crate::config::DatastoreConfig {
+                    sql: Some(crate::config::SqlConfig {
+                        plugin_name: "mysql".into(),
+                        database_name: "/tmp/cadence.db".into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        assert!(
+            MatchingDomainCache::from_default_store(&wrong_sql, "active")
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("supported plugin is sqlite")
+        );
+
+        let ambiguous_path = crate::config::PersistenceConfig {
+            default_store: "sqlite".into(),
+            datastores: HashMap::from([(
+                "sqlite".into(),
+                crate::config::DatastoreConfig {
+                    sql: Some(crate::config::SqlConfig {
+                        plugin_name: "sqlite".into(),
+                        database_name: "/tmp/cadence?mode=memory".into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        assert!(
+            MatchingDomainCache::from_default_store(&ambiguous_path, "active")
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("databaseName containing URI query attributes")
+        );
+    }
 
     #[derive(Default)]
     struct FakeClock(AtomicU64);
@@ -666,6 +858,7 @@ mod tests {
         calls: Mutex<Vec<String>>,
         timeouts: Mutex<Vec<Duration>>,
         metadata_delay: Mutex<Duration>,
+        metadata_gate: Mutex<Option<(SyncSender<()>, Receiver<()>)>>,
     }
     impl FakeSource {
         fn put(&self, record: MatchingDomainMetadata) {
@@ -685,6 +878,10 @@ mod tests {
             assert!(!timeout.is_zero() && timeout <= DOMAIN_CACHE_PERSISTENCE_TIMEOUT);
             self.calls.lock().unwrap().push("metadata".into());
             self.timeouts.lock().unwrap().push(timeout);
+            if let Some((entered, release)) = self.metadata_gate.lock().unwrap().take() {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            }
             thread::sleep(*self.metadata_delay.lock().unwrap());
             Ok(*self.version.lock().unwrap())
         }
@@ -740,7 +937,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("get:{}", name.or(id).unwrap_or("")));
-            self.records
+            let domain = self.records
                 .lock()
                 .unwrap()
                 .iter()
@@ -754,7 +951,9 @@ mod tests {
                         "Domain {} does not exist.",
                         name.or(id).unwrap_or("")
                     ))
-                })
+                })?;
+            validate_typed_domain_config(&domain)?;
+            Ok(domain)
         }
     }
 
@@ -785,6 +984,10 @@ mod tests {
             isolation_groups: None,
             async_workflow_config: None,
             active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
         }
     }
 
@@ -814,6 +1017,86 @@ mod tests {
             Arc::clone(source) as Arc<dyn DomainMetadataSource>,
             Arc::clone(clock) as Arc<dyn DomainCacheClock>,
         ))
+    }
+
+    #[test]
+    fn callback_catch_up_serializes_with_refresh_publication() {
+        let source = Arc::new(FakeSource::default());
+        *source.version.lock().unwrap() = 10;
+        source.put(record(1, 1));
+        let clock = Arc::new(FakeClock::default());
+        let cache = cache(&source, &clock);
+        cache.refresh_domains().unwrap();
+
+        let (snapshot_tx, snapshot_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let callback_observed = Arc::clone(&observed);
+        let callback_release_rx = Arc::clone(&release_rx);
+        let catch_up: CatchUpCallback = Arc::new(move |entries, _prepare, changed| {
+            snapshot_tx.send(entries[0].notification_version).unwrap();
+            callback_release_rx.lock().unwrap().recv().unwrap();
+            changed(entries);
+        });
+        let changed: DomainChangeCallback = Arc::new(move |entries| {
+            callback_observed
+                .lock()
+                .unwrap()
+                .extend(entries.iter().map(|entry| entry.notification_version));
+        });
+        let registering_cache = Arc::clone(&cache);
+        let register = thread::spawn(move || {
+            registering_cache.register_callback("test", catch_up, Arc::new(|| {}), changed);
+        });
+
+        assert_eq!(snapshot_rx.recv().unwrap(), 1);
+        assert!(cache.refresh_lock.try_lock().is_err());
+        release_tx.send(()).unwrap();
+        register.join().unwrap();
+
+        source.put(record(1, 2));
+        clock.0.store(2, Ordering::SeqCst);
+        cache.refresh_domains().unwrap();
+        assert_eq!(*observed.lock().unwrap(), [1, 2]);
+        cache.unregister_callback("test");
+    }
+
+    #[test]
+    fn typed_domain_config_error_during_refresh_keeps_raw_cache_snapshot() {
+        let source = Arc::new(FakeSource::default());
+        *source.version.lock().unwrap() = 10;
+        source.put(record(1, 1));
+        let clock = Arc::new(FakeClock::default());
+        let cache = cache(&source, &clock);
+        cache.refresh_domains().unwrap();
+
+        *source.version.lock().unwrap() = 11;
+        let mut malformed = record(2, 11);
+        malformed.config_decode_error = Some("invalid opaque domain config".into());
+        source.put(malformed);
+        clock.0.store(2, Ordering::SeqCst);
+        let error = cache.refresh_domains().unwrap_err().to_string();
+        assert!(error.contains("invalid opaque domain config"));
+        assert_eq!(
+            cache.get_domain_id("domain-1").unwrap(),
+            format!("{:032x}", 1)
+        );
+        assert!(cache.get_domain_id("domain-2").is_err());
+    }
+
+    #[test]
+    fn malformed_typed_domain_config_fails_cache_miss_without_loading_entry() {
+        let source = Arc::new(FakeSource::default());
+        let mut malformed = record(1, 1);
+        malformed.config_decode_error = Some("invalid opaque domain config".into());
+        source.put(malformed);
+        let cache = cache(&source, &Arc::new(FakeClock::default()));
+
+        let error = cache.get_domain("domain-1").unwrap_err();
+        assert!(error.to_string().contains("invalid opaque domain config"));
+        assert_eq!(cache.get_cache_size(), (0, 0));
+        assert_eq!(*source.calls.lock().unwrap(), ["get:domain-1"]);
     }
 
     #[test]

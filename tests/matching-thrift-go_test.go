@@ -242,6 +242,75 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 	}
 }
 
+// TestRustMatchingDomainCacheFailoverProbe runs against the production Rust
+// Matching process. The Python runner changes the Go SQL domain row while this
+// worker poll is blocked; an ordinary metadata update must leave it blocked,
+// while a global non-active-active failover must release it with an empty poll.
+func TestRustMatchingDomainCacheFailoverProbe(t *testing.T) {
+	address := os.Getenv("CADENCE_MATCHING_TCHANNEL")
+	if address == "" {
+		t.Skip("requires native Rust Matching")
+	}
+	tr, err := tchannel.NewTransport(tchannel.ServiceName("matching-domain-cache-probe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-domain-cache-probe", Outbounds: yarpc.Outbounds{
+		"cadence-matching": {Unary: tr.NewSingleOutbound(address)},
+	}})
+	if err := dispatcher.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer dispatcher.Stop()
+	matching := matchingserviceclient.New(dispatcher.ClientConfig("cadence-matching"))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		response, err := matching.PollForDecisionTask(ctx, &m.PollForDecisionTaskRequest{
+			DomainUUID: common.StringPtr("00000000-0000-0000-0000-000000000077"),
+			PollerID:   common.StringPtr(uuid.NewString()),
+			PollRequest: &s.PollForDecisionTaskRequest{
+				TaskList: &s.TaskList{Name: common.StringPtr("cache-failover-probe"), Kind: s.TaskListKindNormal.Ptr()},
+				Identity: common.StringPtr("domain-cache-probe"),
+			},
+		})
+		if err == nil && len(response.GetTaskToken()) != 0 {
+			err = fmt.Errorf("unexpected task delivered by failover probe: %x", response.GetTaskToken())
+		}
+		result <- err
+	}()
+	if ready := os.Getenv("CADENCE_MATCHING_FAILOVER_READY"); ready != "" {
+		if err := os.WriteFile(ready, []byte("poll-started"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	failoverWritten := os.Getenv("CADENCE_MATCHING_FAILOVER_WRITTEN")
+	if failoverWritten == "" {
+		t.Fatal("CADENCE_MATCHING_FAILOVER_WRITTEN is required")
+	}
+	for {
+		if _, err := os.Stat(failoverWritten); err == nil {
+			break
+		}
+		select {
+		case err := <-result:
+			t.Fatalf("poll returned before Go failover update: %v", err)
+		case <-ctx.Done():
+			t.Fatalf("Go failover update did not run: %v", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(18 * time.Second):
+		t.Fatal("poll was not released by Go failover update")
+	}
+}
+
 // Used by the production binary drain oracle: one generated-Go Thrift call
 // must succeed after SIGTERM while matching.shutdownDrainDuration is active.
 func TestRustMatchingDrainHealth(t *testing.T) {

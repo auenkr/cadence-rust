@@ -10,9 +10,13 @@ use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
 use cadence_api::enums::{ArchivalStatus, DomainStatus};
-use cadence_api::types::{DomainConfiguration, DomainInfo, DomainReplicationConfiguration};
+use cadence_api::types::{
+    ActiveClusters, AsyncWorkflowConfiguration, BadBinaries, DomainConfiguration, DomainInfo,
+    DomainReplicationConfiguration, IsolationGroupConfiguration,
+};
 use cadence_thrift::protocol::{Reader, TType};
-use cadence_thrift::value::{read_value, Struct, Value};
+use cadence_thrift::value::{read_struct, read_value, Struct, Value};
+use cadence_thrift::FromThrift;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use thiserror::Error;
 
@@ -32,7 +36,7 @@ pub struct GoDomainBlob {
 /// Domain state read from the Go SQLite schema with fields needed by Matching.
 /// `notification_version` and nested blobs are intentionally outside the
 /// existing `DomainRecord`, which predates durable domain metadata reads.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchingDomainMetadata {
     pub info: DomainInfo,
     pub configuration: DomainConfiguration,
@@ -55,6 +59,13 @@ pub struct MatchingDomainMetadata {
     pub isolation_groups: Option<GoDomainBlob>,
     pub async_workflow_config: Option<GoDomainBlob>,
     pub active_clusters_config: Option<GoDomainBlob>,
+    pub decoded_bad_binaries: Option<BadBinaries>,
+    pub decoded_isolation_groups: Option<IsolationGroupConfiguration>,
+    pub decoded_async_workflow_config: Option<AsyncWorkflowConfiguration>,
+    /// Deferred typed-conversion failure. The raw SQL store returns opaque
+    /// blobs unchanged; Matching cache conversion reports this like Go's
+    /// MetadataManager when it materializes DomainConfig/ReplicationConfig.
+    pub config_decode_error: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -77,6 +88,8 @@ pub enum MatchingDomainMetadataError {
     InvalidPageSize,
     #[error("domain metadata persistence operation timed out")]
     OperationTimedOut,
+    #[error("invalid SQLite domain metadata reader configuration: {0}")]
+    InvalidSqliteConfiguration(String),
 }
 
 /// Read-only access to the Go `domains` and `domain_metadata` tables.
@@ -86,9 +99,10 @@ pub enum MatchingDomainMetadataError {
 pub struct MatchingDomainMetadataStore {
     connection: Mutex<Connection>,
     active_cluster_name: String,
+    busy_timeout: Duration,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchingDomainPage {
     pub domains: Vec<MatchingDomainMetadata>,
     /// Go returns the last row's raw UUID whenever rows.len() >= page_size.
@@ -122,8 +136,16 @@ fn sqlite_operation_error(
 }
 
 impl<'a> SqliteOperationDeadline<'a> {
-    fn new(connection: &'a Connection, deadline: Instant) -> Result<Self, rusqlite::Error> {
-        connection.busy_timeout(deadline.saturating_duration_since(Instant::now()))?;
+    fn new(
+        connection: &'a Connection,
+        deadline: Instant,
+        configured_busy_timeout: Duration,
+    ) -> Result<Self, rusqlite::Error> {
+        connection.busy_timeout(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(configured_busy_timeout),
+        )?;
         connection.progress_handler(1_000, Some(move || Instant::now() >= deadline));
         Ok(Self(connection))
     }
@@ -174,19 +196,69 @@ impl MatchingDomainMetadataStore {
         path: impl AsRef<Path>,
         active_cluster_name: impl Into<String>,
     ) -> Result<Self, MatchingDomainMetadataError> {
+        Self::open_read_only_with_options(path, active_cluster_name, "ro", Duration::from_secs(60))
+    }
+
+    /// Open a Go-configured SQLite database while preserving URI mode and
+    /// busy-timeout behavior. The reader always remains read-only; `rw` and
+    /// `rwc` match Go's existence/create modes only insofar as this reader
+    /// requires an already-existing database and never creates one.
+    pub fn open_read_only_with_options(
+        path: impl AsRef<Path>,
+        active_cluster_name: impl Into<String>,
+        mode: &str,
+        busy_timeout: Duration,
+    ) -> Result<Self, MatchingDomainMetadataError> {
+        match mode {
+            "ro" | "rw" | "rwc" => {}
+            "memory" => {
+                return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                    "mode=memory is not supported by the Matching domain reader".into(),
+                ));
+            }
+            _ => {
+                return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                    format!("unsupported URI mode {mode:?}"),
+                ));
+            }
+        };
+        let path = path.as_ref().to_string_lossy();
+        // Go config's `rw` and `rwc` describe the read/write pool. This
+        // adapter is deliberately read-only, while preserving the same
+        // existing-file lookup behavior for all three file-backed modes.
+        let uri = format!("file:{path}?mode=ro");
         let connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            uri,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_URI,
         )?;
-        Ok(Self::from_connection(connection, active_cluster_name))
+        Ok(Self::from_connection_with_busy_timeout(
+            connection,
+            active_cluster_name,
+            busy_timeout,
+        ))
     }
 
     /// Wrap an existing read-only connection. Primarily useful to callers that
     /// manage connection lifecycle outside this metadata reader.
     pub fn from_connection(connection: Connection, active_cluster_name: impl Into<String>) -> Self {
+        Self::from_connection_with_busy_timeout(
+            connection,
+            active_cluster_name,
+            Duration::from_secs(60),
+        )
+    }
+
+    fn from_connection_with_busy_timeout(
+        connection: Connection,
+        active_cluster_name: impl Into<String>,
+        busy_timeout: Duration,
+    ) -> Self {
         Self {
             connection: Mutex::new(connection),
             active_cluster_name: active_cluster_name.into(),
+            busy_timeout,
         }
     }
 
@@ -201,7 +273,7 @@ impl MatchingDomainMetadataStore {
         timeout: Duration,
     ) -> Result<i64, MatchingDomainMetadataError> {
         let (connection, deadline) = self.lock_connection(timeout)?;
-        let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline, self.busy_timeout)?;
         connection
             .query_row(
                 "SELECT notification_version FROM domain_metadata",
@@ -266,7 +338,7 @@ impl MatchingDomainMetadataStore {
             return Err(MatchingDomainMetadataError::InvalidPageSize);
         }
         let (connection, deadline) = self.lock_connection(timeout)?;
-        let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline, self.busy_timeout)?;
         let mut rows = if let Some(token) = next_page_token {
             let mut statement = connection
                 .prepare(
@@ -332,7 +404,7 @@ impl MatchingDomainMetadataStore {
             "SELECT id, name, is_global, data, data_encoding FROM domains WHERE shard_id = ?1 AND {selector} = ?2"
         );
         let (connection, deadline) = self.lock_connection(timeout)?;
-        let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline, self.busy_timeout)?;
         let row = connection
             .query_row(&query, params![GO_DEFAULT_SHARD_ID, value], row_from_sqlite)
             .optional()
@@ -479,12 +551,17 @@ fn thrift_to_metadata(
     row: SqlDomainRow,
     current_cluster: &str,
 ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+    let mut config_decode_errors = Vec::new();
     let data_map = thrift.opt_map_str::<String>(38).map_err(protocol_error)?;
     let clusters = thrift
         .opt_list::<String>(36)
         .map_err(protocol_error)?
         .unwrap_or_default();
     let active_clusters_config = blob(&thrift, 64, 66)?;
+    let active_clusters = decode_optional_go_blob::<ActiveClusters>(
+        active_clusters_config.as_ref(),
+        &mut config_decode_errors,
+    );
     // Go injects current cluster for non-active-active domains only. The
     // presence of field 64, including an empty byte string, suppresses it.
     let active_cluster_name = match thrift
@@ -530,6 +607,19 @@ fn thrift_to_metadata(
         data: data_map,
         uuid,
     };
+    let bad_binaries = blob(&thrift, 39, 40)?;
+    let isolation_groups = blob(&thrift, 56, 58)?;
+    let async_workflow_config = blob(&thrift, 60, 62)?;
+    let decoded_bad_binaries =
+        decode_optional_go_blob::<BadBinaries>(bad_binaries.as_ref(), &mut config_decode_errors);
+    let decoded_isolation_groups = decode_optional_go_blob::<IsolationGroupConfiguration>(
+        isolation_groups.as_ref(),
+        &mut config_decode_errors,
+    );
+    let decoded_async_workflow_config = decode_optional_go_blob::<AsyncWorkflowConfiguration>(
+        async_workflow_config.as_ref(),
+        &mut config_decode_errors,
+    );
     let configuration = DomainConfiguration {
         workflow_execution_retention_period_in_days: i32::from(optional_i16(&thrift, 18)?),
         emit_metric: thrift
@@ -552,13 +642,13 @@ fn thrift_to_metadata(
             .opt_string(48)
             .map_err(protocol_error)?
             .unwrap_or_default(),
-        ..DomainConfiguration::default()
+        bad_binaries: decoded_bad_binaries.clone(),
     };
     let replication = DomainReplicationConfiguration {
         active_cluster_name,
         clusters,
         // The encoded bytes are also retained in `active_clusters_config`.
-        active_clusters: None,
+        active_clusters,
     };
     let failover_end_time_nanos = thrift
         .opt_i64(50)
@@ -602,11 +692,66 @@ fn thrift_to_metadata(
             .opt_i64(54)
             .map_err(protocol_error)?
             .unwrap_or_default(),
-        bad_binaries: blob(&thrift, 39, 40)?,
-        isolation_groups: blob(&thrift, 56, 58)?,
-        async_workflow_config: blob(&thrift, 60, 62)?,
+        bad_binaries,
+        isolation_groups,
+        async_workflow_config,
         active_clusters_config,
+        decoded_bad_binaries,
+        decoded_isolation_groups,
+        decoded_async_workflow_config,
+        config_decode_error: (!config_decode_errors.is_empty())
+            .then(|| config_decode_errors.join("; ")),
     })
+}
+
+fn decode_optional_go_blob<T>(blob: Option<&GoDomainBlob>, errors: &mut Vec<String>) -> Option<T>
+where
+    T: FromThrift + serde::de::DeserializeOwned,
+{
+    blob.and_then(|blob| match decode_go_blob(blob) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            errors.push(error.to_string());
+            None
+        }
+    })
+}
+
+fn decode_go_blob<T>(blob: &GoDomainBlob) -> Result<T, MatchingDomainMetadataError>
+where
+    T: FromThrift + serde::de::DeserializeOwned,
+{
+    let encoding = match blob.encoding.as_str() {
+        "thriftrw" => Some(false),
+        "thriftrw_snappy" => Some(true),
+        // The Go serializer uses JSON for JSON, empty, and unknown encodings.
+        "json" | "" | "unknown" => None,
+        other => {
+            return Err(MatchingDomainMetadataError::UnsupportedEncoding(
+                other.to_string(),
+            ));
+        }
+    };
+    let Some(snappy) = encoding else {
+        return serde_json::from_slice(&blob.data)
+            .map_err(|error| MatchingDomainMetadataError::InvalidBlob(error.to_string()));
+    };
+    let bytes = if snappy {
+        snap::raw::Decoder::new()
+            .decompress_vec(&blob.data)
+            .map_err(|error| MatchingDomainMetadataError::InvalidBlob(error.to_string()))?
+    } else {
+        blob.data.clone()
+    };
+    let mut reader = Reader::new(&bytes);
+    let value = T::from_thrift(&read_struct(&mut reader).map_err(protocol_error)?)
+        .map_err(protocol_error)?;
+    if reader.remaining() != 0 {
+        return Err(MatchingDomainMetadataError::InvalidBlob(
+            "trailing Go ThriftRW blob bytes".into(),
+        ));
+    }
+    Ok(value)
 }
 
 fn blob(
@@ -653,6 +798,58 @@ mod tests {
             "INSERT INTO domains (shard_id, id, name, is_global, data, data_encoding) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![GO_DEFAULT_SHARD_ID, id.as_bytes(), name, false, info, ENCODING_THRIFT_RW],
         ).unwrap();
+    }
+
+    #[test]
+    fn read_only_uri_modes_and_configured_busy_timeout_are_preserved() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("domains.sqlite");
+        let writer = Connection::open(&path).unwrap();
+        writer.execute_batch(
+            "CREATE TABLE domains (shard_id INTEGER, id BLOB, name TEXT, is_global BOOLEAN, data BLOB, data_encoding TEXT);
+             CREATE TABLE domain_metadata (id INTEGER, notification_version INTEGER);
+             INSERT INTO domain_metadata VALUES (1, 91);",
+        ).unwrap();
+        drop(writer);
+
+        for mode in ["ro", "rw", "rwc"] {
+            let store = MatchingDomainMetadataStore::open_read_only_with_options(
+                &path,
+                "cluster-a",
+                mode,
+                Duration::from_millis(17),
+            )
+            .unwrap();
+            assert_eq!(store.busy_timeout, Duration::from_millis(17));
+            assert_eq!(store.get_metadata_version().unwrap(), 91);
+        }
+        let lock = Connection::open(&path).unwrap();
+        lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+        let store = MatchingDomainMetadataStore::open_read_only_with_options(
+            &path,
+            "cluster-a",
+            "ro",
+            Duration::from_millis(17),
+        )
+        .unwrap();
+        let started = Instant::now();
+        assert!(matches!(
+            store.get_metadata_version(),
+            Err(MatchingDomainMetadataError::Sqlite(
+                rusqlite::Error::SqliteFailure(failure, _)
+            )) if failure.code == rusqlite::ErrorCode::DatabaseBusy
+        ));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        lock.execute_batch("ROLLBACK;").unwrap();
+        assert!(matches!(
+            MatchingDomainMetadataStore::open_read_only_with_options(
+                &path,
+                "cluster-a",
+                "memory",
+                Duration::from_secs(1),
+            ),
+            Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(_))
+        ));
     }
 
     #[test]
@@ -709,6 +906,13 @@ mod tests {
         assert_eq!(domain.replication.active_cluster_name, "cluster-a");
         assert_eq!(domain.replication.clusters[0].cluster_name, "cluster-a");
         assert_eq!(domain.isolation_groups.as_ref().unwrap().data, [0, 255, 7]);
+        assert!(domain.decoded_isolation_groups.is_none());
+        assert!(domain
+            .config_decode_error
+            .as_deref()
+            .unwrap()
+            .contains("trailing Go ThriftRW blob bytes"));
+        assert!(domain.decoded_isolation_groups.is_none());
     }
 
     #[test]
@@ -726,10 +930,16 @@ mod tests {
         writer.execute_batch("BEGIN EXCLUSIVE;").unwrap();
 
         let result = store.get_metadata_version_with_timeout(Duration::from_millis(20));
-        assert!(matches!(
-            result,
-            Err(MatchingDomainMetadataError::OperationTimedOut)
-        ));
+        assert!(
+            matches!(
+                result,
+                Err(MatchingDomainMetadataError::OperationTimedOut)
+                    | Err(MatchingDomainMetadataError::Sqlite(
+                        rusqlite::Error::SqliteFailure(_, _)
+                    ))
+            ),
+            "{result:?}"
+        );
 
         let before_deadline = Instant::now() + Duration::from_secs(1);
         let immediate_busy = rusqlite::Error::SqliteFailure(
@@ -745,7 +955,7 @@ mod tests {
 
     #[test]
     fn active_active_blob_suppresses_current_cluster_default() {
-        let active_config = vec![0x80, 0];
+        let active_config = vec![0];
         let metadata = thrift_to_metadata(
             Struct {
                 fields: vec![
@@ -876,6 +1086,7 @@ mod tests {
             standard.async_workflow_config.as_ref().unwrap().data,
             [9, 8, 7]
         );
+        assert!(standard.config_decode_error.is_some());
 
         for id in [
             "00000000000000000000000000000001",

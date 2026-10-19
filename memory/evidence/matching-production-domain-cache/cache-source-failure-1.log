@@ -1,0 +1,152 @@
+   Compiling icu_properties_data v2.3.0
+   Compiling hyper v1.12.0
+   Compiling icu_collections v2.3.0
+   Compiling icu_normalizer_data v2.3.0
+   Compiling ring v0.17.14
+   Compiling icu_provider v2.3.1
+   Compiling rustversion v1.0.23
+   Compiling libc v0.2.190
+   Compiling http-body-util v0.1.5
+   Compiling async-trait v0.1.92
+   Compiling mime v0.3.17
+   Compiling prettyplease v0.2.37
+   Compiling regex-syntax v0.8.11
+   Compiling bytes v1.12.1
+   Compiling prost v0.13.5
+   Compiling regex-automata v0.4.18
+   Compiling getrandom v0.4.3
+   Compiling hyper-util v0.1.21
+   Compiling indexmap v1.9.3
+   Compiling serde_json v1.0.154
+   Compiling fixedbitset v0.5.7
+   Compiling zeroize v1.9.1
+   Compiling untrusted v0.9.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling petgraph v0.7.1
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling tempfile v3.27.0
+   Compiling regex v1.13.1
+   Compiling prost-types v0.13.5
+   Compiling tower v0.5.3
+   Compiling form_urlencoded v1.2.2
+   Compiling pin-project-internal v1.1.13
+   Compiling thiserror-impl v2.0.21
+   Compiling hashbrown v0.12.3
+   Compiling multimap v0.10.1
+   Compiling prost-build v0.13.5
+   Compiling thiserror v2.0.21
+   Compiling pin-project v1.1.13
+   Compiling ahash v0.8.12
+   Compiling idna_adapter v1.2.2
+   Compiling axum-core v0.4.5
+   Compiling async-stream-impl v0.3.6
+   Compiling protoc-bin-vendored-win32 v3.3.0
+   Compiling utf8parse v0.2.2
+   Compiling protoc-bin-vendored-linux-x86_32 v3.3.0
+   Compiling protoc-bin-vendored-linux-x86_64 v3.3.0
+   Compiling protoc-bin-vendored-linux-aarch_64 v3.3.0
+   Compiling matchit v0.7.3
+   Compiling semver v1.0.28
+   Compiling protoc-bin-vendored-macos-aarch_64 v3.3.0
+   Compiling thiserror v1.0.69
+   Compiling rustls v0.23.46
+   Compiling protoc-bin-vendored-linux-ppcle_64 v3.3.0
+   Compiling protoc-bin-vendored-macos-x86_64 v3.3.0
+   Compiling protoc-bin-vendored-linux-s390_64 v3.3.0
+   Compiling protoc-bin-vendored v3.3.0
+   Compiling rustc_version v0.4.1
+   Compiling axum v0.7.9
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-common)
+   Compiling anstyle-parse v1.0.0
+   Compiling async-stream v0.3.6
+   Compiling idna v1.1.0
+   Compiling hashbrown v0.14.5
+   Compiling tower v0.4.13
+   Compiling tonic-build v0.12.3
+   Compiling rustls-webpki v0.103.15
+   Compiling hyper-timeout v0.5.2
+   Compiling tokio-stream v0.1.19
+   Compiling fs-err v3.3.2
+   Compiling thiserror-impl v1.0.69
+   Compiling socket2 v0.5.10
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling ryu v1.0.23
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling subtle v2.6.1
+   Compiling anstream v1.0.0
+   Compiling tonic v0.12.3
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-proto)
+   Compiling hashlink v0.9.1
+   Compiling url v2.5.8
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-api)
+   Compiling crc32c v0.6.8
+   Compiling enum-as-inner v0.6.1
+   Compiling futures-io v0.3.34
+   Compiling crc32fast v1.5.2
+   Compiling ipnet v2.12.2
+   Compiling strsim v0.11.1
+   Compiling tinyvec v1.13.3
+   Compiling data-encoding v2.11.1
+   Compiling linked-hash-map v0.5.6
+   Compiling clap_lex v1.1.1
+   Compiling clap_builder v4.6.7
+   Compiling lru-cache v0.1.2
+   Compiling rusqlite v0.32.1
+   Compiling hickory-proto v0.24.4
+   Compiling uuid v1.28.0
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-thrift)
+   Compiling tokio-rustls v0.26.6
+   Compiling serde_urlencoded v0.7.1
+   Compiling axum-core v0.5.6
+   Compiling arc-swap v1.9.2
+   Compiling clap_derive v4.6.7
+   Compiling serde_path_to_error v0.1.20
+   Compiling matchit v0.8.4
+   Compiling time-core v0.1.9
+   Compiling num-conv v0.2.2
+   Compiling either v1.19.0
+   Compiling resolv-conf v0.7.6
+   Compiling deranged v0.5.9
+   Compiling unsafe-libyaml v0.2.11
+   Compiling powerfmt v0.2.1
+   Compiling time v0.3.55
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling hickory-resolver v0.24.4
+   Compiling axum-server v0.8.0
+   Compiling axum v0.8.9
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-persistence)
+   Compiling clap v4.6.7
+   Compiling tonic-reflection v0.12.3
+   Compiling if-addrs v0.13.4
+   Compiling yasna v0.5.2
+   Compiling pem v3.0.6
+   Compiling rcgen v0.13.2
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+error[E0277]: `std::sync::mpsc::Receiver<()>` cannot be shared between threads safely
+    --> crates/cadence-server/src/matching_domain_cache.rs:1005:41
+     |
+1005 |           let catch_up: CatchUpCallback = Arc::new(move |entries, _prepare, changed| {
+     |                                           ^        --------------------------------- within this `{closure@matching_domain_cache.rs:1005:50}`
+     |  _________________________________________|
+     | |
+1006 | |             snapshot_tx.send(entries[0].notification_version).unwrap();
+1007 | |             release_rx.recv().unwrap();
+1008 | |             changed(entries);
+1009 | |         });
+     | |__________^ `std::sync::mpsc::Receiver<()>` cannot be shared between threads safely
+     |
+     = help: within `{closure@matching_domain_cache.rs:1005:50}`, the trait `Sync` is not implemented for `std::sync::mpsc::Receiver<()>`
+note: required because it's used within this closure
+    --> crates/cadence-server/src/matching_domain_cache.rs:1005:50
+     |
+1005 | ...lback = Arc::new(move |entries, _prepare, changed| {
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: required for the cast from `Arc<{closure@...}>` to `Arc<dyn Fn(&[_], _, _) + Send + Sync>`
+     = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-38a5878de2feb9ba.long-type-9903492559086743766.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `cadence-server` (lib test) due to 1 previous error

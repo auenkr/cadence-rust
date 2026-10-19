@@ -404,6 +404,27 @@ async fn owner_work<T: Send + 'static>(
     result
 }
 impl QueueRegistry {
+    /// Go's domain failover callback releases blocked normal decision/activity
+    /// pollers and sticky decision pollers. Owners and their manager state stay
+    /// installed so later polls can immediately reuse the same queues.
+    pub fn release_blocked_pollers_for_domain(&self, domain: Uuid) -> usize {
+        let state = self.state.lock().expect("Matching registry lock");
+        let mut released = 0;
+        for ((id, _, task_type), owner) in &state.owners {
+            if *id != domain {
+                continue;
+            }
+            let kind = owner.queue.task_list_kind();
+            let eligible =
+                (kind == 0 && matches!(*task_type, 0 | 1)) || (kind == 1 && *task_type == 0);
+            if eligible {
+                owner.dispatcher.release_blocked_pollers();
+                released += 1;
+            }
+        }
+        released
+    }
+
     /// Snapshot loaded managers only, like Go ManagersByDomainID. This must
     /// neither acquire new leases nor consult frontend workflow state.
     pub fn describe_by_domain(
@@ -617,7 +638,10 @@ impl QueueRegistry {
         self.idle_tasklist_check_interval = Some(provider);
         self
     }
-    pub fn with_max_task_delete_batch_size(mut self, provider: TaskDeleteBatchSizeProvider) -> Self {
+    pub fn with_max_task_delete_batch_size(
+        mut self,
+        provider: TaskDeleteBatchSizeProvider,
+    ) -> Self {
         self.max_task_delete_batch_size = Some(provider);
         self
     }

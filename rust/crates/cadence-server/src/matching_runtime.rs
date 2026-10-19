@@ -2,9 +2,9 @@
 //! background maintenance task.
 //!
 //! Persistence, History and dynamic configuration enter through explicit
-//! dependencies. Membership discovery/eviction and the production domain
-//! cache are not constructed here yet; callers must not treat this owner as a
-//! complete Go Matching service until those adapters are supplied.
+//! dependencies. The production domain cache can be attached through the
+//! cache-aware constructors; membership discovery/eviction remains a separate
+//! adapter, so this owner does not represent complete Go Matching parity.
 use crate::{admin::DynamicConfigOverlay, grpc_matching::Matching};
 use cadence_persistence::matching_sqlite::SqliteTaskStore;
 use std::{
@@ -43,6 +43,7 @@ pub struct MatchingRuntime {
     registry: Option<crate::matching_registry::QueueRegistry>,
     maintenance_stop: Option<oneshot::Sender<()>>,
     maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
+    domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
     drain_duration: DrainDuration,
     evict_self: Option<EvictSelf>,
     drained: bool,
@@ -55,6 +56,7 @@ impl MatchingRuntime {
             registry: None,
             maintenance_stop: None,
             maintenance: None,
+            domain_cache: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -87,6 +89,7 @@ impl MatchingRuntime {
             registry: Some(registry),
             maintenance_stop: Some(stop),
             maintenance: Some(maintenance),
+            domain_cache: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -95,6 +98,64 @@ impl MatchingRuntime {
 
     pub fn matching(&self) -> &Matching {
         &self.matching
+    }
+
+    /// Start and connect the persistence-backed domain cache before constructing
+    /// Matching. Its synchronous initial refresh therefore gates readiness;
+    /// subsequent notifications update the same domain view consumed by Matching.
+    pub async fn in_memory_with_domain_cache(
+        state: crate::handlers::AppState,
+        drain_duration: DrainDuration,
+        cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
+    ) -> anyhow::Result<Self> {
+        Self::start_domain_cache(state.domains.clone(), cache.clone()).await?;
+        let mut runtime = Self::in_memory(state, drain_duration);
+        runtime.domain_cache = Some(cache);
+        Ok(runtime)
+    }
+
+    pub async fn with_durable_queues_and_domain_cache(
+        state: crate::handlers::AppState,
+        store: Arc<SqliteTaskStore>,
+        history: crate::matching_history::MatchingHistoryClient,
+        task_id_range: NonZeroU32,
+        poll_expiration: Duration,
+        drain_duration: DrainDuration,
+        cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
+    ) -> anyhow::Result<Self> {
+        Self::start_domain_cache(state.domains.clone(), cache.clone()).await?;
+        let mut runtime = Self::with_durable_queues(
+            state,
+            store,
+            history,
+            task_id_range,
+            poll_expiration,
+            drain_duration,
+        );
+        runtime.domain_cache = Some(cache);
+        Ok(runtime)
+    }
+
+    async fn start_domain_cache(
+        domains: cadence_persistence::InMemoryDomainStore,
+        cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
+    ) -> anyhow::Result<()> {
+        tokio::task::spawn_blocking(move || {
+            cache
+                .start()
+                .map_err(|error| anyhow::anyhow!("starting Matching domain cache: {error}"))?;
+            let changed: crate::matching_domain_cache::DomainChangeCallback =
+                Arc::new(move |entries| domains.sync_matching_metadata(entries));
+            let catch_up: crate::matching_domain_cache::CatchUpCallback =
+                Arc::new(|entries, prepare, changed| {
+                    prepare();
+                    changed(entries);
+                });
+            cache.register_callback("matching", catch_up, Arc::new(|| {}), changed);
+            Ok(())
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("joining Matching domain cache startup: {error}"))?
     }
 
     /// Supply Go's membership eviction action when production membership
@@ -122,16 +183,27 @@ impl MatchingRuntime {
         if let Some(stop) = self.maintenance_stop.take() {
             let _ = stop.send(());
         }
-        if let Some(maintenance) = self.maintenance.take() {
+        let maintenance_result = if let Some(maintenance) = self.maintenance.take() {
             maintenance
                 .await
-                .map_err(|error| anyhow::anyhow!("joining Matching maintenance: {error}"))?
-                .map_err(|error| anyhow::anyhow!("stopping Matching maintenance: {error}"))?;
+                .map_err(|error| anyhow::anyhow!("joining Matching maintenance: {error}"))
+                .and_then(|result| {
+                    result
+                        .map_err(|error| anyhow::anyhow!("stopping Matching maintenance: {error}"))
+                })
         } else if let Some(registry) = &self.registry {
             registry
                 .shutdown(crate::grpc_matching::matching_now())
-                .await?;
+                .await
+                .map_err(|error| anyhow::anyhow!("stopping Matching registry: {error}"))
+        } else {
+            Ok(())
+        };
+        if let Some(cache) = self.domain_cache.take() {
+            cache.unregister_callback("matching");
+            cache.stop();
         }
+        maintenance_result?;
         drain_result?;
         Ok(())
     }
@@ -172,7 +244,11 @@ pub fn live_shutdown_drain_duration(overlay: Arc<Mutex<DynamicConfigOverlay>>) -
             }
         }
         let nanos = selected
-            .and_then(|value| value.as_str().and_then(cadence_common::duration::parse_nanos))
+            .and_then(|value| {
+                value
+                    .as_str()
+                    .and_then(cadence_common::duration::parse_nanos)
+            })
             .unwrap_or_default();
         Duration::from_nanos(nanos.max(0) as u64)
     })

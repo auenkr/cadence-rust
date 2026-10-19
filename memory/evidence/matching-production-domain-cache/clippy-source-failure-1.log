@@ -1,0 +1,45 @@
+    Checking tokio v1.53.3
+    Checking tokio-util v0.7.20
+    Checking h2 v0.4.20
+    Checking hyper v1.12.0
+   Compiling rustix v1.1.5
+    Checking hyper-util v0.1.21
+   Compiling tempfile v3.27.0
+    Checking tower v0.5.3
+    Checking bitflags v2.13.2
+   Compiling prost-build v0.13.5
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-common)
+    Checking axum v0.7.9
+    Checking tower v0.4.13
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-api)
+   Compiling tonic-build v0.12.3
+    Checking hyper-timeout v0.5.2
+    Checking tokio-stream v0.1.19
+    Checking rusqlite v0.32.1
+    Checking tonic v0.12.3
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-proto)
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-thrift)
+    Checking hickory-proto v0.24.4
+    Checking fs-err v3.3.2
+    Checking tokio-rustls v0.26.6
+    Checking powerfmt v0.2.1
+    Checking time-core v0.1.9
+    Checking linux-raw-sys v0.12.1
+    Checking num-conv v0.2.2
+    Checking deranged v0.5.9
+    Checking time v0.3.55
+    Checking hickory-resolver v0.24.4
+    Checking axum v0.8.9
+    Checking axum-server v0.8.0
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-persistence)
+error: struct update has no effect, all the fields in the struct have already been specified
+   --> crates/cadence-persistence/src/matching_domain_metadata.rs:631:11
+    |
+631 |         ..DomainConfiguration::default()
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_update
+    = note: `-D clippy::needless-update` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::needless_update)]`
+
+error: could not compile `cadence-persistence` (lib) due to 1 previous error

@@ -1,0 +1,26 @@
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 42s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 17 tests
+test matching_domain_cache::tests::cache_retains_independent_config_failover_versions_and_raw_nested_blobs ... ok
+test matching_domain_cache::tests::cache_misses_read_through_and_can_retry_after_domain_appears ... ok
+test matching_domain_cache::tests::catch_up_registration_observes_current_entries_after_callbacks_are_installed ... ok
+test matching_domain_cache::tests::callback_catch_up_serializes_with_refresh_publication ... ok
+test matching_domain_cache::tests::duplicate_callback_registration_replaces_pair_and_refresh_pairs_prepare_with_change ... ok
+test matching_domain_cache::tests::joining_worker_from_its_own_thread_detaches_instead_of_panicking ... ok
+test matching_domain_cache::tests::lifecycle_start_stop_is_idempotent_and_stops_owned_worker ... ok
+test matching_domain_cache::tests::metadata_first_pages_of_two_hundred_and_notification_cutoff_match_go_scan ... ok
+test matching_domain_cache::tests::failed_later_page_preserves_old_snapshot_and_retry_refreshes ... ok
+test matching_domain_cache::tests::production_source_uses_only_the_selected_sqlite_default_store ... ok
+test matching_domain_cache::tests::refresh_is_throttled_for_one_second_after_success_but_not_after_failure ... ok
+test matching_domain_cache::tests::retry_expiration_below_initial_interval_returns_previous_attempt_error ... ok
+test matching_domain_cache::tests::retryable_refresh_error_retries_and_returns_previous_error_if_retry_fails ... ok
+test matching_domain_cache::tests::sqlite_timeout_errors_follow_go_sql_error_conversion_retryability ... ok
+test matching_domain_cache::tests::trace_matches_pinned_go_domain_cache_scan_update_callback_error_and_misses ... ok
+test matching_domain_cache::tests::typed_domain_config_error_during_refresh_keeps_raw_cache_snapshot ... ok
+test matching_domain_cache::tests::page_calls_inherit_remaining_metadata_refresh_deadline ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 236 filtered out; finished in 0.12s
+

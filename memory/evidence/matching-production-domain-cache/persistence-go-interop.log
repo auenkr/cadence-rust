@@ -1,0 +1,21 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.59s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_persistence-d957beebee0b5c0b)
+
+running 1 test
+test matching_domain_metadata::tests::go_domain_store_database_interop ... FAILED
+
+failures:
+
+---- matching_domain_metadata::tests::go_domain_store_database_interop stdout ----
+
+thread 'matching_domain_metadata::tests::go_domain_store_database_interop' (1819402) panicked at crates/cadence-persistence/src/matching_domain_metadata.rs:1032:74:
+called `Result::unwrap()` on an `Err` value: NotFound("metadata-standard")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    matching_domain_metadata::tests::go_domain_store_database_interop
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 203 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p cadence-persistence --lib`

@@ -574,7 +574,8 @@ impl Matching {
                 )
             })
         };
-        let max_task_delete_batch_size = task_delete_batch_size_provider(domains.clone(), overlay.clone());
+        let max_task_delete_batch_size =
+            task_delete_batch_size_provider(domains.clone(), overlay.clone());
         let writer_live = task_writer_live_provider(domains.clone(), overlay.clone());
         let scaler_config: crate::matching_registry::ScalerConfigProvider = {
             let domains = domains.clone();
@@ -1333,12 +1334,17 @@ impl m::matching_api_server::MatchingApi for Matching {
                         response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
                         Response::new(response)
                     }),
-                _=failover.changed()=>Ok(Response::new(m::PollForDecisionTaskResponse {
+                _=failover.changed()=>{
+                    if let (Some(registry), Ok(domain)) = (&self.queues, uuid::Uuid::parse_str(&r.domain_id)) {
+                        registry.release_blocked_pollers_for_domain(domain);
+                    }
+                    Ok(Response::new(m::PollForDecisionTaskResponse {
                     auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
                     load_balancer_hints: queue.load_balancer_hints(matching_now()),
                     partition_config: queue.partitions.get().map(partition_config_to_internal),
                     ..Default::default()
-                })),
+                    }))
+                },
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }
@@ -1474,12 +1480,23 @@ impl m::matching_api_server::MatchingApi for Matching {
                         response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, task_type, poll_started));
                         Response::new(response)
                     }),
-                _=failover.changed()=>Ok(Response::new(m::PollForActivityTaskResponse {
+                _=async {
+                    if queue.queue.task_list_kind() == 0 {
+                        failover.changed().await
+                    } else {
+                        std::future::pending().await
+                    }
+                }=>{
+                    if let (Some(registry), Ok(domain)) = (&self.queues, uuid::Uuid::parse_str(&r.domain_id)) {
+                        registry.release_blocked_pollers_for_domain(domain);
+                    }
+                    Ok(Response::new(m::PollForActivityTaskResponse {
                     auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
                     load_balancer_hints: queue.load_balancer_hints(matching_now()),
                     partition_config: queue.partitions.get().map(partition_config_to_internal),
                     ..Default::default()
-                })),
+                    }))
+                },
                 _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
             };
         }

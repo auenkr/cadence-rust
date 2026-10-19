@@ -1,0 +1,10 @@
+gate	status
+persistence	passed
+cache	passed
+domain-failover	passed
+server-check	passed
+server-build	passed
+clippy	passed
+go-production-probe	passed
+persistence-go-interop	passed
+diff-check	passed

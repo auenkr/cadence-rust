@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import signal
 import socket
+import sqlite3
 import ssl
 import subprocess
 import tempfile
@@ -34,6 +35,20 @@ http, frontend, history, matching, tchannel, matching_tchannel, matching_http = 
 for listener in reservations:
     listener.close()
 config = (root / 'rust/config/development.yaml').read_text()
+domain_database = (artifacts / 'go-cadence.sqlite').resolve()
+oracle_database = (artifacts / 'go-oracle.sqlite').resolve()
+for path in (domain_database, oracle_database):
+    for suffix in ('', '-wal', '-shm'):
+        Path(str(path) + suffix).unlink(missing_ok=True)
+    with sqlite3.connect(path) as database:
+        database.executescript((root / 'go/schema/sqlite/cadence/schema.sql').read_text())
+config = config.replace('defaultStore: cass-default', 'defaultStore: matching-domain-metadata', 1)
+config = config.replace(
+    '\nringpop:\n',
+    f'\n    matching-domain-metadata:\n      sql:\n        pluginName: sqlite\n'
+    f'        databaseName: {domain_database}\n\nringpop:\n',
+    1,
+)
 matching_section = re.search(r'(?ms)^  matching:\n    rpc:\n(.*?)(?=^    [a-z])', config)
 if matching_section is None:
     raise RuntimeError('could not locate matching.rpc in development config')
@@ -60,7 +75,20 @@ command = [str(args.server_bin.resolve()), 'start', '--config', str(config_path)
            '--history-grpc-port', str(history), '--matching-grpc-port', str(matching), '--tchannel-port', str(tchannel),
            '--matching-tchannel-port', str(matching_tchannel), '--data-dir', str(artifacts / 'data')]
 overlay = artifacts / 'overlay.json'
-overlay.write_text(json.dumps({'Replace': {str(root / 'go/service/matching/wrappers/thrift/rust_native_test.go'): str(root / 'tests/matching-thrift-go_test.go')}}))
+overlay.write_text(json.dumps({'Replace': {
+    str(root / 'go/service/matching/wrappers/thrift/rust_native_test.go'): str(root / 'tests/matching-thrift-go_test.go'),
+    str(root / 'go/common/persistence/sql/rust_matching_sqlite_test.go'): str(root / 'tests/matching-sqlite-go_test.go'),
+}}))
+oracle_sql_env = {**os.environ, 'CADENCE_MATCHING_SQLITE_DB': str(oracle_database),
+                  'CADENCE_MATCHING_SQLITE_PHASE': 'seed'}
+subprocess.run(['go', 'test', '-overlay', str(overlay), './common/persistence/sql',
+                '-run', '^TestRustMatchingDomainMetadataInterop$', '-count=1'],
+               cwd=root / 'go', env=oracle_sql_env, check=True, timeout=180)
+domain_sql_env = {**os.environ, 'CADENCE_MATCHING_SQLITE_DB': str(domain_database),
+                  'CADENCE_MATCHING_SQLITE_PHASE': 'live-seed'}
+subprocess.run(['go', 'test', '-overlay', str(overlay), './common/persistence/sql',
+                '-run', '^TestRustMatchingDomainMetadataInterop$', '-count=1'],
+               cwd=root / 'go', env=domain_sql_env, check=True, timeout=180)
 drain_probe = artifacts / 'matching-drain.test'
 subprocess.run([
     'go', 'test', '-c', '-overlay', str(overlay), '-o', str(drain_probe),
@@ -72,6 +100,32 @@ def assert_start_fails(test_config, message):
     result = subprocess.run(test_command, cwd=root, capture_output=True, text=True, timeout=15)
     if result.returncode == 0 or message not in result.stdout + result.stderr:
         raise AssertionError(f'expected startup failure containing {message!r}: {result.stdout}\n{result.stderr}')
+
+def assert_embedded_start_succeeds():
+    test_command = command.copy()
+    config_index = test_command.index('--config')
+    del test_command[config_index:config_index + 2]
+    log_path = artifacts / 'embedded-startup.log'
+    with log_path.open('w') as log:
+        process = subprocess.Popen(test_command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise RuntimeError(f'no-config embedded Matching exited; see {log_path}')
+                try:
+                    with socket.create_connection(('127.0.0.1', matching_tchannel), timeout=0.2):
+                        return
+                except OSError:
+                    time.sleep(0.1)
+            raise RuntimeError(f'no-config embedded Matching did not start; see {log_path}')
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
 def assert_runtime_listener_failure_cleans_up():
     occupied = socket.socket()
@@ -117,6 +171,8 @@ subprocess.run(['openssl', 'genrsa', '-out', str(wrong_key), '2048'], check=True
 mismatched_path = artifacts / 'mismatched-key.yaml'
 mismatched_path.write_text(tls_config_path.read_text().replace(str(artifacts / 'tls-key.pem'), str(wrong_key)))
 assert_start_fails(mismatched_path, 'loading Matching HTTP TLS certificate/key')
+assert_start_fails(root / 'rust/config/development.yaml', 'does not support configured NoSQL')
+assert_embedded_start_succeeds()
 assert_runtime_listener_failure_cleans_up()
 with (artifacts / 'server.log').open('w') as log:
     server = subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
@@ -143,6 +199,98 @@ with (artifacts / 'server.log').open('w') as log:
                        env={**os.environ, 'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
                             'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
                             'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{matching_http}/matching'})
+        ready = artifacts / 'failover-poll.ready'
+        failover_written = artifacts / 'go-failover.ready'
+        poll_env = {**os.environ, 'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
+                    'CADENCE_MATCHING_FAILOVER_READY': str(ready),
+                    'CADENCE_MATCHING_FAILOVER_WRITTEN': str(failover_written),
+                    'CADENCE_MATCHING_SQLITE_DB': str(domain_database)}
+        poll_probe = subprocess.Popen(
+            ['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
+             '-run', '^TestRustMatchingDomainCacheFailoverProbe$', '-count=1', '-v'],
+            cwd=root / 'go', env=poll_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        try:
+            deadline = time.monotonic() + 90
+            while not ready.exists():
+                if poll_probe.poll() is not None:
+                    raise RuntimeError(f'failover poll probe exited before readiness: {poll_probe.stdout.read()}')
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('failover poll probe did not register its long poll')
+                time.sleep(0.1)
+            def start_held_domain_update(phase):
+                ready_path = artifacts / f'{phase}.ready'
+                release_path = artifacts / f'{phase}.release'
+                ready_path.unlink(missing_ok=True)
+                release_path.unlink(missing_ok=True)
+                # Pin the pre-update WAL snapshot so SQLite cannot checkpoint
+                # and recycle the Go writer's committed frames before Rust
+                # reads them. The held Go process alone has no reader, so its
+                # automatic checkpoint can legitimately leave no WAL bytes.
+                wal_reader = sqlite3.connect(domain_database, timeout=30)
+                wal_reader.execute('BEGIN')
+                wal_reader.execute('SELECT id FROM domains LIMIT 1').fetchall()
+                held = subprocess.Popen(
+                    ['go', 'test', '-overlay', str(overlay.resolve()), './common/persistence/sql',
+                     '-run', '^TestRustMatchingDomainMetadataInterop$', '-count=1', '-v'],
+                    cwd=root / 'go',
+                    env={**domain_sql_env, 'CADENCE_MATCHING_SQLITE_PHASE': phase,
+                         'CADENCE_MATCHING_SQLITE_HOLD_READY': str(ready_path),
+                         'CADENCE_MATCHING_SQLITE_HOLD_RELEASE': str(release_path)},
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                deadline = time.monotonic() + 90
+                while not ready_path.exists():
+                    if held.poll() is not None:
+                        raise RuntimeError(f'held Go SQLite update exited before commit: {held.stdout.read()}')
+                    if time.monotonic() >= deadline:
+                        held.kill()
+                        output, _ = held.communicate()
+                        raise RuntimeError(f'held Go SQLite update did not commit: {output}')
+                    time.sleep(0.1)
+                if held.poll() is not None:
+                    raise RuntimeError(f'Go SQLite writer exited before WAL inspection: {held.stdout.read()}')
+                wal_path = Path(str(domain_database) + '-wal')
+                if not wal_path.exists() or wal_path.stat().st_size == 0:
+                    release_path.write_text('release')
+                    output, _ = held.communicate(timeout=10)
+                    wal_reader.close()
+                    raise RuntimeError(f'Go SQLite update did not leave committed WAL bytes: {output}')
+                return held, release_path, wal_reader
+
+            def release_held_update(held, release_path, wal_reader):
+                release_path.write_text('release')
+                output, _ = held.communicate(timeout=15)
+                wal_reader.close()
+                if held.returncode != 0:
+                    raise RuntimeError(f'held Go SQLite update failed: {output}')
+
+            ordinary_writer, ordinary_release, ordinary_wal_reader = start_held_domain_update('live-ordinary-held')
+            try:
+                time.sleep(2)
+                if poll_probe.poll() is not None:
+                    raise RuntimeError(f'ordinary metadata refresh released a poll: {poll_probe.stdout.read()}')
+                if ordinary_writer.poll() is not None:
+                    raise RuntimeError('Go ordinary update writer exited before Rust cache observation')
+            finally:
+                release_held_update(ordinary_writer, ordinary_release, ordinary_wal_reader)
+            failover_writer, failover_release, failover_wal_reader = start_held_domain_update('live-failover-held')
+            try:
+                failover_written.write_text('updated')
+                try:
+                    output, _ = poll_probe.communicate(timeout=20)
+                except subprocess.TimeoutExpired:
+                    poll_probe.kill()
+                    output, _ = poll_probe.communicate()
+                    raise RuntimeError(f'Rust Matching did not release the poll after Go failover: {output}')
+                if poll_probe.returncode != 0:
+                    raise RuntimeError(f'Go worker poll did not observe Rust failover behavior: {output}')
+                if failover_writer.poll() is not None:
+                    raise RuntimeError('Go failover update writer exited before Rust cache observation')
+            finally:
+                release_held_update(failover_writer, failover_release, failover_wal_reader)
+        finally:
+            if poll_probe.poll() is None:
+                poll_probe.kill()
+                poll_probe.wait(timeout=5)
         import urllib.error
         import urllib.request
         headers = {'Rpc-Service': 'cadence-matching', 'Rpc-Encoding': 'thrift'}

@@ -19,7 +19,11 @@ pub struct DomainRecord {
     pub configuration: DomainConfiguration,
     pub replication: DomainReplicationConfiguration,
     pub failover_version: i64,
+    #[serde(default)]
+    pub failover_notification_version: i64,
     pub is_global_domain: bool,
+    #[serde(default)]
+    pub archival_bucket: String,
     /// Failover audit entries in publication order (Go domain audit logs).
     #[serde(default)]
     pub(crate) failover_audit: Vec<FailoverAuditEntry>,
@@ -39,7 +43,9 @@ pub struct DomainRecord {
     pub(crate) async_workflow_config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
 }
 
-fn initial_previous_version() -> i64 { -1 }
+fn initial_previous_version() -> i64 {
+    -1
+}
 
 impl DomainRecord {
     fn to_describe_response(&self) -> DescribeDomainResponse {
@@ -76,6 +82,10 @@ struct Inner {
     /// In-memory only like Go's isolation-state cache; domain records carry
     /// their own overrides into snapshots.
     global_isolation_groups: Option<cadence_api::types::IsolationGroupConfiguration>,
+    /// Matching's Go engine catches up to the highest persisted failover
+    /// notification on registration, then disconnects long polls only for a
+    /// later notification version.
+    matching_failover_notification_version: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -105,24 +115,127 @@ impl From<crate::domain_update::UpdateError> for FailoverError {
 }
 
 fn now_nanos() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-        .map(|v| v.as_nanos() as i64).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|v| v.as_nanos() as i64)
+        .unwrap_or(0)
 }
 
 impl InMemoryDomainStore {
+    /// Merge a complete SQLite-backed Matching metadata refresh into the
+    /// domain view used by Matching consumers. Existing failover audit history
+    /// remains owned by the frontend domain handler; refreshed persistence
+    /// metadata replaces the fields that Go's DomainCache supplies to Matching.
+    pub fn sync_matching_metadata(
+        &self,
+        domains: &[crate::matching_domain_metadata::MatchingDomainMetadata],
+    ) {
+        let mut notifications = Vec::new();
+        let mut inner = self.inner.write().expect("domain store lock");
+        // The initial cache catch-up establishes the Go engine's baseline.
+        // It must never disconnect polls merely because a domain is loaded.
+        let initialize_failover_baseline = inner.matching_failover_notification_version.is_none();
+        if initialize_failover_baseline {
+            inner.matching_failover_notification_version = Some(
+                domains
+                    .iter()
+                    .map(|metadata| metadata.failover_notification_version)
+                    .max()
+                    .unwrap_or_default(),
+            );
+        }
+        let failover_baseline = inner
+            .matching_failover_notification_version
+            .unwrap_or_default();
+        for metadata in domains {
+            let old_name = inner.by_id.get(&metadata.info.uuid).cloned();
+            let old = old_name
+                .as_ref()
+                .and_then(|name| inner.by_name.get(name))
+                .cloned();
+            let record = DomainRecord {
+                info: metadata.info.clone(),
+                configuration: metadata.configuration.clone(),
+                replication: metadata.replication.clone(),
+                failover_version: metadata.failover_version,
+                failover_notification_version: metadata.failover_notification_version,
+                is_global_domain: metadata.is_global_domain,
+                archival_bucket: metadata.archival_bucket.clone(),
+                failover_audit: old
+                    .as_ref()
+                    .map(|record| record.failover_audit.clone())
+                    .unwrap_or_default(),
+                config_version: metadata.config_version,
+                last_updated_time_nanos: metadata.last_updated_time_nanos,
+                failover_end_time: metadata.failover_end_time_nanos,
+                previous_failover_version: metadata.previous_failover_version,
+                isolation_groups: metadata.decoded_isolation_groups.clone(),
+                async_workflow_config: metadata.decoded_async_workflow_config.clone(),
+            };
+            if !initialize_failover_baseline
+                && record.is_global_domain
+                && record.failover_notification_version > failover_baseline
+            {
+                notifications.push(record.clone());
+            }
+            inner.matching_failover_notification_version = Some(
+                inner
+                    .matching_failover_notification_version
+                    .unwrap_or_default()
+                    .max(record.failover_notification_version),
+            );
+            if let Some(old_name) = old_name {
+                if old_name != record.info.name {
+                    inner.by_name.remove(&old_name);
+                }
+            }
+            inner
+                .by_id
+                .insert(record.info.uuid.clone(), record.info.name.clone());
+            inner.by_name.insert(record.info.name.clone(), record);
+        }
+        drop(inner);
+        for record in &notifications {
+            self.notify_failover(record);
+        }
+    }
+
     /// Per-domain failover generation. Subscribing before a Matching poll
     /// starts prevents a domain change from leaving its old long poll blocked.
     pub fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64> {
-        self.failover_notifications.lock().expect("domain notification lock")
-            .entry(uuid.into()).or_insert_with(|| tokio::sync::watch::channel(0).0).subscribe()
+        self.failover_notifications
+            .lock()
+            .expect("domain notification lock")
+            .entry(uuid.into())
+            .or_insert_with(|| tokio::sync::watch::channel(0).0)
+            .subscribe()
     }
     fn notify_failover(&self, record: &DomainRecord) {
-        if !record.is_global_domain { return; }
-        let active_active = record.replication.active_clusters.as_ref()
-            .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
-            .is_some_and(|scopes| scopes.values().any(|scope| scope.cluster_attributes.as_ref().is_some_and(|attributes| !attributes.is_empty())));
-        if active_active { return; }
-        if let Some(sender) = self.failover_notifications.lock().expect("domain notification lock").get(&record.info.uuid) {
+        if !record.is_global_domain {
+            return;
+        }
+        let active_active = record.replication.active_clusters.as_ref().is_some_and(|active| {
+            active
+                    .active_clusters_by_cluster_attribute
+                    .as_ref()
+                    .is_some_and(|scopes| {
+                        scopes.values().any(|scope| {
+                            scope
+                                .cluster_attributes
+                                .as_ref()
+                                .is_some_and(|attributes| !attributes.is_empty())
+                        })
+                    })
+        });
+        if active_active {
+            return;
+        }
+        if let Some(sender) = self
+            .failover_notifications
+            .lock()
+            .expect("domain notification lock")
+            .get(&record.info.uuid)
+        {
             sender.send_modify(|generation| *generation = generation.wrapping_add(1));
         }
     }
@@ -139,8 +252,17 @@ impl InMemoryDomainStore {
         replication: DomainReplicationConfiguration,
         is_global_domain: bool,
     ) -> Result<DescribeDomainResponse, DomainAlreadyExistsError> {
-        self.create_with_version(info, configuration, replication, is_global_domain,
-            if is_global_domain { 0 } else { crate::version_history::EMPTY_VERSION })
+        self.create_with_version(
+            info,
+            configuration,
+            replication,
+            is_global_domain,
+            if is_global_domain {
+                0
+            } else {
+                crate::version_history::EMPTY_VERSION
+            },
+        )
     }
 
     pub fn create_with_version(
@@ -162,7 +284,9 @@ impl InMemoryDomainStore {
             configuration,
             replication,
             failover_version,
+            failover_notification_version: 0,
             is_global_domain,
+            archival_bucket: String::new(),
             failover_audit: Vec::new(),
             config_version: 0,
             last_updated_time_nanos: now_nanos(),
@@ -213,15 +337,34 @@ impl InMemoryDomainStore {
     /// pending failover is passive, and any active-active attribute may own work.
     pub fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError> {
         let inner = self.inner.read().expect("domain store lock");
-        let record = inner.by_id.get(uuid).and_then(|name| inner.by_name.get(name))
+        let record = inner
+            .by_id
+            .get(uuid)
+            .and_then(|name| inner.by_name.get(name))
             .ok_or_else(|| EntityNotExistsError::new(format!("Domain {uuid} does not exist.")))?;
-        if !record.is_global_domain { return Ok(true); }
-        if record.failover_end_time.is_some() { return Ok(false); }
-        if record.replication.active_cluster_name == cluster { return Ok(true); }
-        Ok(record.replication.active_clusters.as_ref()
+        if !record.is_global_domain {
+            return Ok(true);
+        }
+        if record.failover_end_time.is_some() {
+            return Ok(false);
+        }
+        if record.replication.active_cluster_name == cluster {
+            return Ok(true);
+        }
+        Ok(record
+            .replication
+            .active_clusters
+            .as_ref()
             .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
-            .is_some_and(|scopes| scopes.values().any(|scope| scope.cluster_attributes.as_ref()
-                .is_some_and(|attributes| attributes.values().any(|attribute| attribute.active_cluster_name == cluster)))))
+            .is_some_and(|scopes| {
+                scopes.values().any(|scope| {
+                    scope.cluster_attributes.as_ref().is_some_and(|attributes| {
+                        attributes
+                            .values()
+                            .any(|attribute| attribute.active_cluster_name == cluster)
+                    })
+                })
+            }))
     }
 
     pub fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError> {
@@ -270,7 +413,9 @@ impl InMemoryDomainStore {
             is_global_domain: candidate.is_global_domain,
         };
         if prepared.write {
-            if prepared.failover { self.notify_failover(&candidate); }
+            if prepared.failover {
+                self.notify_failover(&candidate);
+            }
             inner.by_name.insert(req.name.clone(), candidate);
         }
         Ok(response)
@@ -398,13 +543,7 @@ impl InMemoryDomainStore {
         domain_id: &str,
         page_size: usize,
         page_token: &[u8],
-    ) -> Result<
-        (
-            Vec<cadence_api::types::FailoverEvent>,
-            Vec<u8>,
-        ),
-        EntityNotExistsError,
-    > {
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), EntityNotExistsError> {
         use cadence_api::types::{ActiveClusterInfo, ClusterFailover, FailoverEvent};
         let inner = self.inner.read().expect("domain store lock");
         let name = inner.by_id.get(domain_id).ok_or_else(|| {
@@ -423,11 +562,8 @@ impl InMemoryDomainStore {
         // Newest first, like Go's audit-log ordering.
         let mut entries: Vec<&FailoverAuditEntry> = record.failover_audit.iter().collect();
         entries.reverse();
-        let page: Vec<&&FailoverAuditEntry> = entries
-            .iter()
-            .skip(offset)
-            .take(page_size.max(1))
-            .collect();
+        let page: Vec<&&FailoverAuditEntry> =
+            entries.iter().skip(offset).take(page_size.max(1)).collect();
         let page_len = page.len();
         for entry in page {
             let mut cluster_failovers = Vec::new();
@@ -468,9 +604,8 @@ impl InMemoryDomainStore {
                     .and_then(|c| c.active_clusters_by_cluster_attribute.as_ref())
                     .and_then(|m| m.get(scope))
                     .and_then(|s| s.cluster_attributes.as_ref());
-                let mut names: Vec<&String> = after_attrs
-                    .map(|m| m.keys().collect())
-                    .unwrap_or_default();
+                let mut names: Vec<&String> =
+                    after_attrs.map(|m| m.keys().collect()).unwrap_or_default();
                 names.sort();
                 for name in names {
                     let after_info = after_attrs.and_then(|m| m.get(name));
@@ -540,8 +675,7 @@ impl InMemoryDomainStore {
     pub fn domain_isolation_groups(
         &self,
         name: &str,
-    ) -> Result<Option<cadence_api::types::IsolationGroupConfiguration>, EntityNotExistsError>
-    {
+    ) -> Result<Option<cadence_api::types::IsolationGroupConfiguration>, EntityNotExistsError> {
         Ok(self
             .inner
             .read()
@@ -573,8 +707,7 @@ impl InMemoryDomainStore {
     pub fn domain_async_workflow_config(
         &self,
         name: &str,
-    ) -> Result<Option<cadence_api::types::AsyncWorkflowConfiguration>, EntityNotExistsError>
-    {
+    ) -> Result<Option<cadence_api::types::AsyncWorkflowConfiguration>, EntityNotExistsError> {
         Ok(self
             .inner
             .read()
@@ -772,6 +905,151 @@ mod tests {
     }
 
     #[test]
+    fn matching_metadata_refresh_updates_full_domain_state_and_publishes_failover() {
+        let domains = InMemoryDomainStore::new();
+        let id = "00000000-0000-0000-0000-000000000077";
+        let mut metadata = crate::matching_domain_metadata::MatchingDomainMetadata {
+            info: DomainInfo {
+                name: "go-seeded".into(),
+                uuid: id.into(),
+                status: Some(DomainStatus::Registered),
+                ..DomainInfo::default()
+            },
+            configuration: DomainConfiguration {
+                workflow_execution_retention_period_in_days: 17,
+                ..DomainConfiguration::default()
+            },
+            replication: DomainReplicationConfiguration {
+                active_cluster_name: "active-a".into(),
+                clusters: vec![ClusterReplicationConfiguration {
+                    cluster_name: "active-a".into(),
+                }],
+                active_clusters: None,
+            },
+            is_global_domain: true,
+            archival_bucket: "bucket-a".into(),
+            status_raw: DomainStatus::Registered as i32,
+            archival_status_raw: 0,
+            history_archival_status_raw: 0,
+            visibility_archival_status_raw: 0,
+            config_version: 4,
+            notification_version: 6,
+            failover_notification_version: 1,
+            failover_version: 8,
+            previous_failover_version: 7,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 99,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: Some(cadence_api::types::IsolationGroupConfiguration {
+                isolation_groups: vec![cadence_api::types::IsolationGroupPartition {
+                    name: "drained".into(),
+                    state: Some(cadence_api::enums::IsolationGroupState::Drained),
+                }],
+            }),
+            decoded_async_workflow_config: Some(cadence_api::types::AsyncWorkflowConfiguration {
+                enabled: true,
+                predefined_queue_name: "work-queue".into(),
+                ..Default::default()
+            }),
+            config_decode_error: None,
+        };
+        let mut failover = domains.subscribe_failover(id);
+        domains.sync_matching_metadata(&[metadata.clone()]);
+        let view = domains
+            .describe(&cadence_api::service_types::DescribeDomainRequest {
+                name: Some("go-seeded".into()),
+                uuid: None,
+            })
+            .unwrap();
+        assert_eq!(
+            view.configuration
+                .unwrap()
+                .workflow_execution_retention_period_in_days,
+            17
+        );
+        assert_eq!(view.failover_version, 8);
+        assert!(domains.is_active_in(id, "active-a").unwrap());
+        assert_eq!(
+            domains
+                .domain_isolation_groups("go-seeded")
+                .unwrap()
+                .unwrap()
+                .isolation_groups[0]
+                .name,
+            "drained"
+        );
+        assert!(
+            domains
+                .domain_async_workflow_config("go-seeded")
+                .unwrap()
+                .unwrap()
+                .enabled
+        );
+        assert!(!failover.has_changed().unwrap());
+
+        // An ordinary domain configuration publication has a newer metadata
+        // notification but the same failover notification version.
+        metadata.notification_version = 7;
+        metadata.configuration.workflow_execution_retention_period_in_days = 18;
+        domains.sync_matching_metadata(&[metadata.clone()]);
+        assert!(!failover.has_changed().unwrap());
+
+        // Go's IsActiveActive excludes attribute-scoped domains from the
+        // blocked-poller release callback even when their failover version
+        // advances.
+        metadata.notification_version = 8;
+        metadata.failover_notification_version = 2;
+        metadata.replication.active_clusters = Some(cadence_api::types::ActiveClusters {
+            active_clusters_by_region: Some(std::collections::HashMap::from([(
+                "legacy-region".into(),
+                cadence_api::types::ActiveClusterInfo::default(),
+            )])),
+            active_clusters_by_cluster_attribute: Some(std::collections::HashMap::from([(
+                "region".into(),
+                cadence_api::types::ClusterAttributeScope {
+                    cluster_attributes: Some(std::collections::HashMap::from([(
+                        "attribute".into(),
+                        cadence_api::types::ActiveClusterInfo::default(),
+                    )])),
+                },
+            )])),
+        });
+        domains.sync_matching_metadata(&[metadata.clone()]);
+        assert!(!failover.has_changed().unwrap());
+
+        // Legacy region-only metadata is not active-active according to Go's
+        // IsActiveActive predicate and must release an eligible failover poll.
+        metadata.failover_notification_version = 3;
+        metadata.replication.active_clusters = Some(cadence_api::types::ActiveClusters {
+            active_clusters_by_region: Some(std::collections::HashMap::from([(
+                "legacy-region".into(),
+                cadence_api::types::ActiveClusterInfo::default(),
+            )])),
+            ..Default::default()
+        });
+        domains.sync_matching_metadata(&[metadata.clone()]);
+        assert!(failover.has_changed().unwrap());
+        let _ = failover.borrow_and_update();
+
+        // A later eligible failover releases blocked polls, while retaining
+        // the domain and task-list manager so subsequent polls can register.
+        metadata.notification_version = 9;
+        metadata.failover_notification_version = 4;
+        metadata.failover_version = 9;
+        metadata.previous_failover_version = 8;
+        metadata.replication.active_cluster_name = "active-b".into();
+        metadata.replication.active_clusters = None;
+        domains.sync_matching_metadata(&[metadata]);
+        assert!(failover.has_changed().unwrap());
+        assert!(!domains.is_active_in(id, "active-a").unwrap());
+        assert!(domains.is_active_in(id, "active-b").unwrap());
+    }
+
+    #[test]
     fn matching_domain_activity_follows_local_failover_and_attribute_rules() {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = sample("d", "id");
@@ -818,10 +1096,16 @@ mod tests {
                 uuid: Some("uuid-1".into()),
             })
             .unwrap();
-        assert_eq!(by_id.failover_version, crate::version_history::EMPTY_VERSION);
+        assert_eq!(
+            by_id.failover_version,
+            crate::version_history::EMPTY_VERSION
+        );
     }
 
-    fn global_sample(domain: &str, uuid: &str) -> (
+    fn global_sample(
+        domain: &str,
+        uuid: &str,
+    ) -> (
         DomainInfo,
         DomainConfiguration,
         DomainReplicationConfiguration,
@@ -834,18 +1118,35 @@ mod tests {
     }
 
     fn test_policy() -> crate::domain_update::DomainPolicy {
-        crate::domain_update::DomainPolicy { cooldown_nanos: 0, ..Default::default() }
+        crate::domain_update::DomainPolicy {
+            cooldown_nanos: 0,
+            ..Default::default()
+        }
     }
 
     fn cluster_metadata() -> cadence_common::cluster::Metadata {
-        use cadence_common::cluster::{Metadata, ClusterInformation};
+        use cadence_common::cluster::{ClusterInformation, Metadata};
         Metadata {
             failover_version_increment: 10,
             primary_cluster_name: "active".into(),
             current_cluster_name: "active".into(),
             clusters: std::collections::BTreeMap::from([
-                ("active".into(), ClusterInformation { enabled: true, initial_failover_version: 0, ..Default::default() }),
-                ("standby".into(), ClusterInformation { enabled: true, initial_failover_version: 1, ..Default::default() }),
+                (
+                    "active".into(),
+                    ClusterInformation {
+                        enabled: true,
+                        initial_failover_version: 0,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "standby".into(),
+                    ClusterInformation {
+                        enabled: true,
+                        initial_failover_version: 1,
+                        ..Default::default()
+                    },
+                ),
             ]),
         }
     }
@@ -866,7 +1167,14 @@ mod tests {
         let mut watch = store.subscribe_failover("uuid-g");
         let other = store.subscribe_failover("unrelated");
         assert!(!watch.has_changed().unwrap());
-        store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata(), &test_policy()).unwrap();
+        store
+            .failover(
+                &failover_req("g", "standby"),
+                "standby",
+                &cluster_metadata(),
+                &test_policy(),
+            )
+            .unwrap();
         assert!(watch.has_changed().unwrap());
         assert_eq!(*watch.borrow_and_update(), 1);
         assert!(!other.has_changed().unwrap());
@@ -885,7 +1193,14 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = global_sample("g", "uuid-g");
         store.create(info, cfg, rep, true).unwrap();
-        let resp = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata(), &test_policy()).unwrap();
+        let resp = store
+            .failover(
+                &failover_req("g", "standby"),
+                "standby",
+                &cluster_metadata(),
+                &test_policy(),
+            )
+            .unwrap();
         assert_eq!(
             resp.replication_configuration.unwrap().active_cluster_name,
             "standby"
@@ -905,7 +1220,14 @@ mod tests {
             "standby"
         );
         // An explicit same-cluster target is accepted without advancing an AP version.
-        let repeated = store.failover(&failover_req("g", "standby"), "standby", &cluster_metadata(), &test_policy()).unwrap();
+        let repeated = store
+            .failover(
+                &failover_req("g", "standby"),
+                "standby",
+                &cluster_metadata(),
+                &test_policy(),
+            )
+            .unwrap();
         assert_eq!(repeated.failover_version, 1);
     }
 
@@ -914,25 +1236,52 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = sample("local", "uuid-local");
         store.create(info, cfg, rep, false).unwrap();
-        let err = store.failover(&failover_req("local", "other"), "other", &cluster_metadata(), &test_policy()).unwrap_err();
+        let err = store
+            .failover(
+                &failover_req("local", "other"),
+                "other",
+                &cluster_metadata(),
+                &test_policy(),
+            )
+            .unwrap_err();
         assert!(matches!(err, FailoverError::Invalid(_)));
         let err = store
-            .failover(&failover_req("missing", "other"), "other", &cluster_metadata(), &test_policy())
+            .failover(
+                &failover_req("missing", "other"),
+                "other",
+                &cluster_metadata(),
+                &test_policy(),
+            )
             .unwrap_err();
         assert!(matches!(err, FailoverError::NotFound(_)));
 
         let (info, cfg, rep) = global_sample("g2", "uuid-g2");
         store.create(info, cfg, rep, true).unwrap();
         // Wrong destination cluster without the skip flag.
-        let err = store.failover(&failover_req("g2", "standby"), "active", &cluster_metadata(), &test_policy()).unwrap_err();
+        let err = store
+            .failover(
+                &failover_req("g2", "standby"),
+                "active",
+                &cluster_metadata(),
+                &test_policy(),
+            )
+            .unwrap_err();
         assert!(matches!(err, FailoverError::Invalid(_)));
         // Skip flag accepts from any cluster.
         let mut req = failover_req("g2", "standby");
         req.skip_destination_cluster_check = true;
-        store.failover(&req, "active", &cluster_metadata(), &test_policy()).unwrap();
+        store
+            .failover(&req, "active", &cluster_metadata(), &test_policy())
+            .unwrap();
         let mut back = failover_req("g2", "active");
         back.skip_destination_cluster_check = true;
-        assert_eq!(store.failover(&back, "active", &cluster_metadata(), &test_policy()).unwrap().failover_version, 10);
+        assert_eq!(
+            store
+                .failover(&back, "active", &cluster_metadata(), &test_policy())
+                .unwrap()
+                .failover_version,
+            10
+        );
         // Paging: newest first, one per page.
         let (first, next) = store.failover_history("uuid-g2", 1, &[]).unwrap();
         assert_eq!(first.len(), 1);

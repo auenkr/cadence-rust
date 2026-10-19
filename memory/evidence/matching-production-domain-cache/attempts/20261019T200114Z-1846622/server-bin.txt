@@ -1,0 +1,1 @@
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/cadence-server

@@ -1,0 +1,13 @@
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-persistence)
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+error: struct update has no effect, all the fields in the struct have already been specified
+    --> crates/cadence-persistence/src/domains.rs:1020:15
+     |
+1020 |             ..Default::default()
+     |               ^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_update
+     = note: `-D clippy::needless-update` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::needless_update)]`
+
+error: could not compile `cadence-persistence` (lib test) due to 1 previous error

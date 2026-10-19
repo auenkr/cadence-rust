@@ -183,6 +183,72 @@ func TestRustMatchingDomainMetadataInterop(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 	phase := os.Getenv("CADENCE_MATCHING_SQLITE_PHASE")
+	if phase == "live-seed" {
+		_, err := store.CreateDomain(ctx, &p.InternalCreateDomainRequest{
+			Info:   &p.DomainInfo{ID: "00000000-0000-0000-0000-000000000077", Name: "matching-failover-probe", Status: 1},
+			Config: &p.InternalDomainConfig{Retention: 24 * time.Hour},
+			ReplicationConfig: &p.InternalDomainReplicationConfig{
+				Clusters:          []*p.ClusterReplicationConfig{{ClusterName: "cluster0"}, {ClusterName: "cluster1"}},
+				ActiveClusterName: "cluster0",
+			},
+			IsGlobalDomain: true, ConfigVersion: 1, FailoverVersion: 1,
+			LastUpdatedTime: time.Now(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if phase == "live-ordinary" || phase == "live-failover" || phase == "live-ordinary-held" || phase == "live-failover-held" {
+		got, err := store.GetDomain(ctx, &p.GetDomainRequest{ID: "00000000-0000-0000-0000-000000000077"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata, err := store.GetMetadata(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := &p.InternalUpdateDomainRequest{
+			Info: got.Info, Config: got.Config, ReplicationConfig: got.ReplicationConfig,
+			ConfigVersion: got.ConfigVersion + 1, FailoverVersion: got.FailoverVersion,
+			FailoverNotificationVersion: got.FailoverNotificationVersion,
+			PreviousFailoverVersion:     got.PreviousFailoverVersion,
+			FailoverEndTime:             got.FailoverEndTime, LastUpdatedTime: time.Now(),
+			NotificationVersion: metadata.NotificationVersion,
+		}
+		if phase == "live-ordinary" || phase == "live-ordinary-held" {
+			request.Config.Retention += time.Hour
+		} else {
+			request.FailoverVersion++
+			request.FailoverNotificationVersion++
+			request.PreviousFailoverVersion = got.FailoverVersion
+			request.ReplicationConfig.ActiveClusterName = "cluster1"
+		}
+		if err := store.UpdateDomain(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+		if phase == "live-ordinary-held" || phase == "live-failover-held" {
+			ready := os.Getenv("CADENCE_MATCHING_SQLITE_HOLD_READY")
+			release := os.Getenv("CADENCE_MATCHING_SQLITE_HOLD_RELEASE")
+			if ready == "" || release == "" {
+				t.Fatal("held SQLite update requires ready and release paths")
+			}
+			if err := os.WriteFile(ready, []byte("committed"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(90 * time.Second)
+			for {
+				if _, err := os.Stat(release); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("timed out waiting to release held SQLite writer")
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+		}
+		return
+	}
 	if phase == "seed" {
 		for _, spec := range []struct {
 			id, name     string

@@ -56,6 +56,9 @@ pub struct TaskDispatcher {
     sync_matcher: Option<Arc<crate::matching_sync::SyncMatcher>>,
     forward: Option<ForwardState>,
     pollers: Option<Arc<std::sync::Mutex<cadence_common::poller::Manager>>>,
+    /// Go matcher cancel context: release blocked long polls without stopping
+    /// this dispatcher, queue, or poller manager.
+    blocked_pollers: Arc<Notify>,
 }
 /// Go `forwarder.ForwardPoll`: a child partition with no local task hands its
 /// poll to the parent partition, which runs its full poll (History start
@@ -93,7 +96,15 @@ trait ForwardPollRequest<R>: Clone + Send {
 impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTaskRequest {
     fn for_parent(&self, name: &str) -> Self {
         Self {
-            task_list: Some(p::TaskList { name: name.into(), kind: self.task_list.as_ref().map(|list| list.kind).unwrap_or_default(), ..Default::default() }),
+            task_list: Some(p::TaskList {
+                name: name.into(),
+                kind: self
+                    .task_list
+                    .as_ref()
+                    .map(|list| list.kind)
+                    .unwrap_or_default(),
+                ..Default::default()
+            }),
             identity: self.identity.clone(),
             ..Default::default()
         }
@@ -102,23 +113,47 @@ impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTa
         Box::pin(async move {
             let payload = self.for_parent(&target.parent_name);
             let mut request = tonic::Request::new(m::PollForDecisionTaskRequest {
-                domain_id: target.domain_id, poller_id: target.poller_id,
-                request: Some(payload), forwarded_from: target.forwarded_from,
+                domain_id: target.domain_id,
+                poller_id: target.poller_id,
+                request: Some(payload),
+                forwarded_from: target.forwarded_from,
                 isolation_group: target.isolation_group,
             });
-            request.set_timeout(target.deadline.saturating_duration_since(tokio::time::Instant::now()));
+            request.set_timeout(
+                target
+                    .deadline
+                    .saturating_duration_since(tokio::time::Instant::now()),
+            );
             match target.target {
-                Parent::Service(service) => m::matching_api_server::MatchingApi::poll_for_decision_task(&*service, request).await,
-                Parent::Remote(channel) => m::matching_api_client::MatchingApiClient::new(channel).poll_for_decision_task(request).await,
-                Parent::Dispatcher(_) => unreachable!("library dispatcher handled by forwarding loop"),
-            }.map(tonic::Response::into_inner)
+                Parent::Service(service) => {
+                    m::matching_api_server::MatchingApi::poll_for_decision_task(&*service, request)
+                        .await
+                }
+                Parent::Remote(channel) => {
+                    m::matching_api_client::MatchingApiClient::new(channel)
+                        .poll_for_decision_task(request)
+                        .await
+                }
+                Parent::Dispatcher(_) => {
+                    unreachable!("library dispatcher handled by forwarding loop")
+                }
+            }
+            .map(tonic::Response::into_inner)
         })
     }
 }
 impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTaskRequest {
     fn for_parent(&self, name: &str) -> Self {
         Self {
-            task_list: Some(p::TaskList { name: name.into(), kind: self.task_list.as_ref().map(|list| list.kind).unwrap_or_default(), ..Default::default() }),
+            task_list: Some(p::TaskList {
+                name: name.into(),
+                kind: self
+                    .task_list
+                    .as_ref()
+                    .map(|list| list.kind)
+                    .unwrap_or_default(),
+                ..Default::default()
+            }),
             identity: self.identity.clone(),
             ..Default::default()
         }
@@ -127,30 +162,45 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
         Box::pin(async move {
             let payload = self.for_parent(&target.parent_name);
             let mut request = tonic::Request::new(m::PollForActivityTaskRequest {
-                domain_id: target.domain_id, poller_id: target.poller_id,
-                request: Some(payload), forwarded_from: target.forwarded_from,
+                domain_id: target.domain_id,
+                poller_id: target.poller_id,
+                request: Some(payload),
+                forwarded_from: target.forwarded_from,
                 isolation_group: target.isolation_group,
             });
-            request.set_timeout(target.deadline.saturating_duration_since(tokio::time::Instant::now()));
+            request.set_timeout(
+                target
+                    .deadline
+                    .saturating_duration_since(tokio::time::Instant::now()),
+            );
             match target.target {
-                Parent::Service(service) => m::matching_api_server::MatchingApi::poll_for_activity_task(&*service, request).await,
-                Parent::Remote(channel) => m::matching_api_client::MatchingApiClient::new(channel).poll_for_activity_task(request).await,
-                Parent::Dispatcher(_) => unreachable!("library dispatcher handled by forwarding loop"),
-            }.map(tonic::Response::into_inner)
+                Parent::Service(service) => {
+                    m::matching_api_server::MatchingApi::poll_for_activity_task(&*service, request)
+                        .await
+                }
+                Parent::Remote(channel) => {
+                    m::matching_api_client::MatchingApiClient::new(channel)
+                        .poll_for_activity_task(request)
+                        .await
+                }
+                Parent::Dispatcher(_) => {
+                    unreachable!("library dispatcher handled by forwarding loop")
+                }
+            }
+            .map(tonic::Response::into_inner)
         })
     }
 }
 #[cfg(test)]
 impl<R: Send + 'static> ForwardPollRequest<R> for () {
     fn for_parent(&self, _name: &str) -> Self {}
-    fn forward(self, _target: ForwardPoll) -> ForwardResult<R> { Box::pin(async { Err(Status::unimplemented("test poll")) }) }
+    fn forward(self, _target: ForwardPoll) -> ForwardResult<R> {
+        Box::pin(async { Err(Status::unimplemented("test poll")) })
+    }
 }
 impl ForwardState {
     pub(crate) fn new(
-        resolve: impl Fn() -> ParentFuture
-            + Send
-            + Sync
-            + 'static,
+        resolve: impl Fn() -> ParentFuture + Send + Sync + 'static,
         max_outstanding: crate::matching_forward::Count,
         source: String,
         local_wait: crate::matching_forward::Count,
@@ -177,6 +227,12 @@ enum ClaimError {
     Queue(QueueError),
     Join(tokio::task::JoinError),
     Forward(tokio::sync::OwnedSemaphorePermit),
+    Released,
+}
+enum WaitResult {
+    Closed,
+    Released,
+    Woken,
 }
 fn queue_status(error: QueueError) -> Status {
     Status::unavailable(error.to_string())
@@ -203,6 +259,7 @@ impl TaskDispatcher {
             sync_matcher: None,
             forward: None,
             pollers: None,
+            blocked_pollers: Arc::new(Notify::new()),
         }
     }
     pub fn with_liveness(mut self, liveness: Arc<cadence_common::liveness::Liveness>) -> Self {
@@ -225,7 +282,10 @@ impl TaskDispatcher {
         self.forward = Some(forward);
         self
     }
-    pub(crate) fn with_pollers(mut self, pollers: Arc<std::sync::Mutex<cadence_common::poller::Manager>>) -> Self {
+    pub(crate) fn with_pollers(
+        mut self,
+        pollers: Arc<std::sync::Mutex<cadence_common::poller::Manager>>,
+    ) -> Self {
         self.pollers = Some(pollers);
         self
     }
@@ -234,6 +294,9 @@ impl TaskDispatcher {
     }
     pub fn notify_new_tasks(&self) {
         self.wake.notify_waiters();
+    }
+    pub fn release_blocked_pollers(&self) {
+        self.blocked_pollers.notify_waiters();
     }
     async fn claim(&self, group: &str) -> Result<(Option<AllocatedTask>, bool), ClaimError> {
         if let Some(reader) = &self.reader {
@@ -245,11 +308,7 @@ impl TaskDispatcher {
         }
         let queue = self.queue.clone();
         tokio::task::spawn_blocking(move || {
-            queue.read_batch_with_clock(
-                100000,
-                NonZeroU32::new(1).unwrap(),
-                now,
-            )
+            queue.read_batch_with_clock(100000, NonZeroU32::new(1).unwrap(), now)
         })
         .await
         .map_err(ClaimError::Join)?
@@ -375,7 +434,10 @@ impl TaskDispatcher {
             if sender.as_ref().is_some_and(|sender| sender.is_closed()) {
                 return true;
             }
-            if deadline.saturating_duration_since(tokio::time::Instant::now()).is_zero() {
+            if deadline
+                .saturating_duration_since(tokio::time::Instant::now())
+                .is_zero()
+            {
                 return false;
             }
             let Some((parent, parent_name)) = (forward.resolve)().await else {
@@ -384,20 +446,36 @@ impl TaskDispatcher {
             let parent = match parent {
                 Parent::Dispatcher(parent) => parent,
                 target => {
-                    let (poller_id, isolation_group) = lifecycle.as_ref().map(|poll| (poll.id.clone(), poll.info.isolation_group.clone())).unwrap_or_default();
-                    let target = ForwardPoll { target, domain_id: self.domain_id.clone(),
-                        parent_name, forwarded_from: forward.source.clone(),
-                        poller_id, isolation_group, deadline };
+                    let (poller_id, isolation_group) = lifecycle
+                        .as_ref()
+                        .map(|poll| (poll.id.clone(), poll.info.isolation_group.clone()))
+                        .unwrap_or_default();
+                    let target = ForwardPoll {
+                        target,
+                        domain_id: self.domain_id.clone(),
+                        parent_name,
+                        forwarded_from: forward.source.clone(),
+                        poller_id,
+                        isolation_group,
+                        deadline,
+                    };
                     // A cancelled child RPC must drop the upstream RPC as well.
                     // The dispatcher owns the response channel, so watch it
                     // directly rather than waiting out a full parent long poll.
-                    let Some(response) = sender.as_mut() else { return true; };
+                    let Some(response) = sender.as_mut() else {
+                        return true;
+                    };
                     let result = tokio::select! {
                         result = poll.forward(target) => result,
                         _ = response.closed() => return true,
                     };
                     return match result {
-                        Ok(value) => { if let Some(sender) = sender.take() { let _ = sender.send(Ok(value)); } true },
+                        Ok(value) => {
+                            if let Some(sender) = sender.take() {
+                                let _ = sender.send(Ok(value));
+                            }
+                            true
+                        }
                         Err(_) => false,
                     };
                 }
@@ -412,7 +490,13 @@ impl TaskDispatcher {
                 Some(lifecycle)
             });
             parent
-                .delivery_loop(poll.for_parent(&parent_name), sender, deliver, lifecycle, deadline)
+                .delivery_loop(
+                    poll.for_parent(&parent_name),
+                    sender,
+                    deliver,
+                    lifecycle,
+                    deadline,
+                )
                 .await;
             true
         })
@@ -609,6 +693,9 @@ impl TaskDispatcher {
             let notification = self.wake.notified();
             tokio::pin!(notification);
             notification.as_mut().enable();
+            let released = self.blocked_pollers.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
             let claim = {
                 let closed = async {
                     match sender.as_mut() {
@@ -623,6 +710,7 @@ impl TaskDispatcher {
                     tokio::select! {
                         biased;
                         _ = &mut closed => return,
+                        _ = &mut released => Err(ClaimError::Released),
                         result = self.claim_delivery(lifecycle.as_ref().map(|l| l.info.isolation_group.as_str()).unwrap_or_default()) => result,
                         permit = async {
                             match &self.forward {
@@ -647,11 +735,27 @@ impl TaskDispatcher {
             let (task, scan_pending) = match claim {
                 Ok(value) => value,
                 Err(ClaimError::Forward(permit)) => {
-                    if self.forward_poll(poll.clone(), sender, deliver, (deadline, permit), lifecycle.clone()).await {
+                    if self
+                        .forward_poll(
+                            poll.clone(),
+                            sender,
+                            deliver,
+                            (deadline, permit),
+                            lifecycle.clone(),
+                        )
+                        .await
+                    {
                         return;
                     }
                     forward_failed = true;
                     continue;
+                }
+                Err(ClaimError::Released) => {
+                    drop(waiting.take());
+                    if let Some(sender) = sender.take() {
+                        let _ = sender.send(Ok(R::default()));
+                    }
+                    return;
                 }
                 Err(ClaimError::Queue(QueueError::Stopped)) => {
                     drop(waiting.take());
@@ -668,6 +772,7 @@ impl TaskDispatcher {
                         ClaimError::Queue(error) => queue_status(error),
                         ClaimError::Join(error) => Status::internal(error.to_string()),
                         ClaimError::Forward(_) => unreachable!("handled above"),
+                        ClaimError::Released => unreachable!("handled above"),
                     };
                     if let Some(sender) = sender.take() {
                         let _ = sender.send(Err(status));
@@ -680,9 +785,7 @@ impl TaskDispatcher {
                     tokio::task::yield_now().await;
                     continue;
                 }
-                if sender.is_none()
-                    || sender.as_ref().is_some_and(|sender| sender.is_closed())
-                {
+                if sender.is_none() || sender.as_ref().is_some_and(|sender| sender.is_closed()) {
                     return;
                 }
                 let waited = {
@@ -693,10 +796,23 @@ impl TaskDispatcher {
                         }
                     };
                     tokio::pin!(closed);
-                    tokio::select! {_=&mut closed=>true,_=notification=>false,_=tokio::time::sleep(Duration::from_millis(100))=>false}
+                    tokio::select! {
+                        _=&mut closed=>WaitResult::Closed,
+                        _=&mut released=>WaitResult::Released,
+                        _=notification=>WaitResult::Woken,
+                        _=tokio::time::sleep(Duration::from_millis(100))=>WaitResult::Woken
+                    }
                 };
-                if waited {
-                    return;
+                match waited {
+                    WaitResult::Closed => return,
+                    WaitResult::Released => {
+                        drop(waiting.take());
+                        if let Some(sender) = sender.take() {
+                            let _ = sender.send(Ok(R::default()));
+                        }
+                        return;
+                    }
+                    WaitResult::Woken => {}
                 }
                 continue;
             };
@@ -772,10 +888,18 @@ mod tests {
     #[test]
     fn matching_forwarded_poll_rebuilds_parent_request() {
         let activity = p::PollForActivityTaskRequest {
-            domain: "worker-domain".into(), identity: "worker".into(),
-            task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
-            task_list_metadata: Some(p::TaskListMetadata { max_tasks_per_second: Some(3.0) }),
-        }.for_parent("queue");
+            domain: "worker-domain".into(),
+            identity: "worker".into(),
+            task_list: Some(p::TaskList {
+                name: "/__cadence_sys/queue/1".into(),
+                kind: 1,
+                ..Default::default()
+            }),
+            task_list_metadata: Some(p::TaskListMetadata {
+                max_tasks_per_second: Some(3.0),
+            }),
+        }
+        .for_parent("queue");
         assert_eq!(activity.task_list.unwrap().name, "queue");
         assert_eq!(activity.identity, "worker");
         assert!(activity.domain.is_empty());
@@ -859,11 +983,7 @@ mod tests {
             while dispatcher.queue.levels().0 <= 2 {
                 assert!(dispatcher
                     .queue
-                    .read_batch(
-                        100,
-                        NonZeroU32::new(1).unwrap(),
-                        now()
-                    )
+                    .read_batch(100, NonZeroU32::new(1).unwrap(), now())
                     .unwrap()
                     .tasks
                     .is_empty());
@@ -1151,7 +1271,9 @@ mod tests {
             &[],
             reader.stop_signal().subscribe(),
         ));
-        let dispatcher = dispatcher.with_reader(reader).with_sync_matcher(matcher.clone());
+        let dispatcher = dispatcher
+            .with_reader(reader)
+            .with_sync_matcher(matcher.clone());
         let data = TaskData {
             workflow_id: "sync".into(),
             ..Default::default()
