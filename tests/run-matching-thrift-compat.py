@@ -105,6 +105,7 @@ def assert_embedded_start_succeeds():
     test_command = command.copy()
     config_index = test_command.index('--config')
     del test_command[config_index:config_index + 2]
+    test_command[test_command.index('--data-dir') + 1] = str(artifacts / 'embedded-data')
     log_path = artifacts / 'embedded-startup.log'
     with log_path.open('w') as log:
         process = subprocess.Popen(test_command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
@@ -133,6 +134,7 @@ def assert_runtime_listener_failure_cleans_up():
     occupied.listen()
     test_command = command.copy()
     test_command[test_command.index('--matching-tchannel-port') + 1] = str(occupied.getsockname()[1])
+    test_command[test_command.index('--data-dir') + 1] = str(artifacts / 'listener-failure-data')
     try:
         result = subprocess.run(test_command, cwd=root, capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
@@ -347,11 +349,6 @@ with (artifacts / 'server.log').open('w') as log:
             if response.status != 200:
                 raise AssertionError(f'dynamic drain config update returned {response.status}')
         server.send_signal(signal.SIGTERM)
-        time.sleep(0.1)
-        try:
-            server.send_signal(signal.SIGTERM)
-        except ProcessLookupError:
-            pass
         env = {**os.environ, 'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}'}
         subprocess.run(
             [str(drain_probe), '-test.run=^TestRustMatchingDrainHealth$', '-test.count=1', '-test.v'],
@@ -359,6 +356,12 @@ with (artifacts / 'server.log').open('w') as log:
         )
         if server.poll() is not None:
             raise AssertionError('server exited before the Matching drain health RPC completed')
+        # A second signal forces shutdown, so send it only after proving the
+        # configured graceful-drain window accepted a generated-client RPC.
+        try:
+            server.send_signal(signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         server.wait(timeout=10)
         shutdown_probe.settimeout(3)
         try:

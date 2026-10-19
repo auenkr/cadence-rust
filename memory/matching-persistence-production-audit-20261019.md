@@ -248,3 +248,48 @@ This is a source-only checkpoint until the validation runner has completed.
 It is not acceptance evidence until all five gates pass with matching
 before/after source hashes; the staged production
 Ringpop probe remains separately blocked on production provider assembly.
+
+## Focused configured-store probe evidence (2026-10-19)
+
+The native configured-store runner passed after isolating the two startup-only
+checks from the production data directory and strengthening the live Go
+readback to inspect the Rust-created activity task payload before Rust
+delivered it. The exact command was:
+
+```sh
+python3 tests/run-matching-thrift-compat.py \
+  --server-bin /home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/cadence-server \
+  --artifacts-dir artifacts/matching-configured-store-20261019T220052Z
+```
+
+The command exited successfully. It ran Go overlay compile diagnostics, Go
+TaskStore seed/readback checks, all ten generated-client native Matching
+Thrift methods over TChannel, HTTP, HTTP with trailing slash and TLS, Rust
+task-list and task-row interoperability, the Go-enqueued task ID 2 delivery
+and collection assertion, dynamic failover checks, graceful drain health,
+plain HTTP routing checks, TLS startup checks, and embedded/listener-failure
+startup checks. The live task-list input is preserved in
+`artifacts/matching-configured-store-20261019T220052Z/rust-configured-task-list.txt`.
+The production negative assertion passed: the explicit configured-store
+server did not create `artifacts/matching-configured-store-20261019T220052Z/data/matching.db`.
+Embedded startup wrote only under `embedded-data`, and listener failure used
+`listener-failure-data`.
+
+At tested HEAD `5ead1b419e2b09d5109aa27b9c691da474829e0d`, the source hashes
+were:
+
+| File | SHA-256 |
+| --- | --- |
+| `tests/matching-thrift-go_test.go` | `e49161b140a8c0e3ac6bb9527c5be5f853bd47d549045f270b6efe1e640d37ac` |
+| `tests/run-matching-thrift-compat.py` | `bbeb74e27497cd5708b1d04a50a6fce339d0621ed1104f6f651bf53b40fb90ba` |
+| `rust/crates/cadence-server/src/config.rs` | `00f0dd3153eb5084164277321e5eb94944108543b0738e02b4b0f0e5e412cf6a` |
+| `rust/crates/cadence-server/src/lib.rs` | `053aea7397291306fe6e7dd595f772e6c6ea672bbea25ceee4a9aad8bd856cce` |
+| `rust/Cargo.lock` | `a9995876e7e851652c6781142c2439b5d71e4903518df03b66a5047537d2b129` |
+
+This focused runner is evidence for configured single-shard SQLite persistence,
+native Matching transports and the listed lifecycle paths. It does not test
+the production Go Frontend/History/Worker mixed-cluster Ringpop discovery path,
+Matching-to-History discovery, or establish Matching service completion. The
+separate staged production mixed probe remains unvalidated until production
+main assembles the Matching Ringpop membership/provider lifecycle and the
+discovered History peer resolver.

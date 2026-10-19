@@ -150,6 +150,9 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if path := os.Getenv("CADENCE_MATCHING_SQLITE_DB"); path != "" {
+				assertRustQueuedActivityTaskReadable(t, path, domainID, list.GetName(), workflowID, run.GetRunId(), scheduleIDs["activity"])
+			}
 			if os.Getenv("CADENCE_MATCHING_SQLITE_DB") != "" {
 				goActivity, err := matching.PollForActivityTask(ctx, &m.PollForActivityTaskRequest{DomainUUID: common.StringPtr(domainID), PollerID: common.StringPtr(uuid.NewString()), PollRequest: &s.PollForActivityTaskRequest{TaskList: list, Identity: common.StringPtr("go-activity-worker"), TaskListMetadata: &s.TaskListMetadata{MaxTasksPerSecond: common.Float64Ptr(50)}}})
 				if err != nil || string(goActivity.Input) != "go-input" || goActivity.GetActivityId() != "go-queued-activity" {
@@ -324,6 +327,42 @@ func insertGoQueuedActivityTask(t *testing.T, path, domainID, taskList, workflow
 	if !foundTaskID2 {
 		t.Fatal("Go TaskStore did not persist seeded activity task ID 2")
 	}
+}
+
+func assertRustQueuedActivityTaskReadable(t *testing.T, path, domainID, taskList, workflowID, runID string, scheduleID int64) {
+	t.Helper()
+	dc := p.NewDefaultDynamicConfiguration()
+	parser, err := serialization.NewParser(dc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := sqlstore.NewFactory(config.SQL{PluginName: "sqlite", DatabaseName: path, NumShards: 1, MaxConns: 1, MaxIdleConns: 1, MaxConnLifetime: time.Hour}, "cluster0", log.NewNoop(), parser, dc)
+	store, err := factory.NewTaskStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	metadata, err := store.GetTaskList(ctx, &p.GetTaskListRequest{DomainID: domainID, TaskList: taskList, TaskType: 1})
+	if err != nil || metadata.TaskListInfo == nil || metadata.TaskListInfo.RangeID != 2 {
+		t.Fatalf("Go TaskStore could not read Rust's second activity-list lease: metadata=%v err=%v", metadata, err)
+	}
+	rows, err := store.GetTasks(ctx, &p.GetTasksRequest{DomainID: domainID, TaskList: taskList, TaskType: 1, ReadLevel: -1, BatchSize: 100})
+	if err != nil {
+		t.Fatalf("Go TaskStore could not read Rust-created activity task: %v", err)
+	}
+	for _, row := range rows.Tasks {
+		if row.TaskID == 2 {
+			continue
+		}
+		if row.WorkflowID == workflowID && row.RunID == runID && row.ScheduleID == scheduleID {
+			if row.DomainID != domainID {
+				t.Fatalf("Rust activity task has unexpected domain %q", row.DomainID)
+			}
+			return
+		}
+	}
+	t.Fatalf("Go TaskStore did not find Rust-created activity task for workflow %q schedule %d; rows=%+v", workflowID, scheduleID, rows.Tasks)
 }
 
 func assertGoQueuedActivityTaskConsumed(t *testing.T, path, domainID, taskList string) {
