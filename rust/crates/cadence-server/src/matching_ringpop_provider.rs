@@ -440,7 +440,6 @@ mod tests {
                 ("tchannel".into(), "7935".into()),
                 ("worker".into(), "9000".into()),
             ])),
-            ..Default::default()
         };
         let node = RingpopNode::new("cadence", member, false);
         let members = MatchingRingpopProvider::current_members(&node);
