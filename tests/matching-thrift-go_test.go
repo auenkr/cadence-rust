@@ -298,7 +298,7 @@ func insertGoQueuedActivityTask(t *testing.T, path, domainID, taskList, workflow
 		TaskListInfo:     metadata.TaskListInfo,
 		CurrentTimeStamp: time.Now(),
 		Tasks: []*p.CreateTaskInfo{{TaskID: 2, Data: &p.TaskInfo{
-			DomainID: domainID, WorkflowID: workflowID, RunID: runID, ScheduleID: scheduleID,
+			DomainID: domainID, WorkflowID: workflowID, RunID: runID, TaskID: 2, ScheduleID: scheduleID,
 			ScheduleToStartTimeoutSeconds: 30,
 		}}},
 	})
