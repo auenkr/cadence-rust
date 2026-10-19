@@ -180,6 +180,16 @@ Ringpop-provider peer on the same TChannel protocol path and exercise join,
 label change, self-eviction, restart, and recovery. The full mixed Go
 Frontend/History/Worker + Rust Matching SDK workflow remains the service gate.
 
+The Go peer harness is now present as source at
+`tests/go-overlay/common/peerprovider/ringpopprovider/rust_provider_lifecycle_test.go`
+with runner `tests/run-matching-ringpop-go-peer.py` and Rust probe example
+`rust/crates/cadence-server/examples/matching_ringpop_go_peer_probe.rs`. The Go
+test starts Cadence's pinned Ringpop provider on a real TChannel channel, and
+the Rust example runs Matching's concrete provider and shared listener at a
+reserved address. It checks Go-side role/port-label decoding, observes Rust
+self-eviction, then verifies recovery when Rust restarts at the same address.
+These files are uncompiled and unrun; they are harness source, not evidence.
+
 Production startup recipe: bind Matching's TChannel listener; construct the
 provider using that listener's concrete `local_addr()`; install
 `provider.handler()` with `serve_matching_with_ringpop_listener` on that same
