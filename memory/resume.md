@@ -1,3 +1,20 @@
+## Authoritative continuation checkpoint — 2026-10-19
+
+Parent source365d9b219. Whole migration goal remains active; Matching incomplete, no History migration until full service parity and mixed original-Go verification. Current orchestration uses native Luna workers (normal Standard speed), not stale T3 task71/72 IDs owned by another thread.
+
+Active workers:
+- `/root/discovery_review`, isolated `t3-367ce881`, baseline056ee6890+0eba7a373 and retained uncommitted decoder changes. Expanding actual Go raw-byte, oversized number, surrogate and whole-document syntax-before-type oracles. Fresh post-final-edit Rust focused tests and strict server Clippy still required. Nothing integrated.
+- `/root/relay_completion`, isolated `t3-6f14baa6`, baselinee1f379685 and retained relay/harness changes. Real Go->Rust->Go PING-REQ success/failure/state/dissemination checks, exact fresh probe selection. Nothing integrated. Relay intentionally ignores reverse full sync per actual Go handler.
+- `/root/state_transitions`, isolated `ringpop-state-transitions` fromec059ca8e. New deterministic common timer core and actual pinned-Go clock oracle. Parent required deadline ordering across addresses and token/locking contract; runtime integration remains open.
+
+Builds checked live (no stale lock inference): relay Cargo PID1337500, discovery Cargo1337885/rustc1337912, common Cargo1339966 and Go oracle1341378. Linkers are active; host IO pressure high. Do not start duplicate jobs or cancel just due observation timeout. Long jobs tmux cadence-rust, jobs1. Native worker status remains running.
+
+Storage cleanup recovered36.9GB;36GB currently free. Active975/e426+a33 caches preserved. Old ce1e72cb target removed, source remains. Exact report memory/storage-recovery-20261019.md.
+
+Parent added memory/matching-production-binary-gate.md: existing mixed tests launch ignored matching_delivery test executable, not actual cadence-server main. Main still loopback History/snapshot-only domains/unmanaged maintenance/no production membership wiring. Must add actual binary validation and complete production dependencies before service-complete claim. Last full frozen regression remains3c8c5f98a (34 stages/568 tests), not current source. Freshness issue also identified in tests/run-ringpop-outbound-ping-compat.py (reuses global /tmp probe); repair before relying on future evidence.
+
+Next: review and integrate only finished validated worker commits; assign outgoing indirect probes/DNS-SRV/runtime-owner and remaining Matching production gaps in independent bounded slices, then full actual-binary mixed recovery audit. Preserve source/evidence and push checkpoints after compaction.
+
 ## Authoritative resume checkpoint — 2026-10-18
 
 Parent source 0a6b6b336; Matching remains incomplete. Service order Matching -> History -> Frontend -> Worker. Workers use Luna normal speed, serviceTier=default, isolated async worktrees. No future-service migration yet.
