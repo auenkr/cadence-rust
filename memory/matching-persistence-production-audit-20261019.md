@@ -234,7 +234,8 @@ independent gate, plus `source-freeze.json` and `results.json` in a unique
 timestamped artifact directory. The gates cover (1) persistence SQLite
 options/schema and store-operation tests, (2) server configured-store option
 resolution, (3) a locked `cadence-server` build, (4) the Go/native-Thrift
-configured two-way probe, and (5) workspace-wide strict Clippy (`-D warnings`). The compatibility probe verifies
+configured two-way probe, and (5) strict Clippy for `cadence-persistence` and
+`cadence-server` (`-D warnings`). The compatibility probe verifies
 Rust task-list data through Go persistence and Go activity task ID 2 delivery
 plus subsequent Rust-side task-list readback/collection. Run with
 `python3 tests/run-matching-configured-store-validation.py --target-dir /path/to/shared/target`.

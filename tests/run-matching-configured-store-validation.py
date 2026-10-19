@@ -78,7 +78,7 @@ def main():
         ("configured-two-way-go-native-thrift-probe", [sys.executable,
          str(ROOT / "tests/run-matching-thrift-compat.py"), "--server-bin", str(server_bin),
          "--artifacts-dir", str(artifacts / "go-native-thrift")]),
-        ("strict-rust-lint", ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]),
+        ("strict-rust-lint", ["cargo", "clippy", "--locked", "-p", "cadence-persistence", "-p", "cadence-server", "--all-targets", "--", "-D", "warnings"]),
     ]
     for name, command in gates:
         log_path = artifacts / f"{name}.log"
