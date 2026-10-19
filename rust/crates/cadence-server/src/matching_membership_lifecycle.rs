@@ -24,6 +24,7 @@ pub struct MatchingMembershipLifecycle<P: MatchingPeerProvider> {
     provider: Arc<P>,
     membership: Membership,
     stopped: Arc<AtomicBool>,
+    withdrawn: bool,
     worker: Option<JoinHandle<()>>,
     shutdown: Option<watch::Sender<bool>>,
 }
@@ -34,6 +35,7 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
             provider,
             membership,
             stopped: Arc::new(AtomicBool::new(false)),
+            withdrawn: false,
             worker: None,
             shutdown: None,
         }
@@ -131,15 +133,27 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
     pub fn membership(&self) -> &Membership {
         &self.membership
     }
-    /// Withdrawal precedes provider teardown; emptying local placement follows worker exit.
-    pub async fn shutdown(&mut self) -> Result<(), ProviderError> {
+    /// Begin Go's self-eviction before the configured matching drain interval.
+    /// The provider and its Ringpop runtime remain active until
+    /// `stop_after_drain` so peers can learn the FAULTY transition.
+    pub async fn withdraw(&mut self) -> Result<(), ProviderError> {
+        if self.withdrawn {
+            return Ok(());
+        }
+        self.provider.self_evict().await?;
+        self.withdrawn = true;
+        Ok(())
+    }
+
+    /// Stop provider refresh and Ringpop after the Matching handler has stopped
+    /// accepting work. This mirrors Go Service.Stop's base-resource teardown.
+    pub async fn stop_after_drain(&mut self) -> Result<(), ProviderError> {
         if self.worker.is_none() && self.stopped.load(Ordering::Acquire) {
             return Ok(());
         }
         if self.stopped.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
-        let eviction = self.provider.self_evict().await;
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(true);
         }
@@ -148,8 +162,14 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
             let _ = worker.await;
         }
         self.membership.replace(Vec::new());
-        let stop = self.provider.stop().await;
-        eviction.and(stop)
+        self.provider.stop().await
+    }
+
+    /// Convenience shutdown for owners without a separate traffic-drain phase.
+    pub async fn shutdown(&mut self) -> Result<(), ProviderError> {
+        let withdrawal = self.withdraw().await;
+        let stop = self.stop_after_drain().await;
+        withdrawal.and(stop)
     }
 }
 impl<P: MatchingPeerProvider> Drop for MatchingMembershipLifecycle<P> {
@@ -279,6 +299,11 @@ mod tests {
             address: address.into(),
             identity: identity.into(),
             status,
+            named_ports: if grpc.is_empty() {
+                HashMap::new()
+            } else {
+                HashMap::from([("grpc".into(), grpc.parse().unwrap())])
+            },
             labels: HashMap::from([
                 ("serviceName".into(), service.into()),
                 ("grpc".into(), grpc.into()),

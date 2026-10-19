@@ -65,6 +65,62 @@ impl Memberlist {
         self.checksum
     }
 
+    /// Apply a Go `updateLocalMember` mutation. A changed local status/label
+    /// bumps the incarnation to the supplied wall-clock millisecond and
+    /// returns the resulting membership change for dissemination.
+    pub fn update_local<F>(&mut self, now_millis: i64, update: F) -> Option<Change>
+    where
+        F: FnOnce(&mut Member) -> bool,
+    {
+        let local = self
+            .by_address
+            .get(&self.local_address)
+            .copied()
+            .expect("local member is always present");
+        let member = &mut self.members[local];
+        if !update(member) {
+            return None;
+        }
+        member.incarnation = now_millis;
+        let change = Change {
+            source: member.address.clone(),
+            source_incarnation: member.incarnation,
+            address: member.address.clone(),
+            incarnation: member.incarnation,
+            status: member.status.clone(),
+            tombstone: false,
+            labels: member.labels.clone(),
+            ..Default::default()
+        };
+        self.checksum = memberlist_checksum(&self.members);
+        Some(change)
+    }
+
+    pub fn set_local_labels(
+        &mut self,
+        labels: &BTreeMap<String, String>,
+        now_millis: i64,
+    ) -> Option<Change> {
+        self.update_local(now_millis, |local| {
+            let merged = local.labels.get_or_insert_with(BTreeMap::new);
+            let mut changed = false;
+            for (key, value) in labels {
+                if merged.get(key) != Some(value) {
+                    merged.insert(key.clone(), value.clone());
+                    changed = true;
+                }
+            }
+            changed
+        })
+    }
+
+    pub fn set_local_status(&mut self, status: &str, now_millis: i64) -> Option<Change> {
+        self.update_local(now_millis, |local| {
+            local.status = status.to_owned();
+            true
+        })
+    }
+
     /// Shuffle membership in place using the same descending Fisher-Yates
     /// bounds used by Go's `rand.Shuffle`. `random_below` receives an
     /// exclusive upper bound and must return a value within it.
@@ -267,6 +323,27 @@ mod tests {
         assert_ne!(old_sum, result.checksum);
         assert_eq!(result.accepted[2].address, "self");
         assert_eq!(result.accepted[2].status, ALIVE);
+    }
+
+    #[test]
+    fn local_updates_merge_labels_bump_incarnation_and_refresh_checksum() {
+        let mut local = member("self", crate::ringpop_wire::ALIVE, 10);
+        local.labels = Some(BTreeMap::from([("keep".into(), "yes".into())]));
+        let mut list = Memberlist::new(local);
+        let old_checksum = list.checksum();
+        let change = list
+            .set_local_labels(&BTreeMap::from([("grpc".into(), "7835".into())]), 20)
+            .unwrap();
+        assert_eq!(change.incarnation, 20);
+        assert_eq!(change.labels.as_ref().unwrap()["keep"], "yes");
+        assert_eq!(change.labels.as_ref().unwrap()["grpc"], "7835");
+        assert_ne!(list.checksum(), old_checksum);
+        assert!(list
+            .set_local_labels(&BTreeMap::from([("grpc".into(), "7835".into())]), 30)
+            .is_none());
+        let faulty = list.set_local_status("faulty", 40).unwrap();
+        assert_eq!(faulty.status, "faulty");
+        assert_eq!(list.member("self").unwrap().incarnation, 40);
     }
 
     #[test]

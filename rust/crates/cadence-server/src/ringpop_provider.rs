@@ -289,6 +289,7 @@ struct RuntimeControl {
     stop_done: Option<watch::Sender<bool>>,
     stopping: bool,
     executor: Option<tokio::runtime::Handle>,
+    self_evicted: bool,
 }
 
 impl Drop for RuntimeControl {
@@ -313,6 +314,7 @@ struct State {
     min_protocol_period: Duration,
     protocol_metrics: ProtocolMetrics,
     transition_notify: Arc<Notify>,
+    membership_changes: watch::Sender<u64>,
     memberlist: Memberlist,
     member_iterator: MemberlistIter,
     state_transitions: StateTransitionScheduler,
@@ -426,6 +428,8 @@ impl State {
         if update.accepted.is_empty() {
             return Vec::new();
         }
+        self.membership_changes
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
         let pingable = self
             .memberlist
             .members()
@@ -475,6 +479,45 @@ impl State {
         accepted
     }
 
+    fn record_local_change(&mut self, change: Change) {
+        self.membership_changes
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
+        let pingable = self
+            .memberlist
+            .members()
+            .iter()
+            .filter(|member| {
+                member.address != self.address
+                    && (member.status == ALIVE || member.status == SUSPECT)
+            })
+            .count();
+        self.disseminator.adjust_max_propagations(pingable);
+        self.disseminator.record(change.clone());
+        match change.status.as_str() {
+            ALIVE | LEAVE => self.state_transitions.cancel(&change.address),
+            SUSPECT => self.state_transitions.schedule(
+                change.address,
+                change.incarnation,
+                TransitionState::Suspect,
+                self.monotonic_now_ns(),
+            ),
+            FAULTY => self.state_transitions.schedule(
+                change.address,
+                change.incarnation,
+                TransitionState::Faulty,
+                self.monotonic_now_ns(),
+            ),
+            TOMBSTONE => self.state_transitions.schedule(
+                change.address,
+                change.incarnation,
+                TransitionState::Tombstone,
+                self.monotonic_now_ns(),
+            ),
+            _ => {}
+        }
+        self.transition_notify.notify_one();
+    }
+
     fn apply_due_transitions<F, R>(
         &mut self,
         now_ns: i64,
@@ -488,7 +531,10 @@ impl State {
         for action in due {
             match action.action {
                 TransitionAction::Evict => {
-                    self.memberlist.remove_member(&action.address);
+                    if self.memberlist.remove_member(&action.address) {
+                        self.membership_changes
+                            .send_modify(|generation| *generation = generation.wrapping_add(1));
+                    }
                 }
                 TransitionAction::MakeFaulty | TransitionAction::MakeTombstone => {
                     let Some(subject) = self.memberlist.member(&action.address).cloned() else {
@@ -591,6 +637,7 @@ impl RingpopNode {
             rand::Rng::gen_range(&mut rand::thread_rng(), 0..upper)
         });
         let mut disseminator = Disseminator::default();
+        let (membership_changes, _) = watch::channel(0u64);
         // swim.NewNode records its initial local member with an empty source;
         // preserve this pre-bootstrap delta and its nil/empty wire behavior.
         disseminator.record(Change {
@@ -626,6 +673,7 @@ impl RingpopNode {
                 min_protocol_period,
                 protocol_metrics: ProtocolMetrics::new(min_protocol_period),
                 transition_notify: Arc::new(Notify::new()),
+                membership_changes,
                 memberlist,
                 member_iterator,
                 state_transitions: StateTransitionScheduler::new(local_address, state_timeouts),
@@ -639,6 +687,74 @@ impl RingpopNode {
     /// Bootstrap owner controls readiness. `false` also supports draining.
     pub fn set_ready(&self, ready: bool) {
         self.state.lock().expect("Ringpop state poisoned").ready = ready;
+    }
+
+    /// Set labels after Bootstrap and propagate the resulting local member
+    /// change with Go's `updateLocalMember` incarnation/checksum semantics.
+    pub fn set_local_labels(&self, labels: &BTreeMap<String, String>) {
+        let mut state = self.state.lock().expect("Ringpop state poisoned");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(i64::MAX as u128) as i64;
+        if let Some(change) = state.memberlist.set_local_labels(labels, now) {
+            state.record_local_change(change);
+        }
+    }
+
+    /// Run Ringpop's proactive self-eviction before the Matching drain.
+    /// The local member becomes FAULTY, then a randomized 40% subset (bounded
+    /// by the dissemination limit) receives the change through direct PING.
+    pub async fn self_evict(&self) -> Result<(), &'static str> {
+        {
+            let mut runtime = self.runtime.lock().expect("Ringpop runtime poisoned");
+            if runtime.self_evicted {
+                return Err("Ringpop self eviction already started");
+            }
+            runtime.self_evicted = true;
+        }
+        let (targets, timeout) = {
+            let mut state = self.state.lock().expect("Ringpop state poisoned");
+            if state.stopped || state.destroyed {
+                return Err("Ringpop node stopped");
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                .min(i64::MAX as u128) as i64;
+            if let Some(change) = state.memberlist.set_local_status(FAULTY, now) {
+                state.record_local_change(change);
+            }
+            let mut pingable: Vec<_> = state
+                .memberlist
+                .members()
+                .iter()
+                .filter(|member| {
+                    member.address != state.address
+                        && (member.status == ALIVE || member.status == SUSPECT)
+                })
+                .map(|member| member.address.clone())
+                .collect();
+            let count = pingable.len();
+            let max_by_ratio = ((count as f64) * 0.4).ceil() as usize;
+            let number = state
+                .disseminator
+                .max_propagations()
+                .min(count)
+                .min(max_by_ratio);
+            pingable.shuffle(&mut rand::thread_rng());
+            pingable.truncate(number);
+            (pingable, state.ping_timeout)
+        };
+        let mut tasks = tokio::task::JoinSet::new();
+        for target in targets {
+            let node = self.clone();
+            tasks.spawn(async move { node.ping(&target, timeout).await });
+        }
+        while tasks.join_next().await.is_some() {}
+        Ok(())
     }
 
     pub fn stop(&self) {
@@ -1381,6 +1497,17 @@ impl RingpopNode {
             node.memberlist.members().to_vec(),
             node.memberlist.checksum(),
         )
+    }
+
+    /// Subscribe to accepted Ringpop membership changes. The initial watch
+    /// value is a snapshot boundary; receivers should refresh immediately and
+    /// then refresh whenever the generation changes.
+    pub fn subscribe_membership_changes(&self) -> watch::Receiver<u64> {
+        self.state
+            .lock()
+            .expect("Ringpop state poisoned")
+            .membership_changes
+            .subscribe()
     }
 
     pub fn dissemination_counts(&self) -> BTreeMap<String, usize> {
