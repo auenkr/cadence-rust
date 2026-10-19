@@ -233,15 +233,17 @@ files before and after validation. It emits a separate log and status per
 independent gate, plus `source-freeze.json` and `results.json` in a unique
 timestamped artifact directory. The gates cover (1) persistence SQLite
 options/schema and store-operation tests, (2) server configured-store option
-resolution, (3) the Go/native-Thrift configured two-way probe, and (4)
-workspace-wide strict Clippy (`-D warnings`). The compatibility probe verifies
+resolution, (3) a locked `cadence-server` build, (4) the Go/native-Thrift
+configured two-way probe, and (5) workspace-wide strict Clippy (`-D warnings`). The compatibility probe verifies
 Rust task-list data through Go persistence and Go activity task ID 2 delivery
 plus subsequent Rust-side task-list readback/collection. Run with
-`python3 tests/run-matching-configured-store-validation.py --server-bin rust/target/debug/cadence-server`.
+`python3 tests/run-matching-configured-store-validation.py --target-dir /path/to/shared/target`.
+The server binary defaults to `<target-dir>/debug/cadence-server`; `--server-bin`
+can override it when reusing a previously built binary.
 Cargo commands use `--locked`, default to one build job, and inherit an existing
 `CARGO_TARGET_DIR`; `--target-dir` can select the shared warmed target explicitly.
 
-This is a source-only checkpoint. The runner has not been executed because the
-shared build slot is held by History. It is not acceptance evidence until all
-four gates pass with matching before/after source hashes; the staged production
+This is a source-only checkpoint until the validation runner has completed.
+It is not acceptance evidence until all five gates pass with matching
+before/after source hashes; the staged production
 Ringpop probe remains separately blocked on production provider assembly.

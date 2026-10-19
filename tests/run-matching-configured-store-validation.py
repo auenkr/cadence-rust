@@ -48,7 +48,7 @@ def hashes():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-bin", type=Path,
-                        default=ROOT / "rust/target/debug/cadence-server")
+                        help="prebuilt server binary; defaults under Cargo's target directory")
     parser.add_argument("--target-dir", type=Path,
                         help="Cargo target directory; defaults to inherited CARGO_TARGET_DIR")
     parser.add_argument("--artifacts-dir", type=Path)
@@ -61,10 +61,12 @@ def main():
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     if args.target_dir:
         os.environ["CARGO_TARGET_DIR"] = str(args.target_dir.resolve())
+    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "rust/target"))
+    server_bin = (args.server_bin or target_dir / "debug/cadence-server").resolve()
     report = {
         "startedUtc": started.isoformat(), "head": head,
-        "serverBinary": str(args.server_bin.resolve()), "sourceSha256Before": before,
-        "cargoTargetDir": os.environ.get("CARGO_TARGET_DIR", str(ROOT / "rust/target")),
+        "serverBinary": str(server_bin), "sourceSha256Before": before,
+        "cargoTargetDir": str(target_dir.resolve()),
         "gates": [],
     }
     (artifacts / "source-freeze.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -72,8 +74,9 @@ def main():
     gates = [
         ("sqlite-option-and-schema-tests", ["cargo", "test", "--locked", "-p", "cadence-persistence", "--lib", "matching_sqlite"]),
         ("configured-store-resolution-tests", ["cargo", "test", "--locked", "-p", "cadence-server", "--lib", "matching_task_store"]),
+        ("cadence-server-build", ["cargo", "build", "--locked", "-p", "cadence-server", "--bin", "cadence-server"]),
         ("configured-two-way-go-native-thrift-probe", [sys.executable,
-         str(ROOT / "tests/run-matching-thrift-compat.py"), "--server-bin", str(args.server_bin.resolve()),
+         str(ROOT / "tests/run-matching-thrift-compat.py"), "--server-bin", str(server_bin),
          "--artifacts-dir", str(artifacts / "go-native-thrift")]),
         ("strict-rust-lint", ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]),
     ]
