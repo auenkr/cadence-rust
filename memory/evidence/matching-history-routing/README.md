@@ -112,3 +112,10 @@ The final runner now also executes real Go-generated short-byte FarmHash
 vectors, the existing Go Ringpop membership oracle with U+FFFD added as a key,
 Ringpop member primitive tests, and strict cadence-common Clippy. This audits
 both the History ownership route and other callers of the shared hash helper.
+
+Attempt `attempt-20261019T203141Z-JSv0Tg` passed the new short-byte tests,
+Go membership oracle, Ringpop member tests, common Clippy, History client tests,
+and the History peer resolver tests (5 passed). The membership snapshot test
+failed because its isolated Ringpop node had not been marked ready before the
+test injected a PING; the fixture now enables readiness as the node lifecycle
+does before handling PINGs.

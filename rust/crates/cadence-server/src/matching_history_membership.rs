@@ -242,6 +242,7 @@ mod tests {
             },
             false,
         ));
+        node.set_ready(true);
         let adapter = RingpopHistoryMembership::new(node.clone());
         assert_eq!(adapter.hosts().unwrap().len(), 1);
 
