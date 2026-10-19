@@ -40,6 +40,22 @@ fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net
     Ok(Some(std::net::SocketAddr::new(ip, http.port)))
 }
 
+async fn shutdown_signal() -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.map_err(anyhow::Error::from),
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await.map_err(anyhow::Error::from)
+    }
+}
+
 async fn matching_http_tls(
     http: &config::HttpConfig,
 ) -> anyhow::Result<Option<axum_server::tls_rustls::RustlsConfig>> {
@@ -686,27 +702,28 @@ async fn main() -> anyhow::Result<()> {
             if run_history {
                 println!("Cadence internal history gRPC listening on {history_addr}");
             }
-            let matching_rpc = cfg.services.get("matching").map(|s| &s.rpc);
+            // The listener task is spawned and must own its configuration.
+            let matching_rpc = cfg.services.get("matching").map(|s| s.rpc.clone());
             let matching_addr = std::net::SocketAddr::from((
-                if matching_rpc.is_some_and(|r| r.bind_on_local_host) {
+                if matching_rpc.as_ref().is_some_and(|r| r.bind_on_local_host) {
                     [127, 0, 0, 1]
                 } else {
                     [0, 0, 0, 0]
                 },
                 matching_grpc_port
-                    .or_else(|| matching_rpc.map(|r| r.grpc_port).filter(|p| *p > 0))
+                    .or_else(|| matching_rpc.as_ref().map(|r| r.grpc_port).filter(|p| *p > 0))
                     .unwrap_or(7835),
             ));
             let matching_tchannel_addr = std::net::SocketAddr::new(matching_addr.ip(), matching_tchannel_port
-                .or_else(|| matching_rpc.map(|r| r.port).filter(|p| *p > 0)).unwrap_or(7935));
+                .or_else(|| matching_rpc.as_ref().map(|r| r.port).filter(|p| *p > 0)).unwrap_or(7935));
             let run_matching = wanted.contains(&service::ServiceName::Matching);
             let matching_http_addr = if run_matching {
-                matching_rpc.map(matching_http_addr).transpose()?.flatten()
+                matching_rpc.as_ref().map(matching_http_addr).transpose()?.flatten()
             } else {
                 None
             };
             let matching_http_tls_config = if run_matching {
-                match matching_rpc.and_then(|rpc| rpc.http.as_ref()) {
+                match matching_rpc.as_ref().and_then(|rpc| rpc.http.as_ref()) {
                     Some(http) => matching_http_tls(http).await?,
                     None => None,
                 }
@@ -722,69 +739,57 @@ async fn main() -> anyhow::Result<()> {
                 println!("Cadence internal matching gRPC listening on {matching_addr}");
                 println!("Cadence internal matching Thrift/TChannel listening on {matching_tchannel_addr}");
             }
-            // Durable matching queues live beside the JSON snapshots so a
-            // standalone restart recovers backlog, partition fencing and ack
-            // levels. Without `--data-dir` matching keeps the previous
-            // in-memory engine, exactly like snapshots stay in-memory.
-            let matching_service = if run_matching {
-                match data_dir.as_ref() {
+            // MatchingRuntime owns the production handler and its background
+            // maintenance task. Dependencies are explicit; production membership
+            // and the shared domain cache remain separate pending adapters.
+            let mut matching_runtime = if run_matching {
+                let drain = cadence_server::matching_runtime::live_shutdown_drain_duration(
+                    state.admin.dynamic_config.clone(),
+                );
+                Some(match data_dir.as_ref() {
                     Some(dir) => {
                         let path = std::path::PathBuf::from(dir).join("matching.db");
-                        let store =
-                            if path.exists() {
-                                cadence_persistence::matching_sqlite::SqliteTaskStore::open(
-                                    &path,
-                                    cadence_persistence::matching_blob::BlobEncoding::ThriftRWSnappy,
-                                )
-                            } else {
-                                cadence_persistence::matching_sqlite::SqliteTaskStore::create(
-                                    &path,
-                                    cadence_persistence::matching_blob::BlobEncoding::ThriftRWSnappy,
-                                )
-                            }?;
-                        let store = std::sync::Arc::new(store);
-                        // History runs in this process; talk to it over
-                        // loopback gRPC like any other matching host would.
-                        let history_peer =
-                            format!("http://127.0.0.1:{}", history_addr.port());
-                        let history_channel =
-                            tonic::transport::Endpoint::from_shared(history_peer)?
-                                .connect_lazy();
-                        let history =
-                            cadence_server::matching_history::MatchingHistoryClient::new(
-                                history_channel,
-                                std::time::Duration::from_secs(1),
-                                32 * 1024 * 1024,
-                            );
-                        let registry =
-                            cadence_server::matching_registry::QueueRegistry::new(
-                                store,
-                                history,
-                                std::num::NonZeroU32::new(100000).expect("task id range"),
-                            );
-                        let controller = registry.clone();
-                        tokio::spawn(async move {
-                            if let Err(error) = controller
-                                .maintain_until(
-                                    std::time::Duration::from_secs(10),
-                                    std::future::pending(),
-                                )
-                                .await
-                            {
-                                eprintln!("matching maintenance failed: {error}");
-                            }
-                        });
-                        cadence_server::grpc_matching::Matching::with_durable_queues(
+                        let store = if path.exists() {
+                            cadence_persistence::matching_sqlite::SqliteTaskStore::open(
+                                &path,
+                                cadence_persistence::matching_blob::BlobEncoding::ThriftRWSnappy,
+                            )
+                        } else {
+                            cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+                                &path,
+                                cadence_persistence::matching_blob::BlobEncoding::ThriftRWSnappy,
+                            )
+                        }?;
+                        // TODO: replace this loopback adapter with configured
+                        // History discovery when production discovery is wired.
+                        let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
+                        let history_channel = tonic::transport::Endpoint::from_shared(history_peer)?
+                            .connect_lazy();
+                        let history = cadence_server::matching_history::MatchingHistoryClient::new(
+                            history_channel,
+                            std::time::Duration::from_secs(1),
+                            32 * 1024 * 1024,
+                        );
+                        cadence_server::matching_runtime::MatchingRuntime::with_durable_queues(
                             state.clone(),
-                            registry,
+                            std::sync::Arc::new(store),
+                            history,
+                            std::num::NonZeroU32::new(100000).expect("task id range"),
                             std::time::Duration::from_secs(60),
+                            drain,
                         )
                     }
-                    None => cadence_server::grpc_matching::Matching::new(state.clone()),
-                }
+                    None => cadence_server::matching_runtime::MatchingRuntime::in_memory(
+                        state.clone(), drain,
+                    ),
+                })
             } else {
-                cadence_server::grpc_matching::Matching::new(state.clone())
+                None
             };
+            let matching_service = matching_runtime
+                .as_ref()
+                .map(|runtime| runtime.matching().clone())
+                .unwrap_or_else(|| cadence_server::grpc_matching::Matching::new(state.clone()));
             let app = if run_matching {
                 if matching_http_addr.is_some() {
                     app
@@ -804,95 +809,133 @@ async fn main() -> anyhow::Result<()> {
                 app
             };
             let matching_tchannel_service = matching_service.clone();
-            tokio::try_join!(
-                async {
-                    axum::serve(listener, app)
-                        .await
-                        .map_err(anyhow::Error::from)
-                },
-                async {
-                    if run_frontend {
-                        cadence_server::grpc::serve(grpc_addr, grpc_state).await
-                    } else {
-                        std::future::pending::<anyhow::Result<()>>().await
-                    }
-                },
-                async {
-                    if run_frontend {
-                        cadence_server::tchannel::serve(tchannel_addr, tchannel_state).await
-                    } else {
-                        std::future::pending::<anyhow::Result<()>>().await
-                    }
-                },
-                async {
-                    if run_history {
-                        cadence_server::grpc_internal::serve(history_addr, history_state).await
-                    } else {
-                        std::future::pending::<anyhow::Result<()>>().await
-                    }
-                },
-                async {
-                    if run_matching {
-                        cadence_server::tchannel::serve_matching(matching_tchannel_addr, matching_tchannel_service).await
-                    } else {
-                        std::future::pending::<anyhow::Result<()>>().await
-                    }
-                },
-                async {
-                    if run_matching {
-                        cadence_server::grpc_matching::serve_with(
-                            matching_addr,
-                            matching_service.clone(),
-                        )
-                        .await
-                    } else {
-                        std::future::pending::<anyhow::Result<()>>().await
-                    }
-                },
-                async {
-                    if run_matching {
-                        if let Some(addr) = matching_http_addr {
-                            let http = matching_rpc
-                                .and_then(|rpc| rpc.http.as_ref())
-                                .expect("configured Matching HTTP address");
-                            let app = cadence_server::thrift_matching::router_with_procedures(
+            let mut serving = tokio::spawn(async move {
+                let _ = tokio::try_join!(
+                    async {
+                        axum::serve(listener, app)
+                            .await
+                            .map_err(anyhow::Error::from)
+                    },
+                    async {
+                        if run_frontend {
+                            cadence_server::grpc::serve(grpc_addr, grpc_state).await
+                        } else {
+                            std::future::pending::<anyhow::Result<()>>().await
+                        }
+                    },
+                    async {
+                        if run_frontend {
+                            cadence_server::tchannel::serve(tchannel_addr, tchannel_state).await
+                        } else {
+                            std::future::pending::<anyhow::Result<()>>().await
+                        }
+                    },
+                    async {
+                        if run_history {
+                            cadence_server::grpc_internal::serve(history_addr, history_state).await
+                        } else {
+                            std::future::pending::<anyhow::Result<()>>().await
+                        }
+                    },
+                    async {
+                        if run_matching {
+                            cadence_server::tchannel::serve_matching(
+                                matching_tchannel_addr,
+                                matching_tchannel_service,
+                            )
+                            .await
+                        } else {
+                            std::future::pending::<anyhow::Result<()>>().await
+                        }
+                    },
+                    async {
+                        if run_matching {
+                            cadence_server::grpc_matching::serve_with(
+                                matching_addr,
                                 matching_service.clone(),
-                                http.procedures.clone(),
-                            );
-                            let http = matching_rpc
-                                .and_then(|rpc| rpc.http.as_ref())
-                                .expect("configured Matching HTTP");
-                            if http.tls_mode.as_deref() == Some("enforced")
-                                && http.tls.as_ref().is_some_and(|tls| tls.enabled)
-                            {
-                                let tls_config = matching_http_tls_config
-                                    .clone()
-                                    .expect("validated enforced TLS configuration");
-                                axum_server::bind_rustls(addr, tls_config)
-                                    .serve(app.into_make_service())
-                                    .await
-                                    .map_err(anyhow::Error::from)
-                            } else if http.tls_mode.as_deref() == Some("permissive")
-                                && http.tls.as_ref().is_some_and(|tls| tls.enabled)
-                            {
-                                let tls_config = matching_http_tls_config
-                                    .clone()
-                                    .expect("validated permissive TLS configuration");
-                                serve_matching_http_permissive(addr, app, tls_config).await
+                            )
+                            .await
+                        } else {
+                            std::future::pending::<anyhow::Result<()>>().await
+                        }
+                    },
+                    async {
+                        if run_matching {
+                            if let Some(addr) = matching_http_addr {
+                                let http = matching_rpc.as_ref()
+                                    .and_then(|rpc| rpc.http.as_ref())
+                                    .expect("configured Matching HTTP address");
+                                let app = cadence_server::thrift_matching::router_with_procedures(
+                                    matching_service.clone(),
+                                    http.procedures.clone(),
+                                );
+                                let http = matching_rpc.as_ref()
+                                    .and_then(|rpc| rpc.http.as_ref())
+                                    .expect("configured Matching HTTP");
+                                if http.tls_mode.as_deref() == Some("enforced")
+                                    && http.tls.as_ref().is_some_and(|tls| tls.enabled)
+                                {
+                                    let tls_config = matching_http_tls_config
+                                        .clone()
+                                        .expect("validated enforced TLS configuration");
+                                    axum_server::bind_rustls(addr, tls_config)
+                                        .serve(app.into_make_service())
+                                        .await
+                                        .map_err(anyhow::Error::from)
+                                } else if http.tls_mode.as_deref() == Some("permissive")
+                                    && http.tls.as_ref().is_some_and(|tls| tls.enabled)
+                                {
+                                    let tls_config = matching_http_tls_config
+                                        .clone()
+                                        .expect("validated permissive TLS configuration");
+                                    serve_matching_http_permissive(addr, app, tls_config).await
+                                } else {
+                                    let listener = tokio::net::TcpListener::bind(addr).await?;
+                                    axum::serve(listener, app)
+                                        .await
+                                        .map_err(anyhow::Error::from)
+                                }
                             } else {
-                                let listener = tokio::net::TcpListener::bind(addr).await?;
-                                axum::serve(listener, app).await.map_err(anyhow::Error::from)
+                                std::future::pending::<anyhow::Result<()>>().await
                             }
                         } else {
                             std::future::pending::<anyhow::Result<()>>().await
                         }
-                    } else {
-                        std::future::pending::<anyhow::Result<()>>().await
-                    }
-                },
-            )?;
+                    },
+                )?;
+                anyhow::Ok(())
+            });
+            let (mut serving_result, signal_result) = tokio::select! {
+                result = &mut serving => (
+                    Some(result.map_err(anyhow::Error::from).and_then(|result| result)),
+                    None,
+                ),
+                signal = shutdown_signal() => (None, Some(signal)),
+            };
+            // On a signal, the listener task remains active while shutdown
+            // drains traffic. Listener errors have already ended that task.
+            let shutdown = if let Some(runtime) = matching_runtime.as_mut() {
+                runtime.shutdown().await
+            } else {
+                Ok(())
+            };
+            if serving_result.is_none() {
+                if serving.is_finished() {
+                    serving_result =
+                        Some(serving.await.map_err(anyhow::Error::from).and_then(|result| result));
+                } else if signal_result.is_some() {
+                    serving.abort();
+                    let _ = serving.await;
+                }
+            }
+            if let Some(result) = serving_result {
+                result?;
+            }
+            if let Some(result) = signal_result {
+                result?;
+            }
+            shutdown?;
             println!("shutting down");
-            let _ = registry;
         }
         Command::Version => {
             println!("cadence-server (rust) {}", cadence_api::API_COMPAT_VERSION);

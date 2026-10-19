@@ -1,0 +1,25 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+error[E0597]: `cfg.services` does not live long enough
+   --> crates/cadence-server/src/main.rs:705:32
+    |
+499 | ...       let cfg = match config {
+    |               --- binding `cfg` declared here
+...
+705 | ...       let matching_rpc = cfg.services.get("matching").map(|s| &s.rpc);
+    |                              ^^^^^^^^^^^^                         ------ returning this value requires that `cfg.services` is borrowed for `'static`
+    |                              |
+    |                              borrowed value does not live long enough
+...
+938 | ...   }
+    |       - `cfg.services` dropped here while still borrowed
+    |
+note: requirements that the value outlives `'static` introduced here
+   --> /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library/core/src/option.rs:1160:11
+    |
+   ::: /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/task/spawn.rs:176:28
+    |
+176 |         F: Future + Send + 'static,
+    |                            ^^^^^^^
+
+For more information about this error, try `rustc --explain E0597`.
+error: could not compile `cadence-server` (bin "cadence-server") due to 1 previous error

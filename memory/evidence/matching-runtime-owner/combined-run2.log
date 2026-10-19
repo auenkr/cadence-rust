@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.07s
+=== RUN   TestRustCombinedMatchingRingpopTChannel
+--- PASS: TestRustCombinedMatchingRingpopTChannel (0.02s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.052s
+Combined Matching/Ringpop TChannel oracle passed; artifacts: /tmp/combined-matching-ringpop-tchannel-lheoa0u2

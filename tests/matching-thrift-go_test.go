@@ -242,6 +242,32 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 	}
 }
 
+// Used by the production binary drain oracle: one generated-Go Thrift call
+// must succeed after SIGTERM while matching.shutdownDrainDuration is active.
+func TestRustMatchingDrainHealth(t *testing.T) {
+	addr := os.Getenv("CADENCE_MATCHING_TCHANNEL")
+	if addr == "" {
+		t.Fatal("CADENCE_MATCHING_TCHANNEL is required")
+	}
+	tr, err := tchannel.NewTransport(tchannel.ServiceName("matching-drain-compat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := yarpc.NewDispatcher(yarpc.Config{Name: "matching-drain-compat", Outbounds: yarpc.Outbounds{
+		"cadence-matching": {Unary: tr.NewSingleOutbound(addr)},
+	}})
+	if err := dispatcher.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer dispatcher.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	health, err := metaclient.New(dispatcher.ClientConfig("cadence-matching")).Health(ctx)
+	if err != nil || !health.GetOk() {
+		t.Fatalf("Matching Meta::health during shutdown drain: %v %v", health, err)
+	}
+}
+
 func TestRustMatchingTLS(t *testing.T) {
 	endpoint := os.Getenv("CADENCE_MATCHING_TLS_HTTP")
 	if endpoint == "" {

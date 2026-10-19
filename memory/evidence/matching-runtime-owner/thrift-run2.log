@@ -1,0 +1,40 @@
+=== RUN   TestIsTLSClientHelloRecord
+=== RUN   TestIsTLSClientHelloRecord/non_tls
+=== RUN   TestIsTLSClientHelloRecord/read_error
+=== RUN   TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length
+=== RUN   TestIsTLSClientHelloRecord/tls_header
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_0
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_1
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_2
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_3
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_4
+=== RUN   TestIsTLSClientHelloRecord/e2e_tls
+--- PASS: TestIsTLSClientHelloRecord (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/non_tls (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/read_error (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/tls_header (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_0 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_1 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_2 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_3 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_4 (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/e2e_tls (0.00s)
+PASS
+ok  	go.uber.org/yarpc/transport/internal/tls/muxlistener	0.020s
+# github.com/uber/cadence/service/matching/wrappers/thrift_test [github.com/uber/cadence/service/matching/wrappers/thrift.test]
+../tests/matching-thrift-go_test.go:252:8: assignment mismatch: 1 variable but tchannel.NewTransport returns 2 values
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/tests/run-matching-thrift-compat.py", line 65, in <module>
+    subprocess.run([
+    ~~~~~~~~~~~~~~^^
+        'go', 'test', '-c', '-overlay', str(overlay), '-o', str(drain_probe),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        './service/matching/wrappers/thrift',
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ], cwd=root / 'go', check=True, timeout=180)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['go', 'test', '-c', '-overlay', '/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/memory/evidence/matching-runtime-owner/thrift-artifacts-rerun/overlay.json', '-o', '/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/memory/evidence/matching-runtime-owner/thrift-artifacts-rerun/matching-drain.test', './service/matching/wrappers/thrift']' returned non-zero exit status 1.

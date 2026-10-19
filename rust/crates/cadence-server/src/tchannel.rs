@@ -654,6 +654,14 @@ pub async fn serve(addr: std::net::SocketAddr, state: AppState) -> Result<()> {
 pub async fn serve_matching(addr: std::net::SocketAddr, matching: crate::grpc_matching::Matching) -> Result<()> {
     serve_with(addr, matching.frontend.state.clone(), Some(matching), None).await
 }
+/// Serve Matching Thrift and Ringpop JSON methods on one TChannel listener.
+pub async fn serve_matching_with_ringpop(
+    addr: std::net::SocketAddr,
+    matching: crate::grpc_matching::Matching,
+    ringpop: RingpopHandler,
+) -> Result<()> {
+    serve_with(addr, matching.frontend.state.clone(), Some(matching), Some(ringpop)).await
+}
 pub async fn serve_ringpop(addr: std::net::SocketAddr, handler: RingpopHandler) -> Result<()> {
     serve_with(addr, AppState::default(), None, Some(handler)).await
 }
@@ -673,14 +681,20 @@ async fn serve_with(
     let listener = TcpListener::bind(addr)
         .await
         .context("bind TChannel frontend")?;
+    let mut connections = tokio::task::JoinSet::new();
     loop {
-        let (stream, _) = listener.accept().await?;
-        let state = state.clone();
-        let matching = matching.clone();
-        let ringpop = ringpop.clone();
-        tokio::spawn(async move {
-            let _ = connection(stream, state, matching, ringpop).await;
-        });
+        tokio::select! {
+            accepted = listener.accept() => {
+                let (stream, _) = accepted?;
+                let state = state.clone();
+                let matching = matching.clone();
+                let ringpop = ringpop.clone();
+                connections.spawn(async move {
+                    let _ = connection(stream, state, matching, ringpop).await;
+                });
+            }
+            _ = connections.join_next(), if !connections.is_empty() => {}
+        }
     }
 }
 

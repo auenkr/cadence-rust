@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """Exercise native Rust Matching Thrift with the pinned Go generated clients."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import socket
 import ssl
 import subprocess
 import tempfile
 import time
+import urllib.request
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--server-bin', type=Path, default=root / 'rust/target/debug/cadence-server')
 parser.add_argument('--artifacts-dir', type=Path)
 args = parser.parse_args()
-artifacts = args.artifacts_dir or Path(tempfile.mkdtemp(prefix='matching-thrift-compat-'))
+artifacts = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='matching-thrift-compat-'))).resolve()
 artifacts.mkdir(parents=True, exist_ok=True)
 
 # Original YARPC v1.88.0 classifier tests are the oracle for short reads.
@@ -58,12 +61,32 @@ command = [str(args.server_bin.resolve()), 'start', '--config', str(config_path)
            '--matching-tchannel-port', str(matching_tchannel), '--data-dir', str(artifacts / 'data')]
 overlay = artifacts / 'overlay.json'
 overlay.write_text(json.dumps({'Replace': {str(root / 'go/service/matching/wrappers/thrift/rust_native_test.go'): str(root / 'tests/matching-thrift-go_test.go')}}))
+drain_probe = artifacts / 'matching-drain.test'
+subprocess.run([
+    'go', 'test', '-c', '-overlay', str(overlay), '-o', str(drain_probe),
+    './service/matching/wrappers/thrift',
+], cwd=root / 'go', check=True, timeout=180)
 def assert_start_fails(test_config, message):
     test_command = command.copy()
     test_command[test_command.index('--config') + 1] = str(test_config)
     result = subprocess.run(test_command, cwd=root, capture_output=True, text=True, timeout=15)
     if result.returncode == 0 or message not in result.stdout + result.stderr:
         raise AssertionError(f'expected startup failure containing {message!r}: {result.stdout}\n{result.stderr}')
+
+def assert_runtime_listener_failure_cleans_up():
+    occupied = socket.socket()
+    occupied.bind(('127.0.0.1', 0))
+    occupied.listen()
+    test_command = command.copy()
+    test_command[test_command.index('--matching-tchannel-port') + 1] = str(occupied.getsockname()[1])
+    try:
+        result = subprocess.run(test_command, cwd=root, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            raise AssertionError('server unexpectedly started with Matching TChannel port occupied')
+        if 'address already in use' not in (result.stdout + result.stderr).lower():
+            raise AssertionError(f'server failed before the occupied Matching listener: {result.stdout}\\n{result.stderr}')
+    finally:
+        occupied.close()
 
 def request_tls_health(port, certificate):
     context = ssl.create_default_context(cafile=str(certificate))
@@ -94,6 +117,7 @@ subprocess.run(['openssl', 'genrsa', '-out', str(wrong_key), '2048'], check=True
 mismatched_path = artifacts / 'mismatched-key.yaml'
 mismatched_path.write_text(tls_config_path.read_text().replace(str(artifacts / 'tls-key.pem'), str(wrong_key)))
 assert_start_fails(mismatched_path, 'loading Matching HTTP TLS certificate/key')
+assert_runtime_listener_failure_cleans_up()
 with (artifacts / 'server.log').open('w') as log:
     server = subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
     try:
@@ -147,7 +171,34 @@ with (artifacts / 'server.log').open('w') as log:
                     raise
         # Listener shutdown must cancel connection tasks waiting in sniffing.
         shutdown_probe = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
-        server.terminate()
+        drain_value = base64.b64encode(b'"5s"').decode('ascii')
+        update = urllib.request.Request(
+            f'http://127.0.0.1:{http}/api/v1/admin/dynamic-config/update',
+            data=json.dumps({
+                'configName': 'matching.shutdownDrainDuration',
+                'configValues': [{
+                    'filters': [],
+                    'value': {'encodingType': 'JSON', 'data': drain_value},
+                }],
+            }).encode(),
+            headers={'Content-Type': 'application/json'},
+        )
+        with urllib.request.urlopen(update, timeout=3) as response:
+            if response.status != 200:
+                raise AssertionError(f'dynamic drain config update returned {response.status}')
+        server.send_signal(signal.SIGTERM)
+        time.sleep(0.1)
+        try:
+            server.send_signal(signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        env = {**os.environ, 'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}'}
+        subprocess.run(
+            [str(drain_probe), '-test.run=^TestRustMatchingDrainHealth$', '-test.count=1', '-test.v'],
+            cwd=root / 'go', env=env, check=True, timeout=5,
+        )
+        if server.poll() is not None:
+            raise AssertionError('server exited before the Matching drain health RPC completed')
         server.wait(timeout=10)
         shutdown_probe.settimeout(3)
         try:
