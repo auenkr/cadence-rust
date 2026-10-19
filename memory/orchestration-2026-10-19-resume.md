@@ -31,3 +31,11 @@ Cache component validation reached 9 persistence tests (1 pre-existing Go-file-d
 History routing rounds 2 and 3 remained partial (per-peer channels and membership test source, but no ownership redirects or executable placement oracle). Neither is accepted. Current implementation task is standard-tier gpt-6-luna high reasoning, narrowly implementing redirects across all five Matching outbound methods, carrying prior source from t3-c63f01e1. Task ID:
 `node:delegated-task:command%3Amcp%3A6a1e03e1-ed6f-4ea2-b645-7d7964f28ed9%3Adelegate-task%3Amatching-history-redirect-luna-20261019-r4`
 Outbound native Luna independently owns actual Go placement oracle in its existing SWIM worktree; no Cargo grant. Runtime worker is source-ready after listener ownership changes; needs regrant after cache and actual mid-drain Go RPC verification. No component patches integrated yet.
+
+## Accepted cache and placement oracle
+
+Main d40c84e48 contains accepted cache source (worker 66006fd0f + 921fe51a7); 0a214e47c records parent byte comparison and evidence scope. Main 28365d4ae contains actual Go three-host History placement oracle (worker9061f072b); parent verified all recorded Go/test hashes against main. No combined main regression yet.
+
+Redirect task r4 completed source at `/home/ubuntu/.t3/worktrees/cadence-rust/t3-12810cdd`: all five calls use typed ownership redirects with shared timeout, plus two-tonic-peer test source. Uncommitted and unbuilt, not accepted. Cache Luna read-only review confirms five workflow key paths but flags added hard client-side timeout versus prior header-only timeout and Go caller-context semantics; confirm/fix before acceptance. Runtime injection remains separate (main loopback unchanged), TChannel named-port adapter absent. No Cargo grant for routing patch yet.
+
+Runtime worker holds sole build slot. Spawned listener assembly failed E0597 because borrowed matching RPC config crosses tokio::spawn; worker instructed to own/clone config and use bin check before link. Failed artifacts retained. SWIM source remains unbuilt; queue after runtime. User AGENTS.md change remains uncommitted and preserved.
