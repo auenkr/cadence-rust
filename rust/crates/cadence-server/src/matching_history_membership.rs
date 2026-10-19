@@ -36,7 +36,7 @@ impl HistoryMembership for RingpopHistoryMembership {
 fn history_hosts(members: &[Member]) -> Vec<Host> {
     members
         .iter()
-        .filter_map(|member| history_host(member))
+        .filter_map(history_host)
         .collect()
 }
 

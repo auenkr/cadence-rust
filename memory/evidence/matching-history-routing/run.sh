@@ -14,6 +14,7 @@ sources=(
   rust/Cargo.lock
   rust/crates/cadence-server/Cargo.toml
   rust/crates/cadence-server/src/matching_history.rs
+  rust/crates/cadence-server/src/lib.rs
   rust/crates/cadence-server/src/matching_history_peer_resolver.rs
   rust/crates/cadence-server/src/matching_history_membership.rs
   rust/crates/cadence-server/src/matching_dispatch.rs

@@ -119,3 +119,10 @@ and the History peer resolver tests (5 passed). The membership snapshot test
 failed because its isolated Ringpop node had not been marked ready before the
 test injected a PING; the fixture now enables readiness as the node lifecycle
 does before handling PINGs.
+
+Attempt `attempt-20261019T203855Z-GYy546` passed all hash, membership, History
+client, resolver, and dispatch regression gates. Strict cadence-server Clippy
+reported that the new resolver module needed the same `result_large_err`
+exception already used for other tonic Status service modules, plus one
+redundant closure in the adapter. Both have been corrected before the final
+lint run.
