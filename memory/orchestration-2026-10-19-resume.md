@@ -19,3 +19,7 @@ Parent found production-bin compile errors not exercised by library tests; runti
 New T3-owned worker explicitly uses codex/gpt-6-luna, medium reasoning, serviceTier=default (normal speed), isolated worktree, no build grant. Task: Matching's discovered History dependency routing, not migration of History service. Scope excludes main/runtime/TChannel/Ringpop/cache. Task ID:
 `node:delegated-task:command%3Amcp%3A6a1e03e1-ed6f-4ea2-b645-7d7964f28ed9%3Adelegate-task%3Amatching-history-routing-luna-20261019-r1`
 Track this task with T3 task_status/task_cancel; do not duplicate it. Build queue after runtime: cache acceptance, then SWIM. Heavy builds remain serialized.
+
+Round 1 History resolver returned source-only seam, leaving constructor-channel RPC routing unchanged; not accepted as the requested implementation. Round 2 now owns completion of actual opt-in resolver-aware Matching History calls and Go multi-peer placement evidence in a new T3 worktree, same explicit standard-tier Luna model. Task ID suffix replaces `r1` with `r2` in the full task ID above. Prior source is retained at t3-04a109d4 for carrying forward; no builds authorized for this worker.
+
+Runtime check passed after Option/mut fixes, then worker released build slot while correcting drain/listener lifetime. Cache has sole grant for focused persistence/cache tests and strict Clippy, using t3-a33b4846 target. Parent verified live persistence test build PID1593320. No combined current-main validation or service acceptance yet.
