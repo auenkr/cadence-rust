@@ -1,9 +1,12 @@
 # Matching production assembly wiring contract (2026-10-19)
 
-Source audit against accepted root checkpoint `b1a7f52e6` (production wiring is
-still incomplete). This is an assembly recipe for the Matching owner; it does
-not claim service completion. The configured-store worker owns `main.rs` and
-config edits, so this note deliberately changes no production code.
+Source audit was corrected against accepted root `a3745a7d7` (the `b1a7f52e6`
+checkpoint predates the concrete provider/listener additions). The provider,
+History snapshot adapter, and prebound-listener APIs below already exist in
+that accepted source. Production wiring in `main.rs` remains incomplete. This
+is an assembly recipe for the Matching owner; it does not claim service
+completion. The configured-store worker owns `main.rs` and config edits, so
+this note deliberately changes no production code.
 
 ## Go lifecycle and transport ordering
 
@@ -39,22 +42,29 @@ The reference is `go/service/matching/service.go:89-157`,
 Use one lifecycle owner retained alongside the `MatchingRuntime` in main:
 
 1. Validate Matching, shard-distributor, persistence, and transport settings.
-   Bind the TChannel listener early enough to obtain the actual advertised
-   address/port. Construct the local Ringpop member labels from that address
-   and the configured gRPC port, plus identity and `serviceName=matching`.
-2. Construct one `RingpopNode`, its provider/snapshot view, and a Ringpop JSON
-   handler. Use the same prebound TChannel listener for Ringpop's `ringpop`
-   methods and Matching's `cadence-matching` Thrift methods; do not create a
-   second listener or advertise a port different from the bound socket.
-3. Start the membership provider/bootstrap and wait for its accepted
-   membership/readiness condition before exposing Matching readiness. Keep
-   the shared provider alive for the History resolver, Matching membership
-   forwarding/cleanup, local identity and self-eviction.
-4. Build a stable/latest-snapshot adapter from provider members to both
-   `MatchingMembership` and `HistoryMembership`. Build the History peer
-   resolver with `cfg.persistence.numHistoryShards` and the configured
-   transport, then apply it to `MatchingHistoryClient` before passing that
-   client into the durable runtime constructor.
+   Bind the TChannel listener early enough to obtain its actual local address.
+   Construct `MatchingRingpopProvider` with that address, service label
+   `cadence-matching`, configured gRPC port, and Ringpop config. Its
+   `handler()` belongs on this listener; `start()` performs bootstrap/JOIN,
+   starts SWIM, sets readiness, publishes local service/port labels and starts
+   its member snapshot monitor.
+2. Pass the same prebound listener to the existing
+   `tchannel::serve_matching_with_ringpop_listener` API. It dispatches
+   Ringpop's `ringpop` JSON calls and Matching's `cadence-matching` Thrift
+   calls over one socket. Do not bind another TChannel listener or advertise
+   a different port.
+3. Start `MatchingMembershipLifecycle` with the provider and a Matching
+   membership object. It owns provider start, watch registration, initial
+   refresh, subsequent refresh and withdrawal/teardown. Wait for its initial
+   snapshot before exposing Matching readiness. Keep the same provider/node
+   available for History routing, Matching forwarding/cleanup, local identity,
+   and self-eviction.
+4. Use `RingpopHistoryMembership::new(Arc<RingpopNode>)` as the current
+   snapshot-backed History adapter, construct
+   `MatchingHistoryPeerResolver` with `cfg.persistence.numHistoryShards` and
+   `NamedPort::Grpc`, then call `MatchingHistoryClient::with_peer_resolver`
+   before passing it to the durable runtime. This source adapter currently
+   supplies only named gRPC endpoints.
 5. Construct the shard-distributor spectator when its client endpoint is
    configured, and create the executor only for a configured Matching
    namespace. Give the executor a processor factory that connects shard
@@ -73,28 +83,30 @@ Use one lifecycle owner retained alongside the `MatchingRuntime` in main:
 
 ## Concrete API mismatches to resolve in the assembly owner
 
-- `main.rs` currently calls `tchannel::serve` and `serve_matching`, each of
-  which binds its own socket. `serve_matching_with_ringpop(addr, matching,
-  handler)` already combines both TChannel service routes, but it still binds
-  internally; there is no public prebound-listener entry point. Assembly must
-  add/use a listener-taking serve API so provider identity/labels and runtime
-  share the actual bound socket.
-- `MatchingPeerProvider` is only a trait boundary; `RingpopNode` has a handler,
-  membership snapshot and SWIM lifecycle but there is no production adapter
-  that implements the trait and owns bootstrap/readiness in main.
+- At accepted root `a3745a7d7`, the prebound listener API
+  `tchannel::serve_matching_with_ringpop_listener(listener, matching,
+  handler)` exists. `MatchingRingpopProvider` implements
+  `MatchingPeerProvider`, derives the advertised address from the already-bound
+  listener, and owns bootstrap, SWIM, readiness, labels, snapshots, eviction
+  and stop. `main.rs` still calls the separate `serve` / `serve_matching`
+  paths and does not construct or inject this provider, so the gap is main
+  assembly, not missing provider/listener APIs.
+- `MatchingMembershipLifecycle` already starts the provider, registers the
+  service-scoped watch and obtains an initial snapshot, maintains the Matching
+  ring, then withdraws and stops the provider after drain. It is not wired in
+  `main.rs` and `MatchingRuntime` does not own it.
 - `MatchingRuntime` has `with_membership_evictor`, but its public
   `matching()` returns `&Matching`; it has no builder/constructor that installs
   `MatchingMembership` before serving. `Matching::with_membership` consumes
   the handler value. Assembly needs a runtime constructor/builder that accepts
   membership and installs it before extracting the service and starting
   maintenance.
-- `MatchingHistoryPeerResolver` consumes synchronous `HistoryMembership`,
-  while `MatchingPeerProvider` exposes async snapshots/events. Add a
-  snapshot-consistent adapter refreshed from provider events; it must preserve
-  each member's labels so `grpc` and `tchannel` named ports come from the same
-  membership generation. `cadence_common::membership::Host` has only
-  `address`, `identity`, and `grpc_address`, so its default `named_address`
-  cannot resolve TChannel.
+- `RingpopHistoryMembership` already adapts the live `RingpopNode` memberlist
+  into Go-filtered History `Host` snapshots and maps the `grpc` named port.
+  `MatchingPeerProvider`/`PeerMember::named_address` separately preserves
+  parsed named ports and TChannel fallback for matching membership snapshots.
+  Main must instantiate and inject the existing History adapter/resolver.
+  `RingpopHistoryMembership` itself is gRPC-only; `Host` has no TChannel field.
 - `MatchingHistoryClient` is gRPC-only (`HistoryApiClient<tonic::Channel>`).
   A `NamedPort::Tchannel` resolver endpoint cannot be called by this client.
   Go's RPC factory can route History using configured gRPC or TChannel
@@ -102,10 +114,11 @@ Use one lifecycle owner retained alongside the `MatchingRuntime` in main:
   client adapter (covering the Matching->History RPC methods used here) is
   required. The existing `tchannel_json_client` is only Ringpop JSON and does
   not satisfy that contract.
-- `MatchingHistoryClient::with_peer_resolver` exists but current `main.rs`
-  constructs History with `http://127.0.0.1:<history port>` and does not call
-  it. The resolver's shard count must use configured `numHistoryShards`; a
-  fixed loopback channel breaks multi-host routing and owner redirects.
+- `MatchingHistoryClient::with_peer_resolver` and
+  `RingpopHistoryMembership` exist but current `main.rs` constructs History
+  with `http://127.0.0.1:<history port>` and does not call the resolver
+  builder. The resolver's shard count must use configured `numHistoryShards`;
+  a fixed loopback channel breaks multi-host routing and owner redirects.
 - `ShardDistributorExecutor::new` requires a `ShardProcessorFactory`, but
   `MatchingRuntime`/`main.rs` currently neither constructs the executor nor
   binds processor creation to the current queue registry. `TonicSpectator`
@@ -137,9 +150,13 @@ Use one lifecycle owner retained alongside the `MatchingRuntime` in main:
 - Shared TChannel route exists but is not wired by main:
   `rust/crates/cadence-server/src/tchannel.rs`
   (`serve_matching_with_ringpop` / internal `TcpListener::bind`).
-- Provider and node are separate primitives, not a service owner:
-  `rust/crates/cadence-server/src/matching_peer_provider.rs`,
-  `ringpop_provider.rs`, and `ringpop_runtime.rs`.
+- Accepted root has the concrete provider/lifecycle/adapters, still not wired
+  by main: `rust/crates/cadence-server/src/matching_ringpop_provider.rs`,
+  `matching_membership_lifecycle.rs`, `matching_history_membership.rs`,
+  `matching_peer_provider.rs`, `ringpop_provider.rs`, and `ringpop_runtime.rs`.
+- Prebound shared listener entry point:
+  `rust/crates/cadence-server/src/tchannel.rs`
+  (`serve_matching_with_ringpop_listener`).
 
 No builds/tests were run for this source audit. This contract does not validate
 production wiring and does not authorize History service migration.
