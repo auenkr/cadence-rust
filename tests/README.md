@@ -56,6 +56,23 @@ explicitly disabled because the full sticky task lifecycle is not ported yet.
 
 ## Ringpop JSON over TChannel boundary
 
+The focused PING-REQ relay interoperability run starts a real pinned Go
+Ringpop requester and target around the Rust production handler:
+
+```sh
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/path/to/warmed/target python3 tests/run-ringpop-ping-req-relay-compat.py
+```
+
+It always rebuilds the test-only Rust relay probe from the current checkout and
+copies the result to a unique temporary executable, then runs the pinned Go
+overlay. The flow covers success, failed target, request/target change exchange,
+and Rust membership/dissemination state. The overlay also checks Go TChannel
+JSON decoding for empty, null, one value with trailing JSON, whitespace-only,
+and malformed field bodies; ready/unready null behavior is recorded in
+`memory/ringpop-tchannel-next.md`. Rust unit tests cover downstream application,
+timeout and malformed response failures, raw request decoding, and
+stopped/destroyed relay behavior.
+
 ```sh
 python3 tests/run-ringpop-tchannel-compat.py
 ```

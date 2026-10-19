@@ -203,6 +203,71 @@ Pinned source oracle: `/home/ubuntu/go/pkg/mod/github.com/uber/ringpop-go@v0.10.
 
 Rust change: production `RingpopNode::handler` now dispatches `/protocol/ping-req`; its async relay releases the state mutex across direct `/protocol/ping` I/O, applies request/target memberlist updates and dissemination accounting, then serializes `PingResponse`. Added `ping_req` request count. Focused production-handler relay test covers a successful direct TChannel target. Rust node configuration still has no ping-timeout field, so this slice uses pinned default 1500ms (config extraction remains pending). Reverse full-sync and full bootstrap/readiness remain outside this slice.
 
-Evidence so far: `CARGO_BUILD_JOBS=1 cargo check -p cadence-server --locked` in `rust/` passed after fixing a borrow conflict. `rustfmt --edition 2021 --check rust/crates/cadence-server/src/ringpop_provider.rs` and `git diff --check` passed. A focused lib test build/run is underway; record its final exit before relying on this section. Workspace-wide `cargo fmt --check` is not a usable gate because it reports extensive pre-existing unrelated formatting differences; no workspace formatting was applied. No mixed Go/Rust three-node probe or strict locked Clippy run has been completed yet; Matching remains incomplete.
-- Focused test completed: `CARGO_BUILD_JOBS=1 cargo test --locked -p cadence-server --lib production_ping_req_handler_relays_direct_ping_and_returns_ping_response -- --nocapture` — exit 0, 1 passed; command run from `rust/`.
-- `CARGO_BUILD_JOBS=1 cargo clippy --locked -p cadence-server --all-targets -- -D warnings` — exit 0.
+The first fa305/e1 focused relay check compiled and passed its original single
+handler test and server Clippy, but had no Go requester -> Rust relay -> Go
+target evidence. Those initial results are superseded by the final evidence
+below; Matching remains incomplete.
+
+## PING-REQ relay continuation (2026-10-18)
+
+Candidate `fa30557ee08872bff89a1d2e66dc694be57cfe96` was cherry-picked into an
+isolated checkout as `e1f379685` (follow-up changes are pending). The pinned
+oracle was read directly from `ringpop-go@v0.10.0/swim/ping_request_handler.go`,
+`ping_sender.go`, `ping_request_sender.go`, and `disseminator.go`.
+
+The Go handler order is readiness check, receive counters/events, request
+`memberlist.Update`, `sendPing(target, node.pingTimeout)`, successful target
+change update, then `IssueAsReceiver(source, sourceIncarnation, checksum)`.
+`sendPing` calls `IssueAsSender` and bumps that snapshot only after successful
+TChannel/JSON completion. `IssueAsReceiver` advances receiver counters and
+returns the complete membership when its filtered delta is empty and checksums
+differ. `handlePingRequest` ignores the `fullSync` boolean and does not start the
+reverse-full-sync job (the normal PING handler does that); it still returns the
+membership changes. The Go defaults are 1500 ms direct ping and 5000 ms
+requester-to-relay timeout.
+
+The Rust relay's 1500 ms timeout is now configurable using
+`RingpopNode::new_with_ping_timeout`; `RingpopNode::new` retains Go's default.
+The timeout is copied while holding state and the lock is released before the
+network await. Request member changes are now also ignored after Stop/Destroy,
+matching stopped `Memberlist.Update`; the relay still attempts the direct ping
+and emits a PING-REQ response, as Go's handler does.
+
+Final focused evidence is recorded under `memory/evidence/ringpop-ping-req/`.
+The actual Go requester -> Rust production handler -> pinned Go target probe
+covers success and unreachable target. It asserts changes reach the target and
+return to the requester on success; on failure it checks `pingStatus=false`,
+the request change remains in Rust membership/dissemination, and the unreachable
+target is not merged. Rust tests cover timeout, application and malformed
+downstream replies, Stop/Destroy updates, and raw request decoding.
+
+The pinned Go `tchannel-go` `ArgReadHelper.ReadJSON` oracle accepts zero-length
+and `null` args as a zero-value request, decodes one JSON value (the small
+`{} {}` input leaves the second value ignored), rejects whitespace-only and
+malformed fields. Rust now matches those request decoding cases. An unready Go
+node returns its not-ready application error for a null PING-REQ. A ready Go
+node reaches `sendPing` with the zero-value empty target and panics while
+creating a blank TChannel peer; the test recovers this source-level panic rather
+than crashing the test process. A ready Rust relay returns `pingStatus=false`
+for the same null request. This safe response is a known edge difference from
+the Go process panic; normal valid PING-REQ interoperability passes.
+
+The relay runner always rebuilds the current example into the warmed Cargo
+target, copies that exact binary to a unique temporary path, then runs the Go
+overlay. It does not reuse a possibly stale probe executable.
+
+Final reproducible evidence (source in this worktree at repair commit):
+
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target cargo test --locked --offline -p cadence-server --lib ping_req -- --nocapture` — exit 0, 5 passed. Command ran from the worktree's `rust/`; log and exit are in `memory/evidence/ringpop-ping-req/pingreq-relay-final4-rust.*`.
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target python3 tests/run-ringpop-ping-req-relay-compat.py` — exit 0. It freshly builds the example, then runs two pinned Go overlay tests: raw `ReadJSON` body cases and the real Go requester -> Rust relay -> Go target flow, including the failed-target path. Log and exit are in `memory/evidence/ringpop-ping-req/pingreq-relay-final5-go.*`.
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target cargo clippy --locked --offline -p cadence-server --all-targets -- -D warnings` — exit 0. Log and exit are in `memory/evidence/ringpop-ping-req/pingreq-relay-final5-clippy.*`.
+- `rustfmt --edition 2021 --check` on the changed provider and example, `gofmt -d` on the Go overlay, Python syntax compilation of the runner, and `git diff --check` all passed.
+
+Earlier final3/final4 Go attempts are retained only in `/tmp`; final5 is the
+authoritative Go evidence after the test oracle fixture was corrected.
+
+This relay slice does not establish whole-service Matching completion. It does
+not add bootstrap/discovery selection, scheduled SWIM probe behavior, provider
+lifecycle integration, or service-wide restart/recovery. The injected ping
+timeout constructor supports Go's default and tests, but production runtime
+configuration wiring remains pending.

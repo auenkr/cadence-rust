@@ -8,7 +8,7 @@ use cadence_common::ringpop_memberlist::Memberlist;
 use cadence_common::ringpop_wire::{
     Change, JoinRequest, JoinResponse, Member, Ping, PingRequest, PingResponse, ALIVE, SUSPECT,
 };
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::{future::Future, pin::Pin};
@@ -270,6 +270,7 @@ struct State {
     stopped: bool,
     destroyed: bool,
     requires_app_in_ping: bool,
+    ping_timeout: Duration,
     memberlist: Memberlist,
     disseminator: Disseminator,
     counts: RingpopRequestCounts,
@@ -277,6 +278,22 @@ struct State {
 
 impl RingpopNode {
     pub fn new(app: impl Into<String>, local_member: Member, requires_app_in_ping: bool) -> Self {
+        Self::new_with_ping_timeout(
+            app,
+            local_member,
+            requires_app_in_ping,
+            Duration::from_millis(1500),
+        )
+    }
+
+    /// Construct with the direct-ping deadline used while relaying PING-REQ.
+    /// The default matches ringpop-go v0.10.0's 1500ms `pingTimeout`.
+    pub fn new_with_ping_timeout(
+        app: impl Into<String>,
+        local_member: Member,
+        requires_app_in_ping: bool,
+        ping_timeout: Duration,
+    ) -> Self {
         let mut disseminator = Disseminator::default();
         // swim.NewNode records its initial local member with an empty source;
         // preserve this pre-bootstrap delta and its nil/empty wire behavior.
@@ -295,6 +312,7 @@ impl RingpopNode {
                 stopped: false,
                 destroyed: false,
                 requires_app_in_ping,
+                ping_timeout,
                 memberlist: Memberlist::new(local_member),
                 disseminator,
                 counts: RingpopRequestCounts::default(),
@@ -523,32 +541,34 @@ impl RingpopNode {
     /// owns its sender dissemination callback), merges target changes only on
     /// success, then responds with the relay's delta for the original caller.
     async fn relay_ping_request(&self, request: PingRequest) -> Result<PingResponse, RingpopError> {
-        let (relay_ping, sent_changes, relay_address) = {
+        let (relay_ping, sent_changes, relay_address, ping_timeout) = {
             let mut node = self.state.lock().expect("Ringpop state poisoned");
             node.counts.ping_req = node.counts.ping_req.saturating_add(1);
             let relay_address = node.address.clone();
-            let update = node.memberlist.update(
-                request.changes.as_deref().unwrap_or_default(),
-                || {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as i64
-                },
-                |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
-            );
-            if !update.accepted.is_empty() {
-                let pingable = node
-                    .memberlist
-                    .members()
-                    .iter()
-                    .filter(|m| {
-                        m.address != relay_address && (m.status == ALIVE || m.status == SUSPECT)
-                    })
-                    .count();
-                node.disseminator.adjust_max_propagations(pingable);
-                for change in update.accepted {
-                    node.disseminator.record(change);
+            if !node.stopped {
+                let update = node.memberlist.update(
+                    request.changes.as_deref().unwrap_or_default(),
+                    || {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64
+                    },
+                    |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+                );
+                if !update.accepted.is_empty() {
+                    let pingable = node
+                        .memberlist
+                        .members()
+                        .iter()
+                        .filter(|m| {
+                            m.address != relay_address && (m.status == ALIVE || m.status == SUSPECT)
+                        })
+                        .count();
+                    node.disseminator.adjust_max_propagations(pingable);
+                    for change in update.accepted {
+                        node.disseminator.record(change);
+                    }
                 }
             }
             let local = node
@@ -566,6 +586,7 @@ impl RingpopNode {
                 },
                 changes,
                 relay_address,
+                node.ping_timeout,
             )
         };
         let response = tchannel_json_client::call(
@@ -574,7 +595,7 @@ impl RingpopNode {
             "/protocol/ping",
             None,
             &serde_json::to_value(relay_ping).expect("Ping serialization"),
-            Duration::from_millis(1500),
+            ping_timeout,
         )
         .await;
         let (ping_ok, target_changes) = match response {
@@ -761,8 +782,14 @@ fn apply_join_list<F, R>(
     }
 }
 
-fn decode<T: DeserializeOwned>(body: &[u8]) -> Result<T, RingpopError> {
-    serde_json::from_slice(body).map_err(|e| RingpopError::System(e.to_string()))
+fn decode<T: DeserializeOwned + Default>(body: &[u8]) -> Result<T, RingpopError> {
+    if body.is_empty() {
+        return Ok(T::default());
+    }
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    Option::<T>::deserialize(&mut deserializer)
+        .map(|value| value.unwrap_or_default())
+        .map_err(|e| RingpopError::System(e.to_string()))
 }
 
 fn encode<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, RingpopError> {
@@ -1875,6 +1902,176 @@ mod tests {
         assert!(response.changes.is_some());
         assert_eq!(node.request_counts().ping_req, 1);
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn ping_req_direct_failures_do_not_advance_sender_or_merge_target_changes() {
+        for mode in ["error", "deadline", "malformed"] {
+            let node = RingpopNode::new_with_ping_timeout(
+                "cadence-matching",
+                Member {
+                    address: "relay:7933".into(),
+                    status: ALIVE.into(),
+                    incarnation: 100,
+                    labels: None,
+                },
+                true,
+                Duration::from_millis(40),
+            );
+            node.set_ready(true);
+            let target = RingpopHandler::new(move |_, _, _| async move {
+                if mode == "deadline" {
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: br#"{"changes":[]}"#.to_vec(),
+                    })
+                } else if mode == "malformed" {
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: br#"{"source":7}"#.to_vec(),
+                    })
+                } else {
+                    Err(RingpopError::Application("target rejected ping".into()))
+                }
+            });
+            let (target_address, server) = outbound_test_server(target).await;
+            let request = PingRequest {
+                source: "requester:7933".into(),
+                source_incarnation: 11,
+                target: target_address,
+                checksum: 0,
+                changes: Some(vec![Change {
+                    address: "requester-member".into(),
+                    status: ALIVE.into(),
+                    incarnation: 5,
+                    ..Change::default()
+                }]),
+            };
+            let response = node
+                .handler()
+                .call(
+                    "/protocol/ping-req".into(),
+                    None,
+                    serde_json::to_vec(&request).unwrap(),
+                )
+                .await
+                .unwrap();
+            let response: PingResponse = serde_json::from_slice(&response.body).unwrap();
+            assert!(!response.ping_status, "mode={mode}");
+            assert!(node
+                .membership_snapshot()
+                .0
+                .iter()
+                .any(|member| member.address == "requester-member"));
+            // The response's IssueAsReceiver path advances the queued relay
+            // change once; a failed direct sender call must not add another
+            // propagation to that same entry.
+            assert_eq!(node.dissemination_counts().get("relay:7933"), Some(&1));
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn ping_req_empty_null_and_trailing_values_match_tchannel_json_decode() {
+        let ready_node = node();
+        ready_node.set_ready(true);
+        for body in [b"".as_slice(), b"null", b"{} {}"] {
+            let response = ready_node
+                .handler()
+                .call("/protocol/ping-req".into(), None, body.to_vec())
+                .await
+                .unwrap();
+            let response: PingResponse = serde_json::from_slice(&response.body).unwrap();
+            assert!(!response.ping_status);
+            assert_eq!(response.target, "");
+        }
+        assert_eq!(ready_node.request_counts().ping_req, 3);
+        for body in [b"   ".as_slice(), b"{\"target\":7}"] {
+            assert!(ready_node
+                .handler()
+                .call("/protocol/ping-req".into(), None, body.to_vec())
+                .await
+                .is_err());
+        }
+        assert_eq!(ready_node.request_counts().ping_req, 3);
+
+        let unready = node();
+        for body in [b"".as_slice(), b"null"] {
+            assert!(unready
+                .handler()
+                .call("/protocol/ping-req".into(), None, body.to_vec())
+                .await
+                .is_err());
+        }
+        assert_eq!(unready.request_counts().ping_req, 0);
+    }
+
+    #[tokio::test]
+    async fn ping_req_stopped_and_destroyed_nodes_still_relay_without_memberlist_updates() {
+        for destroyed in [false, true] {
+            let node = RingpopNode::new(
+                "cadence-matching",
+                Member {
+                    address: "relay:7933".into(),
+                    status: ALIVE.into(),
+                    incarnation: 100,
+                    labels: None,
+                },
+                true,
+            );
+            node.set_ready(true);
+            if destroyed {
+                node.destroy();
+            } else {
+                node.stop();
+            }
+            let target = RingpopHandler::new(|_, _, body| async move {
+                let ping: Ping = serde_json::from_slice(&body).unwrap();
+                Ok(RingpopResponse {
+                    headers: None,
+                    body: serde_json::to_vec(&Ping {
+                        changes: Some(vec![Change {
+                            address: "target-member".into(),
+                            status: ALIVE.into(),
+                            incarnation: 8,
+                            ..Change::default()
+                        }]),
+                        ..ping
+                    })
+                    .unwrap(),
+                })
+            });
+            let (target_address, server) = outbound_test_server(target).await;
+            let request = PingRequest {
+                source: "requester:7933".into(),
+                source_incarnation: 11,
+                target: target_address,
+                checksum: 0,
+                changes: Some(vec![Change {
+                    address: "requester-member".into(),
+                    status: ALIVE.into(),
+                    incarnation: 5,
+                    ..Change::default()
+                }]),
+            };
+            let raw = node
+                .handler()
+                .call(
+                    "/protocol/ping-req".into(),
+                    None,
+                    serde_json::to_vec(&request).unwrap(),
+                )
+                .await
+                .unwrap();
+            let response: PingResponse = serde_json::from_slice(&raw.body).unwrap();
+            assert!(response.ping_status, "destroyed={destroyed}");
+            let members = node.membership_snapshot().0;
+            assert!(!members.iter().any(|member| {
+                member.address == "requester-member" || member.address == "target-member"
+            }));
+            server.abort();
+        }
     }
 
     #[tokio::test]

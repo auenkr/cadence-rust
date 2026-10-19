@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.88s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target/debug/deps/cadence_server-4bff137241497f73)
+
+running 5 tests
+test ringpop_provider::tests::ping_req_empty_null_and_trailing_values_match_tchannel_json_decode ... ok
+test ringpop_provider::tests::ping_req_stopped_and_destroyed_nodes_still_relay_without_memberlist_updates ... ok
+test ringpop_provider::tests::ping_requires_readiness_then_merges_and_returns_receiver_checksum ... ok
+test ringpop_provider::tests::production_ping_req_handler_relays_direct_ping_and_returns_ping_response ... ok
+test ringpop_provider::tests::ping_req_direct_failures_do_not_advance_sender_or_merge_target_changes ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 212 filtered out; finished in 0.20s

@@ -1,0 +1,18 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+=== RUN   TestGoRequesterRustRelayGoTarget
+--- PASS: TestGoRequesterRustRelayGoTarget (0.09s)
+=== RUN   TestGoTChannelArgReadJSONRelayBodies
+=== RUN   TestGoTChannelArgReadJSONRelayBodies/empty
+=== RUN   TestGoTChannelArgReadJSONRelayBodies/null
+=== RUN   TestGoTChannelArgReadJSONRelayBodies/one_value_and_trailing_JSON
+=== RUN   TestGoTChannelArgReadJSONRelayBodies/whitespace_only
+=== RUN   TestGoTChannelArgReadJSONRelayBodies/malformed_field
+--- PASS: TestGoTChannelArgReadJSONRelayBodies (0.00s)
+    --- PASS: TestGoTChannelArgReadJSONRelayBodies/empty (0.00s)
+    --- PASS: TestGoTChannelArgReadJSONRelayBodies/null (0.00s)
+    --- PASS: TestGoTChannelArgReadJSONRelayBodies/one_value_and_trailing_JSON (0.00s)
+    --- PASS: TestGoTChannelArgReadJSONRelayBodies/whitespace_only (0.00s)
+    --- PASS: TestGoTChannelArgReadJSONRelayBodies/malformed_field (0.00s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.103s
+Go requester -> Rust RingpopNode relay -> Go Ringpop target passed
