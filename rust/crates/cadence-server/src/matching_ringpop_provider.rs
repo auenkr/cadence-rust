@@ -272,7 +272,6 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
 
         let healer_node = self.node.clone();
         let discovery = Arc::clone(&self.discovery);
-        let local_address = self.local_address.clone();
         let healer = tokio::spawn(async move {
             let period = std::time::Duration::from_secs(30);
             let mut previous_host_list_size = 0usize;
@@ -287,13 +286,10 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
                     .membership_snapshot()
                     .0
                     .iter()
-                    .filter(|member| {
-                        member.address != local_address
-                            && (member.status == ALIVE || member.status == SUSPECT)
-                    })
+                    .filter(|member| member.status == ALIVE || member.status == SUSPECT)
                     .count();
-                let divisor = previous_host_list_size.max(reachable).max(1);
-                if rand::random::<f64>() >= 3.0 / divisor as f64 {
+                let probability = healer_probability(&mut previous_host_list_size, reachable, 3.0);
+                if rand::random::<f64>() >= probability {
                     continue;
                 }
                 let hosts = match discovery.hosts() {
@@ -316,10 +312,15 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
                 candidates.shuffle(&mut rand::thread_rng());
                 let mut failures = 0;
                 while !candidates.is_empty() && failures < 10 {
-                    let target = candidates.remove(0);
-                    match healer_node.attempt_heal(&target).await {
-                        Ok(known) => candidates.retain(|candidate| !known.contains(candidate)),
-                        Err(_) => failures += 1,
+                    let target = remove_address(&mut candidates, 0);
+                    tokio::select! {
+                        result = healer_node.attempt_heal(&target) => match result {
+                            Ok(known) => for address in known { remove_all_addresses(&mut candidates, &address); },
+                            Err(_) => failures += 1,
+                        },
+                        changed = healer_stopped.changed() => {
+                            if changed.is_err() || *healer_stopped.borrow() { return; }
+                        }
                     }
                 }
             }
@@ -405,6 +406,28 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
         }
         *lifecycle = Lifecycle::Stopped;
         Ok(())
+    }
+}
+
+fn remove_address(addresses: &mut Vec<String>, index: usize) -> String {
+    let address = addresses[index].clone();
+    remove_all_addresses(addresses, &address);
+    address
+}
+
+fn healer_probability(previous_host_list_size: &mut usize, reachable: usize, base: f64) -> f64 {
+    *previous_host_list_size = (*previous_host_list_size).max(reachable).max(1);
+    base / *previous_host_list_size as f64
+}
+
+fn remove_all_addresses(addresses: &mut Vec<String>, address: &str) {
+    let mut index = 0;
+    while index < addresses.len() {
+        if addresses[index] == address {
+            addresses.swap_remove(index);
+        } else {
+            index += 1;
+        }
     }
 }
 
@@ -494,6 +517,54 @@ mod tests {
     use crate::config::BootstrapMode;
     use cadence_common::ringpop_wire::Member;
     use tokio::net::TcpListener;
+
+    #[test]
+    fn healer_probability_keeps_go_previous_host_floor_and_includes_local_reachability() {
+        let mut previous = 0;
+        assert_eq!(healer_probability(&mut previous, 1, 3.0), 3.0);
+        assert_eq!(previous, 1);
+        assert_eq!(healer_probability(&mut previous, 4, 3.0), 0.75);
+        assert_eq!(previous, 4);
+        // CountReachableMembers can shrink, but Go retains the earlier
+        // discovery/reachability divisor until Hosts() reports a larger list.
+        assert_eq!(healer_probability(&mut previous, 1, 3.0), 0.75);
+        assert_eq!(previous, 4);
+    }
+
+    #[test]
+    fn go_del_swaps_and_removes_all_duplicate_addresses() {
+        let mut addresses = vec!["a".into(), "b".into(), "a".into(), "c".into()];
+        assert_eq!(remove_address(&mut addresses, 0), "a");
+        assert_eq!(addresses.len(), 2);
+        assert!(!addresses.iter().any(|address| address == "a"));
+    }
+
+    #[test]
+    fn go_healer_oracle_trace_covers_probability_candidate_and_retry_edges() {
+        let oracle: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/ringpop_healer_go.json")).unwrap();
+        assert_eq!(oracle["localFaultyWins"]["forRemote"][0]["status"], SUSPECT);
+        assert_eq!(oracle["localFaultyWins"]["forRemote"][0]["source"], "");
+        assert_eq!(oracle["remoteFaultyWins"]["forLocal"][0]["status"], SUSPECT);
+        assert_eq!(
+            oracle["noConflict"]["forLocal"].as_array().unwrap().len(),
+            0
+        );
+        assert_eq!(oracle["failureCap"], 10);
+        assert_eq!(oracle["localHostFaultyCandidate"], 1);
+        assert_eq!(oracle["duplicateTargetAttempts"], 2);
+        assert_eq!(oracle["delDuplicateRemaining"][0], "other");
+        assert_eq!(oracle["failedDiscoveryPreviousHostCount"], 7);
+        assert_eq!(oracle["maxReverseFullSyncJobs"], 5);
+        assert_eq!(oracle["reverseFullSyncJobsStarted"], 5);
+        assert_eq!(oracle["partitionHealPeriodNanos"], 30_000_000_000i64);
+        assert_eq!(oracle["noPendingChangesFullSync"]["fullSync"], true);
+        assert_eq!(oracle["probabilityLocalReachable"], 3.0);
+        assert_eq!(oracle["probabilityDoesNotShrink"], 0.375);
+        assert_eq!(oracle["twoPartitionRepair"]["membersA"], 2);
+        assert_eq!(oracle["twoPartitionRepair"]["membersB"], 2);
+        assert_eq!(oracle["twoPartitionRepair"]["allAlive"], true);
+    }
 
     #[test]
     fn provider_snapshot_retains_other_roles_and_only_known_ports() {

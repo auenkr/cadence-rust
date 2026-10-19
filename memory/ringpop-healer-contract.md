@@ -10,6 +10,9 @@ Reference: `github.com/uber/ringpop-go@v0.10.0/swim` (`node.go`,
 - Default period: 30 seconds. Default base probability: 3.
 - Each tick first waits one full period, then attempts with probability
   `base / max(previous_discovery_host_count, reachable_member_count, 1)`.
+  `CountReachableMembers` includes the local member and the divisor is retained
+  at its maximum observed value until a successful Hosts read updates the saved
+  host-list size.
 - Refresh `Hosts()` only on a selected attempt. Failed discovery is a failed
   tick; successful reads replace the saved host-list size.
 - Candidate addresses are discovery results absent from membership or whose
@@ -23,6 +26,9 @@ Reference: `github.com/uber/ringpop-go@v0.10.0/swim` (`node.go`,
   to the opposite partition and apply the local-side changes. Otherwise merge
   remote membership locally and send the complete local membership in a PING.
 - Return pingable remote membership addresses to candidate filtering.
+- Removing a selected target and every address learned from a remote partition
+  uses Ringpop's swap-with-last deletion, including removal of duplicate host
+  entries. Stop cancels the current async JOIN/PING repair attempt.
 
 ## Reverse full sync
 
