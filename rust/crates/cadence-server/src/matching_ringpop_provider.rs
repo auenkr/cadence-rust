@@ -16,8 +16,9 @@ use crate::{
 };
 use cadence_common::{
     ringpop_bootstrap_selection::{BootstrapSelection, Options},
-    ringpop_wire::{Member, ALIVE, FAULTY, LEAVE, SUSPECT},
+    ringpop_wire::{Member, ALIVE, FAULTY, LEAVE, SUSPECT, TOMBSTONE},
 };
+use rand::seq::SliceRandom;
 use std::{
     collections::{BTreeMap, HashMap},
     net::{IpAddr, SocketAddr},
@@ -36,6 +37,7 @@ enum Lifecycle {
     Started {
         stop: watch::Sender<bool>,
         monitor: tokio::task::JoinHandle<()>,
+        healer: tokio::task::JoinHandle<()>,
     },
     Stopping {
         cleanup: tokio::task::JoinHandle<()>,
@@ -50,7 +52,7 @@ pub struct MatchingRingpopProvider {
     node: RingpopNode,
     local_address: String,
     service: String,
-    discovery: DiscoveryProvider,
+    discovery: Arc<DiscoveryProvider>,
     max_join_duration_nanos: i64,
     ports: BTreeMap<String, u16>,
     lifecycle: Mutex<Lifecycle>,
@@ -111,7 +113,7 @@ impl MatchingRingpopProvider {
             node,
             local_address: address,
             service: service.into(),
-            discovery,
+            discovery: Arc::new(discovery),
             max_join_duration_nanos: config.max_join_duration_nanos,
             ports,
             lifecycle: Mutex::new(Lifecycle::Initialized),
@@ -245,6 +247,7 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
         self.node.set_ready(true);
 
         let (stop, mut stopped) = watch::channel(false);
+        let mut healer_stopped = stop.subscribe();
         let mut membership_changes = self.node.subscribe_membership_changes();
         let node = self.node.clone();
         let snapshot = Arc::clone(&self.snapshot);
@@ -267,6 +270,61 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
             }
         });
 
+        let healer_node = self.node.clone();
+        let discovery = Arc::clone(&self.discovery);
+        let local_address = self.local_address.clone();
+        let healer = tokio::spawn(async move {
+            let period = std::time::Duration::from_secs(30);
+            let mut previous_host_list_size = 0usize;
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(period) => {},
+                    changed = healer_stopped.changed() => {
+                        if changed.is_err() || *healer_stopped.borrow() { break; }
+                    }
+                }
+                let reachable = healer_node
+                    .membership_snapshot()
+                    .0
+                    .iter()
+                    .filter(|member| {
+                        member.address != local_address
+                            && (member.status == ALIVE || member.status == SUSPECT)
+                    })
+                    .count();
+                let divisor = previous_host_list_size.max(reachable).max(1);
+                if rand::random::<f64>() >= 3.0 / divisor as f64 {
+                    continue;
+                }
+                let hosts = match discovery.hosts() {
+                    Ok(hosts) => hosts,
+                    Err(_) => continue,
+                };
+                previous_host_list_size = hosts.len();
+                let members = healer_node.membership_snapshot().0;
+                let mut candidates: Vec<_> = hosts
+                    .into_iter()
+                    .filter(|host| {
+                        members
+                            .iter()
+                            .find(|member| member.address == *host)
+                            .is_none_or(|member| {
+                                matches!(member.status.as_str(), FAULTY | LEAVE | TOMBSTONE)
+                            })
+                    })
+                    .collect();
+                candidates.shuffle(&mut rand::thread_rng());
+                let mut failures = 0;
+                while !candidates.is_empty() && failures < 10 {
+                    let target = candidates.remove(0);
+                    match healer_node.attempt_heal(&target).await {
+                        Ok(known) => candidates.retain(|candidate| !known.contains(candidate)),
+                        Err(_) => failures += 1,
+                    }
+                }
+            }
+        });
+
         let mut labels = BTreeMap::new();
         labels.insert("serviceName".to_owned(), self.service.clone());
         for (name, port) in &self.ports {
@@ -278,7 +336,11 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
             &self.events,
             Self::current_members(&self.node),
         );
-        *lifecycle = Lifecycle::Started { stop, monitor };
+        *lifecycle = Lifecycle::Started {
+            stop,
+            monitor,
+            healer,
+        };
         Ok(())
     }
 
@@ -307,13 +369,18 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
         let mut lifecycle = self.lifecycle.lock().await;
         let current = std::mem::replace(&mut *lifecycle, Lifecycle::Stopped);
         match current {
-            Lifecycle::Started { stop, monitor } => {
+            Lifecycle::Started {
+                stop,
+                monitor,
+                healer,
+            } => {
                 // Remove the provider's Ringpop listener before destroying the
                 // node, matching Go Provider.Stop's RemoveListener → Destroy.
                 let _ = stop.send(true);
                 let node = self.node.clone();
                 let cleanup = tokio::spawn(async move {
                     let _ = monitor.await;
+                    let _ = healer.await;
                     node.destroy_and_wait().await;
                 });
                 *lifecycle = Lifecycle::Stopping { cleanup };

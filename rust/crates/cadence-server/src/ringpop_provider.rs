@@ -4,6 +4,7 @@
 //! bootstrap and readiness remain controlled by its lifecycle owner.
 use cadence_common::ringpop_bootstrap_selection::BootstrapSelection;
 use cadence_common::ringpop_disseminator::Disseminator;
+use cadence_common::ringpop_member::should_process_gossip;
 use cadence_common::ringpop_memberlist::Memberlist;
 use cadence_common::ringpop_memberlist::MemberlistIter;
 use cadence_common::ringpop_state_transitions::{
@@ -16,7 +17,7 @@ use cadence_common::ringpop_wire::{
 use rand::seq::SliceRandom;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{future::Future, pin::Pin};
 use tokio::sync::{mpsc, watch, Notify};
@@ -290,11 +291,13 @@ struct RuntimeControl {
     stopping: bool,
     executor: Option<tokio::runtime::Handle>,
     self_evicted: bool,
+    reverse_jobs: Arc<AtomicUsize>,
+    reverse_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl Drop for RuntimeControl {
     fn drop(&mut self) {
-        for task in self.tasks.drain(..) {
+        for task in self.tasks.drain(..).chain(self.reverse_tasks.drain(..)) {
             task.abort();
         }
     }
@@ -789,6 +792,9 @@ impl RingpopNode {
         for task in runtime.tasks.drain(..) {
             task.abort();
         }
+        for task in runtime.reverse_tasks.drain(..) {
+            task.abort();
+        }
     }
 
     /// Stop SWIM cooperatively and wait for any in-flight probe to complete.
@@ -802,7 +808,7 @@ impl RingpopNode {
                 .executor
                 .clone()
         });
-        let (tasks, existing_stop, done_tx, transition_stop_tx) = {
+        let (tasks, reverse_tasks, existing_stop, done_tx, transition_stop_tx) = {
             let mut runtime = self.runtime.lock().expect("Ringpop runtime poisoned");
             if runtime.stopping {
                 let done_rx = runtime
@@ -810,7 +816,7 @@ impl RingpopNode {
                     .as_ref()
                     .expect("stopping runtime has a completion channel")
                     .subscribe();
-                (Vec::new(), Some(done_rx), None, None)
+                (Vec::new(), Vec::new(), Some(done_rx), None, None)
             } else {
                 runtime.stopping = true;
                 if let Some(stop_tx) = &runtime.stop_tx {
@@ -822,7 +828,7 @@ impl RingpopNode {
                     .as_ref()
                     .cloned()
                     .unwrap_or_else(|| watch::channel(false).0);
-                if runtime.tasks.is_empty() {
+                if runtime.tasks.is_empty() && runtime.reverse_tasks.is_empty() {
                     runtime.generation.fetch_add(1, Ordering::SeqCst);
                     let mut state = self.state.lock().expect("Ringpop state poisoned");
                     state.state_transitions.disable();
@@ -832,7 +838,14 @@ impl RingpopNode {
                     return;
                 }
                 let tasks = std::mem::take(&mut runtime.tasks);
-                (tasks, None, Some(done_tx), transition_stop_tx)
+                let reverse_tasks = std::mem::take(&mut runtime.reverse_tasks);
+                (
+                    tasks,
+                    reverse_tasks,
+                    None,
+                    Some(done_tx),
+                    transition_stop_tx,
+                )
             }
         };
         if let Some(mut done_rx) = existing_stop {
@@ -875,6 +888,9 @@ impl RingpopNode {
                 state.transition_notify.notify_waiters();
             }
             for task in tasks {
+                let _ = task.await;
+            }
+            for task in reverse_tasks {
                 let _ = task.await;
             }
             let mut runtime = node.runtime.lock().expect("Ringpop runtime poisoned");
@@ -1165,6 +1181,96 @@ impl RingpopNode {
             |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
         );
         Ok(join)
+    }
+
+    /// Run one Ringpop v0.10.0 partition-heal attempt against a discovery host.
+    /// JOIN membership is inspected without being merged until the conflict
+    /// check decides whether the two sides can safely converge.
+    pub async fn attempt_heal(&self, target: &str) -> Result<Vec<String>, String> {
+        let (request, local_members) = {
+            let node = self.state.lock().expect("Ringpop state poisoned");
+            let local = node.memberlist.member(&node.address).expect("local member");
+            let request = JoinRequest {
+                app: node.app.clone(),
+                source: local.address.clone(),
+                incarnation: local.incarnation,
+                timeout: 1_000_000_000,
+                labels: local.labels.clone(),
+            };
+            let local_members = membership_as_changes(node.memberlist.members(), local);
+            (request, local_members)
+        };
+        let response = tchannel_json_client::call(
+            target,
+            "ringpop",
+            "/protocol/join",
+            None,
+            &serde_json::to_value(request).map_err(|e| e.to_string())?,
+            Duration::from_secs(1),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        let remote: JoinResponse =
+            serde_json::from_value(response.body).map_err(|e| e.to_string())?;
+        let remote_members = remote.membership.unwrap_or_default();
+        let local_snapshot = local_members;
+        let (changes_a, changes_b) =
+            changes_that_need_reincarnation(&local_snapshot, &remote_members);
+        if !changes_a.is_empty() || !changes_b.is_empty() {
+            {
+                let mut node = self.state.lock().expect("Ringpop state poisoned");
+                node.apply_changes(&changes_a, wall_clock_millis, |len| {
+                    rand::Rng::gen_range(&mut rand::thread_rng(), 0..len)
+                });
+            }
+            if !changes_b.is_empty() {
+                self.send_ping_changes(target, changes_b).await?;
+            }
+        } else {
+            {
+                let mut node = self.state.lock().expect("Ringpop state poisoned");
+                node.apply_changes(&remote_members, wall_clock_millis, |len| {
+                    rand::Rng::gen_range(&mut rand::thread_rng(), 0..len)
+                });
+            }
+            let merged = {
+                let node = self.state.lock().expect("Ringpop state poisoned");
+                let local = node.memberlist.member(&node.address).expect("local member");
+                membership_as_changes(node.memberlist.members(), local)
+            };
+            self.send_ping_changes(target, merged).await?;
+        }
+        Ok(remote_members
+            .iter()
+            .filter(|member| member.status == ALIVE || member.status == SUSPECT)
+            .map(|member| member.address.clone())
+            .collect())
+    }
+
+    async fn send_ping_changes(&self, target: &str, changes: Vec<Change>) -> Result<(), String> {
+        let request = {
+            let node = self.state.lock().expect("Ringpop state poisoned");
+            let local = node.memberlist.member(&node.address).expect("local member");
+            Ping {
+                changes: Some(changes),
+                checksum: node.memberlist.checksum(),
+                source: local.address.clone(),
+                source_incarnation: local.incarnation,
+                app: node.app.clone(),
+            }
+        };
+        let response = tchannel_json_client::call(
+            target,
+            "ringpop",
+            "/protocol/ping",
+            None,
+            &serde_json::to_value(request).map_err(|e| e.to_string())?,
+            Duration::from_secs(1),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        serde_json::from_value::<Ping>(response.body).map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     /// Execute one Go `JoinGroup`: select once, launch every selected JOIN
@@ -1624,17 +1730,23 @@ impl RingpopNode {
             async move {
                 let result = match method.as_str() {
                     "/protocol/join" => handle_join(&state, &body),
-                    "/protocol/ping" => handle_ping(
-                        &state,
-                        &body,
-                        || {
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as i64
-                        },
-                        |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
-                    ),
+                    "/protocol/ping" => {
+                        let (response, reverse_target) = handle_ping_with_full_sync(
+                            &state,
+                            &body,
+                            || {
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as i64
+                            },
+                            |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+                        )?;
+                        if let Some(target) = reverse_target {
+                            schedule_reverse_full_sync(&runtime, state.clone(), target);
+                        }
+                        Ok(response)
+                    }
                     "/protocol/ping-req" => {
                         let request: PingRequest = decode(&body)?;
                         {
@@ -1713,6 +1825,76 @@ fn encode<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, RingpopError> {
     serde_json::to_vec(value).map_err(|e| RingpopError::System(e.to_string()))
 }
 
+fn membership_as_changes(members: &[Member], local: &Member) -> Vec<Change> {
+    members
+        .iter()
+        .map(|member| {
+            Change {
+                source: local.address.clone(),
+                source_incarnation: local.incarnation,
+                address: member.address.clone(),
+                incarnation: member.incarnation,
+                status: member.status.clone(),
+                tombstone: false,
+                labels: member.labels.clone(),
+                timestamp: Default::default(),
+            }
+            .validate_outgoing()
+        })
+        .collect()
+}
+
+fn changes_that_need_reincarnation(
+    local: &[Change],
+    remote: &[Change],
+) -> (Vec<Change>, Vec<Change>) {
+    let mut changes_for_local = Vec::new();
+    let mut changes_for_remote = Vec::new();
+    for remote_change in remote {
+        let Some(local_change) = local
+            .iter()
+            .find(|change| change.address == remote_change.address)
+        else {
+            continue;
+        };
+        let local_member = Member {
+            address: local_change.address.clone(),
+            incarnation: local_change.incarnation,
+            status: local_change.status.clone(),
+            labels: local_change.labels.clone(),
+        };
+        let remote_member = Member {
+            address: remote_change.address.clone(),
+            incarnation: remote_change.incarnation,
+            status: remote_change.status.clone(),
+            labels: remote_change.labels.clone(),
+        };
+        let local_pingable = matches!(local_member.status.as_str(), ALIVE | SUSPECT);
+        let remote_pingable = matches!(remote_member.status.as_str(), ALIVE | SUSPECT);
+        if remote_pingable
+            && should_process_gossip(Some(&remote_member), &local_member)
+            && !local_pingable
+        {
+            let mut change = local_change.clone();
+            change.source.clear();
+            change.source_incarnation = 0;
+            change.status = SUSPECT.to_owned();
+            changes_for_remote.push(change);
+        }
+        if local_pingable
+            && should_process_gossip(Some(&local_member), &remote_member)
+            && !remote_pingable
+        {
+            let mut change = remote_change.clone();
+            change.source.clear();
+            change.source_incarnation = 0;
+            change.status = SUSPECT.to_owned();
+            changes_for_local.push(change);
+        }
+    }
+    (changes_for_local, changes_for_remote)
+}
+
 fn handle_join(state: &Arc<Mutex<State>>, body: &[u8]) -> Result<Vec<u8>, RingpopError> {
     let request: JoinRequest = decode(body)?;
     let mut node = state.lock().expect("Ringpop state poisoned");
@@ -1768,6 +1950,20 @@ where
     F: FnMut() -> i64,
     R: FnMut(usize) -> usize,
 {
+    handle_ping_with_full_sync(state, body, next_incarnation, insert_position)
+        .map(|(response, _)| response)
+}
+
+fn handle_ping_with_full_sync<F, R>(
+    state: &Arc<Mutex<State>>,
+    body: &[u8],
+    next_incarnation: F,
+    insert_position: R,
+) -> Result<(Vec<u8>, Option<String>), RingpopError>
+where
+    F: FnMut() -> i64,
+    R: FnMut(usize) -> usize,
+{
     let request: Ping = decode(body)?;
     let mut node = state.lock().expect("Ringpop state poisoned");
     if !node.ready {
@@ -1800,7 +1996,7 @@ where
         .incarnation;
     let local_checksum = node.memberlist.checksum();
     let members = node.memberlist.members().to_vec();
-    let (changes, _full_sync) = node.disseminator.issue_receiver(
+    let (changes, full_sync) = node.disseminator.issue_receiver(
         &request.source,
         request.source_incarnation,
         request.checksum,
@@ -1809,18 +2005,79 @@ where
         &local_address,
         local_incarnation,
     );
-    encode(&Ping {
+    let response = encode(&Ping {
         checksum: local_checksum,
         changes: Some(changes),
         source: local_address,
         source_incarnation: local_incarnation,
         app: String::new(),
-    })
+    })?;
+    Ok((response, full_sync.then_some(request.source)))
+}
+
+fn schedule_reverse_full_sync(
+    runtime: &Arc<Mutex<RuntimeControl>>,
+    state: Arc<Mutex<State>>,
+    target: String,
+) {
+    let mut owner = runtime.lock().expect("Ringpop runtime poisoned");
+    if owner.stopping || owner.reverse_jobs.load(Ordering::SeqCst) >= 5 {
+        return;
+    }
+    owner.reverse_tasks.retain(|task| !task.is_finished());
+    owner.reverse_jobs.fetch_add(1, Ordering::SeqCst);
+    let runtime = Arc::clone(runtime);
+    let node = RingpopNode {
+        state,
+        runtime: Arc::clone(&runtime),
+    };
+    let task = tokio::spawn(async move {
+        let _ = node.join_seed(&target, Duration::from_secs(1)).await;
+        node.runtime
+            .lock()
+            .expect("Ringpop runtime poisoned")
+            .reverse_jobs
+            .fetch_sub(1, Ordering::SeqCst);
+    });
+    owner.reverse_tasks.push(task);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn go_heal_partition_reincarnates_overriding_faulty_winner_before_merge() {
+        let member_change = |address: &str, status: &str, incarnation| Change {
+            address: address.into(),
+            status: status.into(),
+            incarnation,
+            source: "partition-peer".into(),
+            source_incarnation: 9,
+            ..Default::default()
+        };
+        // Go nodesThatNeedToReincarnate: a higher-incarnation Faulty entry in
+        // A would overwrite B's pingable Alive member, so A is gossiped as
+        // Suspect to B before the partitions merge.
+        let local = vec![member_change("shared", FAULTY, 20)];
+        let remote = vec![member_change("shared", ALIVE, 10)];
+        let (for_local, for_remote) = changes_that_need_reincarnation(&local, &remote);
+        assert!(for_local.is_empty());
+        assert_eq!(for_remote.len(), 1);
+        assert_eq!(for_remote[0].status, SUSPECT);
+        assert!(for_remote[0].source.is_empty());
+        assert_eq!(for_remote[0].source_incarnation, 0);
+
+        // Symmetric conflict: B's winning Faulty entry must be sent as
+        // Suspect to A while A retains its pingable entry.
+        let local = vec![member_change("shared", ALIVE, 10)];
+        let remote = vec![member_change("shared", FAULTY, 20)];
+        let (for_local, for_remote) = changes_that_need_reincarnation(&local, &remote);
+        assert_eq!(for_local.len(), 1);
+        assert!(for_remote.is_empty());
+        assert_eq!(for_local[0].status, SUSPECT);
+        assert!(for_local[0].source.is_empty());
+    }
 
     #[test]
     fn protocol_rate_uses_go_sample_percentile_and_minimum_floor() {
