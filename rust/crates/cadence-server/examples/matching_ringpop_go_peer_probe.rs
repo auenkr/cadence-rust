@@ -8,7 +8,25 @@ use cadence_server::{
     tchannel,
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::{net::TcpListener, task::JoinHandle};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    net::TcpListener,
+    task::JoinHandle,
+};
+
+async fn wait_for_go_command(
+    reader: &mut BufReader<tokio::io::Stdin>,
+    expected: &str,
+) -> Result<()> {
+    let mut command = String::new();
+    let bytes = reader.read_line(&mut command).await?;
+    anyhow::ensure!(bytes != 0, "Go peer closed stdin before {expected:?}");
+    anyhow::ensure!(
+        command.trim_end() == expected,
+        "expected Go command {expected:?}, got {command:?}"
+    );
+    Ok(())
+}
 
 async fn start_provider(
     bind: SocketAddr,
@@ -70,6 +88,7 @@ async fn stop_provider(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let mut go_commands = BufReader::new(tokio::io::stdin());
     let mut args = std::env::args().skip(1);
     let bind: SocketAddr = args
         .next()
@@ -82,18 +101,16 @@ async fn main() -> Result<()> {
         "rust-peer-ready {}",
         first.node().membership_snapshot().0.len()
     );
+    wait_for_go_command(&mut go_commands, "evict").await?;
     first.self_evict().await?;
-    // Leave time for Go's listener and provider event callback to observe the
-    // FAULTY update before stopping the shared listener.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    wait_for_go_command(&mut go_commands, "restart").await?;
     stop_provider(first, first_server).await?;
-    tokio::time::sleep(Duration::from_millis(25)).await;
 
     let (restarted, restarted_server) = start_provider(bind, &seed).await?;
     println!(
         "rust-peer-recovered {}",
         restarted.node().membership_snapshot().0.len()
     );
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    wait_for_go_command(&mut go_commands, "stop").await?;
     stop_provider(restarted, restarted_server).await
 }

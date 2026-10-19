@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -74,6 +75,11 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	// Keep the reservation made in the provider's seed list. Start a Rust node
 	// there only after the Go listener is ready to answer Ringpop JOIN calls.
 	command := exec.CommandContext(ctx, probe, rustAddress, goAddress)
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
 	output := &lockedBuffer{}
 	command.Stdout = output
 	command.Stderr = output
@@ -111,13 +117,30 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 		t.Fatalf("Rust grpc label = %q, %v; want 127.0.0.1:7234", grpcAddress, err)
 	}
 	firstIncarnation := peerIncarnation(t, goProvider, rustAddress)
+	if _, err := io.WriteString(stdin, "evict\n"); err != nil {
+		t.Fatalf("allowing Rust self-eviction: %v", err)
+	}
 
 	waitMembers(t, ctx, goProvider, 0, "Go peer did not observe Rust self-eviction")
+	if _, err := io.WriteString(stdin, "restart\n"); err != nil {
+		t.Fatalf("allowing Rust restart: %v", err)
+	}
 	waitMembers(t, ctx, goProvider, 1, "same-address Rust restart did not recover membership", func() string {
 		return fmt.Sprintf("Rust probe output:\n%s\nGo reachable members: %s", output.String(), reachableMembers(goProvider))
 	})
-	if incarnation := peerIncarnation(t, goProvider, rustAddress); incarnation <= firstIncarnation {
-		t.Fatalf("restarted Rust incarnation = %d, want > %d", incarnation, firstIncarnation)
+	waitForIncarnationGreater(t, ctx, goProvider, rustAddress, firstIncarnation, output)
+	recovered, err := goProvider.GetMembers("cadence-matching")
+	if err != nil || len(recovered) != 1 {
+		t.Fatalf("restarted Rust Matching membership: %#v, %v", recovered, err)
+	}
+	if grpc, err := recovered[0].GetNamedAddress(membership.PortGRPC); err != nil || grpc != "127.0.0.1:7234" {
+		t.Fatalf("restarted Rust grpc label = %q, %v; want 127.0.0.1:7234", grpc, err)
+	}
+	if tchannel, err := recovered[0].GetNamedAddress(membership.PortTchannel); err != nil || tchannel != rustAddress {
+		t.Fatalf("restarted Rust tchannel label = %q, %v; want %q", tchannel, err, rustAddress)
+	}
+	if _, err := io.WriteString(stdin, "stop\n"); err != nil {
+		t.Fatalf("allowing final Rust provider stop: %v", err)
 	}
 
 	if err := command.Wait(); err != nil {
@@ -125,6 +148,22 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "rust-peer-recovered") {
 		t.Fatalf("Rust lifecycle probe did not report recovery:\n%s", output.String())
+	}
+}
+
+func waitForIncarnationGreater(t *testing.T, ctx context.Context, provider *Provider, address string, previous int64, output *lockedBuffer) {
+	t.Helper()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if incarnation := peerIncarnation(t, provider, address); incarnation > previous {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("restarted Rust incarnation did not exceed %d\nRust probe output:\n%s\nGo reachable members: %s", previous, output.String(), reachableMembers(provider))
+		case <-ticker.C:
+		}
 	}
 }
 
