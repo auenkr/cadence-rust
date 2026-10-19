@@ -223,3 +223,23 @@ the current loopback-only Matching-to-History client with a discovered
 `MatchingHistoryPeerResolver`/`RingpopHistoryMembership` before claiming
 service parity. Existing adapter-only idle-unload behavior remains an explicit
 coverage gap for the production process probe.
+
+## Timestamped configured-store validation runner (source-only)
+
+`tests/run-matching-configured-store-validation.py` is the reproducible runner
+for the configured SQLite source delta. It records UTC start/end times, Git
+HEAD, server binary path and SHA-256 hashes of relevant source, probe and audit
+files before and after validation. It emits a separate log and status per
+independent gate, plus `source-freeze.json` and `results.json` in a unique
+timestamped artifact directory. The gates cover (1) persistence SQLite
+options/schema and store-operation tests, (2) server configured-store option
+resolution, (3) the Go/native-Thrift configured two-way probe, and (4)
+workspace-wide strict Clippy (`-D warnings`). The compatibility probe verifies
+Rust task-list data through Go persistence and Go activity task ID 2 delivery
+plus subsequent Rust-side task-list readback/collection. Run with
+`python3 tests/run-matching-configured-store-validation.py --server-bin rust/target/debug/cadence-server`.
+
+This is a source-only checkpoint. The runner has not been executed because the
+shared build slot is held by History. It is not acceptance evidence until all
+four gates pass with matching before/after source hashes; the staged production
+Ringpop probe remains separately blocked on production provider assembly.
