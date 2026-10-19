@@ -22,3 +22,7 @@ Production gate after bounded protocol slices:
 5. Verify queued activity/decision delivery, query/cancellation/retry/error details, graceful drain, SIGKILL/restart on same persistence and endpoint, backlog recovery, peer failover and membership changes. Record exact source, config, process roles, command, per-stage exits and artifacts. No completion claim from only successful RPCs.
 
 Immediate independent follow-up once a worker slot is free: runtime owner/lifecycle construction against existing storage and transport boundaries, with main changes isolated from discovery/protocol modules. A source audit of actual Go shutdown/config sampling points is required before implementation. Domain persistence/cache and external store backends are separate substantial remaining slices, not silently replaced by a seeded snapshot in the production test.
+
+## Runtime-owner review, 2026-10-19
+
+The draft main signal branch awaited drain inside a `tokio::select!` arm while listener futures lived in the competing serving arm. Selecting the signal drops that arm, so it cannot establish that listeners continue accepting during drain. Parent requested pinned/owned serving lifetime polled through the drain, cleanup even on signal/drain errors, and an actual Go RPC during a nonzero drain. A port-open check or elapsed shutdown duration does not prove this behavior. This draft remains unaccepted until corrected and validated.
