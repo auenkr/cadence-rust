@@ -26,7 +26,10 @@ default), bounded across History retries and owner redirects; their outer
 250ms / 1s / five-attempt retry stays distinct. `with_history_rpc_timeout`
 allows callers to configure the factory timeout; the legacy constructor's
 timeout argument remains the Record*Started fallback used by current runtime
-callers.
+callers. Matching poll deadlines now reach both Record*Started retry layers,
+the inactive-domain refresh call, and query mutable-state retry. A configured
+zero Record*Started timeout disables that added operation deadline, matching
+Go `WithOperationTimeout(0)`, while the caller deadline still applies.
 
 ## Reproducible placement evidence
 
@@ -42,8 +45,10 @@ redirects an actual RPC to B.
 
 Existing recorded Go oracle: exit 0, Go 1.26.8 linux/arm64; exact command and
 output are in `memory/evidence/matching-history-peer-oracle/go-oracle.log`.
-The fixture and manifest are checked in beside it. No Rust build or tests were
-run for this follow-up yet: waiting for the parent's serialized build slot.
+The fixture and manifest are checked in beside it. The initial source commit is
+`fad59909a`; caller-deadline and zero-timeout changes are uncommitted pending
+source review and the parent's serialized build slot. No Rust build or tests
+were run for this follow-up yet.
 After that grant, run the focused peer resolver / matching History tests and
 strict lint, then rerun the Go oracle and compare its generated fixture and
 source manifest with the recorded copies. Production discovery injection and

@@ -1303,7 +1303,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                 query=queue.queries.next()=>{
                     let _wait=query_lifecycle.begin();
                     let execution=query.request.workflow_execution.clone().unwrap_or_default();
-                    let query_state = queue.dispatcher.query_mutable_state(&execution);
+                    let query_state = queue
+                        .dispatcher
+                        .query_mutable_state_with_deadline(&execution, incoming_deadline);
                     let query_state = if let Some(deadline) = incoming_deadline {
                         tokio::time::timeout_at(deadline, query_state)
                             .await

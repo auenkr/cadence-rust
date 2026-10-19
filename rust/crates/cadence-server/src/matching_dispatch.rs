@@ -509,7 +509,16 @@ impl TaskDispatcher {
         &self,
         execution: &p::WorkflowExecution,
     ) -> Result<h::GetMutableStateResponse, Status> {
-        self.history.mutable_state(&self.domain_id, execution).await
+        self.query_mutable_state_with_deadline(execution, None).await
+    }
+    pub async fn query_mutable_state_with_deadline(
+        &self,
+        execution: &p::WorkflowExecution,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<h::GetMutableStateResponse, Status> {
+        self.history
+            .mutable_state_with_deadline(&self.domain_id, execution, caller_deadline)
+            .await
     }
 
     pub async fn poll_decision(
@@ -519,13 +528,18 @@ impl TaskDispatcher {
     ) -> Result<m::PollForDecisionTaskResponse, Status> {
         let history = self.history.clone();
         let domain = self.domain_id.clone();
+        let caller_deadline = tokio::time::Instant::now() + expiration;
         self.poll_with_lifecycle(
             poll,
             expiration,
             move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
                 let domain = source_domain.unwrap_or_else(|| domain.clone());
-                async move { history.start_decision(&domain, &task, poll).await }
+                async move {
+                    history
+                        .start_decision_with_deadline(&domain, &task, poll, Some(caller_deadline))
+                        .await
+                }
             },
             None,
         )
@@ -540,13 +554,18 @@ impl TaskDispatcher {
     ) -> Result<m::PollForDecisionTaskResponse, Status> {
         let history = self.history.clone();
         let domain = self.domain_id.clone();
+        let caller_deadline = tokio::time::Instant::now() + expiration;
         self.poll_with_lifecycle(
             poll,
             expiration,
             move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
                 let domain = source_domain.unwrap_or_else(|| domain.clone());
-                async move { history.start_decision(&domain, &task, poll).await }
+                async move {
+                    history
+                        .start_decision_with_deadline(&domain, &task, poll, Some(caller_deadline))
+                        .await
+                }
             },
             Some(lifecycle),
         )
@@ -559,13 +578,18 @@ impl TaskDispatcher {
     ) -> Result<m::PollForActivityTaskResponse, Status> {
         let history = self.history.clone();
         let domain = self.domain_id.clone();
+        let caller_deadline = tokio::time::Instant::now() + expiration;
         self.poll_with_lifecycle(
             poll,
             expiration,
             move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
                 let domain = source_domain.unwrap_or_else(|| domain.clone());
-                async move { history.start_activity(&domain, &task, poll).await }
+                async move {
+                    history
+                        .start_activity_with_deadline(&domain, &task, poll, Some(caller_deadline))
+                        .await
+                }
             },
             None,
         )
@@ -580,13 +604,18 @@ impl TaskDispatcher {
     ) -> Result<m::PollForActivityTaskResponse, Status> {
         let history = self.history.clone();
         let domain = self.domain_id.clone();
+        let caller_deadline = tokio::time::Instant::now() + expiration;
         self.poll_with_lifecycle(
             poll,
             expiration,
             move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
                 let domain = source_domain.unwrap_or_else(|| domain.clone());
-                async move { history.start_activity(&domain, &task, poll).await }
+                async move {
+                    history
+                        .start_activity_with_deadline(&domain, &task, poll, Some(caller_deadline))
+                        .await
+                }
             },
             Some(lifecycle),
         )
@@ -850,12 +879,13 @@ impl TaskDispatcher {
                     StartErrorKind::InactiveDomain => {
                         if self
                             .history
-                            .refresh_workflow_tasks(
+                            .refresh_workflow_tasks_with_deadline(
                                 task.sync
                                     .as_ref()
                                     .map(|sync| sync.source_domain.as_str())
                                     .unwrap_or(&self.domain_id),
                                 &task.task,
+                                Some(deadline),
                             )
                             .await
                             .is_ok()

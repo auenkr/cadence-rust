@@ -231,6 +231,12 @@ impl MatchingHistoryClient {
                 )),
         )
     }
+    fn record_started_operation_timeout(&self, domain_id: &str) -> Option<Duration> {
+        let timeout = self
+            .record_started_timeout(domain_id)
+            .unwrap_or(self.operation_timeout);
+        (!timeout.is_zero()).then_some(timeout)
+    }
     fn request<T>(&self, payload: T) -> Request<T> {
         self.request_with_timeout(payload, Some(self.history_rpc_timeout))
     }
@@ -344,7 +350,8 @@ impl MatchingHistoryClient {
     async fn retry_record_started<T: Clone + Send, R, F, Fut>(
         &self,
         payload: T,
-        timeout: Duration,
+        timeout: Option<Duration>,
+        caller_deadline: Option<tokio::time::Instant>,
         workflow_id: &str,
         mut call: F,
     ) -> Result<R, Status>
@@ -361,10 +368,17 @@ impl MatchingHistoryClient {
             .with_maximum_interval(Duration::from_secs(10))
             .with_expiration_interval(NO_INTERVAL);
         let mut throttle_retrier = Retrier::new(throttle_policy);
-        let mut previous_error = None;
+        let mut previous_retry_error = None;
         loop {
+            let previous_error = previous_retry_error.clone();
             match self
-                .retry(payload.clone(), Some(timeout), None, workflow_id, &mut call)
+                .retry(
+                    payload.clone(),
+                    timeout,
+                    caller_deadline,
+                    workflow_id,
+                    &mut call,
+                )
                 .await
             {
                 Ok(value) => return Ok(value),
@@ -384,8 +398,20 @@ impl MatchingHistoryClient {
                             delay = delay.max(throttle_delay);
                         }
                     }
-                    previous_error = Some(error);
-                    tokio::time::sleep(delay).await;
+                    if let Some(deadline) = caller_deadline {
+                        if tokio::time::Instant::now() >= deadline {
+                            return Err(previous_error.unwrap_or(error));
+                        }
+                        tokio::select! {
+                            _ = tokio::time::sleep_until(deadline) => {
+                                return Err(previous_error.unwrap_or(error));
+                            }
+                            _ = tokio::time::sleep(delay) => {}
+                        }
+                    } else {
+                        tokio::time::sleep(delay).await;
+                    }
+                    previous_retry_error = Some(error);
                 }
             }
         }
@@ -590,6 +616,17 @@ impl MatchingHistoryClient {
         task: &AllocatedTask,
         poll: p::PollForDecisionTaskRequest,
     ) -> Result<m::PollForDecisionTaskResponse, Status> {
+        self.start_decision_with_deadline(domain_id, task, poll, None)
+            .await
+    }
+
+    pub async fn start_decision_with_deadline(
+        &self,
+        domain_id: &str,
+        task: &AllocatedTask,
+        poll: p::PollForDecisionTaskRequest,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<m::PollForDecisionTaskResponse, Status> {
         let execution = Self::execution(task)?;
         let payload = h::RecordDecisionTaskStartedRequest {
             domain_id: domain_id.into(),
@@ -602,8 +639,8 @@ impl MatchingHistoryClient {
         let started = self
             .retry_record_started(
                 payload,
-                self.record_started_timeout(domain_id)
-                    .unwrap_or(self.operation_timeout),
+                self.record_started_operation_timeout(domain_id),
+                caller_deadline,
                 &execution.workflow_id,
                 move |mut client, request| async move {
                     client
@@ -649,6 +686,17 @@ impl MatchingHistoryClient {
         task: &AllocatedTask,
         poll: p::PollForActivityTaskRequest,
     ) -> Result<m::PollForActivityTaskResponse, Status> {
+        self.start_activity_with_deadline(domain_id, task, poll, None)
+            .await
+    }
+
+    pub async fn start_activity_with_deadline(
+        &self,
+        domain_id: &str,
+        task: &AllocatedTask,
+        poll: p::PollForActivityTaskRequest,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<m::PollForActivityTaskResponse, Status> {
         let execution = Self::execution(task)?;
         let payload = h::RecordActivityTaskStartedRequest {
             domain_id: domain_id.into(),
@@ -661,8 +709,8 @@ impl MatchingHistoryClient {
         let started = self
             .retry_record_started(
                 payload,
-                self.record_started_timeout(domain_id)
-                    .unwrap_or(self.operation_timeout),
+                self.record_started_operation_timeout(domain_id),
+                caller_deadline,
                 &execution.workflow_id,
                 move |mut client, request| async move {
                     client
@@ -1178,6 +1226,14 @@ mod tests {
             client.record_started_timeout("domain-b"),
             Some(Duration::from_secs(9))
         );
+        let unbounded = client
+            .clone()
+            .with_record_started_timeout(Arc::new(|_: &str| Duration::ZERO));
+        assert_eq!(
+            unbounded.record_started_operation_timeout("domain-a"),
+            None,
+            "Go WithOperationTimeout(0) leaves the caller deadline unchanged"
+        );
         let request = client.request_with_timeout((), client.record_started_timeout("domain-a"));
         assert_eq!(
             request.metadata().get("grpc-timeout"),
@@ -1284,6 +1340,28 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.code(), Code::DeadlineExceeded);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+    #[tokio::test]
+    async fn record_started_retries_stop_at_caller_deadline() {
+        let history_client = client();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let copy = calls.clone();
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(25);
+        let error = history_client
+            .retry_record_started(
+                (),
+                Some(Duration::from_secs(1)),
+                Some(deadline),
+                "workflow-record-caller-deadline",
+                move |_, _| {
+                    copy.fetch_add(1, Ordering::SeqCst);
+                    std::future::ready(Err::<(), _>(Status::unavailable("retry me")))
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), Code::Unavailable);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
     fn grpc_timeout(duration: Duration) -> tonic::metadata::MetadataValue<tonic::metadata::Ascii> {
