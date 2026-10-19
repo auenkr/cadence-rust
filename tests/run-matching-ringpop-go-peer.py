@@ -46,6 +46,7 @@ def run_gate(name, argv, cwd, env, log_path, timeout):
     status.write_text(json.dumps({"stage": name, "state": "passed", "exit": 0}, indent=2) + "\n")
 
 env = {**os.environ, "CARGO_BUILD_JOBS": "1"}
+target_dir = Path(env.get("CARGO_TARGET_DIR", root / "rust/target"))
 go_flags = env.get("GOFLAGS", "").strip()
 env["GOFLAGS"] = f"{go_flags} -p=1".strip()
 run_gate(
@@ -80,7 +81,7 @@ overlay.write_text(
 env = {
     **env,
     "RUST_MATCHING_RINGPOP_PROBE": str(
-        root / "rust/target/debug/examples/matching_ringpop_go_peer_probe"
+        target_dir / "debug/examples/matching_ringpop_go_peer_probe"
     ),
 }
 run_gate(
