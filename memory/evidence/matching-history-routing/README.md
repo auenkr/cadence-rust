@@ -87,3 +87,11 @@ Attempt `attempt-20261019T201548Z-211EUS` compiled the library but stopped
 while compiling the test target (exit 101). It found a test fixture shadowing
 bug and an assertion comparing `Result<_, tonic::Status>` directly; both have
 been corrected. No test assertion ran in that attempt.
+
+Attempt `attempt-20261019T201754Z-8fQ3XM` compiled the server test binary and
+ran the History client tests (12 passed, 2 failed). The caller-deadline case
+used a 25ms budget and was starved before entering its RPC closure; its budget
+is now widened to 250ms to retain the deterministic bounded-cancellation
+assertion. The timeout test incorrectly expected the factory's 30s request
+helper to encode the separate 1s Record*Started operation budget; it now
+constructs the RPC request with that operation budget explicitly.

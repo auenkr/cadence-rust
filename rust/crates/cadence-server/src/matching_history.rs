@@ -1066,11 +1066,12 @@ mod tests {
         let count = calls.clone();
         let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let drop_mark = dropped.clone();
+        let caller_deadline = tokio::time::Instant::now() + Duration::from_millis(250);
         let result = history
             .execute_with_redirect(
                 (),
                 None,
-                Some(tokio::time::Instant::now() + Duration::from_millis(25)),
+                Some(caller_deadline),
                 "workflow-caller-deadline",
                 &mut move |_, _| {
                     let attempt = count.fetch_add(1, Ordering::SeqCst);
@@ -1208,7 +1209,10 @@ mod tests {
             Some(default)
         );
         assert_eq!(
-            client().request(()).metadata().get("grpc-timeout"),
+            history_client.request_with_timeout(
+                (),
+                history_client.record_started_operation_timeout("domain-a"),
+            ).metadata().get("grpc-timeout"),
             Some(&grpc_timeout(default))
         );
         // Go reads `matching.recordTaskStartedTimeout(domain)` per attempt.
