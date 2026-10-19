@@ -155,3 +155,25 @@ required exact database path preservation, writer journal/busy options rather
 than reader exceptions, existing schema validation and actual Go read/write
 proof. Explicit unsupported backend/multishard errors are partial migration,
 not all-backend parity. No new target directories needed;42GBfree.
+
+## Shared hash defect and next frozen candidates
+
+Actual Go placement fixture failed for invalid shard1114112 (Go rune U+FFFD).
+Parent found farmhash1.1.5 short-byte unsigned handling differs Go signed int8.
+History74c540e6d fixes common fingerprint32 (<=4 signed bytes), Ring and
+Ringpop checksum/labels and History workflow/domain placement. Parent caught
+initial rotate-left vs Go rotate-right error before build. Actual generated Go
+vectors and original Ring oracle (extended U+FFFD) pass in final expanded
+attempt20261019T203141Z-JSv0Tg, as do ringpop_member tests and common Clippy.
+History server tests/lint/oracle still pending rebuild. Worker sole build owner.
+
+Provider source chain e6fc0fd79+954b88540+7c90e1d6f+32fc49bd6+cfd5e9dce
+is clean and unvalidated, includes Rust-Rust shared-listener bootstrap/evict/
+restart and actual Go provider overlay harness with higher recovery incarnation.
+No main integration. Source-only task-store chain7fb11795f+a4ad328ac+
+520ec008d+b2989bec1 clean, unvalidated. Fixed initial Go taskID0 skipped by
+ack0: probe now distinct Go ID2 after Rust ID1 and asserts delivery plus bounded
+GC. Staged real-discovery mixed binary harness avoids Fx Matching decorator,
+but waits production main/provider and discovered History injection; output
+explicitly preliminary/acceptanceEligible:false. Both workers idle awaiting
+grants, not running background builds. Current free disk37GB.
