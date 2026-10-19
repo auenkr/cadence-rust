@@ -2172,7 +2172,17 @@ mod tests {
         .await
         .unwrap();
         let response: Ping = serde_json::from_value(response.body).unwrap();
-        assert_eq!(response.changes.unwrap().len(), 1);
+        let response_changes = response.changes.unwrap();
+        assert_eq!(response_changes.len(), 1);
+        // Apply the reply as the actual Ping sender does after a successful
+        // TChannel response; the receiver independently launches reverse JOIN.
+        node_a
+            .state
+            .lock()
+            .unwrap()
+            .apply_changes(&response_changes, wall_clock_millis, |len| {
+                rand::Rng::gen_range(&mut rand::thread_rng(), 0..len)
+            });
 
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
