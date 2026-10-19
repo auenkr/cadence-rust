@@ -15,10 +15,11 @@ use std::time::{Duration, Instant};
 pub const DOMAIN_CACHE_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 pub const DOMAIN_CACHE_MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 pub const DOMAIN_CACHE_REFRESH_PAGE_SIZE: usize = 200;
-/// Go gives every persistence request in a domain-cache refresh (and each
-/// cache-miss existence check) its own three-second context deadline. The
-/// SQLite adapter bounds connection-lock waiting, SQLite busy waiting, and VM
-/// execution with that deadline. Blob decoding happens after the SQL call, as
+/// Go gives the complete metadata-first refresh scan one three-second context
+/// deadline; page requests inherit its remaining time. Each cache-miss
+/// existence check gets its own three-second context. The SQLite adapter
+/// bounds connection-lock waiting, SQLite busy waiting, and VM execution with
+/// the supplied remaining time. Blob decoding happens after the SQL call, as
 /// it does in Go's sqlDomainStore, which does not recheck the context there.
 pub const DOMAIN_CACHE_PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(3);
 const DOMAIN_CACHE_RETRY_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
@@ -79,13 +80,18 @@ fn metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSo
     use rusqlite::ErrorCode;
 
     let retryable = match &error {
-        MatchingDomainMetadataError::OperationTimedOut => true,
+        // Go's SQLite IsTimeoutError maps context deadlines, SQLITE_INTERRUPT,
+        // and SQLITE_BUSY_TIMEOUT to persistence.TimeoutError. That type is
+        // not accepted by IsServiceTransientError, so the cache does not retry
+        // it. Other SQL failures become InternalServiceError and are retryable.
+        MatchingDomainMetadataError::OperationTimedOut => false,
         MatchingDomainMetadataError::Sqlite(rusqlite::Error::SqliteFailure(failure, _)) => {
-            matches!(
-                failure.code,
-                ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked
-            )
+            failure.code != ErrorCode::OperationInterrupted
+                && failure.extended_code != rusqlite::ffi::SQLITE_BUSY_TIMEOUT
         }
+        // Go converts other SQL scan/driver failures to InternalServiceError,
+        // which the domain-cache retry policy treats as transient.
+        MatchingDomainMetadataError::Sqlite(_) => true,
         _ => false,
     };
     DomainMetadataSourceError {
@@ -210,7 +216,11 @@ impl DomainCacheClock for SystemDomainCacheClock {
     fn wait(&self, duration: Duration, stopped: &std::sync::atomic::AtomicBool) {
         let deadline = Instant::now() + duration;
         while !stopped.load(std::sync::atomic::Ordering::Acquire) && Instant::now() < deadline {
-            thread::sleep((deadline - Instant::now()).min(Duration::from_millis(50)));
+            thread::sleep(
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(50)),
+            );
         }
     }
 }
@@ -219,6 +229,12 @@ struct Lifecycle {
     started: bool,
     stopped: bool,
     worker: Option<JoinHandle<()>>,
+}
+
+fn join_worker(worker: JoinHandle<()>) {
+    if worker.thread().id() != thread::current().id() {
+        let _ = worker.join();
+    }
 }
 
 pub struct MatchingDomainCache {
@@ -303,10 +319,16 @@ impl MatchingDomainCache {
                 return Err(DomainCacheError::Source(error.to_string()));
             }
         };
-        self.lifecycle
-            .lock()
-            .expect("domain cache lifecycle lock")
-            .worker = Some(worker);
+        let mut worker = Some(worker);
+        {
+            let mut lifecycle = self.lifecycle.lock().expect("domain cache lifecycle lock");
+            if !lifecycle.stopped {
+                lifecycle.worker = worker.take();
+            }
+        }
+        if let Some(worker) = worker {
+            join_worker(worker);
+        }
         Ok(())
     }
 
@@ -322,7 +344,10 @@ impl MatchingDomainCache {
             lifecycle.worker.take()
         };
         if let Some(worker) = worker {
-            let _ = worker.join();
+            // The worker temporarily upgrades its Weak cache reference while
+            // refreshing. If that reference owns the final Arc, Drop runs on
+            // this thread and must not try to join itself.
+            join_worker(worker);
         }
     }
 
@@ -455,29 +480,39 @@ impl MatchingDomainCache {
                         return Err(previous_error.unwrap_or(DomainCacheError::Source(message)));
                     }
                     let elapsed = self.clock.now().saturating_sub(started);
-                    if elapsed >= DOMAIN_CACHE_RETRY_EXPIRATION {
+                    if elapsed > DOMAIN_CACHE_RETRY_EXPIRATION {
                         return Err(previous_error.unwrap_or(DomainCacheError::Source(message)));
                     }
-                    previous_error = Some(DomainCacheError::Source(message.clone()));
                     let exponential = DOMAIN_CACHE_RETRY_INITIAL_INTERVAL
                         .saturating_mul(2_u32.saturating_pow(retry_count))
                         .min(DOMAIN_CACHE_RETRY_MAX_INTERVAL);
                     let remaining = DOMAIN_CACHE_RETRY_EXPIRATION.saturating_sub(elapsed);
                     let interval = exponential.min(remaining);
+                    // Go's ComputeNextDelay stops instead of scheduling a
+                    // shortened retry when the remaining budget is below the
+                    // initial one-second interval.
+                    if interval < DOMAIN_CACHE_RETRY_INITIAL_INTERVAL {
+                        return Err(previous_error.unwrap_or(DomainCacheError::Source(message)));
+                    }
+                    let prior_error = previous_error;
                     let jitter_portion = interval / 5;
                     let jitter_nanos = jitter_portion.as_nanos().min(u128::from(u64::MAX)) as u64;
                     let jitter = if jitter_nanos == 0 {
                         Duration::ZERO
                     } else {
-                        Duration::from_nanos(u64::from(rand::random::<u32>()) % jitter_nanos)
+                        Duration::from_nanos(rand::Rng::gen_range(
+                            &mut rand::thread_rng(),
+                            0..jitter_nanos,
+                        ))
                     };
                     let delay = interval
                         .saturating_sub(jitter_portion)
                         .saturating_add(jitter);
                     self.clock.wait(delay, &self.stopped);
                     if self.stopped.load(std::sync::atomic::Ordering::Acquire) {
-                        return Err(previous_error.unwrap_or(DomainCacheError::Source(message)));
+                        return Err(prior_error.unwrap_or(DomainCacheError::Source(message)));
                     }
+                    previous_error = Some(DomainCacheError::Source(message));
                     retry_count = retry_count.saturating_add(1);
                 }
                 Err(error) => return Err(previous_error.unwrap_or(error)),
@@ -506,9 +541,12 @@ impl MatchingDomainCache {
 
         // Go reads metadata first. Any failed page leaves both existing maps
         // untouched, so readers never observe a partial scan.
+        // Go derives each page-call context from the metadata context, so the
+        // whole metadata+pages scan shares one three-second deadline.
+        let refresh_deadline = Instant::now() + DOMAIN_CACHE_PERSISTENCE_TIMEOUT;
         let metadata_version = self
             .source
-            .metadata_version(DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
+            .metadata_version(refresh_deadline.saturating_duration_since(Instant::now()))
             .map_err(|error| {
                 *self
                     .last_source_error_retryable
@@ -524,7 +562,7 @@ impl MatchingDomainCache {
                 .list_domains(
                     DOMAIN_CACHE_REFRESH_PAGE_SIZE,
                     token.as_deref(),
-                    DOMAIN_CACHE_PERSISTENCE_TIMEOUT,
+                    refresh_deadline.saturating_duration_since(Instant::now()),
                 )
                 .map_err(|error| {
                     *self
@@ -605,6 +643,18 @@ mod tests {
         }
     }
 
+    struct ExpiringClock(AtomicU64);
+    impl DomainCacheClock for ExpiringClock {
+        fn now(&self) -> Duration {
+            Duration::from_secs(self.0.load(Ordering::SeqCst))
+        }
+        fn wait(&self, _duration: Duration, stopped: &std::sync::atomic::AtomicBool) {
+            if !stopped.load(Ordering::Acquire) {
+                self.0.store(120, Ordering::SeqCst);
+            }
+        }
+    }
+
     #[derive(Default)]
     struct FakeSource {
         version: Mutex<i64>,
@@ -612,7 +662,10 @@ mod tests {
         yield_page_size: Mutex<Option<usize>>,
         fail_page: Mutex<Option<usize>>,
         retryable_page_failures: Mutex<usize>,
+        retryable_page_messages: Mutex<Vec<String>>,
         calls: Mutex<Vec<String>>,
+        timeouts: Mutex<Vec<Duration>>,
+        metadata_delay: Mutex<Duration>,
     }
     impl FakeSource {
         fn put(&self, record: MatchingDomainMetadata) {
@@ -629,8 +682,10 @@ mod tests {
     }
     impl DomainMetadataSource for FakeSource {
         fn metadata_version(&self, timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
-            assert_eq!(timeout, DOMAIN_CACHE_PERSISTENCE_TIMEOUT);
+            assert!(!timeout.is_zero() && timeout <= DOMAIN_CACHE_PERSISTENCE_TIMEOUT);
             self.calls.lock().unwrap().push("metadata".into());
+            self.timeouts.lock().unwrap().push(timeout);
+            thread::sleep(*self.metadata_delay.lock().unwrap());
             Ok(*self.version.lock().unwrap())
         }
         fn list_domains(
@@ -640,7 +695,8 @@ mod tests {
             timeout: Duration,
         ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
             assert_eq!(page_size, DOMAIN_CACHE_REFRESH_PAGE_SIZE);
-            assert_eq!(timeout, DOMAIN_CACHE_PERSISTENCE_TIMEOUT);
+            assert!(!timeout.is_zero() && timeout <= DOMAIN_CACHE_PERSISTENCE_TIMEOUT);
+            self.timeouts.lock().unwrap().push(timeout);
             let offset = token
                 .and_then(|bytes| bytes.try_into().ok())
                 .map(usize::from_be_bytes)
@@ -650,9 +706,13 @@ mod tests {
                 let mut remaining = self.retryable_page_failures.lock().unwrap();
                 if *remaining > 0 {
                     *remaining -= 1;
-                    return Err(DomainMetadataSourceError::transient(
-                        "injected transient page failure",
-                    ));
+                    let message = self
+                        .retryable_page_messages
+                        .lock()
+                        .unwrap()
+                        .pop()
+                        .unwrap_or_else(|| "injected transient page failure".into());
+                    return Err(DomainMetadataSourceError::transient(message));
                 }
                 return Err(DomainMetadataSourceError::permanent(
                     "injected page failure",
@@ -674,7 +734,8 @@ mod tests {
             id: Option<&str>,
             timeout: Duration,
         ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
-            assert_eq!(timeout, DOMAIN_CACHE_PERSISTENCE_TIMEOUT);
+            assert!(!timeout.is_zero() && timeout <= DOMAIN_CACHE_PERSISTENCE_TIMEOUT);
+            self.timeouts.lock().unwrap().push(timeout);
             self.calls
                 .lock()
                 .unwrap()
@@ -1114,6 +1175,19 @@ mod tests {
     }
 
     #[test]
+    fn page_calls_inherit_remaining_metadata_refresh_deadline() {
+        let source = Arc::new(FakeSource::default());
+        *source.version.lock().unwrap() = 1;
+        *source.metadata_delay.lock().unwrap() = Duration::from_millis(20);
+        let clock = Arc::new(FakeClock::default());
+        cache(&source, &clock).refresh_domains().unwrap();
+        let timeouts = source.timeouts.lock().unwrap();
+        assert_eq!(timeouts.len(), 2);
+        assert!(timeouts[1] < timeouts[0]);
+        assert!(timeouts[0] - timeouts[1] >= Duration::from_millis(10));
+    }
+
+    #[test]
     fn retryable_refresh_error_retries_and_returns_previous_error_if_retry_fails() {
         let source = Arc::new(FakeSource::default());
         *source.version.lock().unwrap() = 1;
@@ -1135,6 +1209,51 @@ mod tests {
     }
 
     #[test]
+    fn retry_expiration_below_initial_interval_returns_previous_attempt_error() {
+        let source = Arc::new(FakeSource::default());
+        *source.version.lock().unwrap() = 1;
+        *source.fail_page.lock().unwrap() = Some(0);
+        *source.retryable_page_failures.lock().unwrap() = 2;
+        *source.retryable_page_messages.lock().unwrap() =
+            vec!["second transient".into(), "first transient".into()];
+        let clock = Arc::new(ExpiringClock(AtomicU64::new(0)));
+        let cache = Arc::new(MatchingDomainCache::with_clock(
+            Arc::clone(&source) as Arc<dyn DomainMetadataSource>,
+            clock,
+        ));
+        assert_eq!(
+            cache.refresh_domains(),
+            Err(DomainCacheError::Source("first transient".into()))
+        );
+        assert_eq!(
+            source.calls.lock().unwrap().as_slice(),
+            ["metadata", "page:0", "metadata", "page:0"]
+        );
+    }
+
+    #[test]
+    fn sqlite_timeout_errors_follow_go_sql_error_conversion_retryability() {
+        let sqlite_error = |code| {
+            MatchingDomainMetadataError::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                None,
+            ))
+        };
+        assert!(!metadata_source_error(MatchingDomainMetadataError::OperationTimedOut).retryable);
+        assert!(metadata_source_error(sqlite_error(rusqlite::ffi::SQLITE_BUSY)).retryable);
+        assert!(metadata_source_error(sqlite_error(rusqlite::ffi::SQLITE_LOCKED)).retryable);
+        assert!(!metadata_source_error(sqlite_error(rusqlite::ffi::SQLITE_INTERRUPT)).retryable);
+        assert!(!metadata_source_error(sqlite_error(rusqlite::ffi::SQLITE_BUSY_TIMEOUT)).retryable);
+        assert!(metadata_source_error(sqlite_error(rusqlite::ffi::SQLITE_ERROR)).retryable);
+        assert!(
+            metadata_source_error(MatchingDomainMetadataError::Sqlite(
+                rusqlite::Error::InvalidQuery
+            ))
+            .retryable
+        );
+    }
+
+    #[test]
     fn lifecycle_start_stop_is_idempotent_and_stops_owned_worker() {
         let source = Arc::new(FakeSource::default());
         *source.version.lock().unwrap() = 1;
@@ -1144,5 +1263,29 @@ mod tests {
         cache.stop();
         cache.stop();
         assert_eq!(cache.refresh_domains(), Err(DomainCacheError::Stopped));
+    }
+
+    #[test]
+    fn joining_worker_from_its_own_thread_detaches_instead_of_panicking() {
+        let handle_cell = Arc::new(Mutex::new(None));
+        let child_handle_cell = Arc::clone(&handle_cell);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let handle = loop {
+                if let Some(handle) = child_handle_cell.lock().unwrap().take() {
+                    break handle;
+                }
+                thread::yield_now();
+            };
+            join_worker(handle);
+            done_tx.send(()).unwrap();
+        });
+        *handle_cell.lock().unwrap() = Some(worker);
+        ready_rx.recv().unwrap();
+        // Completion proves the worker dropped its own JoinHandle without a
+        // self-join panic or deadlock.
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
     }
 }

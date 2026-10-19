@@ -99,6 +99,28 @@ pub struct MatchingDomainPage {
 /// persistence call. Go supplies a fresh three-second context to each call.
 struct SqliteOperationDeadline<'a>(&'a Connection);
 
+fn sqlite_operation_error(
+    error: rusqlite::Error,
+    deadline: Instant,
+) -> MatchingDomainMetadataError {
+    let expired_sql_lock = matches!(
+        &error,
+        rusqlite::Error::SqliteFailure(failure, _)
+            if Instant::now() >= deadline
+                && matches!(
+                    failure.code,
+                    rusqlite::ErrorCode::DatabaseBusy
+                        | rusqlite::ErrorCode::DatabaseLocked
+                        | rusqlite::ErrorCode::OperationInterrupted
+                )
+    );
+    if expired_sql_lock {
+        MatchingDomainMetadataError::OperationTimedOut
+    } else {
+        MatchingDomainMetadataError::Sqlite(error)
+    }
+}
+
 impl<'a> SqliteOperationDeadline<'a> {
     fn new(connection: &'a Connection, deadline: Instant) -> Result<Self, rusqlite::Error> {
         connection.busy_timeout(deadline.saturating_duration_since(Instant::now()))?;
@@ -121,8 +143,16 @@ impl MatchingDomainMetadataStore {
         let deadline = Instant::now() + timeout;
         loop {
             match self.connection.try_lock() {
-                Ok(connection) => return Ok((connection, deadline)),
+                Ok(connection) => {
+                    if Instant::now() >= deadline {
+                        return Err(MatchingDomainMetadataError::OperationTimedOut);
+                    }
+                    return Ok((connection, deadline));
+                }
                 Err(TryLockError::Poisoned(error)) => {
+                    if Instant::now() >= deadline {
+                        return Err(MatchingDomainMetadataError::OperationTimedOut);
+                    }
                     return Ok((error.into_inner(), deadline));
                 }
                 Err(TryLockError::WouldBlock) if Instant::now() >= deadline => {
@@ -172,11 +202,13 @@ impl MatchingDomainMetadataStore {
     ) -> Result<i64, MatchingDomainMetadataError> {
         let (connection, deadline) = self.lock_connection(timeout)?;
         let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
-        Ok(connection.query_row(
-            "SELECT notification_version FROM domain_metadata",
-            [],
-            |row| row.get(0),
-        )?)
+        connection
+            .query_row(
+                "SELECT notification_version FROM domain_metadata",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| sqlite_operation_error(error, deadline))
     }
 
     /// Read by exactly one of name or canonical UUID, matching Go request
@@ -189,7 +221,7 @@ impl MatchingDomainMetadataStore {
         self.get_domain_with_timeout(name, id, Duration::from_secs(3))
     }
 
-    /// Cache-miss read-through using Go's persistence timeout for this call.
+    /// Cache-miss read-through using the remaining Go persistence-call budget.
     pub fn get_domain_with_timeout(
         &self,
         name: Option<&str>,
@@ -223,7 +255,7 @@ impl MatchingDomainMetadataStore {
         self.list_domains_with_timeout(page_size, next_page_token, Duration::from_secs(3))
     }
 
-    /// Scan one cache page with Go's per-persistence-call timeout.
+    /// Scan one cache page with the remaining Go refresh-context budget.
     pub fn list_domains_with_timeout(
         &self,
         page_size: usize,
@@ -236,31 +268,39 @@ impl MatchingDomainMetadataStore {
         let (connection, deadline) = self.lock_connection(timeout)?;
         let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
         let mut rows = if let Some(token) = next_page_token {
-            let mut statement = connection.prepare(
-                "SELECT id, name, is_global, data, data_encoding FROM domains \
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, name, is_global, data, data_encoding FROM domains \
                  WHERE shard_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3",
-            )?;
-            let mapped = statement.query_map(
-                params![GO_DEFAULT_SHARD_ID, token, page_size as i64],
-                row_from_sqlite,
-            )?;
+                )
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
+            let mapped = statement
+                .query_map(
+                    params![GO_DEFAULT_SHARD_ID, token, page_size as i64],
+                    row_from_sqlite,
+                )
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
             let mut collected = Vec::with_capacity(page_size);
             for row in mapped {
-                collected.push(row?);
+                collected.push(row.map_err(|error| sqlite_operation_error(error, deadline))?);
             }
             collected
         } else {
-            let mut statement = connection.prepare(
-                "SELECT id, name, is_global, data, data_encoding FROM domains \
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, name, is_global, data, data_encoding FROM domains \
                  WHERE shard_id = ?1 ORDER BY id LIMIT ?2",
-            )?;
-            let mapped = statement.query_map(
-                params![GO_DEFAULT_SHARD_ID, page_size as i64],
-                row_from_sqlite,
-            )?;
+                )
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
+            let mapped = statement
+                .query_map(
+                    params![GO_DEFAULT_SHARD_ID, page_size as i64],
+                    row_from_sqlite,
+                )
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
             let mut collected = Vec::with_capacity(page_size);
             for row in mapped {
-                collected.push(row?);
+                collected.push(row.map_err(|error| sqlite_operation_error(error, deadline))?);
             }
             collected
         };
@@ -295,7 +335,8 @@ impl MatchingDomainMetadataStore {
         let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
         let row = connection
             .query_row(&query, params![GO_DEFAULT_SHARD_ID, value], row_from_sqlite)
-            .optional()?
+            .optional()
+            .map_err(|error| sqlite_operation_error(error, deadline))?
             .ok_or_else(|| MatchingDomainMetadataError::NotFound(identity.to_string()))?;
         self.decode_row(row)
     }
@@ -668,6 +709,38 @@ mod tests {
         assert_eq!(domain.replication.active_cluster_name, "cluster-a");
         assert_eq!(domain.replication.clusters[0].cluster_name, "cluster-a");
         assert_eq!(domain.isolation_groups.as_ref().unwrap().data, [0, 255, 7]);
+    }
+
+    #[test]
+    fn sqlite_lock_wait_past_deadline_maps_to_operation_timeout() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("domain-lock.sqlite");
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch(
+                "CREATE TABLE domain_metadata (id INTEGER, notification_version INTEGER);
+                 INSERT INTO domain_metadata VALUES (1, 91);",
+            )
+            .unwrap();
+        let store = MatchingDomainMetadataStore::open_read_only(&path, "cluster-a").unwrap();
+        writer.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+
+        let result = store.get_metadata_version_with_timeout(Duration::from_millis(20));
+        assert!(matches!(
+            result,
+            Err(MatchingDomainMetadataError::OperationTimedOut)
+        ));
+
+        let before_deadline = Instant::now() + Duration::from_secs(1);
+        let immediate_busy = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        );
+        assert!(matches!(
+            sqlite_operation_error(immediate_busy, before_deadline),
+            MatchingDomainMetadataError::Sqlite(_)
+        ));
+        writer.execute_batch("ROLLBACK;").unwrap();
     }
 
     #[test]

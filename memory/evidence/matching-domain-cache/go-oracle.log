@@ -1,0 +1,12 @@
+=== RUN   TestDomainCacheSuite
+=== RUN   TestDomainCacheSuite/TestDomainCacheOracleTrace
+    logger.go:146: 2026-10-19T13:06:56.282Z	INFO	Domain notification is not less than than metadata notification version	{"wf-domain-name": "beta", "logging-call-at": "domainCache.go:496"}
+    logger.go:146: 2026-10-19T13:06:56.282Z	DEBUG	Domain change callbacks are going to triggered	{"number": 0, "logging-call-at": "domainCache.go:701"}
+    logger.go:146: 2026-10-19T13:06:56.282Z	DEBUG	Domain change callbacks are completed	{"number": 0, "logging-call-at": "domainCache.go:705"}
+    logger.go:146: 2026-10-19T13:06:56.282Z	DEBUG	Domain change callbacks are going to triggered	{"number": 1, "logging-call-at": "domainCache.go:701"}
+    logger.go:146: 2026-10-19T13:06:56.282Z	DEBUG	Domain change callbacks are completed	{"number": 1, "logging-call-at": "domainCache.go:705"}
+    domain_cache_oracle_test.go:112: GO_DOMAIN_CACHE_TRACE={"MetadataFirstPageSize":200,"InitialIDs":["00000000-0000-0000-0000-000000000001"],"CatchupMax":2,"Events":["prepare","changed:00000000-0000-0000-0000-000000000001:2"],"FinalEntries":[{"ID":"00000000-0000-0000-0000-000000000001","Name":"alpha","Notification":2,"Config":6,"Failover":8,"FailoverNotification":4,"Retention":6},{"ID":"00000000-0000-0000-0000-000000000002","Name":"beta","Notification":3,"Config":9,"Failover":11,"FailoverNotification":3,"Retention":9}],"PageError":"injected page failure","RetainedNotification":2,"NameMiss":true,"IDMiss":true}
+--- PASS: TestDomainCacheSuite (0.01s)
+    --- PASS: TestDomainCacheSuite/TestDomainCacheOracleTrace (0.01s)
+PASS
+ok  	github.com/uber/cadence/common/cache	0.075s

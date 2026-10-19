@@ -1,0 +1,24 @@
+Go SQLite timeout classification audit
+Source tree revision: 5d8e21ddd5ff22bf02084b8d548b353b0b550a27
+
+The Go SQLite plugin is github.com/ncruces/go-sqlite3 v0.23.3. Its
+`Error.Timeout()` is true only for extended code BUSY_TIMEOUT
+(`go/pkg/mod/github.com/ncruces/go-sqlite3@v0.23.3/error.go:89-92`).
+Cadence's SQLite plugin `IsTimeoutError` also recognizes context.DeadlineExceeded
+and SQLITE_INTERRUPT (`go/common/persistence/sql/sqlplugin/sqlite/error_checker.go:68-87`).
+`convertCommonErrors` maps those to persistence.TimeoutError
+(`go/common/persistence/sql/common.go:127-142`); domain-cache retryability uses
+`common.IsServiceTransientError`, which does not include persistence.TimeoutError
+and does include InternalServiceError/ServiceBusyError
+(`go/common/util.go:310-340`). Thus deadline, interrupt, and BUSY_TIMEOUT outcomes
+are nonretryable, while a pre-deadline generic SQLite failure is converted to
+InternalServiceError and is retryable. The Rust reader now converts BUSY,
+LOCKED, or INTERRUPT to OperationTimedOut only when its supplied deadline has
+elapsed; pre-deadline errors retain their SQLite error classification. Successful
+row decoding still does not recheck the deadline after the SQL query, matching
+Go's sqlDomainStore decode path.
+
+A source-level SQLite lock contention regression was added at
+`rust/crates/cadence-persistence/src/matching_domain_metadata.rs` and a
+retryability mapping regression at `rust/crates/cadence-server/src/matching_domain_cache.rs`.
+They are unbuilt pending the shared Cargo slot.

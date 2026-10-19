@@ -1803,3 +1803,17 @@ three-second budget; raw nested blobs stay intact. Focused Rust cache tests pass
 rusqlite dependency. See `memory/evidence/matching-domain-cache/` for logs and
 exit codes. This is a cache module draft, not production wiring or Matching
 completion; mixed-service SDK validation and full parity audit remain open.
+
+## 2026-10-19: Matching domain cache retry/deadline acceptance follow-up
+
+The metadata-first refresh now shares Go's outer three-second context across
+metadata plus all pages. Retry stops rather than scheduling intervals under the
+one-second initial interval and retains Go's previous-attempt error behavior.
+SQLite lock/VM cancellation maps to a nonretryable timeout only after its
+operation deadline; immediate SQL failures retain their regular transient
+classification. Lifecycle wait/self-join/worker-publication races are addressed.
+Go oracle JSON trace matches the final Rust trace. Persistence-focused tests
+passed 9/10 (one pre-existing Go-database interop test is intentionally ignored),
+cache-focused tests passed 14/14, and locked strict workspace Clippy passed.
+See `memory/evidence/matching-domain-cache/`; production wiring and mixed-service
+validation remain outstanding.

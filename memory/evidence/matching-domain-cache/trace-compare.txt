@@ -1,0 +1,1 @@
+PASS: Final Rust cache test trace and pinned Go oracle trace are structurally equal.
