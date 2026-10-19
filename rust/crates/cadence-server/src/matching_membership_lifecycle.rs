@@ -341,10 +341,13 @@ mod tests {
             address: address.into(),
             identity: identity.into(),
             status,
-            named_ports: if grpc.is_empty() {
-                HashMap::new()
+            named_ports: if !grpc.is_empty() && grpc.bytes().all(|byte| byte.is_ascii_digit()) {
+                grpc.parse::<u16>()
+                    .ok()
+                    .map(|port| HashMap::from([("grpc".into(), port)]))
+                    .unwrap_or_default()
             } else {
-                HashMap::from([("grpc".into(), grpc.parse().unwrap())])
+                HashMap::new()
             },
             labels: HashMap::from([
                 ("serviceName".into(), service.into()),

@@ -62,13 +62,6 @@ impl PeerMember {
     }
 }
 
-fn label_to_port(label: &str) -> Option<u16> {
-    if label.is_empty() || !label.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    label.parse::<u16>().ok()
-}
-
 fn host_from_host_port(address: &str) -> Option<String> {
     let colon = address.rfind(':')?;
     let host = if address.starts_with('[') {
