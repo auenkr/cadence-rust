@@ -188,6 +188,10 @@ test starts Cadence's pinned Ringpop provider on a real TChannel channel, and
 the Rust example runs Matching's concrete provider and shared listener at a
 reserved address. It checks Go-side role/port-label decoding, observes Rust
 self-eviction, then verifies recovery when Rust restarts at the same address.
+The Go assertion also requires the recovered member incarnation to exceed the
+first observed incarnation. The runner uses a unique temporary artifact
+directory and stores source hashes, per-gate status, and full Cargo/Go logs;
+its Cargo invocation is locked and both build parallelism settings are one.
 These files are uncompiled and unrun; they are harness source, not evidence.
 
 Production startup recipe: bind Matching's TChannel listener; construct the
