@@ -19,8 +19,12 @@ FROZEN_FILES = (
     "rust/crates/cadence-persistence/src/matching_sqlite.rs",
     "rust/crates/cadence-server/src/matching_task_store.rs",
     "rust/crates/cadence-server/src/main.rs",
+    "rust/crates/cadence-server/src/config.rs",
+    "rust/crates/cadence-server/src/lib.rs",
+    "rust/Cargo.lock",
     "tests/run-matching-thrift-compat.py",
     "tests/run-matching-configured-store-validation.py",
+    "tests/matching-thrift-go_test.go",
     "tests/matching-sqlite-go_test.go",
     "memory/matching-persistence-production-audit-20261019.md",
 )
@@ -90,6 +94,8 @@ def main():
         (artifacts / "results.json").write_text(json.dumps(report, indent=2) + "\n")
         if code != 0:
             print(f"[{name}] FAILED with exit code {code}", flush=True)
+            report["stoppedAfterFailure"] = name
+            break
 
     after = hashes()
     report["finishedUtc"] = datetime.now(timezone.utc).isoformat()
