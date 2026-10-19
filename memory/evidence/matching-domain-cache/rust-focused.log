@@ -1,0 +1,37 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-domain-metadata/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 08s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a33b4846/rust/target/debug/deps/cadence_server-349174c613afc051)
+
+running 10 tests
+test matching_domain_cache::tests::cache_retains_independent_config_failover_versions_and_raw_nested_blobs ... ok
+test matching_domain_cache::tests::catch_up_registration_observes_current_entries_after_callbacks_are_installed ... ok
+test matching_domain_cache::tests::duplicate_callback_registration_replaces_pair_and_refresh_pairs_prepare_with_change ... ok
+test matching_domain_cache::tests::cache_misses_read_through_and_can_retry_after_domain_appears ... ok
+test matching_domain_cache::tests::failed_later_page_preserves_old_snapshot_and_retry_refreshes ... ok
+test matching_domain_cache::tests::lifecycle_start_stop_is_idempotent_and_stops_owned_worker ... ok
+test matching_domain_cache::tests::refresh_is_throttled_for_one_second_after_success_but_not_after_failure ... ok
+test matching_domain_cache::tests::retryable_refresh_error_retries_and_returns_previous_error_if_retry_fails ... ok
+test matching_domain_cache::tests::metadata_first_pages_of_two_hundred_and_notification_cutoff_match_go_scan ... ok
+RUST_DOMAIN_CACHE_TRACE={"CatchupMax":2,"Events":["prepare","changed:00000000-0000-0000-0000-000000000001:2"],"FinalEntries":[{"Config":6,"Failover":8,"FailoverNotification":4,"ID":"00000000-0000-0000-0000-000000000001","Name":"alpha","Notification":2,"Retention":6},{"Config":9,"Failover":11,"FailoverNotification":3,"ID":"00000000-0000-0000-0000-000000000002","Name":"beta","Notification":3,"Retention":9}],"IDMiss":true,"InitialIDs":["00000000-0000-0000-0000-000000000001"],"MetadataFirstPageSize":200,"NameMiss":true,"PageError":"injected page failure","RetainedNotification":2}
+test matching_domain_cache::tests::trace_matches_pinned_go_domain_cache_scan_update_callback_error_and_misses ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 224 filtered out; finished in 0.08s
+
+     Running unittests src/main.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a33b4846/rust/target/debug/deps/cadence_server-b923d5e80696f011)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/e2e.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a33b4846/rust/target/debug/deps/e2e-7216e0127f5e66d2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+     Running tests/matching_delivery.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-a33b4846/rust/target/debug/deps/matching_delivery-17aa772c1bbed50b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

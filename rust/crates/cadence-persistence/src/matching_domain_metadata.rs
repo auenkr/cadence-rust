@@ -6,13 +6,14 @@
 //! writes or migrates the database.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, TryLockError};
+use std::time::{Duration, Instant};
 
 use cadence_api::enums::{ArchivalStatus, DomainStatus};
 use cadence_api::types::{DomainConfiguration, DomainInfo, DomainReplicationConfiguration};
 use cadence_thrift::protocol::{Reader, TType};
-use cadence_thrift::value::{Struct, Value, read_value};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use cadence_thrift::value::{read_value, Struct, Value};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use thiserror::Error;
 
 const GO_DEFAULT_SHARD_ID: i64 = 54321;
@@ -74,6 +75,8 @@ pub enum MatchingDomainMetadataError {
     Sqlite(#[from] rusqlite::Error),
     #[error("domain page size must be positive")]
     InvalidPageSize,
+    #[error("domain metadata persistence operation timed out")]
+    OperationTimedOut,
 }
 
 /// Read-only access to the Go `domains` and `domain_metadata` tables.
@@ -92,7 +95,50 @@ pub struct MatchingDomainPage {
     pub next_page_token: Option<Vec<u8>>,
 }
 
+/// Bounds both SQLite lock waiting and virtual-machine execution for one
+/// persistence call. Go supplies a fresh three-second context to each call.
+struct SqliteOperationDeadline<'a>(&'a Connection);
+
+impl<'a> SqliteOperationDeadline<'a> {
+    fn new(connection: &'a Connection, deadline: Instant) -> Result<Self, rusqlite::Error> {
+        connection.busy_timeout(deadline.saturating_duration_since(Instant::now()))?;
+        connection.progress_handler(1_000, Some(move || Instant::now() >= deadline));
+        Ok(Self(connection))
+    }
+}
+
+impl Drop for SqliteOperationDeadline<'_> {
+    fn drop(&mut self) {
+        self.0.progress_handler(0, None::<fn() -> bool>);
+    }
+}
+
 impl MatchingDomainMetadataStore {
+    fn lock_connection(
+        &self,
+        timeout: Duration,
+    ) -> Result<(MutexGuard<'_, Connection>, Instant), MatchingDomainMetadataError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.connection.try_lock() {
+                Ok(connection) => return Ok((connection, deadline)),
+                Err(TryLockError::Poisoned(error)) => {
+                    return Ok((error.into_inner(), deadline));
+                }
+                Err(TryLockError::WouldBlock) if Instant::now() >= deadline => {
+                    return Err(MatchingDomainMetadataError::OperationTimedOut);
+                }
+                Err(TryLockError::WouldBlock) => {
+                    std::thread::sleep(
+                        deadline
+                            .saturating_duration_since(Instant::now())
+                            .min(Duration::from_millis(1)),
+                    );
+                }
+            }
+        }
+    }
+
     /// Open an existing Cadence SQLite file without write access.
     pub fn open_read_only(
         path: impl AsRef<Path>,
@@ -115,10 +161,17 @@ impl MatchingDomainMetadataStore {
     }
 
     pub fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
-        let connection = self
-            .connection
-            .lock()
-            .expect("domain metadata connection lock");
+        self.get_metadata_version_with_timeout(Duration::from_secs(3))
+    }
+
+    /// Read the cluster-wide domain notification version with a bounded SQLite
+    /// lock wait. Matching uses Go's three-second persistence-call deadline.
+    pub fn get_metadata_version_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        let (connection, deadline) = self.lock_connection(timeout)?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
         Ok(connection.query_row(
             "SELECT notification_version FROM domain_metadata",
             [],
@@ -133,6 +186,16 @@ impl MatchingDomainMetadataStore {
         name: Option<&str>,
         id: Option<&str>,
     ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+        self.get_domain_with_timeout(name, id, Duration::from_secs(3))
+    }
+
+    /// Cache-miss read-through using Go's persistence timeout for this call.
+    pub fn get_domain_with_timeout(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+        timeout: Duration,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
         match (
             name.filter(|value| !value.is_empty()),
             id.filter(|value| !value.is_empty()),
@@ -141,11 +204,11 @@ impl MatchingDomainMetadataStore {
             (None, None) | (Some(""), None) | (None, Some("")) => {
                 Err(MatchingDomainMetadataError::EmptyIdentity)
             }
-            (Some(name), None) => self.read_one("name", name, name),
+            (Some(name), None) => self.read_one("name", name, name, timeout),
             (None, Some(id)) => {
                 let uuid = uuid::Uuid::parse_str(id)
                     .map_err(|_| MatchingDomainMetadataError::InvalidUuid(id.to_string()))?;
-                self.read_one("id", uuid.as_bytes(), id)
+                self.read_one("id", uuid.as_bytes(), id, timeout)
             }
         }
     }
@@ -157,13 +220,21 @@ impl MatchingDomainMetadataStore {
         page_size: usize,
         next_page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        self.list_domains_with_timeout(page_size, next_page_token, Duration::from_secs(3))
+    }
+
+    /// Scan one cache page with Go's per-persistence-call timeout.
+    pub fn list_domains_with_timeout(
+        &self,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         if page_size == 0 {
             return Err(MatchingDomainMetadataError::InvalidPageSize);
         }
-        let connection = self
-            .connection
-            .lock()
-            .expect("domain metadata connection lock");
+        let (connection, deadline) = self.lock_connection(timeout)?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
         let mut rows = if let Some(token) = next_page_token {
             let mut statement = connection.prepare(
                 "SELECT id, name, is_global, data, data_encoding FROM domains \
@@ -214,15 +285,14 @@ impl MatchingDomainMetadataStore {
         selector: &str,
         value: impl rusqlite::ToSql,
         identity: &str,
+        timeout: Duration,
     ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
         // `selector` is chosen only from this module's two literals.
         let query = format!(
             "SELECT id, name, is_global, data, data_encoding FROM domains WHERE shard_id = ?1 AND {selector} = ?2"
         );
-        let connection = self
-            .connection
-            .lock()
-            .expect("domain metadata connection lock");
+        let (connection, deadline) = self.lock_connection(timeout)?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline)?;
         let row = connection
             .query_row(&query, params![GO_DEFAULT_SHARD_ID, value], row_from_sqlite)
             .optional()?
@@ -348,7 +418,7 @@ fn read_domain_data(reader: &mut Reader<'_>) -> cadence_thrift::protocol::Result
 }
 
 fn domain_info_wire_type(id: i16) -> Option<TType> {
-    use TType::{Bool, I16, I32, I64, List, Map, String};
+    use TType::{Bool, List, Map, String, I16, I32, I64};
     match id {
         10 | 12 | 14 | 22 | 34 | 40 | 44 | 48 | 58 | 62 | 66 => Some(String),
         16 => Some(I32),
@@ -633,13 +703,11 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch("CREATE TABLE domains (shard_id INTEGER, id BLOB, name TEXT, is_global BOOLEAN, data BLOB, data_encoding TEXT);").unwrap();
         let store = MatchingDomainMetadataStore::from_connection(connection, "cluster-a");
-        assert!(
-            store
-                .list_domains(10, Some(b"opaque token"))
-                .unwrap()
-                .domains
-                .is_empty()
-        );
+        assert!(store
+            .list_domains(10, Some(b"opaque token"))
+            .unwrap()
+            .domains
+            .is_empty());
     }
 
     #[test]

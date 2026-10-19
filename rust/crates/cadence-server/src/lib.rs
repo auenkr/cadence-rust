@@ -47,6 +47,7 @@ pub mod matching_scaler;
 pub mod matching_writer;
 
 pub mod matching_limiter;
+pub mod matching_domain_cache;
 
 #[allow(clippy::result_large_err)]
 pub mod matching_query;

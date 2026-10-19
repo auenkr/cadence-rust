@@ -12,6 +12,7 @@ path = "src/main.rs"
 cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
 cadence-persistence = { path = "../cadence-persistence" }
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 cadence-thrift = { path = "../cadence-thrift" }
 cadence-proto = { path = "../cadence-proto" }
 prost = "0.13"

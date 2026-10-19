@@ -1790,3 +1790,16 @@ runner to28. All30 common tests, Go/Rust comparison and strict workspace lint
 passed (/tmp/cadence-rate-common.exit=0; /tmp/cadence-rate-final.exit=0).
 No native pacing claim: clock reservations/token bucket and RPC/reader wiring
 remain next. Last full live run is DB-lock checkpoint367 tests/27 stages.
+
+## 2026-10-19: Matching domain metadata read-cache parity draft
+
+Read-only Matching domain metadata cache draft and deterministic Go oracle are
+in `matching-domain-metadata` worktree. Behavior covers metadata-first paging,
+strict notification cutoffs, snapshot preservation on page errors, cache misses
+by name and ID, callback registration/catch-up ordering, config/failover fields,
+and retryable refresh errors. SQLite connection-lock/busy/query waits use the
+three-second budget; raw nested blobs stay intact. Focused Rust cache tests passed
+10/10 and strict workspace Clippy passed after adding the server's direct
+rusqlite dependency. See `memory/evidence/matching-domain-cache/` for logs and
+exit codes. This is a cache module draft, not production wiring or Matching
+completion; mixed-service SDK validation and full parity audit remain open.
