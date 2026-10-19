@@ -29,3 +29,20 @@ No tracked submodule source changed. Disk had 60 GB free at recovery.
 
 No new component accepted, no current-source combined validation yet. Prior
 service/production gaps and frozen-evidence limitations still apply.
+
+## Build-slot transfer
+
+SWIM cold baseline build and live Go interop passed; the harness now observes
+ALIVE before the Rust peer exits. Worker is implementing exact uniform-reservoir
+adaptive cadence and awaitable in-flight shutdown, source only. No acceptance
+of the uncorrected runtime. Its warmed target is kept local and unshared.
+
+Parent and worker verified no active builds, then granted runtime_cache the
+sole heavy slot for persistence/cache tests, actual binary check, shared Go
+store production probe and strict relevant Clippy. Only SWIM had a target on
+disk; cache may create one, jobs=1, tmux cadence-rust. Disk about 57 GB free.
+
+History routing source candidate fad59909a is committed, unvalidated. Parent
+requested caller-deadline propagation through outer Record retry/backoff and
+nonpositive configured timeout behavior review before acceptance. Factory
+30-second timeout now has a separate explicit override builder.
