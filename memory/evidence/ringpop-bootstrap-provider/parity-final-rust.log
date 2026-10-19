@@ -1,0 +1,14 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-367ce881/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 03s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target/debug/deps/cadence_server-2a6178078280a35b)
+
+running 6 tests
+test ringpop_discovery::tests::file_matches_go_string_replacement_and_number_type_errors ... ok
+test ringpop_discovery::tests::file_reads_each_time_and_preserves_array_contents ... ok
+test ringpop_discovery::tests::malformed_utf8_outside_strings_remains_json_syntax_error ... ok
+test ringpop_discovery::tests::missing_file_is_io_error_and_config_selects_supported_provider ... ok
+test ringpop_discovery::tests::static_hosts_preserve_order_duplicates_and_strings ... ok
+test ringpop_discovery::tests::matches_actual_go_provider_oracle_fixture ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.05s
+

@@ -116,13 +116,27 @@ fn parse_go_duration(input: &str) -> Result<i64, String> {
         let integral = whole.checked_mul(scale).ok_or_else(|| format!("invalid duration {input:?}"))?;
         let fraction = if fraction.is_empty() { 0 } else {
             if !fraction.bytes().all(|b| b.is_ascii_digit()) { return Err(format!("invalid duration {input:?}")); }
-            // Beyond 19 decimal places the remainder is less than a tenth of
-            // a nanosecond even for the largest unit (hour), so it cannot
-            // affect Go's integer nanosecond result.
-            let digits = &fraction[..fraction.len().min(19)];
-            let numerator: u128 = digits.parse().map_err(|_| format!("invalid duration {input:?}"))?;
-            let denominator = 10u128.pow(digits.len() as u32);
-            numerator.checked_mul(scale).ok_or_else(|| format!("invalid duration {input:?}"))? / denominator
+            // time.ParseDuration accumulates at most a signed-64-bit fraction,
+            // grows a float scale as it reads digits, then evaluates
+            // float64(f) * (unit / scale) before truncating to nanoseconds.
+            let mut numerator = 0u64;
+            let mut fraction_scale = 1.0f64;
+            let mut overflow = false;
+            for digit in fraction.bytes() {
+                if overflow { continue; }
+                if numerator > (i64::MAX as u64) / 10 {
+                    overflow = true;
+                    continue;
+                }
+                let next = numerator * 10 + u64::from(digit - b'0');
+                if next > (1u64 << 63) {
+                    overflow = true;
+                    continue;
+                }
+                numerator = next;
+                fraction_scale *= 10.0;
+            }
+            ((numerator as f64) * (scale as f64 / fraction_scale)) as u128
         };
         total = total.checked_add(integral).and_then(|v| v.checked_add(fraction)).ok_or_else(|| format!("invalid duration {input:?}"))?;
         rest = &rest[unit.len()..];

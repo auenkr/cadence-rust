@@ -88,3 +88,31 @@ and oracle runner `c4f0f2b3b8f52632361e9dd4f8cd40f6f01c8c3735d158764714247875009
 
 This provider slice is still not a Matching completion claim. DNS/SRV, runtime
 wiring/lifecycle, and mixed-service validation remain out of scope here.
+
+## Review parity follow-up (2026-10-19)
+
+The final review extended the actual-Go differential for JSON byte semantics and
+configuration duration precision. `JsonFile` now normalizes malformed UTF-8
+only inside JSON strings, replaces lone escaped UTF-16 surrogates with U+FFFD,
+validates the complete JSON document before returning a target-type error, and
+preserves Go's `UnmarshalTypeError` category for oversized root numeric tokens.
+The raw JSON visitor continues scanning after an invalid list element, allowing
+a later syntax error to take precedence as it does in `encoding/json`.
+
+The duration parser now follows Go `time.ParseDuration` fractional accumulation
+and float evaluation. Pinned Go returned `1199999999999ns` for
+`0.333333333333333333h` and `3600000000000ns` for
+`0.999999999999999999h`; the previous rational truncation differed on the
+second case. The oracle fixture records both exact values.
+
+Final reproducible checks from the isolated review checkout, using the warmed
+`t3-e426148a/rust/target` cache with one Cargo job:
+
+- `python3 tests/run-ringpop-bootstrap-provider-oracle.py` — exit 0.
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target cargo test --locked --offline -p cadence-server --lib ringpop_discovery::tests -- --nocapture` — 6 passed, exit 0.
+- `CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target cargo clippy --locked --offline -p cadence-server --all-targets -- -D warnings` — exit 0.
+
+Full final logs and exit markers are stored under
+`memory/evidence/ringpop-bootstrap-provider/parity-final-*`. This remains a
+provider/config compatibility slice; production discovery wiring, DNS/SRV,
+readiness/lifecycle, and mixed Go/Rust Matching validation are still open.

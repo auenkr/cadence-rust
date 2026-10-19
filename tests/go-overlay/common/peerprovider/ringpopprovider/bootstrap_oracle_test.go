@@ -69,6 +69,31 @@ func TestBootstrapProviderActualOracle(t *testing.T) {
 			fileObservations = append(fileObservations, observation{Hosts: hosts})
 		}
 	}
+	byteCases := []struct {
+		name string
+		data []byte
+	}{
+		{"invalidUtf8InString", []byte{'[', '"', 0xff, '"', ']'}},
+		{"invalidUtf8ContinuationInString", []byte{'[', '"', 0xe2, '(', 0xa1, '"', ']'}},
+		{"escapedLoneSurrogate", []byte(`["\ud800"]`)},
+		{"invalidUtf8OutsideString", []byte{'[', 0xff, ']'}},
+		{"largeExponent", []byte(`[1e100000]`)},
+		{"largeInteger", []byte(`[999999999999999999999999999999999999999999999999999999]`)},
+		{"topLevelLargeExponent", []byte(`1e100000`)},
+		{"topLevelLargeInteger", []byte(`999999999999999999999999999999999999999999999999999999`)},
+	}
+	byteObservations := make(map[string]observation, len(byteCases))
+	for _, tc := range byteCases {
+		if err := os.WriteFile(path, tc.data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		hosts, readErr := emptyProvider.Hosts()
+		if readErr != nil {
+			byteObservations[tc.name] = observation{ErrorType: fmt.Sprintf("%T", readErr)}
+		} else {
+			byteObservations[tc.name] = observation{Hosts: hosts}
+		}
+	}
 	if err := os.WriteFile(path, []byte(`["first:1","first:1"," raw "]`), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +143,7 @@ func TestBootstrapProviderActualOracle(t *testing.T) {
 		t.Fatal(err)
 	}
 	durations := map[string]int64{}
-	for key, value := range map[string]string{"max": "9223372036854775807ns", "min": "-9223372036854775808ns", "fraction": "1.000000001s"} {
+	for key, value := range map[string]string{"max": "9223372036854775807ns", "min": "-9223372036854775808ns", "fraction": "1.000000001s", "preciseThirdHour": "0.333333333333333333h", "preciseAlmostHour": "0.999999999999999999h"} {
 		var durationConfig config.Config
 		text := fmt.Sprintf("name: x\nbootstrapMode: hosts\nbootstrapHosts: [x]\nmaxJoinDuration: %s\n", value)
 		if err := yaml.Unmarshal([]byte(text), &durationConfig); err != nil {
@@ -151,7 +176,7 @@ func TestBootstrapProviderActualOracle(t *testing.T) {
 			configErrors[name] = err.Error()
 		}
 	}
-	result := map[string]any{"static": cases[1].hosts, "fileInputs": inputs.FileInputs, "fileObservations": fileObservations, "file": first, "fileAfterUpdate": updated,
+	result := map[string]any{"static": cases[1].hosts, "fileInputs": inputs.FileInputs, "fileObservations": fileObservations, "byteObservations": byteObservations, "file": first, "fileAfterUpdate": updated,
 		"missingErrorType": fmt.Sprintf("%T", missingErr), "malformedErrorType": fmt.Sprintf("%T", syntaxErr), "objectErrorType": fmt.Sprintf("%T", objectErr),
 		"configHosts": parsed.BootstrapHosts, "configMode": int(parsed.BootstrapMode), "configMaxJoinDurationNanos": int64(parsed.MaxJoinDuration), "configErrors": configErrors, "durations": durations, "bootstrapModes": bootstrapModes}
 	b, err := json.Marshal(result)
