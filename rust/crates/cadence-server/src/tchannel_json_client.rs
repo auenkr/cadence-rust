@@ -25,6 +25,15 @@ pub struct JsonResponse {
     pub body: Value,
     pub application_error: bool,
 }
+
+/// Raw reply for a native TChannel Thrift call. `body` is the strict Thrift
+/// reply struct payload; it is deliberately not JSON-decoded here.
+#[derive(Debug)]
+pub(crate) struct ThriftResponse {
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+    pub application_error: bool,
+}
 #[derive(Debug)]
 pub enum JsonCallError {
     Application(Value),
@@ -182,6 +191,158 @@ fn parse_response_frames(frames: Vec<(u8, u32, Vec<u8>)>) -> Result<(bool, [Vec<
         }
     }
     bail!("TChannel response missing final fragment")
+}
+
+/// Make one native TChannel/Thrift unary call. Unlike `call`, this sends
+/// strict Thrift bytes in the third call argument and binary YARPC metadata
+/// in the second call argument; no JSON serialization or newline framing is
+/// applied.
+pub(crate) async fn call_thrift(
+    addr: &str,
+    service: &str,
+    method: &str,
+    headers: &[(String, String)],
+    request: &[u8],
+    deadline: Duration,
+) -> std::result::Result<ThriftResponse, JsonCallError> {
+    let started_at = tokio::time::Instant::now();
+    let work = async {
+        let mut s = TcpStream::connect(addr).await?;
+        s.set_nodelay(true)?;
+        let mut init = 2u16.to_be_bytes().to_vec();
+        init.extend(headers16(&[
+            ("host_port", "0.0.0.0:0"),
+            ("process_name", "cadence-rust-history-client"),
+        ])?);
+        write_frame(&mut s, 1, 1, &init).await?;
+        let (kind, init_id, payload) = read_frame(&mut s).await?;
+        if kind != 2 || init_id != 1 || payload.len() < 4 {
+            bail!("invalid TChannel init response")
+        }
+        if u16::from_be_bytes([payload[0], payload[1]]) != 2 {
+            bail!("unsupported TChannel init response version")
+        }
+        let mut init_pos = 2;
+        let header_count = get16(&payload, &mut init_pos)?;
+        for _ in 0..header_count {
+            let _ = read_string(&payload, &mut init_pos)?;
+            let _ = read_string(&payload, &mut init_pos)?;
+        }
+        if init_pos != payload.len() {
+            bail!("trailing TChannel init response bytes")
+        }
+
+        let encoded_headers: Vec<_> = headers
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        let arg2 = headers16(&encoded_headers)?;
+        let mut head = vec![1];
+        head.extend(
+            (deadline
+                .saturating_sub(started_at.elapsed())
+                .as_millis()
+                .min(u32::MAX as u128) as u32)
+                .to_be_bytes(),
+        );
+        head.extend([0u8; 25]);
+        s8(&mut head, service)?;
+        head.push(1);
+        s8(&mut head, "as")?;
+        s8(&mut head, "thrift")?;
+        head.push(0); // checksum none
+        let args = [method.as_bytes(), arg2.as_slice(), request];
+        let mut arg_i = 0usize;
+        let mut off = 0usize;
+        let mut first = true;
+        let mut marker = false;
+        let id = 2u32;
+        loop {
+            let mut chunk = if first { head.clone() } else { vec![0, 0] };
+            let cap = MAX_FRAME - 16;
+            if marker {
+                chunk.extend(0u16.to_be_bytes());
+                marker = false;
+            }
+            while arg_i < 3 {
+                let room = cap.saturating_sub(chunk.len());
+                if room < 2 {
+                    break;
+                }
+                let n = (room - 2)
+                    .min(args[arg_i].len() - off)
+                    .min(u16::MAX as usize);
+                chunk.extend((n as u16).to_be_bytes());
+                chunk.extend(&args[arg_i][off..off + n]);
+                off += n;
+                if off < args[arg_i].len() {
+                    break;
+                }
+                arg_i += 1;
+                off = 0;
+                if arg_i < 3 && cap.saturating_sub(chunk.len()) < 2 {
+                    marker = true;
+                    break;
+                }
+            }
+            let more = arg_i < 3;
+            chunk[0] = u8::from(more);
+            write_frame(&mut s, if first { 3 } else { 0x13 }, id, &chunk).await?;
+            if !more {
+                break;
+            }
+            first = false;
+        }
+
+        let mut frames = Vec::new();
+        loop {
+            let (kind, id, payload) = read_frame(&mut s).await?;
+            if kind == 0xff {
+                if id != 2 || payload.len() < 27 {
+                    bail!("malformed TChannel error frame")
+                }
+                let code = payload[0];
+                let mut pos = 26;
+                let message = read_string(&payload, &mut pos)?;
+                if pos != payload.len() {
+                    bail!("trailing TChannel error bytes")
+                }
+                bail!("TChannel error {code}: {message}")
+            }
+            let more = payload.first().copied().unwrap_or(0);
+            frames.push((kind, id, payload));
+            if more & 1 == 0 {
+                break;
+            }
+        }
+        let (application_error, args) = parse_response_frames(frames)?;
+        let headers = decode_headers16(&args[1])?;
+        Ok(ThriftResponse {
+            headers,
+            body: args[2].clone(),
+            application_error,
+        })
+    };
+    match timeout(deadline, work).await {
+        Err(_) => Err(JsonCallError::Transport(anyhow!(
+            "TChannel Thrift call deadline exceeded"
+        ))),
+        Ok(Err(error)) => Err(JsonCallError::Transport(error)),
+        Ok(Ok(response)) => Ok(response),
+    }
+}
+
+fn decode_headers16(bytes: &[u8]) -> Result<Vec<(String, String)>> {
+    let mut pos = 0;
+    let count = get16(bytes, &mut pos)?;
+    let mut headers = Vec::with_capacity(count);
+    for _ in 0..count {
+        headers.push((read_string(bytes, &mut pos)?, read_string(bytes, &mut pos)?));
+    }
+    if pos != bytes.len() {
+        bail!("trailing TChannel Thrift metadata")
+    }
+    Ok(headers)
 }
 /// Make one JSON call. `headers: None` is encoded as JSON null, `Some(empty)` as `{}`.
 pub async fn call(

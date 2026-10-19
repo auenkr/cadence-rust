@@ -292,3 +292,21 @@ fn write_typed_value(w: &mut cadence_thrift::protocol::Writer, v: &TypedValue) {
         }
     }
 }
+
+#[cfg(test)]
+mod typed_codec_tests {
+    use super::*;
+
+    #[test]
+    fn empty_container_types_survive_tchannel_codec_round_trip() {
+        let value = TypedStruct {
+            fields: vec![
+                (10, TypedValue::List(TType::Struct, vec![])),
+                (20, TypedValue::Set(TType::I64, vec![])),
+                (30, TypedValue::Map(TType::String, TType::Struct, vec![])),
+            ],
+        };
+        let encoded = encode_typed_struct(&value);
+        assert_eq!(decode_typed_struct(&encoded).unwrap(), value);
+    }
+}
