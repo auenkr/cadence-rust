@@ -1369,4 +1369,56 @@ mod tests {
         request.set_timeout(duration);
         request.metadata().get("grpc-timeout").unwrap().clone()
     }
+
+    #[tokio::test]
+    async fn history_rpc_boundary_uses_caller_deadline_for_query_and_task_start_calls() {
+        // The RPC closure is the boundary where Matching hands a generated
+        // History request to tonic. A longer factory/operation budget must not
+        // replace the caller's shorter deadline on any of these call paths.
+        let history = client().with_history_rpc_timeout(Duration::from_secs(30));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let unbounded_factory_timeout = grpc_timeout(Duration::from_secs(30));
+
+        let query_timeout = Arc::new(Mutex::new(None));
+        let observed = query_timeout.clone();
+        let result = history
+            .execute_with_redirect(
+                h::GetMutableStateRequest::default(),
+                None,
+                Some(deadline),
+                "deadline-query",
+                &mut move |_, request| {
+                    *observed.lock().unwrap() = request.metadata().get("grpc-timeout").cloned();
+                    async { Ok::<_, Status>(()) }
+                },
+            )
+            .await;
+        result.unwrap();
+        let value = query_timeout.lock().unwrap().clone().unwrap();
+        assert_ne!(value, unbounded_factory_timeout, "query RPC must use the caller deadline");
+
+        for (operation, payload) in [
+            ("decision-start", h::RecordDecisionTaskStartedRequest::default().encode_to_vec()),
+            ("activity-start", h::RecordActivityTaskStartedRequest::default().encode_to_vec()),
+        ] {
+            let observed = Arc::new(Mutex::new(None));
+            let capture = observed.clone();
+            let result = history
+                .execute_with_redirect(
+                    payload,
+                    Some(Duration::from_secs(30)),
+                    Some(deadline),
+                    operation,
+                    &mut move |_, request| {
+                        *capture.lock().unwrap() = request.metadata().get("grpc-timeout").cloned();
+                        async { Ok::<_, Status>(()) }
+                    },
+                )
+                .await;
+            result.unwrap();
+            let value = observed.lock().unwrap().clone().unwrap();
+            assert_ne!(value, unbounded_factory_timeout,
+                "{operation} RPC must use the caller deadline");
+        }
+    }
 }
