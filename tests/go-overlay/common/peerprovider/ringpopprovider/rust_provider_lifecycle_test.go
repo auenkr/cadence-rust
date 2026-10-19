@@ -37,7 +37,7 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	}
 	goAddress := channel.PeerInfo().HostPort
 	rustAddress := reserveRustAddress(t)
-	port, err := net.SplitHostPort(goAddress)
+	_, port, err := net.SplitHostPort(goAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 		if err := goProvider.Stop(stopCtx); err != nil {
 			t.Errorf("stopping Go Ringpop provider: %v", err)
 		}
-		_ = channel.Close()
+		channel.Close()
 	}()
 	startDone := make(chan error, 1)
 	go func() { startDone <- goProvider.Start(ctx) }()
