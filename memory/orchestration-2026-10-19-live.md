@@ -193,3 +193,20 @@ validate combined source plus actual Go peer. Cache source-only rebase its
 configured store/harness chain onto219f86054 for next lane. History source-only
 next audits pinned Matching shard-distributor APIs/slices before implementation.
 No competing build processes at transfer. Root only dirty user AGENTS.
+
+## Provider validation continuation and SD draft
+
+SWIM rebase chain now includes sourcee86a9f9c3 (unit match arms),925a3e436
+(invalid-port fixture),6984564a0 (Go malformed-address valid-port fallback).
+Active frozen run cadence-rust:matching-swim-final4 pane%14; worker sole slot.
+Earlier attempts204800/205216/205609 retained failures; cancellation lifecycle
+tests passed, mapping boundary revealed real None-vs-:port discrepancy. Source
+still not accepted. Memberlist/common hash gates pass.
+
+Configured-store/harness clean rebased candidate647f1672d onto55dec7f3d
+awaits next slot; runner locked and honors shared target. History source-only
+SDeecb1a1c9 adds config+standalone client owner but NOT registry/main wiring
+or accepted behavior. Parent review flagged start-after-stop/stop-before-start,
+concurrent/cancelled shutdown and first-snapshot waiter termination; worker
+correcting plus fake spectator server coverage, no build grant. No service
+completion claim. Root remains only user AGENTS dirty.
