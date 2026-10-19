@@ -2046,6 +2046,160 @@ fn schedule_reverse_full_sync(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn partition_heal_joins_two_live_protocol_peers_and_converges_membership() {
+        use crate::{grpc_matching::Matching, handlers::AppState};
+        use tokio::net::TcpListener;
+
+        let listener_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address_a = listener_a.local_addr().unwrap().to_string();
+        let address_b = listener_b.local_addr().unwrap().to_string();
+        let node_a = RingpopNode::new(
+            "heal-test",
+            Member {
+                address: address_a.clone(),
+                status: ALIVE.into(),
+                incarnation: 100,
+                labels: None,
+            },
+            false,
+        );
+        let node_b = RingpopNode::new(
+            "heal-test",
+            Member {
+                address: address_b.clone(),
+                status: ALIVE.into(),
+                incarnation: 200,
+                labels: None,
+            },
+            false,
+        );
+        node_a.set_ready(true);
+        node_b.set_ready(true);
+        let server_a = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            listener_a,
+            Matching::new(AppState::default()),
+            node_a.handler(),
+        ));
+        let server_b = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            listener_b,
+            Matching::new(AppState::default()),
+            node_b.handler(),
+        ));
+
+        assert_eq!(node_a.membership_snapshot().0.len(), 1);
+        assert_eq!(node_b.membership_snapshot().0.len(), 1);
+        let reached = node_a.attempt_heal(&address_b).await.unwrap();
+        assert!(reached.contains(&address_b));
+        for node in [&node_a, &node_b] {
+            let (members, _) = node.membership_snapshot();
+            assert_eq!(members.len(), 2);
+            assert!(members
+                .iter()
+                .any(|member| member.address == address_a && member.status == ALIVE));
+            assert!(members
+                .iter()
+                .any(|member| member.address == address_b && member.status == ALIVE));
+        }
+
+        node_a.destroy_and_wait().await;
+        node_b.destroy_and_wait().await;
+        server_a.abort();
+        server_b.abort();
+        let _ = server_a.await;
+        let _ = server_b.await;
+    }
+
+    #[tokio::test]
+    async fn receiver_full_sync_starts_reverse_join_and_converges_two_live_peers() {
+        use crate::{grpc_matching::Matching, handlers::AppState};
+        use tokio::net::TcpListener;
+
+        let listener_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address_a = listener_a.local_addr().unwrap().to_string();
+        let address_b = listener_b.local_addr().unwrap().to_string();
+        let node_a = RingpopNode::new(
+            "reverse-test",
+            Member {
+                address: address_a.clone(),
+                status: ALIVE.into(),
+                incarnation: 10,
+                labels: None,
+            },
+            false,
+        );
+        let node_b = RingpopNode::new(
+            "reverse-test",
+            Member {
+                address: address_b.clone(),
+                status: ALIVE.into(),
+                incarnation: 20,
+                labels: None,
+            },
+            false,
+        );
+        node_a.set_ready(true);
+        node_b.set_ready(true);
+        node_b.state.lock().unwrap().disseminator.clear();
+        let server_a = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            listener_a,
+            Matching::new(AppState::default()),
+            node_a.handler(),
+        ));
+        let server_b = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            listener_b,
+            Matching::new(AppState::default()),
+            node_b.handler(),
+        ));
+
+        let request = Ping {
+            changes: Some(Vec::new()),
+            checksum: 1,
+            source: address_a.clone(),
+            source_incarnation: 10,
+            app: "reverse-test".into(),
+        };
+        let response = crate::tchannel_json_client::call(
+            &address_b,
+            "ringpop",
+            "/protocol/ping",
+            None,
+            &serde_json::to_value(request).unwrap(),
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+        let response: Ping = serde_json::from_value(response.body).unwrap();
+        assert_eq!(response.changes.unwrap().len(), 1);
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if node_a.membership_snapshot().0.len() == 2
+                    && node_b.membership_snapshot().0.len() == 2
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("reverse full sync did not merge the two partition memberships");
+        let (members_a, checksum_a) = node_a.membership_snapshot();
+        let (members_b, checksum_b) = node_b.membership_snapshot();
+        assert_eq!(checksum_a, checksum_b);
+        assert!(members_a.iter().any(|member| member.address == address_b));
+        assert!(members_b.iter().any(|member| member.address == address_a));
+
+        node_a.destroy_and_wait().await;
+        node_b.destroy_and_wait().await;
+        server_a.abort();
+        server_b.abort();
+        let _ = server_a.await;
+        let _ = server_b.await;
+    }
+
     #[test]
     fn go_heal_partition_reincarnates_overriding_faulty_winner_before_merge() {
         let member_change = |address: &str, status: &str, incarnation| Change {

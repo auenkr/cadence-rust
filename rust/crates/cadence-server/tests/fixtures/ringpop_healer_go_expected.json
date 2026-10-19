@@ -1,0 +1,25 @@
+{
+  "delDuplicateRemaining": ["other"],
+  "duplicateTargetAttempts": 2,
+  "failedDiscoveryPreviousHostCount": 7,
+  "failureCap": 10,
+  "localFaultyWins": {
+    "forLocal": [],
+    "forRemote": [{"address":"shared","status":"suspect","incarnation":20,"source":"","sourceIncarnation":0}]
+  },
+  "localHostFaultyCandidate": 1,
+  "maxReverseFullSyncJobs": 5,
+  "noConflict": {"forLocal":[],"forRemote":[]},
+  "noPendingChangesFullSync": {"fullSync":true,"membersReturned":1},
+  "partitionHealPeriodNanos": 30000000000,
+  "probabilityDoesNotShrink": 0.375,
+  "probabilityLocalReachable": 3,
+  "remoteFaultyWins": {
+    "forLocal": [{"address":"shared","status":"suspect","incarnation":20,"source":"","sourceIncarnation":0}],
+    "forRemote": []
+  },
+  "reverseFullSyncJobsStarted": 5,
+  "stopWaitsForActiveHeal": true,
+  "twoPartitionRepair": {"allAlive":true,"membersA":2,"membersB":2},
+  "unknownHost": {"attempts":1,"successfulTargets":0}
+}
