@@ -1,0 +1,16 @@
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-domain-metadata/rust/crates/cadence-persistence)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.26s
+     Running unittests src/lib.rs (rust/target/debug/deps/cadence_persistence-c18f31471858d2e1)
+
+running 9 tests
+test matching_domain_metadata::tests::duplicate_fields_use_last_correctly_typed_value ... ok
+test matching_domain_metadata::tests::go_domain_store_database_interop ... ignored, requires CADENCE_MATCHING_SQLITE_DB produced by the Go SQLite domain-store oracle
+test matching_domain_metadata::tests::malformed_page_token_is_passed_to_sqlite_without_length_validation ... ok
+test matching_domain_metadata::tests::active_active_blob_suppresses_current_cluster_default ... ok
+test matching_domain_metadata::tests::trailing_bytes_after_struct_match_go_thrift_reader_behavior ... ok
+test matching_domain_metadata::tests::reads_go_domain_metadata_and_pages_by_raw_uuid ... ok
+test matching_domain_metadata::tests::wrong_collection_duplicate_clears_previous_collection ... ok
+test matching_domain_metadata::tests::wrong_collection_element_types_are_skipped_like_go_decoder ... ok
+test matching_domain_metadata::tests::wrong_type_known_field_is_skipped_like_go_decoder ... ok
+
+test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 192 filtered out; finished in 0.03s
