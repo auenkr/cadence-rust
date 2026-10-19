@@ -19,6 +19,9 @@ sources=(
   rust/crates/cadence-server/src/matching_dispatch.rs
   rust/crates/cadence-server/src/grpc_matching.rs
   rust/crates/cadence-common/src/membership.rs
+  rust/crates/cadence-common/src/ringpop_member.rs
+  tests/matching-membership-go_test.go
+  tests/run-matching-membership-compat.py
   tests/matching-history-peer-oracle/run.py
   tests/matching-history-peer-oracle/oracle_test.go
   tests/matching-history-peer-oracle/evidence/matching_history_peer_oracle.json
@@ -52,6 +55,10 @@ stage() {
 }
 
 stage diff-check git diff --check
+stage common-farmhash-tests cargo test --locked --manifest-path rust/Cargo.toml -p cadence-common fingerprint_tests -- --nocapture
+stage matching-membership-go-oracle python3 tests/run-matching-membership-compat.py
+stage ringpop-member-tests cargo test --locked --manifest-path rust/Cargo.toml -p cadence-common ringpop_member::tests -- --nocapture
+stage strict-common-clippy cargo clippy --locked --manifest-path rust/Cargo.toml -p cadence-common --all-targets -- -D warnings
 stage history-client-tests cargo test --locked --manifest-path rust/Cargo.toml -p cadence-server matching_history::tests -- --nocapture
 stage history-peer-resolver-tests cargo test --locked --manifest-path rust/Cargo.toml -p cadence-server matching_history_peer_resolver::tests -- --nocapture
 stage history-membership-tests cargo test --locked --manifest-path rust/Cargo.toml -p cadence-server matching_history_membership::tests -- --nocapture

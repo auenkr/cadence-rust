@@ -71,7 +71,8 @@ impl MatchingHistoryPeerResolver {
         // Go common.WorkflowIDToHistoryShard and DomainIDToHistoryShard use
         // farm.Fingerprint32 % shard count; History lookup then hashes
         // string(rune(shardID)), not the decimal representation.
-        let shard_id = farmhash::fingerprint32(value.as_bytes()) % self.shard_count;
+        let shard_id =
+            cadence_common::membership::fingerprint32(value.as_bytes()) % self.shard_count;
         self.shard_id(shard_id)
     }
 
@@ -142,11 +143,11 @@ mod tests {
     fn workflow_and_domain_share_go_hash_and_rune_shard_lookup() {
         let r = resolver();
         let workflow = "workflow-17";
-        let shard = farmhash::fingerprint32(workflow.as_bytes()) % 1024;
+        let shard = cadence_common::membership::fingerprint32(workflow.as_bytes()) % 1024;
         assert_eq!(r.workflow(workflow).unwrap(), r.shard_id(shard).unwrap());
         assert_eq!(
             r.domain("domain-5").unwrap(),
-            r.shard_id(farmhash::fingerprint32(b"domain-5") % 1024)
+            r.shard_id(cadence_common::membership::fingerprint32(b"domain-5") % 1024)
                 .unwrap()
         );
         assert_eq!(r.workflow(workflow).unwrap(), "history-grpc:7833");

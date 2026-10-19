@@ -2,6 +2,82 @@
 //! Placement uses membership identities; RPC endpoints remain independent.
 use std::collections::HashSet;
 
+/// Go `go-farm` Fingerprint32. Its 0–4 byte path sign-extends each byte as an
+/// int8; the upstream Rust crate uses unsigned bytes on that path.
+pub fn fingerprint32(bytes: &[u8]) -> u32 {
+    if bytes.len() > 4 {
+        return farmhash::fingerprint32(bytes);
+    }
+    const C1: u32 = 0xcc9e2d51;
+    let mut b = 0_u32;
+    let mut c = 9_u32;
+    for byte in bytes {
+        let signed = (*byte as i8 as i32) as u32;
+        b = b.wrapping_mul(C1).wrapping_add(signed);
+        c ^= b;
+    }
+    fn mur(mut a: u32, mut h: u32) -> u32 {
+        a = a
+            .wrapping_mul(0xcc9e2d51)
+            .rotate_right(17)
+            .wrapping_mul(0x1b873593);
+        h ^= a;
+        h = h.rotate_right(19);
+        h.wrapping_mul(5).wrapping_add(0xe6546b64)
+    }
+    fn fmix(mut h: u32) -> u32 {
+        h ^= h >> 16;
+        h = h.wrapping_mul(0x85ebca6b);
+        h ^= h >> 13;
+        h = h.wrapping_mul(0xc2b2ae35);
+        h ^ (h >> 16)
+    }
+    fmix(mur(b, mur(bytes.len() as u32, c)))
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::{fingerprint32, Host, Ring};
+
+    #[test]
+    fn go_fingerprint32_matches_signed_short_byte_vectors() {
+        for (bytes, expected) in [
+            (&[][..], 3_696_677_242),
+            (&[0x80][..], 801_663_339),
+            (&[0xff][..], 495_582_926),
+            (&[0xef, 0xbf, 0xbd][..], 4_143_110_158),
+            (&[0x80, 0xff, 0xef, 0xbf][..], 740_356_336),
+            (&[0xef, 0xbf, 0xbd, 0x01][..], 110_792_607),
+            (&[0x80, 0x00, 0xff, 0x7f][..], 847_840_402),
+        ] {
+            assert_eq!(fingerprint32(bytes), expected, "input={bytes:02x?}");
+        }
+        assert_eq!(fingerprint32("�".as_bytes()), 4_143_110_158);
+    }
+
+    #[test]
+    fn replacement_rune_has_go_ring_owner() {
+        let ring = Ring::new([
+            Host {
+                address: "10.8.0.1:7934".into(),
+                identity: "history-a".into(),
+                grpc_address: String::new(),
+            },
+            Host {
+                address: "10.8.0.2:7934".into(),
+                identity: "history-b".into(),
+                grpc_address: String::new(),
+            },
+            Host {
+                address: "10.8.0.3:7934".into(),
+                identity: "history-c".into(),
+                grpc_address: String::new(),
+            },
+        ]);
+        assert_eq!(ring.lookup("�").unwrap().address, "10.8.0.2:7934");
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Host {
     pub address: String,
@@ -39,7 +115,7 @@ impl Ring {
                 };
                 let key = format!("{}{separator}{replica}", host.identity());
                 points.push((
-                    farmhash::fingerprint32(key.as_bytes()),
+                    fingerprint32(key.as_bytes()),
                     host.address.clone(),
                     replica,
                     host_index,
@@ -50,7 +126,7 @@ impl Ring {
         Self { hosts, points }
     }
     pub fn lookup(&self, key: &str) -> Option<&Host> {
-        let hash = farmhash::fingerprint32(key.as_bytes());
+        let hash = fingerprint32(key.as_bytes());
         let start = self.points.partition_point(|point| point.0 < hash);
         self.points
             .get(start)
@@ -65,7 +141,7 @@ impl Ring {
         if count == 0 || self.points.is_empty() {
             return result;
         }
-        let hash = farmhash::fingerprint32(key.as_bytes());
+        let hash = fingerprint32(key.as_bytes());
         let start = self.points.partition_point(|point| point.0 < hash);
         let mut seen = HashSet::new();
         for point in self.points[start..].iter().chain(&self.points[..start]) {

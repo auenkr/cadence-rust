@@ -41,6 +41,8 @@ integrated evidence.
 | Gate | State before slot transfer | Evidence required |
 |---|---|---|
 | Source freeze and clean diff | Prepared, not executed | Attempt HEAD, clean relevant-source status and SHA-256 before/after |
+| Go-compatible short FarmHash and ring owner | Not run on final candidate | Go byte vectors and U+FFFD Ring oracle key pass |
+| Ringpop checksum/member regressions and common Clippy | Not run on final candidate | Existing fixture tests and strict common lint pass |
 | `matching_history::tests` | Not run on final candidate | Exit 0 and saved log |
 | `matching_history_peer_resolver::tests` | Not run on final candidate | Exit 0 and saved log |
 | `matching_history_membership::tests` | Not run after duplicate-attribute correction | Exit 0 and saved log |
@@ -95,3 +97,18 @@ is now widened to 250ms to retain the deterministic bounded-cancellation
 assertion. The timeout test incorrectly expected the factory's 30s request
 helper to encode the separate 1s Record*Started operation budget; it now
 constructs the RPC request with that operation budget explicitly.
+
+Attempt `attempt-20261019T202250Z-szOBXX` passed all 14 History client tests,
+then found one Go placement mismatch for the replacement rune (`U+FFFD`). The
+Rust FarmHash crate treats bytes as unsigned in its 0–4 byte path, while
+Go's `go-farm` sign-extends each byte as `int8`. A shared Go-compatible
+`fingerprint32` now handles that path and is used by Ring placement, History
+workflow/domain placement, and Ringpop member checksums/labels. The oracle
+fixture remains unchanged.
+The resolver gate stopped before later stages; its failure is recorded in
+that attempt directory.
+
+The final runner now also executes real Go-generated short-byte FarmHash
+vectors, the existing Go Ringpop membership oracle with U+FFFD added as a key,
+Ringpop member primitive tests, and strict cadence-common Clippy. This audits
+both the History ownership route and other callers of the shared hash helper.
