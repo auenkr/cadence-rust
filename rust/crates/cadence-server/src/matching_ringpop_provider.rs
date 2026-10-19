@@ -143,7 +143,7 @@ impl MatchingRingpopProvider {
         let (members, _) = node.membership_snapshot();
         members
             .into_iter()
-            .filter_map(|member| {
+            .map(|member| {
                 let status = match member.status.as_str() {
                     ALIVE => PeerStatus::Alive,
                     SUSPECT => PeerStatus::Suspect,
@@ -164,13 +164,13 @@ impl MatchingRingpopProvider {
                             .flatten()
                     })
                     .collect();
-                Some(PeerMember {
+                PeerMember {
                     address: member.address,
                     identity,
                     status,
                     labels,
                     named_ports,
-                })
+                }
             })
             .collect()
     }
@@ -396,8 +396,8 @@ fn select_advertised_ip() -> anyhow::Result<IpAddr> {
                 let score = listen_ip_score(
                     ip.is_ipv4(),
                     ip.is_loopback(),
-                    flags & libc::IFF_LOOPBACK as i32 != 0,
-                    flags & libc::IFF_UP as i32 != 0,
+                    flags & libc::IFF_LOOPBACK != 0,
+                    flags & libc::IFF_UP != 0,
                 );
                 if best.as_ref().is_none_or(|(previous, _)| score > *previous) {
                     best = Some((score, ip));
