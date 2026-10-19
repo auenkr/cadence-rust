@@ -48,7 +48,9 @@ impl PeerMember {
     /// Legacy TChannel peers omit the label, so their address port is the
     /// fallback used by Go's Ringpop provider.
     pub fn named_address(&self, name: &str) -> Option<String> {
-        let host = host_from_host_port(&self.address)?;
+        // Go ignores SplitHostPort errors when constructing HostInfo, then
+        // JoinHostPort formats a valid named port against the empty host.
+        let host = host_from_host_port(&self.address).unwrap_or_default();
         let port = match self.labels.get(name) {
             Some(_) => self.named_ports.get(name).copied(),
             None if name == "tchannel" => port_from_host_port(&self.address),
