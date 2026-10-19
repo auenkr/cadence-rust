@@ -1,0 +1,31 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-common)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.13s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 8 tests
+test ringpop_memberlist::tests::insertion_position_clamps_to_go_random_range_excluding_end ... ok
+test ringpop_memberlist::tests::local_refutation_uses_new_incarnation_and_local_member_fields ... ok
+test ringpop_memberlist::tests::memberlist_iterator_returns_none_when_only_local_and_non_pingable_members_exist ... ok
+test ringpop_memberlist::tests::remote_acceptance_refutation_tombstone_and_checksum ... ok
+test ringpop_memberlist::tests::removing_remote_member_reindexes_and_keeps_local ... ok
+test ringpop_memberlist::tests::single_remote_iterator_round_matches_pinned_go_trace ... ok
+test ringpop_memberlist::tests::memberlist_iterator_shuffles_and_visits_pingable_members_once_per_round ... FAILED
+test ringpop_memberlist::tests::update_processes_complete_batch_larger_than_sixty_four ... ok
+
+failures:
+
+---- ringpop_memberlist::tests::memberlist_iterator_shuffles_and_visits_pingable_members_once_per_round stdout ----
+
+thread 'ringpop_memberlist::tests::memberlist_iterator_shuffles_and_visits_pingable_members_once_per_round' (1623410) panicked at crates/cadence-common/src/ringpop_memberlist.rs:359:9:
+assertion `left == right` failed
+  left: "suspect"
+ right: "alive"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    ringpop_memberlist::tests::memberlist_iterator_shuffles_and_visits_pingable_members_once_per_round
+
+test result: FAILED. 7 passed; 1 failed; 0 ignored; 0 measured; 55 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p cadence-common --lib`

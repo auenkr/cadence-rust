@@ -1,0 +1,8 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 47.20s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-975b4b2d/rust/target/debug/deps/cadence_server-fad39675bdf7b3f5)
+
+running 1 test
+test ringpop_provider::tests::owned_timer_loop_applies_due_transition_and_cascades_eviction ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 243 filtered out; finished in 0.13s

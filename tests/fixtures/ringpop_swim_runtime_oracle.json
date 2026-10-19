@@ -1,0 +1,28 @@
+{
+  "iterator": [
+    "127.0.0.1:9910",
+    "127.0.0.1:9910"
+  ],
+  "directSuccess": "alive",
+  "noHelpers": "suspect",
+  "sparseHelpers": "suspect",
+  "allErrors": "alive",
+  "cascade": [
+    "suspect",
+    "faulty",
+    "faulty",
+    "tombstone",
+    "evicted"
+  ],
+  "cancelled": [
+    "alive"
+  ],
+  "stopped": [
+    "suspect",
+    "suspect"
+  ],
+  "cadenceInitialInRange": true,
+  "cadenceBehindFloorNanos": 1,
+  "cadenceRateNanos": 50,
+  "cadenceSampleSize": 10
+}

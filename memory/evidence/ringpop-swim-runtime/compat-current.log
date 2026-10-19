@@ -1,0 +1,11 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.01s
+=== RUN   TestGoSwimProbeAndTransitionOracle
+CADENCE_SWIM_RUNTIME_ORACLE={"iterator":["127.0.0.1:9910","127.0.0.1:9910"],"directSuccess":"alive","noHelpers":"suspect","sparseHelpers":"suspect","allErrors":"alive","cascade":["suspect","faulty","faulty","tombstone","evicted"],"cancelled":["alive"],"stopped":["suspect","suspect"],"cadenceInitialInRange":true,"cadenceBehindFloorNanos":1,"cadenceRateNanos":50,"cadenceSampleSize":10}
+--- PASS: TestGoSwimProbeAndTransitionOracle (0.02s)
+=== RUN   TestRustSwimRuntimeAgainstGo
+--- PASS: TestRustSwimRuntimeAgainstGo (1.06s)
+=== RUN   TestGoStopWaitsForInflightProtocol
+--- PASS: TestGoStopWaitsForInflightProtocol (0.02s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	1.112s
+Rust SWIM probe loop and pinned Go probe/timer traces passed

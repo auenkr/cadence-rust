@@ -1,0 +1,29 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+error[E0277]: `?` couldn't convert the error: `str: std::error::Error` is not satisfied
+  --> crates/cadence-server/examples/ringpop_swim_runtime_probe.rs:28:22
+   |
+28 |     node.start_swim()?;
+   |          ------------^ the trait `std::error::Error` is not implemented for `str`
+   |          |
+   |          this can't be annotated with `?` because it has type `Result<_, &'static str>`
+   |
+   = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+   = note: required for `&str` to implement `std::error::Error`
+   = note: required for `anyhow::Error` to implement `From<&str>`
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `cadence-server` (example "ringpop_swim_runtime_probe") due to 1 previous error
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/tests/run-ringpop-swim-runtime-compat.py", line 15, in <module>
+    subprocess.run([
+    ~~~~~~~~~~~~~~^^
+        'cargo', 'build', '--locked', '--manifest-path', str(root / 'rust/Cargo.toml'),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        '-p', 'cadence-server', '--example', 'ringpop_swim_runtime_probe',
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ], cwd=root / 'rust', check=True)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['cargo', 'build', '--locked', '--manifest-path', '/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/Cargo.toml', '-p', 'cadence-server', '--example', 'ringpop_swim_runtime_probe']' returned non-zero exit status 101.

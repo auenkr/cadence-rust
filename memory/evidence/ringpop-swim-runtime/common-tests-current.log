@@ -1,0 +1,28 @@
+   Compiling libc v0.2.190
+   Compiling syn v3.0.9
+   Compiling serde_core v1.0.229
+   Compiling getrandom v0.2.17
+   Compiling rand_core v0.6.4
+   Compiling serde_json v1.0.154
+   Compiling rand_chacha v0.3.1
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_derive v1.0.229
+   Compiling memchr v2.8.3
+   Compiling serde v1.0.229
+   Compiling thiserror v2.0.21
+   Compiling rand v0.8.8
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-common)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.01s
+     Running unittests src/lib.rs (target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 8 tests
+test ringpop_memberlist::tests::insertion_position_clamps_to_go_random_range_excluding_end ... ok
+test ringpop_memberlist::tests::local_refutation_uses_new_incarnation_and_local_member_fields ... ok
+test ringpop_memberlist::tests::memberlist_iterator_returns_none_when_only_local_and_non_pingable_members_exist ... ok
+test ringpop_memberlist::tests::memberlist_iterator_shuffles_and_visits_pingable_members_once_per_round ... ok
+test ringpop_memberlist::tests::remote_acceptance_refutation_tombstone_and_checksum ... ok
+test ringpop_memberlist::tests::removing_remote_member_reindexes_and_keeps_local ... ok
+test ringpop_memberlist::tests::single_remote_iterator_round_matches_pinned_go_trace ... ok
+test ringpop_memberlist::tests::update_processes_complete_batch_larger_than_sixty_four ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 55 filtered out; finished in 0.00s

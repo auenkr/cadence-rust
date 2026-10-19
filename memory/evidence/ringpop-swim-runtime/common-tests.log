@@ -1,0 +1,23 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-common)
+error[E0382]: borrow of moved value: `first_round`
+   --> crates/cadence-common/src/ringpop_memberlist.rs:359:9
+    |
+352 |           let first_round = [
+    |               ----------- move occurs because `first_round` has type `[std::string::String; 2]`, which does not implement the `Copy` trait
+...
+356 |           let mut sorted = first_round;
+    |                            ----------- value moved here
+...
+359 | /         assert_eq!(
+360 | |             iterator.next(&mut list, |_| 0).unwrap().address,
+361 | |             first_round[0]
+362 | |         );
+    | |_________^ value borrowed here after move
+    |
+help: consider cloning the value if the performance cost is acceptable
+    |
+356 |         let mut sorted = first_round.clone();
+    |                                     ++++++++
+
+For more information about this error, try `rustc --explain E0382`.
+error: could not compile `cadence-common` (lib test) due to 1 previous error

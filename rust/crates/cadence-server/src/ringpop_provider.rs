@@ -1,19 +1,25 @@
 //! Bounded inbound Ringpop v0.10.0 JOIN and direct PING state.
 //!
-//! This handler deliberately does not bootstrap, probe, schedule timers, or
-//! declare readiness. The owner must complete bootstrap and call `set_ready`.
+//! The node owns accepted membership changes, SWIM probing, and state timers;
+//! bootstrap and readiness remain controlled by its lifecycle owner.
 use cadence_common::ringpop_bootstrap_selection::BootstrapSelection;
 use cadence_common::ringpop_disseminator::Disseminator;
 use cadence_common::ringpop_memberlist::Memberlist;
+use cadence_common::ringpop_memberlist::MemberlistIter;
+use cadence_common::ringpop_state_transitions::{
+    StateTimeouts, StateTransitionScheduler, TransitionAction, TransitionState,
+};
 use cadence_common::ringpop_wire::{
-    Change, JoinRequest, JoinResponse, Member, Ping, PingRequest, PingResponse, ALIVE, SUSPECT,
+    Change, JoinRequest, JoinResponse, Member, Ping, PingRequest, PingResponse, Timestamp, ALIVE,
+    FAULTY, LEAVE, SUSPECT, TOMBSTONE,
 };
 use rand::seq::SliceRandom;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{future::Future, pin::Pin};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch, Notify};
 
 use crate::ringpop_tchannel::{RingpopError, RingpopHandler, RingpopResponse};
 use crate::tchannel_json_client::{self, JsonCallError};
@@ -271,6 +277,26 @@ pub enum RingpopLifecycle {
 #[derive(Clone)]
 pub struct RingpopNode {
     state: Arc<Mutex<State>>,
+    runtime: Arc<Mutex<RuntimeControl>>,
+}
+
+#[derive(Default)]
+struct RuntimeControl {
+    generation: Arc<AtomicU64>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+    stop_tx: Option<watch::Sender<bool>>,
+    transition_stop_tx: Option<watch::Sender<bool>>,
+    stop_done: Option<watch::Sender<bool>>,
+    stopping: bool,
+    executor: Option<tokio::runtime::Handle>,
+}
+
+impl Drop for RuntimeControl {
+    fn drop(&mut self) {
+        for task in self.tasks.drain(..) {
+            task.abort();
+        }
+    }
 }
 
 struct State {
@@ -281,9 +307,221 @@ struct State {
     destroyed: bool,
     requires_app_in_ping: bool,
     ping_timeout: Duration,
+    ping_request_timeout: Duration,
+    ping_request_size: usize,
+    transition_started_at: tokio::time::Instant,
+    min_protocol_period: Duration,
+    protocol_metrics: ProtocolMetrics,
+    transition_notify: Arc<Notify>,
     memberlist: Memberlist,
+    member_iterator: MemberlistIter,
+    state_transitions: StateTransitionScheduler,
     disseminator: Disseminator,
     counts: RingpopRequestCounts,
+}
+
+/// Go gossip's `metrics.NewUniformSample(10)` and adaptive period state.
+#[derive(Debug)]
+struct ProtocolMetrics {
+    count: u64,
+    samples_nanos: Vec<u64>,
+    last_period: Option<tokio::time::Instant>,
+    last_rate: Duration,
+}
+
+impl ProtocolMetrics {
+    fn new(min_period: Duration) -> Self {
+        Self {
+            count: 1,
+            samples_nanos: vec![duration_nanos_u64(min_period)],
+            last_period: None,
+            last_rate: min_period,
+        }
+    }
+
+    fn record(&mut self, period_end: tokio::time::Instant, duration: Duration) {
+        self.last_period = Some(period_end);
+        self.count = self.count.saturating_add(1);
+        let value = duration_nanos_u64(duration);
+        if self.samples_nanos.len() < 10 {
+            self.samples_nanos.push(value);
+        } else {
+            let index = rand::Rng::gen_range(&mut rand::thread_rng(), 0..self.count);
+            if index < self.samples_nanos.len() as u64 {
+                self.samples_nanos[index as usize] = value;
+            }
+        }
+    }
+
+    fn adjust_rate(&mut self, min_period: Duration) {
+        let mut ordered = self.samples_nanos.clone();
+        ordered.sort_unstable();
+        if ordered.is_empty() {
+            self.last_rate = min_period;
+            return;
+        }
+        // go-metrics SamplePercentiles uses p*(n+1) and interpolates adjacent
+        // samples; p50 is doubled and floored at minProtocolPeriod.
+        let position = ordered.len() as f64 * 0.5 + 0.5;
+        let percentile = if position < 1.0 {
+            ordered[0] as f64
+        } else if position >= ordered.len() as f64 {
+            *ordered.last().expect("nonempty timing sample") as f64
+        } else {
+            let lower_index = position as usize - 1;
+            let lower = ordered[lower_index] as f64;
+            let upper = ordered[lower_index + 1] as f64;
+            lower + (position - position.floor()) * (upper - lower)
+        };
+        let twice_p50 = (percentile * 2.0).min(u64::MAX as f64) as u64;
+        self.last_rate = min_period.max(Duration::from_nanos(twice_p50));
+    }
+}
+
+fn duration_nanos_u64(duration: Duration) -> u64 {
+    duration.as_nanos().min(u64::MAX as u128) as u64
+}
+
+fn next_protocol_delay(
+    min_period: Duration,
+    last_period: tokio::time::Instant,
+    last_rate: Duration,
+    now: tokio::time::Instant,
+) -> Duration {
+    min_period.max(
+        last_period
+            .checked_add(last_rate)
+            .unwrap_or(last_period)
+            .saturating_duration_since(now),
+    )
+}
+
+impl State {
+    fn monotonic_now_ns(&self) -> i64 {
+        self.transition_started_at
+            .elapsed()
+            .as_nanos()
+            .min(i64::MAX as u128) as i64
+    }
+
+    /// The Rust equivalent of Go's Memberlist.Update plus Node.handleChanges.
+    /// All accepted updates flow through this method so timer ownership and
+    /// dissemination stay in step with membership state.
+    fn apply_changes<F, R>(
+        &mut self,
+        changes: &[Change],
+        next_incarnation: F,
+        insert_position: R,
+    ) -> Vec<Change>
+    where
+        F: FnMut() -> i64,
+        R: FnMut(usize) -> usize,
+    {
+        if self.stopped || changes.is_empty() {
+            return Vec::new();
+        }
+        let update = self
+            .memberlist
+            .update(changes, next_incarnation, insert_position);
+        if update.accepted.is_empty() {
+            return Vec::new();
+        }
+        let pingable = self
+            .memberlist
+            .members()
+            .iter()
+            .filter(|member| {
+                member.address != self.address
+                    && (member.status == ALIVE || member.status == SUSPECT)
+            })
+            .count();
+        self.disseminator.adjust_max_propagations(pingable);
+        let now_ns = self.monotonic_now_ns();
+        let accepted = update.accepted;
+        for change in &accepted {
+            self.disseminator.record(change.clone());
+            match change.status.as_str() {
+                ALIVE | LEAVE => {
+                    self.state_transitions.cancel(&change.address);
+                }
+                SUSPECT => {
+                    self.state_transitions.schedule(
+                        change.address.clone(),
+                        change.incarnation,
+                        TransitionState::Suspect,
+                        now_ns,
+                    );
+                }
+                FAULTY => {
+                    self.state_transitions.schedule(
+                        change.address.clone(),
+                        change.incarnation,
+                        TransitionState::Faulty,
+                        now_ns,
+                    );
+                }
+                TOMBSTONE => {
+                    self.state_transitions.schedule(
+                        change.address.clone(),
+                        change.incarnation,
+                        TransitionState::Tombstone,
+                        now_ns,
+                    );
+                }
+                _ => {}
+            }
+        }
+        self.transition_notify.notify_one();
+        accepted
+    }
+
+    fn apply_due_transitions<F, R>(
+        &mut self,
+        now_ns: i64,
+        mut next_incarnation: F,
+        mut insert_position: R,
+    ) where
+        F: FnMut() -> i64,
+        R: FnMut(usize) -> usize,
+    {
+        let due = self.state_transitions.advance(now_ns);
+        for action in due {
+            match action.action {
+                TransitionAction::Evict => {
+                    self.memberlist.remove_member(&action.address);
+                }
+                TransitionAction::MakeFaulty | TransitionAction::MakeTombstone => {
+                    let Some(subject) = self.memberlist.member(&action.address).cloned() else {
+                        continue;
+                    };
+                    let Some(local) = self.memberlist.member(&self.address).cloned() else {
+                        continue;
+                    };
+                    let status = if action.action == TransitionAction::MakeFaulty {
+                        FAULTY
+                    } else {
+                        TOMBSTONE
+                    };
+                    let change = Change {
+                        source: local.address,
+                        source_incarnation: local.incarnation,
+                        address: action.address,
+                        incarnation: action.incarnation,
+                        status: status.to_owned(),
+                        labels: subject.labels,
+                        timestamp: Timestamp(
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64,
+                        ),
+                        ..Default::default()
+                    };
+                    self.apply_changes(&[change], &mut next_incarnation, &mut insert_position);
+                }
+            }
+        }
+    }
 }
 
 impl RingpopNode {
@@ -304,29 +542,97 @@ impl RingpopNode {
         requires_app_in_ping: bool,
         ping_timeout: Duration,
     ) -> Self {
+        Self::new_with_swim_config(
+            app,
+            local_member,
+            requires_app_in_ping,
+            ping_timeout,
+            Duration::from_millis(5000),
+            3,
+            Duration::from_millis(200),
+            StateTimeouts::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_swim_config(
+        app: impl Into<String>,
+        local_member: Member,
+        requires_app_in_ping: bool,
+        ping_timeout: Duration,
+        ping_request_timeout: Duration,
+        ping_request_size: usize,
+        min_protocol_period: Duration,
+        state_timeouts: StateTimeouts,
+    ) -> Self {
+        let ping_timeout = if ping_timeout.is_zero() {
+            Duration::from_millis(1500)
+        } else {
+            ping_timeout
+        };
+        let ping_request_timeout = if ping_request_timeout.is_zero() {
+            Duration::from_millis(5000)
+        } else {
+            ping_request_timeout
+        };
+        let ping_request_size = if ping_request_size == 0 {
+            3
+        } else {
+            ping_request_size
+        };
+        let min_protocol_period = if min_protocol_period.is_zero() {
+            Duration::from_millis(200)
+        } else {
+            min_protocol_period
+        };
+        let local_address = local_member.address.clone();
+        let mut memberlist = Memberlist::new(local_member);
+        let member_iterator = MemberlistIter::new(&mut memberlist, |upper| {
+            rand::Rng::gen_range(&mut rand::thread_rng(), 0..upper)
+        });
         let mut disseminator = Disseminator::default();
         // swim.NewNode records its initial local member with an empty source;
         // preserve this pre-bootstrap delta and its nil/empty wire behavior.
         disseminator.record(Change {
-            address: local_member.address.clone(),
-            incarnation: local_member.incarnation,
-            status: local_member.status.clone(),
-            labels: local_member.labels.clone(),
+            address: local_address.clone(),
+            incarnation: memberlist
+                .member(&local_address)
+                .expect("local member")
+                .incarnation,
+            status: memberlist
+                .member(&local_address)
+                .expect("local member")
+                .status
+                .clone(),
+            labels: memberlist
+                .member(&local_address)
+                .expect("local member")
+                .labels
+                .clone(),
             ..Default::default()
         });
         Self {
             state: Arc::new(Mutex::new(State {
                 app: app.into(),
-                address: local_member.address.clone(),
+                address: local_address.clone(),
                 ready: false,
                 stopped: false,
                 destroyed: false,
                 requires_app_in_ping,
                 ping_timeout,
-                memberlist: Memberlist::new(local_member),
+                ping_request_timeout,
+                ping_request_size,
+                transition_started_at: tokio::time::Instant::now(),
+                min_protocol_period,
+                protocol_metrics: ProtocolMetrics::new(min_protocol_period),
+                transition_notify: Arc::new(Notify::new()),
+                memberlist,
+                member_iterator,
+                state_transitions: StateTransitionScheduler::new(local_address, state_timeouts),
                 disseminator,
                 counts: RingpopRequestCounts::default(),
             })),
+            runtime: Arc::new(Mutex::new(RuntimeControl::default())),
         }
     }
 
@@ -336,13 +642,313 @@ impl RingpopNode {
     }
 
     pub fn stop(&self) {
-        self.state.lock().expect("Ringpop state poisoned").stopped = true;
+        let mut runtime = self.runtime.lock().expect("Ringpop runtime poisoned");
+        let async_stop_in_progress = runtime.stopping;
+        runtime.generation.fetch_add(1, Ordering::SeqCst);
+        {
+            let mut state = self.state.lock().expect("Ringpop state poisoned");
+            state.stopped = true;
+            state.state_transitions.disable();
+        }
+        if let Some(stop_tx) = runtime.stop_tx.take() {
+            stop_tx.send_replace(true);
+        }
+        if let Some(stop_tx) = runtime.transition_stop_tx.take() {
+            stop_tx.send_replace(true);
+        }
+        if !async_stop_in_progress {
+            if let Some(done_tx) = &runtime.stop_done {
+                done_tx.send_replace(true);
+            }
+            runtime.stopping = false;
+        }
+        for task in runtime.tasks.drain(..) {
+            task.abort();
+        }
+    }
+
+    /// Stop SWIM cooperatively and wait for any in-flight probe to complete.
+    /// This matches Go's `gossip.Stop` wait boundary; callers shutting down a
+    /// production node should await this method before closing its transport.
+    pub async fn stop_and_wait(&self) {
+        let handle = tokio::runtime::Handle::try_current().ok().or_else(|| {
+            self.runtime
+                .lock()
+                .expect("Ringpop runtime poisoned")
+                .executor
+                .clone()
+        });
+        let (tasks, existing_stop, done_tx, transition_stop_tx) = {
+            let mut runtime = self.runtime.lock().expect("Ringpop runtime poisoned");
+            if runtime.stopping {
+                let done_rx = runtime
+                    .stop_done
+                    .as_ref()
+                    .expect("stopping runtime has a completion channel")
+                    .subscribe();
+                (Vec::new(), Some(done_rx), None, None)
+            } else {
+                runtime.stopping = true;
+                if let Some(stop_tx) = &runtime.stop_tx {
+                    stop_tx.send_replace(true);
+                }
+                let transition_stop_tx = runtime.transition_stop_tx.clone();
+                let done_tx = runtime
+                    .stop_done
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| watch::channel(false).0);
+                if runtime.tasks.is_empty() {
+                    runtime.generation.fetch_add(1, Ordering::SeqCst);
+                    let mut state = self.state.lock().expect("Ringpop state poisoned");
+                    state.state_transitions.disable();
+                    state.stopped = true;
+                    runtime.stopping = false;
+                    done_tx.send_replace(true);
+                    return;
+                }
+                let tasks = std::mem::take(&mut runtime.tasks);
+                (tasks, None, Some(done_tx), transition_stop_tx)
+            }
+        };
+        if let Some(mut done_rx) = existing_stop {
+            while !*done_rx.borrow() {
+                if done_rx.changed().await.is_err() {
+                    return;
+                }
+            }
+            return;
+        }
+        let Some(done_tx) = done_tx else { return };
+        let Some(handle) = handle else {
+            // Started runtimes always have a Tokio executor to own cleanup.
+            // If the future is polled outside one, leave completion available
+            // to a later caller rather than falsely declaring shutdown done.
+            return;
+        };
+        let node = self.clone();
+        let completion = done_tx.clone();
+        handle.spawn(async move {
+            let mut tasks = tasks.into_iter();
+            // Probe and rate tasks share the ordinary stop signal. Keep the
+            // transition task live until probes drain, matching Node.Stop's
+            // gossip.Stop-then-stateTransitions.Stop ordering.
+            if let Some(probe) = tasks.next() {
+                let _ = probe.await;
+            }
+            if let Some(rate) = tasks.next() {
+                let _ = rate.await;
+            }
+            {
+                let runtime = node.runtime.lock().expect("Ringpop runtime poisoned");
+                runtime.generation.fetch_add(1, Ordering::SeqCst);
+                if let Some(stop_tx) = transition_stop_tx {
+                    stop_tx.send_replace(true);
+                }
+                let mut state = node.state.lock().expect("Ringpop state poisoned");
+                state.state_transitions.disable();
+                state.stopped = true;
+                state.transition_notify.notify_waiters();
+            }
+            for task in tasks {
+                let _ = task.await;
+            }
+            let mut runtime = node.runtime.lock().expect("Ringpop runtime poisoned");
+            runtime.stopping = false;
+            if let Some(stop_tx) = runtime.stop_tx.take() {
+                stop_tx.send_replace(true);
+            }
+            runtime.transition_stop_tx = None;
+            runtime.executor = None;
+            completion.send_replace(true);
+        });
+        let mut done_rx = done_tx.subscribe();
+        while !*done_rx.borrow() {
+            if done_rx.changed().await.is_err() {
+                return;
+            }
+        }
     }
 
     pub fn destroy(&self) {
-        let mut state = self.state.lock().expect("Ringpop state poisoned");
-        state.destroyed = true;
-        state.stopped = true;
+        self.state.lock().expect("Ringpop state poisoned").destroyed = true;
+        self.stop();
+    }
+
+    pub async fn destroy_and_wait(&self) {
+        self.state.lock().expect("Ringpop state poisoned").destroyed = true;
+        self.stop_and_wait().await;
+    }
+
+    /// Start one owned probe loop and one owned state-transition loop. The
+    /// readiness bit remains independently controlled by bootstrap owners.
+    pub fn start_swim(&self) -> Result<(), &'static str> {
+        self.start_swim_with_transport(Arc::new(crate::ringpop_runtime::TChannelProbeTransport))
+    }
+
+    pub fn start_swim_with_transport(
+        &self,
+        transport: Arc<dyn crate::ringpop_runtime::ProbeTransport>,
+    ) -> Result<(), &'static str> {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| "Tokio runtime required")?;
+        let mut runtime = self.runtime.lock().expect("Ringpop runtime poisoned");
+        if runtime.stopping {
+            return Err("SWIM shutdown in progress");
+        }
+        if runtime.tasks.iter().any(|task| !task.is_finished()) {
+            return Ok(());
+        }
+        runtime.tasks.clear();
+        let generation = runtime.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        runtime.executor = Some(handle.clone());
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let (transition_stop_tx, transition_stop_rx) = watch::channel(false);
+        let (stop_done, _) = watch::channel(false);
+        runtime.stop_tx = Some(stop_tx);
+        runtime.transition_stop_tx = Some(transition_stop_tx);
+        runtime.stop_done = Some(stop_done);
+        let state = Arc::clone(&self.state);
+        {
+            let mut state_guard = state.lock().expect("Ringpop state poisoned");
+            state_guard.stopped = false;
+            state_guard.state_transitions.enable();
+        }
+
+        let probe_state = Arc::clone(&state);
+        let probe_generation = Arc::clone(&runtime.generation);
+        let probe_transport = Arc::clone(&transport);
+        let mut probe_stop = stop_rx.clone();
+        runtime.tasks.push(handle.spawn(async move {
+            let node = RingpopNode {
+                state: probe_state.clone(),
+                runtime: Arc::new(Mutex::new(RuntimeControl::default())),
+            };
+            let initial_period = probe_state
+                .lock()
+                .expect("Ringpop state poisoned")
+                .min_protocol_period;
+            let initial_delay = rand::Rng::gen_range(
+                &mut rand::thread_rng(),
+                0..=initial_period.as_nanos().min(u64::MAX as u128) as u64,
+            );
+            let mut delay = Duration::from_nanos(initial_delay);
+            let mut first_period = true;
+            loop {
+                if probe_generation.load(Ordering::SeqCst) != generation
+                    || probe_state.lock().expect("Ringpop state poisoned").stopped
+                    || *probe_stop.borrow()
+                {
+                    break;
+                }
+                {
+                    let state = probe_state.lock().expect("Ringpop state poisoned");
+                    let min_period = state.min_protocol_period;
+                    if first_period {
+                        first_period = false;
+                    } else if let Some(last_period) = state.protocol_metrics.last_period {
+                        delay = next_protocol_delay(
+                            min_period,
+                            last_period,
+                            state.protocol_metrics.last_rate,
+                            tokio::time::Instant::now(),
+                        );
+                    } else {
+                        delay = min_period;
+                    }
+                }
+                let period_start = tokio::time::Instant::now();
+                let _ = crate::ringpop_runtime::ping_next_member_with(
+                    &node,
+                    probe_transport.as_ref(),
+                    |upper| rand::Rng::gen_range(&mut rand::thread_rng(), 0..upper),
+                )
+                .await;
+                let period_end = tokio::time::Instant::now();
+                probe_state
+                    .lock()
+                    .expect("Ringpop state poisoned")
+                    .protocol_metrics
+                    .record(period_end, period_end.duration_since(period_start));
+                // Go computes the delay before its callback and waits after
+                // callback completion. The first delay is randomized.
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    changed = probe_stop.changed() => {
+                        if changed.is_err() || *probe_stop.borrow() { break; }
+                    }
+                }
+            }
+        }));
+
+        let rate_state = Arc::clone(&state);
+        let rate_generation = Arc::clone(&runtime.generation);
+        let mut rate_stop = stop_rx.clone();
+        runtime.tasks.push(handle.spawn(async move {
+            loop {
+                if rate_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                {
+                    let mut state = rate_state.lock().expect("Ringpop state poisoned");
+                    let min_period = state.min_protocol_period;
+                    state.protocol_metrics.adjust_rate(min_period);
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                    changed = rate_stop.changed() => {
+                        if changed.is_err() || *rate_stop.borrow() { break; }
+                    }
+                }
+            }
+        }));
+
+        let timer_state = Arc::clone(&state);
+        let timer_generation = Arc::clone(&runtime.generation);
+        let mut timer_stop = transition_stop_rx;
+        runtime.tasks.push(handle.spawn(async move {
+            loop {
+                if timer_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                let (deadline, now_ns, notifier) = {
+                    let state = timer_state.lock().expect("Ringpop state poisoned");
+                    if state.stopped {
+                        break;
+                    }
+                    let deadline = state
+                        .state_transitions
+                        .timers()
+                        .values()
+                        .filter(|timer| !timer.fired)
+                        .map(|timer| timer.deadline_ns)
+                        .min();
+                    (
+                        deadline,
+                        state.monotonic_now_ns(),
+                        Arc::clone(&state.transition_notify),
+                    )
+                };
+                let wait = deadline
+                    .map(|deadline| Duration::from_nanos(deadline.saturating_sub(now_ns).max(0) as u64))
+                    .unwrap_or(Duration::from_secs(86_400));
+                tokio::select! {
+                    _ = tokio::time::sleep(wait) => {
+                        let mut state = timer_state.lock().expect("Ringpop state poisoned");
+                        let now = state.monotonic_now_ns();
+                        state.apply_due_transitions(
+                            now,
+                            || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64,
+                            |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+                        );
+                    }
+                    _ = notifier.notified() => {}
+                    changed = timer_stop.changed() => {
+                        if changed.is_err() || *timer_stop.borrow() { break; }
+                    }
+                }
+            }
+        }));
+        Ok(())
     }
 
     pub fn is_destroyed(&self) -> bool {
@@ -423,16 +1029,8 @@ impl RingpopNode {
         if node.stopped {
             return Ok(join);
         }
-        let local_address = node.address.clone();
-        let State {
-            memberlist,
-            disseminator,
-            ..
-        } = &mut *node;
         apply_join_list(
-            memberlist,
-            disseminator,
-            &local_address,
+            &mut node,
             changes,
             || {
                 std::time::SystemTime::now()
@@ -513,34 +1111,16 @@ impl RingpopNode {
         // `sendPing` invokes its successful piggyback callback before
         // `pingNextMember` applies the response through Memberlist.Update.
         node.disseminator.complete_sender(&sent_changes, true);
-        if !node.stopped {
-            let local_address = node.address.clone();
-            let update = node.memberlist.update(
-                ping.changes.as_deref().unwrap_or_default(),
-                || {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as i64
-                },
-                |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
-            );
-            if !update.accepted.is_empty() {
-                let pingable = node
-                    .memberlist
-                    .members()
-                    .iter()
-                    .filter(|member| {
-                        member.address != local_address
-                            && (member.status == ALIVE || member.status == SUSPECT)
-                    })
-                    .count();
-                node.disseminator.adjust_max_propagations(pingable);
-                for change in update.accepted {
-                    node.disseminator.record(change);
-                }
-            }
-        }
+        node.apply_changes(
+            ping.changes.as_deref().unwrap_or_default(),
+            || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64
+            },
+            |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+        );
         // Go's sendPing callback above succeeds even if the node stopped while
         // the response was in flight; memberlist.Update itself is stop guarded.
         Ok(ping)
@@ -621,34 +1201,16 @@ impl RingpopNode {
         let mut node = self.state.lock().expect("Ringpop state poisoned");
         // Unlike direct PING, a successful PING-REQ does not bump sender
         // piggyback counters in the pinned Go implementation.
-        if !node.stopped {
-            let local_address = node.address.clone();
-            let update = node.memberlist.update(
-                result.changes.as_deref().unwrap_or_default(),
-                || {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as i64
-                },
-                |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
-            );
-            if !update.accepted.is_empty() {
-                let pingable = node
-                    .memberlist
-                    .members()
-                    .iter()
-                    .filter(|member| {
-                        member.address != local_address
-                            && (member.status == ALIVE || member.status == SUSPECT)
-                    })
-                    .count();
-                node.disseminator.adjust_max_propagations(pingable);
-                for change in update.accepted {
-                    node.disseminator.record(change);
-                }
-            }
-        }
+        node.apply_changes(
+            result.changes.as_deref().unwrap_or_default(),
+            || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64
+            },
+            |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+        );
         Ok(result)
     }
 
@@ -727,32 +1289,16 @@ impl RingpopNode {
             let mut node = self.state.lock().expect("Ringpop state poisoned");
             node.counts.ping_req = node.counts.ping_req.saturating_add(1);
             let relay_address = node.address.clone();
-            if !node.stopped {
-                let update = node.memberlist.update(
-                    request.changes.as_deref().unwrap_or_default(),
-                    || {
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64
-                    },
-                    |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
-                );
-                if !update.accepted.is_empty() {
-                    let pingable = node
-                        .memberlist
-                        .members()
-                        .iter()
-                        .filter(|m| {
-                            m.address != relay_address && (m.status == ALIVE || m.status == SUSPECT)
-                        })
-                        .count();
-                    node.disseminator.adjust_max_propagations(pingable);
-                    for change in update.accepted {
-                        node.disseminator.record(change);
-                    }
-                }
-            }
+            node.apply_changes(
+                request.changes.as_deref().unwrap_or_default(),
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64
+                },
+                |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+            );
             let local = node
                 .memberlist
                 .member(&relay_address)
@@ -793,32 +1339,16 @@ impl RingpopNode {
         };
         if ping_ok {
             let mut node = self.state.lock().expect("Ringpop state poisoned");
-            if !node.stopped {
-                let update = node.memberlist.update(
-                    &target_changes,
-                    || {
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64
-                    },
-                    |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
-                );
-                if !update.accepted.is_empty() {
-                    let count = node
-                        .memberlist
-                        .members()
-                        .iter()
-                        .filter(|m| {
-                            m.address != relay_address && (m.status == ALIVE || m.status == SUSPECT)
-                        })
-                        .count();
-                    node.disseminator.adjust_max_propagations(count);
-                    for change in update.accepted {
-                        node.disseminator.record(change);
-                    }
-                }
-            }
+            node.apply_changes(
+                &target_changes,
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64
+                },
+                |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+            );
         }
         let mut node = self.state.lock().expect("Ringpop state poisoned");
         let local = node
@@ -869,10 +1399,93 @@ impl RingpopNode {
             .max_propagations()
     }
 
+    pub(crate) fn next_pingable_member_with<R>(&self, random_below: R) -> Option<Member>
+    where
+        R: FnMut(usize) -> usize,
+    {
+        let mut state = self.state.lock().expect("Ringpop state poisoned");
+        let State {
+            memberlist,
+            member_iterator,
+            ..
+        } = &mut *state;
+        member_iterator.next(memberlist, random_below)
+    }
+
+    pub(crate) fn ping_timeout(&self) -> Duration {
+        self.state
+            .lock()
+            .expect("Ringpop state poisoned")
+            .ping_timeout
+    }
+
+    pub(crate) fn ping_request_timeout(&self) -> Duration {
+        self.state
+            .lock()
+            .expect("Ringpop state poisoned")
+            .ping_request_timeout
+    }
+
+    pub(crate) fn ping_request_size(&self) -> usize {
+        self.state
+            .lock()
+            .expect("Ringpop state poisoned")
+            .ping_request_size
+    }
+
+    pub(crate) fn make_suspect(&self, address: &str, incarnation: i64) {
+        let mut state = self.state.lock().expect("Ringpop state poisoned");
+        let local = state
+            .memberlist
+            .member(&state.address)
+            .expect("local member")
+            .clone();
+        let labels = state
+            .memberlist
+            .member(address)
+            .and_then(|member| member.labels.clone());
+        let change = Change {
+            source: local.address,
+            source_incarnation: local.incarnation,
+            address: address.to_owned(),
+            incarnation,
+            status: SUSPECT.to_owned(),
+            labels,
+            timestamp: Timestamp(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
+            ),
+            ..Default::default()
+        };
+        state.apply_changes(
+            &[change],
+            || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64
+            },
+            |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+        );
+    }
+
+    pub async fn ping_next_member(&self) -> crate::ringpop_runtime::ProbeOutcome {
+        crate::ringpop_runtime::ping_next_member_with(
+            self,
+            &crate::ringpop_runtime::TChannelProbeTransport,
+            |upper| rand::Rng::gen_range(&mut rand::thread_rng(), 0..upper),
+        )
+        .await
+    }
+
     pub fn handler(&self) -> RingpopHandler {
         let state = Arc::clone(&self.state);
+        let runtime = Arc::clone(&self.runtime);
         RingpopHandler::new(move |method, _headers, body| {
             let state = Arc::clone(&state);
+            let runtime = Arc::clone(&runtime);
             async move {
                 let result = match method.as_str() {
                     "/protocol/join" => handle_join(&state, &body),
@@ -899,6 +1512,7 @@ impl RingpopNode {
                         }
                         let owner = RingpopNode {
                             state: Arc::clone(&state),
+                            runtime: Arc::clone(&runtime),
                         };
                         let response = owner.relay_ping_request(request).await?;
                         encode(&response)
@@ -934,9 +1548,7 @@ impl RingpopNode {
 /// Apply the exact accepted-change pipeline used by Go's
 /// `Node.handleChanges` followed by `memberlist.AddJoinList`.
 fn apply_join_list<F, R>(
-    memberlist: &mut Memberlist,
-    disseminator: &mut Disseminator,
-    local_address: &str,
+    node: &mut State,
     changes: &[Change],
     next_incarnation: F,
     insert_position: R,
@@ -944,22 +1556,10 @@ fn apply_join_list<F, R>(
     F: FnMut() -> i64,
     R: FnMut(usize) -> usize,
 {
-    let update = memberlist.update(changes, next_incarnation, insert_position);
-    if !update.accepted.is_empty() {
-        let pingable_members = memberlist
-            .members()
-            .iter()
-            .filter(|member| {
-                member.address != local_address
-                    && (member.status == ALIVE || member.status == SUSPECT)
-            })
-            .count();
-        disseminator.adjust_max_propagations(pingable_members);
-    }
-    for change in update.accepted {
-        disseminator.record(change.clone());
+    let local_address = node.address.clone();
+    for change in node.apply_changes(changes, next_incarnation, insert_position) {
         if change.address != local_address {
-            disseminator.clear_address(&change.address);
+            node.disseminator.clear_address(&change.address);
         }
     }
 }
@@ -1053,15 +1653,11 @@ where
     }
     node.counts.ping = node.counts.ping.saturating_add(1);
     let local_address = node.address.clone();
-    let update = node.memberlist.update(
+    node.apply_changes(
         request.changes.as_deref().unwrap_or_default(),
         next_incarnation,
         insert_position,
     );
-    let has_accepted_changes = !update.accepted.is_empty();
-    for change in update.accepted {
-        node.disseminator.record(change);
-    }
     let local_incarnation = node
         .memberlist
         .member(&local_address)
@@ -1069,16 +1665,6 @@ where
         .incarnation;
     let local_checksum = node.memberlist.checksum();
     let members = node.memberlist.members().to_vec();
-    if has_accepted_changes {
-        let pingable_members = members
-            .iter()
-            .filter(|member| {
-                member.address != local_address
-                    && (member.status == ALIVE || member.status == SUSPECT)
-            })
-            .count();
-        node.disseminator.adjust_max_propagations(pingable_members);
-    }
     let (changes, _full_sync) = node.disseminator.issue_receiver(
         &request.source,
         request.source_incarnation,
@@ -1100,6 +1686,69 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_rate_uses_go_sample_percentile_and_minimum_floor() {
+        let minimum = Duration::from_nanos(7);
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/ringpop_swim_runtime_oracle.json"
+        ))
+        .unwrap();
+        let mut metrics = ProtocolMetrics::new(minimum);
+        metrics.samples_nanos = vec![10, 20, 30, 40];
+        metrics.adjust_rate(Duration::ZERO);
+        // p50 position is 0.5 * (4 + 1) = 2.5; interpolate 20 and 30,
+        // then multiply by two.
+        assert_eq!(metrics.last_rate, Duration::from_nanos(50));
+        assert_eq!(
+            metrics.last_rate.as_nanos(),
+            oracle["cadenceRateNanos"].as_u64().unwrap() as u128
+        );
+        metrics.samples_nanos = vec![1, 2, 3];
+        metrics.adjust_rate(minimum);
+        assert_eq!(metrics.last_rate, minimum);
+    }
+
+    #[test]
+    fn protocol_delay_matches_go_target_and_floor() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/ringpop_swim_runtime_oracle.json"
+        ))
+        .unwrap();
+        let start = tokio::time::Instant::now();
+        let minimum = Duration::from_nanos(1);
+        assert_eq!(
+            next_protocol_delay(
+                minimum,
+                start,
+                Duration::from_millis(20),
+                start + Duration::from_millis(7),
+            ),
+            Duration::from_millis(13)
+        );
+        let mut metrics = ProtocolMetrics::new(minimum);
+        assert_eq!(
+            next_protocol_delay(
+                minimum,
+                start,
+                Duration::from_millis(20),
+                start + Duration::from_millis(30),
+            ),
+            minimum
+        );
+        assert_eq!(
+            minimum.as_nanos(),
+            oracle["cadenceBehindFloorNanos"].as_u64().unwrap() as u128
+        );
+        assert!(oracle["cadenceInitialInRange"].as_bool().unwrap());
+        for _ in 0..12 {
+            metrics.record(tokio::time::Instant::now(), Duration::from_nanos(1));
+        }
+        assert_eq!(
+            metrics.samples_nanos.len(),
+            oracle["cadenceSampleSize"].as_u64().unwrap() as usize
+        );
+    }
 
     #[derive(Default)]
     struct FakeJoinClock {
@@ -1471,7 +2120,7 @@ mod tests {
                 .into_iter()
                 .filter(|member| member.address != local.address)
                 .collect();
-            let mut memberlist = Memberlist::from_snapshot(local.clone(), initial_remote);
+            let memberlist = Memberlist::from_snapshot(local.clone(), initial_remote);
             let mut disseminator = Disseminator::new(15);
             for (address, pending) in &case.initial_queued {
                 disseminator.record(pending.change.clone());
@@ -1485,37 +2134,35 @@ mod tests {
                     case.name
                 );
             }
-            apply_join_list(
-                &mut memberlist,
-                &mut disseminator,
-                &local.address,
-                &case.input,
-                || case.now_millis,
-                |_| 0,
-            );
-            let mut got_members = memberlist.members().to_vec();
+            let test_node = RingpopNode::new("test", local.clone(), false);
+            let mut state = test_node.state.lock().unwrap();
+            state.memberlist = memberlist;
+            state.disseminator = disseminator;
+            apply_join_list(&mut state, &case.input, || case.now_millis, |_| 0);
+            let mut got_members = state.memberlist.members().to_vec();
             got_members.sort_by(|a, b| a.address.cmp(&b.address));
             assert_eq!(got_members, case.final_members, "{} members", case.name);
             assert_eq!(
-                memberlist.checksum(),
+                state.memberlist.checksum(),
                 case.checksum,
                 "{} checksum",
                 case.name
             );
             assert_eq!(
-                disseminator.max_propagations(),
+                state.disseminator.max_propagations(),
                 case.max_p,
                 "{} maxP",
                 case.name
             );
-            let got_counts = disseminator.propagation_counts();
+            let got_counts = state.disseminator.propagation_counts();
             let expected_counts: BTreeMap<_, _> = case
                 .queued
                 .iter()
                 .map(|(address, queued)| (address.clone(), queued.propagated))
                 .collect();
             assert_eq!(got_counts, expected_counts, "{} counters", case.name);
-            let got_changes: BTreeMap<_, _> = disseminator
+            let got_changes: BTreeMap<_, _> = state
+                .disseminator
                 .issue_sender()
                 .into_iter()
                 .map(|change| (change.address.clone(), change))
@@ -2950,5 +3597,321 @@ mod tests {
             node.handle_ping_with(ping, || 1, |_| 0).unwrap_err(),
             RingpopError::Application("node is not ready to handle requests".into())
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accepted_suspect_cascades_through_faulty_tombstone_and_eviction() {
+        let node = RingpopNode::new_with_swim_config(
+            "test",
+            Member {
+                address: "local:7933".into(),
+                status: ALIVE.into(),
+                incarnation: 10,
+                labels: None,
+            },
+            false,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            3,
+            Duration::from_millis(1),
+            StateTimeouts {
+                suspect_ns: 5,
+                faulty_ns: 10,
+                tombstone_ns: 5,
+            },
+        );
+        node.set_ready(true);
+        let request = Ping {
+            app: "test".into(),
+            source: "seed:7933".into(),
+            source_incarnation: 1,
+            changes: Some(vec![Change {
+                source: "seed:7933".into(),
+                source_incarnation: 1,
+                address: "target:7933".into(),
+                incarnation: 1,
+                status: ALIVE.into(),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        node.handle_ping_with(&serde_json::to_vec(&request).unwrap(), || 11, |_| 0)
+            .unwrap();
+        node.make_suspect("target:7933", 1);
+        let mut trace = vec!["suspect".to_owned()];
+
+        tokio::time::advance(Duration::from_nanos(5)).await;
+        {
+            let mut state = node.state.lock().unwrap();
+            let now = state.monotonic_now_ns();
+            state.apply_due_transitions(now, || 12, |_| 0);
+            assert_eq!(
+                state.memberlist.member("target:7933").unwrap().status,
+                FAULTY
+            );
+            assert_eq!(
+                state
+                    .state_transitions
+                    .timers()
+                    .get("target:7933")
+                    .unwrap()
+                    .deadline_ns,
+                15
+            );
+            trace.push(
+                state
+                    .memberlist
+                    .member("target:7933")
+                    .unwrap()
+                    .status
+                    .clone(),
+            );
+        }
+        tokio::time::advance(Duration::from_nanos(9)).await;
+        {
+            let mut state = node.state.lock().unwrap();
+            let now = state.monotonic_now_ns();
+            state.apply_due_transitions(now, || 12, |_| 0);
+            assert_eq!(
+                state.memberlist.member("target:7933").unwrap().status,
+                FAULTY
+            );
+            trace.push(
+                state
+                    .memberlist
+                    .member("target:7933")
+                    .unwrap()
+                    .status
+                    .clone(),
+            );
+        }
+        tokio::time::advance(Duration::from_nanos(1)).await;
+        {
+            let mut state = node.state.lock().unwrap();
+            let now = state.monotonic_now_ns();
+            state.apply_due_transitions(now, || 12, |_| 0);
+            assert_eq!(
+                state.memberlist.member("target:7933").unwrap().status,
+                TOMBSTONE
+            );
+            trace.push(
+                state
+                    .memberlist
+                    .member("target:7933")
+                    .unwrap()
+                    .status
+                    .clone(),
+            );
+        }
+        tokio::time::advance(Duration::from_nanos(5)).await;
+        {
+            let mut state = node.state.lock().unwrap();
+            let now = state.monotonic_now_ns();
+            state.apply_due_transitions(now, || 12, |_| 0);
+            assert!(state.memberlist.member("target:7933").is_none());
+            assert!(state.memberlist.member("local:7933").is_some());
+            trace.push("evicted".to_owned());
+        }
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/ringpop_swim_runtime_oracle.json"
+        ))
+        .unwrap();
+        assert_eq!(serde_json::to_value(trace).unwrap(), oracle["cascade"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn alive_cancels_timer_and_stop_restart_does_not_restore_cleared_timer() {
+        let node = RingpopNode::new_with_swim_config(
+            "test",
+            Member {
+                address: "local:7933".into(),
+                status: ALIVE.into(),
+                incarnation: 10,
+                labels: None,
+            },
+            false,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            3,
+            Duration::from_secs(3600),
+            StateTimeouts {
+                suspect_ns: 5,
+                faulty_ns: 10,
+                tombstone_ns: 5,
+            },
+        );
+        node.set_ready(true);
+        let request = Ping {
+            app: "test".into(),
+            source: "seed:7933".into(),
+            source_incarnation: 1,
+            changes: Some(vec![Change {
+                source: "seed:7933".into(),
+                source_incarnation: 1,
+                address: "target:7933".into(),
+                incarnation: 1,
+                status: SUSPECT.into(),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        node.handle_ping_with(&serde_json::to_vec(&request).unwrap(), || 11, |_| 0)
+            .unwrap();
+        let alive = Ping {
+            app: "test".into(),
+            source: "seed:7933".into(),
+            source_incarnation: 2,
+            changes: Some(vec![Change {
+                source: "seed:7933".into(),
+                source_incarnation: 2,
+                address: "target:7933".into(),
+                incarnation: 2,
+                status: ALIVE.into(),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        node.handle_ping_with(&serde_json::to_vec(&alive).unwrap(), || 12, |_| 0)
+            .unwrap();
+        let alive_status = node
+            .membership_snapshot()
+            .0
+            .into_iter()
+            .find(|member| member.address == "target:7933")
+            .unwrap()
+            .status;
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/ringpop_swim_runtime_oracle.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(vec![alive_status]).unwrap(),
+            oracle["cancelled"]
+        );
+        assert!(!node
+            .state
+            .lock()
+            .unwrap()
+            .state_transitions
+            .timers()
+            .contains_key("target:7933"));
+
+        node.make_suspect("target:7933", 2);
+        node.stop();
+        tokio::time::advance(Duration::from_secs(1)).await;
+        {
+            let mut state = node.state.lock().unwrap();
+            let now = state.monotonic_now_ns();
+            state.apply_due_transitions(now, || 13, |_| 0);
+            assert_eq!(
+                state.memberlist.member("target:7933").unwrap().status,
+                SUSPECT
+            );
+        }
+        node.start_swim().unwrap();
+        assert!(node.is_ready());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        {
+            let mut state = node.state.lock().unwrap();
+            let now = state.monotonic_now_ns();
+            state.apply_due_transitions(now, || 13, |_| 0);
+            assert_eq!(
+                state.memberlist.member("target:7933").unwrap().status,
+                SUSPECT
+            );
+        }
+        node.destroy();
+
+        assert_eq!(
+            serde_json::to_value(vec!["suspect", "suspect"]).unwrap(),
+            oracle["stopped"]
+        );
+    }
+
+    #[tokio::test]
+    async fn start_stop_restart_destroy_own_both_runtime_tasks_without_changing_ready() {
+        let node = node();
+        node.set_ready(true);
+        node.start_swim().unwrap();
+        assert_eq!(node.runtime.lock().unwrap().tasks.len(), 3);
+        assert!(node.is_ready());
+        node.stop();
+        assert!(node.runtime.lock().unwrap().tasks.is_empty());
+        assert!(node.is_ready());
+        node.start_swim().unwrap();
+        assert_eq!(node.runtime.lock().unwrap().tasks.len(), 3);
+        node.destroy();
+        assert!(node.runtime.lock().unwrap().tasks.is_empty());
+        assert!(node.is_destroyed());
+        assert!(node.is_ready());
+        tokio::task::yield_now().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn owned_timer_loop_applies_due_transition_and_cascades_eviction() {
+        let node = RingpopNode::new_with_swim_config(
+            "test",
+            Member {
+                address: "local:7933".into(),
+                status: ALIVE.into(),
+                incarnation: 10,
+                labels: None,
+            },
+            false,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            3,
+            Duration::from_secs(3600),
+            StateTimeouts {
+                suspect_ns: 5_000_000,
+                faulty_ns: 5_000_000,
+                tombstone_ns: 5_000_000,
+            },
+        );
+        node.set_ready(true);
+        let request = Ping {
+            app: "test".into(),
+            source: "seed:7933".into(),
+            source_incarnation: 1,
+            changes: Some(vec![Change {
+                source: "seed:7933".into(),
+                source_incarnation: 1,
+                address: "target:7933".into(),
+                incarnation: 1,
+                status: FAULTY.into(),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        node.handle_ping_with(&serde_json::to_vec(&request).unwrap(), || 11, |_| 0)
+            .unwrap();
+        node.start_swim().unwrap();
+        // Let the owned timer task register its Tokio sleep before advancing.
+        // Tokio's timer wheel resolves deadlines at millisecond granularity;
+        // sub-millisecond logical timeouts can therefore miss this wakeup.
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(5)).await;
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            node.membership_snapshot()
+                .0
+                .iter()
+                .find(|member| member.address == "target:7933")
+                .unwrap()
+                .status,
+            TOMBSTONE
+        );
+        tokio::time::advance(Duration::from_millis(5)).await;
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        assert!(node
+            .membership_snapshot()
+            .0
+            .iter()
+            .all(|member| member.address != "target:7933"));
+        node.destroy();
     }
 }

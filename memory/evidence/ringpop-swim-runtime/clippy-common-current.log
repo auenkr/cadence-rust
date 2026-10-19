@@ -1,0 +1,15 @@
+    Checking serde_core v1.0.229
+    Checking rand_chacha v0.3.1
+    Checking chrono v0.4.45
+    Checking phf v0.12.1
+    Checking thiserror v2.0.21
+    Checking serde v1.0.229
+    Checking chrono-tz v0.10.4
+    Checking rand v0.8.8
+    Checking zmij v1.0.23
+    Checking itoa v1.0.18
+    Checking farmhash v1.1.5
+    Checking memchr v2.8.3
+    Checking serde_json v1.0.154
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-common)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.42s

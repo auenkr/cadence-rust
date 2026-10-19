@@ -1,0 +1,25 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.66s
+=== RUN   TestGoSwimProbeAndTransitionOracle
+CADENCE_SWIM_RUNTIME_ORACLE={"iterator":["127.0.0.1:9910","127.0.0.1:9910"],"directSuccess":"alive","noHelpers":"suspect","sparseHelpers":"suspect","allErrors":"alive","cascade":["suspect","faulty","faulty","tombstone","evicted"],"cancelled":["alive"],"stopped":["suspect","suspect"]}
+--- PASS: TestGoSwimProbeAndTransitionOracle (0.02s)
+=== RUN   TestRustSwimRuntimeAgainstGo
+    zz_cadence_ringpop_swim_runtime_test.go:188: Go target did not receive Rust's direct probe gossip: &{Address:127.0.0.2:7933 Status:suspect Incarnation:1792417884982 Labels:map[]}
+--- FAIL: TestRustSwimRuntimeAgainstGo (0.31s)
+FAIL
+FAIL	github.com/uber/ringpop-go/swim	0.346s
+FAIL
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/tests/run-ringpop-swim-runtime-compat.py", line 38, in <module>
+    subprocess.run([
+    ~~~~~~~~~~~~~~^^
+        'go', 'test', '-overlay', str(overlay), './swim',
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        '-run', '^Test(GoSwimProbeAndTransitionOracle|RustSwimRuntimeAgainstGo)$', '-count=1', '-v',
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ], cwd=copied, env=env, check=True, timeout=180)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['go', 'test', '-overlay', '/tmp/ringpop-swim-runtime-compat-osdrnkw_/overlay.json', './swim', '-run', '^Test(GoSwimProbeAndTransitionOracle|RustSwimRuntimeAgainstGo)$', '-count=1', '-v']' returned non-zero exit status 1.

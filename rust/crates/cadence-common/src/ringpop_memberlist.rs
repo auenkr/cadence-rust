@@ -65,6 +65,45 @@ impl Memberlist {
         self.checksum
     }
 
+    /// Shuffle membership in place using the same descending Fisher-Yates
+    /// bounds used by Go's `rand.Shuffle`. `random_below` receives an
+    /// exclusive upper bound and must return a value within it.
+    pub fn shuffle<R>(&mut self, mut random_below: R)
+    where
+        R: FnMut(usize) -> usize,
+    {
+        for index in (1..self.members.len()).rev() {
+            let other = random_below(index + 1).min(index);
+            self.members.swap(index, other);
+        }
+        self.reindex();
+    }
+
+    /// Remove a remote member, preserving the order of the remaining member
+    /// slice as Go's `RemoveMember` does, then recompute the cached checksum.
+    /// The local member is retained.
+    pub fn remove_member(&mut self, address: &str) -> bool {
+        if address == self.local_address {
+            return false;
+        }
+        let Some(index) = self.by_address.get(address).copied() else {
+            return false;
+        };
+        self.members.remove(index);
+        self.reindex();
+        self.checksum = memberlist_checksum(&self.members);
+        true
+    }
+
+    fn reindex(&mut self) {
+        self.by_address = self
+            .members
+            .iter()
+            .enumerate()
+            .map(|(index, member)| (member.address.clone(), index))
+            .collect();
+    }
+
     /// `next_incarnation` is called exactly once per accepted local refutation.
     /// `insert_position` is called once for each accepted unknown remote member
     /// with the current member count; its result is clamped to Go's
@@ -132,6 +171,57 @@ impl Memberlist {
             checksum: self.checksum,
             refuted_local,
         }
+    }
+}
+
+/// Go-compatible memberlist iterator. It shuffles initially and whenever the
+/// cursor crosses the end, then scans at most the membership size for a
+/// nonlocal ALIVE/SUSPECT member.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MemberlistIter {
+    current_index: isize,
+    current_round: usize,
+}
+
+impl MemberlistIter {
+    pub fn new<R>(memberlist: &mut Memberlist, random_below: R) -> Self
+    where
+        R: FnMut(usize) -> usize,
+    {
+        memberlist.shuffle(random_below);
+        Self {
+            current_index: -1,
+            current_round: 0,
+        }
+    }
+
+    pub fn current_round(&self) -> usize {
+        self.current_round
+    }
+
+    pub fn next<R>(&mut self, memberlist: &mut Memberlist, mut random_below: R) -> Option<Member>
+    where
+        R: FnMut(usize) -> usize,
+    {
+        let max_to_visit = memberlist.members.len();
+        let mut visited = std::collections::BTreeSet::new();
+        while visited.len() < max_to_visit {
+            self.current_index += 1;
+            if self.current_index as usize >= memberlist.members.len() {
+                self.current_index = 0;
+                self.current_round += 1;
+                memberlist.shuffle(&mut random_below);
+            }
+            let member = memberlist.members[self.current_index as usize].clone();
+            visited.insert(member.address.clone());
+            if member.address != memberlist.local_address
+                && (member.status == crate::ringpop_wire::ALIVE
+                    || member.status == crate::ringpop_wire::SUSPECT)
+            {
+                return Some(member);
+            }
+        }
+        None
     }
 }
 
@@ -246,5 +336,73 @@ mod tests {
         assert_eq!(list.members()[0].address, "first");
         assert_eq!(list.members()[1].address, "second");
         assert_eq!(list.members()[2].address, "self");
+    }
+
+    #[test]
+    fn memberlist_iterator_shuffles_and_visits_pingable_members_once_per_round() {
+        let mut list = Memberlist::from_snapshot(
+            member("self", ALIVE, 1),
+            vec![
+                member("alive", ALIVE, 1),
+                member("suspect", SUSPECT, 1),
+                member("faulty", "faulty", 1),
+            ],
+        );
+        let mut iterator = MemberlistIter::new(&mut list, |_| 0);
+        let first_round = [
+            iterator.next(&mut list, |_| 0).unwrap().address,
+            iterator.next(&mut list, |_| 0).unwrap().address,
+        ];
+        let mut sorted = first_round.clone();
+        sorted.sort();
+        assert_eq!(sorted, ["alive".to_owned(), "suspect".to_owned()]);
+        assert!(matches!(
+            iterator.next(&mut list, |_| 0).unwrap().address.as_str(),
+            "alive" | "suspect"
+        ));
+        assert_eq!(iterator.current_round(), 1);
+    }
+
+    #[test]
+    fn memberlist_iterator_returns_none_when_only_local_and_non_pingable_members_exist() {
+        let mut list = Memberlist::from_snapshot(
+            member("self", ALIVE, 1),
+            vec![member("faulty", "faulty", 1)],
+        );
+        let mut iterator = MemberlistIter::new(&mut list, |_| 0);
+        assert!(iterator.next(&mut list, |_| 0).is_none());
+    }
+
+    #[test]
+    fn single_remote_iterator_round_matches_pinned_go_trace() {
+        let mut list = Memberlist::from_snapshot(
+            member("local:7933", ALIVE, 1),
+            vec![member("127.0.0.1:9910", ALIVE, 1)],
+        );
+        let mut iterator = MemberlistIter::new(&mut list, |_| 0);
+        let got = vec![
+            iterator.next(&mut list, |_| 0).unwrap().address,
+            iterator.next(&mut list, |_| 0).unwrap().address,
+        ];
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/ringpop_swim_runtime_oracle.json"
+        ))
+        .unwrap();
+        assert_eq!(serde_json::to_value(got).unwrap(), oracle["iterator"]);
+        assert_eq!(iterator.current_round(), 1);
+    }
+
+    #[test]
+    fn removing_remote_member_reindexes_and_keeps_local() {
+        let mut list = Memberlist::from_snapshot(
+            member("self", ALIVE, 1),
+            vec![member("first", ALIVE, 1), member("second", ALIVE, 1)],
+        );
+        assert!(list.remove_member("first"));
+        assert!(list.member("first").is_none());
+        assert!(list.member("self").is_some());
+        assert!(list.member("second").is_some());
+        assert!(!list.remove_member("self"));
+        assert!(!list.remove_member("missing"));
     }
 }
