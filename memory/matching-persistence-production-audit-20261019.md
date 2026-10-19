@@ -197,3 +197,29 @@ Cassandra, every SQL plugin, or overall Matching service parity. Do not move
 to History migration until the configured-store probe, full Matching parity
 audit, and mixed Go/Rust failure/restart/recovery validation have reproducible
 passing evidence.
+
+## Production mixed Ringpop probe staged (source-only, not acceptance evidence)
+
+`tests/run-go-service-baseline.py --rust-matching --rust-production-binary <path>`
+now selects an ordinary Go server build and starts only Go Frontend, History,
+and Worker. That mode does not compile or use the Go Fx discovery overlay. It
+generates a Rust Matching config pointing at Go's auto-setup SQLite database
+and the same Ringpop bootstrap hosts, then launches the Rust server as only
+Matching. The probe waits for a public Go Frontend `DescribeTaskList` call to
+resolve Matching, which will require the original Go `PeerProvider` to discover
+the Rust member by its Ringpop `serviceName`/gRPC labels. The restart mode
+SIGKILLs only Rust and uses the existing SDK to resume queued work. Production
+mode also tests SIGTERM shutdown while a matching task is persisted, restarts
+Rust against the same database, and checks SDK completion. Adapter mode retains
+the deterministic stop-file/idle-unload tests.
+
+This runner mode is deliberately staged. Current Rust `main.rs` does not yet
+assemble/start the new `MatchingRingpopProvider` or membership lifecycle, so
+the Go provider will not discover the Rust process until that wiring lands.
+The mode has not been built or run and must not be recorded as passing. The
+test-only static PeerProvider route remains useful adapter evidence but cannot
+substitute for production discovery. The production mixed gate must also replace
+the current loopback-only Matching-to-History client with a discovered
+`MatchingHistoryPeerResolver`/`RingpopHistoryMembership` before claiming
+service parity. Existing adapter-only idle-unload behavior remains an explicit
+coverage gap for the production process probe.

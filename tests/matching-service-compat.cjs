@@ -19,6 +19,7 @@ const api = schema.api.v1;
 const peer = process.argv[2] || '127.0.0.1:7833';
 const restartMode = process.argv[7] === 'restart';
 const goServicesPid = Number(process.argv[8] || 0);
+const productionMode = process.argv[9] === 'production';
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
 function call(service, method, request) {
   const metadata = new grpc.Metadata();
@@ -36,30 +37,71 @@ async function run() {
   const work = path.resolve(process.argv[5]);
   fs.mkdirSync(work, { recursive: true });
   const ready = path.join(work, 'ready'), stop = path.join(work, 'stop'), fixture = path.join(work, 'fixture.json');
-   fs.writeFileSync(fixture, JSON.stringify({ domain, domain_id: domainId, workflow_id: '', run_id: '', task_list: taskList.name, history_peer: process.argv[3], kind: 'server', schedule_id: 0, database: path.join(work, 'matching.db'), output: ready, listen: process.argv[4], stop_file: stop, idle_trigger: path.join(work, 'idle-trigger'), idle_done: path.join(work, 'idle-done'), isolation_groups: ['zone-a', 'zone-b'] }));
+  if (!productionMode) {
+    fs.writeFileSync(fixture, JSON.stringify({ domain, domain_id: domainId, workflow_id: '', run_id: '', task_list: taskList.name, history_peer: process.argv[3], kind: 'server', schedule_id: 0, database: path.join(work, 'matching.db'), output: ready, listen: process.argv[4], stop_file: stop, idle_trigger: path.join(work, 'idle-trigger'), idle_done: path.join(work, 'idle-done'), isolation_groups: ['zone-a', 'zone-b'] }));
+  }
   const reportedTestBinary = process.env.CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE;
-  if (!reportedTestBinary) throw new Error('CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE must identify the executable reported by Cargo');
-  const testBinary = path.resolve(reportedTestBinary);
-  if (!fs.existsSync(testBinary) || !fs.statSync(testBinary).isFile()
-      || (process.platform !== 'win32' && !(fs.statSync(testBinary).mode & 0o111))) {
-    throw new Error(`Cargo-reported matching_delivery test executable is missing or not executable: ${testBinary}`);
+  const productionBinary = process.env.CADENCE_RUST_MATCHING_PRODUCTION_BINARY;
+  const rustConfig = process.env.CADENCE_RUST_MATCHING_PRODUCTION_CONFIG;
+  const rustTChannel = process.env.CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL;
+  const rustGrpcPort = process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT;
+  const historyGrpcPort = process.env.CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT;
+  const rustDataDir = process.env.CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR;
+  let testBinary;
+  if (productionMode) {
+    if (!productionBinary || !rustConfig || !rustTChannel || !rustGrpcPort || !historyGrpcPort || !rustDataDir) throw new Error('production Matching mode requires the Rust binary, config, gRPC/TChannel ports and data directory');
+    if (!fs.existsSync(productionBinary)) throw new Error(`Rust production server binary does not exist: ${productionBinary}`);
+  } else {
+    if (!reportedTestBinary) throw new Error('CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE must identify the executable reported by Cargo');
+    testBinary = path.resolve(reportedTestBinary);
+    if (!fs.existsSync(testBinary) || !fs.statSync(testBinary).isFile()
+        || (process.platform !== 'win32' && !(fs.statSync(testBinary).mode & 0o111))) {
+      throw new Error(`Cargo-reported matching_delivery test executable is missing or not executable: ${testBinary}`);
+    }
   }
   function startRust(label) {
     for (const file of [ready, stop]) if (fs.existsSync(file)) fs.unlinkSync(file);
     const output = fs.openSync(path.join(work, `rust-server-${label}.log`), 'w');
-    const child = spawn(testBinary, ['matching_delivery_go_history', '--ignored', '--exact'], { cwd: path.resolve(__dirname, '..'), env: { ...process.env, CADENCE_MATCHING_DELIVERY_FIXTURE: fixture }, stdio: ['ignore', output, output] });
+    const command = productionMode ? [productionBinary, [
+      'start', '--config', rustConfig, '--services', 'matching', '--port', '0',
+      '--history-grpc-port', historyGrpcPort, '--matching-grpc-port', rustGrpcPort,
+      '--matching-tchannel-port', rustTChannel, '--data-dir', rustDataDir,
+    ], { ...process.env }] : [testBinary,
+      ['matching_delivery_go_history', '--ignored', '--exact'],
+      { ...process.env, CADENCE_MATCHING_DELIVERY_FIXTURE: fixture }];
+    const child = spawn(command[0], command[1], { cwd: path.resolve(__dirname, '..'), env: command[2], stdio: ['ignore', output, output] });
     fs.closeSync(output);
     exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
     return child;
   }
+  async function waitForRustReady(label) {
+    const deadline = Date.now() + 180000;
+    while (Date.now() < deadline) {
+      if (productionMode) {
+        try {
+          // This public Go Frontend call must resolve Matching through Go's
+          // real Ringpop PeerProvider; TCP readiness alone is insufficient.
+          await call('WorkflowAPI', 'DescribeTaskList', {
+            domain, taskList: { name: `discovery-ready-${id}` },
+            taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+          });
+          return;
+        } catch (_) {
+          // JOIN, SWIM, label publication, or Go membership propagation may
+          // still be in progress. The timeout below leaves the cause in logs.
+        }
+      } else if (fs.existsSync(ready)) {
+        return;
+      }
+      if (rust.exitCode !== null || rust.signalCode !== null) throw new Error(`Rust Matching ${label} exited before readiness; see ${work}/rust-server-${label}.log`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error(`Rust Matching ${label} did not become discoverable through Go Frontend; see ${work}/rust-server-${label}.log`);
+  }
   let exited;
   let rust = startRust('before-restart');
   try {
-    const deadline = Date.now() + 180000;
-    while (!fs.existsSync(ready)) {
-      if (rust.exitCode !== null || rust.signalCode !== null || Date.now() > deadline) throw new Error(`Rust Matching startup failed; see ${work}/rust-server.log`);
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    await waitForRustReady('before-restart');
   const startRequest = {
     domain, workflowId: id, workflowType: { name: 'ServiceCompatibility' }, taskList,
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
@@ -78,7 +120,7 @@ async function run() {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
-    const database = path.join(work, 'matching.db');
+    const database = productionMode ? process.env.CADENCE_MATCHING_SQLITE_DB : path.join(work, 'matching.db');
     const sqliteCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, restartTaskList], { encoding: 'utf8' });
     const persistedDeadline = Date.now() + 20000;
     let persisted;
@@ -95,11 +137,7 @@ async function run() {
     assert.equal(beforeExit.signal, 'SIGKILL', 'first Rust Matching process did not terminate');
     if (goServicesPid) process.kill(goServicesPid, 0);
     rust = startRust('after-restart');
-    const secondReadyDeadline = Date.now() + 180000;
-    while (!fs.existsSync(ready)) {
-      if (rust.exitCode !== null || rust.signalCode !== null || Date.now() > secondReadyDeadline) throw new Error(`Rust Matching failed to reopen durable SQLite queue; see ${work}/rust-server-after-restart.log`);
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    await waitForRustReady('after-restart');
     const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
     fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
     if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
@@ -150,6 +188,42 @@ async function run() {
     'decisionTaskCompletedEventAttributes', 'workflowExecutionCompletedEventAttributes',
   ]);
   assert.equal(events.at(-1).workflowExecutionCompletedEventAttributes.result.data.toString(), 'done');
+  let gracefulDrainEvidence;
+  if (productionMode) {
+    const drainID = `graceful-drain-${id}`, drainTaskList = `graceful-drain-tasks-${id}`;
+    const drainRequest = { ...startRequest, workflowId: drainID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: drainTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
+    const drainStarted = await call('WorkflowAPI', 'StartWorkflowExecution', drainRequest);
+    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
+    if (!database) throw new Error('production Matching mode requires CADENCE_MATCHING_SQLITE_DB for drain/recovery evidence');
+    const taskCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, drainTaskList], { encoding: 'utf8' });
+    const taskDeadline = Date.now() + 20000;
+    let queued;
+    while (Date.now() < taskDeadline) {
+      queued = taskCount();
+      if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(queued?.status, 0, `could not inspect pre-drain Matching queue: ${queued?.stderr}`);
+    assert(Number(queued.stdout.trim()) > 0, 'Go History did not persist the graceful-drain decision task');
+    const drainingPid = rust.pid;
+    rust.kill('SIGTERM');
+    const drained = await Promise.race([exited, new Promise(resolve => setTimeout(() => resolve(null), 60000))]);
+    assert(drained, `Rust Matching did not finish SIGTERM drain; see ${work}/rust-server-before-graceful-restart.log`);
+    assert.equal(drained.code, 0, `Rust Matching graceful shutdown failed: ${JSON.stringify(drained)}`);
+    if (goServicesPid) process.kill(goServicesPid, 0);
+    rust = startRust('after-graceful-drain');
+    await waitForRustReady('after-graceful-drain');
+    const drainSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: drainID, CADENCE_MIXED_RESTART_TASK_LIST: drainTaskList,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'graceful-drain-sdk.log'), `${drainSdk.stdout || ''}\n${drainSdk.stderr || ''}`);
+    if (drainSdk.status !== 0) throw new Error(`Existing SDK could not resume the task preserved across Rust SIGTERM: ${drainSdk.error || drainSdk.status}; see ${work}/graceful-drain-sdk.log`);
+    const drainHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: drainID, runId: drainStarted.runId } });
+    const drainCompletions = drainHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(drainCompletions, 1, 'gracefully drained workflow must have exactly one visible completion');
+    gracefulDrainEvidence = { workflowId: drainID, runId: drainStarted.runId, taskList: drainTaskList, queuedRowsBeforeSignal: Number(queued.stdout.trim()), drainingPid, recoveredByRustPid: rust.pid, completionEvents: drainCompletions, goServicesPid };
+  } else {
   async function expireIdleOwners() {
     const done = path.join(work, 'idle-done');
     if (fs.existsSync(done)) fs.unlinkSync(done);
@@ -186,6 +260,7 @@ async function run() {
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: recovered.taskToken, decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('idle-recovered') } }] });
   const recoveredHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: `idle-recovery-${id}`, runId: recovery.runId } });
   assert.equal(recoveredHistory.history.events.at(-1).workflowExecutionCompletedEventAttributes.result.data.toString(), 'idle-recovered');
+  }
   // Rate-limited dispatch: the worker-reported maxTasksPerSecond is applied to
   // the shared limiter, so later backlog dispatches are paced. The first
   // dispatch may still use the pre-report burst, so only assert the last poll.
@@ -296,9 +371,10 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: 'passed', topology: 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: 'passed', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: productionMode ? 'not acceptance evidence until Rust Matching Ringpop assembly, discovered Matching-to-History routing, and parity audit are reviewed' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
   } finally {
-    fs.writeFileSync(stop, 'stop');
+    if (productionMode) rust.kill('SIGTERM');
+    else fs.writeFileSync(stop, 'stop');
     let shutdownTimer;
     const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
     clearTimeout(shutdownTimer);

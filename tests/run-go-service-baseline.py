@@ -22,17 +22,27 @@ parser.add_argument('--matching-delivery', action='store_true', help='run Rust d
 parser.add_argument('--matching-restart', action='store_true', help='restart Rust Matching over the same SQLite queue while Go services stay up')
 parser.add_argument('--binary', type=Path, help='use an already built Go server')
 parser.add_argument('--go-mixed-server-bin', type=Path, help='reuse a Go test binary built with the Rust Matching discovery overlay')
+parser.add_argument('--rust-production-binary', type=Path, help='run an already built Rust server binary with the original Go Ringpop provider (requires production Matching Ringpop assembly)')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
 work.mkdir(parents=True, exist_ok=True)
 print(f'Go baseline artifacts: {work}', flush=True)
+production_matching = args.rust_production_binary is not None
+if production_matching and not (args.rust_matching or args.matching_restart):
+    parser.error('--rust-production-binary requires --rust-matching or --matching-restart')
+if production_matching and args.go_mixed_server_bin:
+    parser.error('--rust-production-binary cannot use the Go test-binary discovery overlay')
+if production_matching and (not args.rust_production_binary.is_file() or not os.access(args.rust_production_binary, os.X_OK)):
+    parser.error(f'--rust-production-binary must name an existing executable: {args.rust_production_binary}')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
 if not args.binary and not args.go_mixed_server_bin:
     with (work / 'build.log').open('w') as output:
-        if args.rust_matching or args.matching_restart:
+        if production_matching:
+            build = ['go', 'build', '-p', '1', '-ldflags=-s -w', '-o', str(binary), '.']
+        elif args.rust_matching or args.matching_restart:
             overlay = work / 'overlay.json'
             overlay.write_text(json.dumps({'Replace': {str(root / 'go/cmd/server/cadence/rust_matching_peer_test.go'): str(root / 'tests/matching-peer-go_test.go')}}))
             build = ['go', 'test', '-c', '-p', '1', '-ldflags=-s -w', '-overlay', str(overlay), '-o', str(binary), './cadence']
@@ -40,7 +50,7 @@ if not args.binary and not args.go_mixed_server_bin:
             build = ['go', 'build', '-p', '1', '-ldflags=-s -w', '-o', str(binary), '.']
         subprocess.run(build, cwd=root / 'go/cmd/server', stdout=output, stderr=subprocess.STDOUT, check=True, timeout=1200)
 matching_test_executable = None
-if args.matching_delivery or args.rust_matching or args.matching_restart:
+if args.matching_delivery or ((args.rust_matching or args.matching_restart) and not production_matching):
     # Compile before booting Go or starting workflow deadlines. The probe's
     # per-workflow timeout must measure delivery, not linker resource contention.
     build = subprocess.run(['cargo', 'test', '--manifest-path', str(root / 'rust/Cargo.toml'),
@@ -72,6 +82,8 @@ keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
         'FRONTEND_PORT_PPROF', 'MATCHING_PORT_PPROF', 'HISTORY_PORT_PPROF', 'WORKER_PORT_PPROF']
 if args.rust_matching or args.matching_restart:
     keys.append('RUST_MATCHING_PORT_GRPC')
+if production_matching:
+    keys.append('RUST_MATCHING_PORT')
 reservations = [socket.socket() for _ in keys]
 try:
     for listener in reservations:
@@ -98,10 +110,45 @@ text = (root / 'go/config/development_sqlite.yaml').read_text()
 text = text.replace('"cadence.db"', json.dumps(str(work / 'cadence.db')))
 text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_visibility.db')))
 (config / 'development_sqlite.yaml').write_text(text)
+if production_matching:
+    rust_config = work / 'rust-matching.yaml'
+    rust_text = (root / 'rust/config/development.yaml').read_text()
+    database_name = json.dumps(str(work / 'cadence.db'))
+    sqlite_persistence = (
+        'persistence:\n'
+        '  defaultStore: sqlite-default\n'
+        '  visibilityStore: sqlite-visibility\n'
+        '  numHistoryShards: 4\n'
+        '  datastores:\n'
+        '    sqlite-default:\n'
+        '      sql:\n'
+        '        pluginName: sqlite\n'
+        '        databaseName: ' + database_name + '\n'
+        '        nShards: 1\n'
+        '    sqlite-visibility:\n'
+        '      sql:\n'
+        '        pluginName: sqlite\n'
+        '        databaseName: ' + json.dumps(str(work / 'cadence_visibility.db')) + '\n'
+    )
+    rust_text, replaced = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', sqlite_persistence, rust_text, count=1)
+    if replaced != 1:
+        raise RuntimeError('could not replace Rust Matching persistence config')
+    seeds = ', '.join(json.dumps(f'127.0.0.1:{ports[key]}') for key in
+                      ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT'])
+    rust_text, replaced = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rust_text, count=1)
+    if replaced != 1:
+        raise RuntimeError('could not configure Rust Ringpop bootstrap hosts')
+    rust_config.write_text(rust_text)
+    (work / 'rust-matching-command.json').write_text(json.dumps([
+        str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config),
+        '--services', 'matching', '--port', '0', '--history-grpc-port', ports['HISTORY_PORT_GRPC'],
+        '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
+        '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
+        '--data-dir', str(work / 'rust-matching-data')], indent=2) + '\n')
 command = [str(binary), '--config', str(config), '--zone', 'sqlite', 'start',
-           '--auto-setup', '--services', 'frontend,history,matching,worker']
+           '--auto-setup', '--services', 'frontend,history,worker' if production_matching else 'frontend,history,matching,worker']
 environment = None
-if args.rust_matching or args.matching_restart:
+if (args.rust_matching or args.matching_restart) and not production_matching:
     import os
     command = [str(binary), '-test.run=^TestRustMatchingGoServices$', '-test.timeout=15m']
     environment = {**os.environ, 'CADENCE_GO_CONFIG': str(config), 'CADENCE_RUST_MATCHING_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}'}
@@ -120,7 +167,12 @@ with (work / 'server.log').open('w') as log:
                     raise RuntimeError('Go baseline startup timed out')
                 time.sleep(0.1)
         with (work / 'probe.log').open('w') as output:
-            if args.rust_matching or args.matching_restart:
+            if production_matching:
+                probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
+                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
+                    f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
+                    'restart' if args.matching_restart else '', str(server.pid), 'production']
+            elif args.rust_matching or args.matching_restart:
                 probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
                     f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
                     f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
@@ -134,12 +186,26 @@ with (work / 'server.log').open('w') as log:
             probe_environment = None
             if matching_test_executable and (args.rust_matching or args.matching_restart):
                 probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
+            if production_matching:
+                probe_environment = {**os.environ,
+                    'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(args.rust_production_binary.resolve()),
+                    'CADENCE_RUST_MATCHING_PRODUCTION_CONFIG': str(rust_config),
+                    'CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL': ports['RUST_MATCHING_PORT'],
+                    'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
+                    'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
+                    'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
+                    'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
             result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
                 env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
-            'topology': 'Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'),
+            'topology': ('Go Frontend/History/Worker with Rust Matching via production Ringpop' if production_matching else ('Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'))),
             'goServicesPid': server.pid, 'goServicesAliveAfterProbe': server.poll() is None,
-            'goMatchingStarted': not (args.rust_matching or args.matching_restart), 'serverCommand': command}, indent=2) + '\n')
+            'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
+            'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
+            'ringpopGate': 'original Go PeerProvider is active; runner does not substitute or hard-code Matching members and Rust must JOIN/publish serviceName/grpc labels' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
+            'historyRoutingGate': 'Matching-to-History still uses the explicit loopback endpoint until discovered History peer routing is integrated' if production_matching else None,
+            'acceptanceEligible': not production_matching,
+            'serverCommand': command}, indent=2) + '\n')
         if result.returncode:
             raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
     finally:
@@ -149,4 +215,7 @@ with (work / 'server.log').open('w') as log:
         except subprocess.TimeoutExpired:
             server.kill()
             server.wait(timeout=10)
-print(f'Service baseline passed: {work / "results.json"}', flush=True)
+if production_matching:
+    print(f'Preliminary production process probe completed; it is not Matching acceptance evidence: {work / "results.json"}', flush=True)
+else:
+    print(f'Service baseline passed: {work / "results.json"}', flush=True)
