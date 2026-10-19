@@ -46,3 +46,29 @@ History routing source candidate fad59909a is committed, unvalidated. Parent
 requested caller-deadline propagation through outer Record retry/backoff and
 nonpositive configured timeout behavior review before acceptance. Factory
 30-second timeout now has a separate explicit override builder.
+
+## Source review and validation continuation
+
+History source chain in t3-83afa06b: fad59909a +25dbbcbf3 (caller deadlines,
+zero Record timeout), then438007ce0 +08265d333 (live Ringpop History adapter,
+snapshot-consistent gRPC endpoint). Source formatting/diff only, no compilation
+or acceptance. Native worker finished and is available for reuse. Adapter's
+shared Host snapshot has no TChannel field; named TChannel resolution remains
+unsupported rather than reading a second inconsistent snapshot. Root and
+cache draft do not yet instantiate/bootstrap Ringpop in main; shared listener
+API capability exists but is not yet used by main.
+
+Cache validation initially failed compilation, then six persistence tests.
+Worker repaired raw nested Thrift decoding and fixture struct shape, preserving
+failure logs. Parent rejected a production 5ms early timeout-classification
+tolerance. Worker removed it; final persistence rerun is10passed/1ignored.
+The Go-file-dependent ignored test still needs the actual Go fixture. Server
+cache compilation now active, sole heavy slot, private target at
+/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target.
+Long commands run in tmux cadence-rust; no component accepted yet.
+
+SWIM source adds adaptive schedule/reservoir and cooperative async shutdown,
+including shared completion for concurrent stop and start rejection during
+shutdown. Actual pinned-Go blocked-ping Stop oracle added; all final builds
+and new oracle execution pending regrant. Parent caught the initial concurrent
+shutdown race before acceptance. Worker remains source-ready, idle build lane.
