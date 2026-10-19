@@ -117,11 +117,13 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 		t.Fatalf("Rust grpc label = %q, %v; want 127.0.0.1:7234", grpcAddress, err)
 	}
 	firstIncarnation := peerIncarnation(t, goProvider, rustAddress)
+	t.Logf("initial Rust member accepted: address=%s incarnation=%d labels=%v", rustAddress, firstIncarnation, initial[0].Labels)
 	if _, err := io.WriteString(stdin, "evict\n"); err != nil {
 		t.Fatalf("allowing Rust self-eviction: %v", err)
 	}
 
 	waitMembers(t, ctx, goProvider, 0, "Go peer did not observe Rust self-eviction")
+	t.Log("Go peer confirmed Rust self-eviction before restart")
 	if _, err := io.WriteString(stdin, "restart\n"); err != nil {
 		t.Fatalf("allowing Rust restart: %v", err)
 	}
@@ -129,6 +131,7 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 		return fmt.Sprintf("Rust probe output:\n%s\nGo reachable members: %s", output.String(), reachableMembers(goProvider))
 	})
 	waitForIncarnationGreater(t, ctx, goProvider, rustAddress, firstIncarnation, output)
+	restartedIncarnation := peerIncarnation(t, goProvider, rustAddress)
 	recovered, err := goProvider.GetMembers("cadence-matching")
 	if err != nil || len(recovered) != 1 {
 		t.Fatalf("restarted Rust Matching membership: %#v, %v", recovered, err)
@@ -139,6 +142,7 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	if tchannel, err := recovered[0].GetNamedAddress(membership.PortTchannel); err != nil || tchannel != rustAddress {
 		t.Fatalf("restarted Rust tchannel label = %q, %v; want %q", tchannel, err, rustAddress)
 	}
+	t.Logf("restarted Rust member accepted: address=%s incarnation=%d previous=%d labels=%v", rustAddress, restartedIncarnation, firstIncarnation, recovered[0].Labels)
 	if _, err := io.WriteString(stdin, "stop\n"); err != nil {
 		t.Fatalf("allowing final Rust provider stop: %v", err)
 	}
@@ -149,6 +153,7 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	if !strings.Contains(output.String(), "rust-peer-recovered") {
 		t.Fatalf("Rust lifecycle probe did not report recovery:\n%s", output.String())
 	}
+	t.Logf("Rust probe phases:\n%s", output.String())
 }
 
 func waitForIncarnationGreater(t *testing.T, ctx context.Context, provider *Provider, address string, previous int64, output *lockedBuffer) {
