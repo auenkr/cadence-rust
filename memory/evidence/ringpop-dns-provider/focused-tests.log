@@ -1,0 +1,82 @@
+   Compiling tokio v1.53.3
+   Compiling zerofrom v0.1.8
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.3
+   Compiling futures-task v0.3.34
+   Compiling futures-util v0.3.34
+   Compiling zerovec v0.11.8
+   Compiling serde v1.0.229
+   Compiling tokio-util v0.7.20
+   Compiling tinystr v0.8.4
+   Compiling litemap v0.8.3
+   Compiling writeable v0.6.4
+   Compiling icu_locale_core v2.3.0
+   Compiling h2 v0.4.20
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling utf8_iter v1.0.4
+   Compiling hyper v1.12.0
+   Compiling icu_collections v2.3.0
+   Compiling icu_provider v2.3.1
+   Compiling icu_normalizer_data v2.3.0
+   Compiling hyper-util v0.1.21
+   Compiling icu_properties_data v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling tower v0.5.3
+   Compiling thiserror v2.0.21
+   Compiling idna_adapter v1.2.2
+   Compiling axum-core v0.4.5
+   Compiling axum v0.7.9
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-common)
+   Compiling idna v1.1.0
+   Compiling tower v0.4.13
+   Compiling hyper-timeout v0.5.2
+   Compiling tokio-stream v0.1.19
+   Compiling tonic v0.12.3
+   Compiling thiserror v1.0.69
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-proto)
+   Compiling url v2.5.8
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-api)
+   Compiling futures-io v0.3.34
+   Compiling ipnet v2.12.2
+   Compiling tinyvec v1.13.3
+   Compiling data-encoding v2.11.1
+   Compiling linked-hash-map v0.5.6
+   Compiling lru-cache v0.1.2
+   Compiling hickory-proto v0.24.4
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-thrift)
+   Compiling fs-err v3.3.2
+   Compiling tokio-rustls v0.26.6
+   Compiling serde_urlencoded v0.7.1
+   Compiling resolv-conf v0.7.6
+   Compiling axum v0.8.9
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling hickory-resolver v0.24.4
+   Compiling axum-server v0.8.0
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-persistence)
+   Compiling clap v4.6.7
+   Compiling tonic-reflection v0.12.3
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 26s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target/debug/deps/cadence_server-fad39675bdf7b3f5)
+
+running 15 tests
+test ringpop_discovery::tests::dns_provider_matches_go_cache_errors_and_host_port_formatting ... ok
+test ringpop_discovery::tests::dns_provider_relooks_up_between_hosts_calls_and_propagates_bad_inputs ... ok
+test ringpop_discovery::tests::dns_srv_provider_preserves_targets_ipv6_and_trailing_dot_domain ... ok
+test ringpop_discovery::tests::dns_srv_provider_caches_by_service_only_and_requeries_each_call ... ok
+test ringpop_discovery::tests::file_matches_go_string_replacement_and_number_type_errors ... ok
+test ringpop_discovery::tests::file_reads_each_time_and_preserves_array_contents ... ok
+test ringpop_discovery::tests::malformed_utf8_outside_strings_remains_json_syntax_error ... ok
+test ringpop_discovery::tests::missing_file_is_io_error_and_config_selects_supported_provider ... ok
+test ringpop_discovery::tests::split_and_join_host_port_match_go_ipv6_and_string_port_rules ... ok
+test ringpop_discovery::tests::static_hosts_preserve_order_duplicates_and_strings ... ok
+test ringpop_discovery::tests::system_dns_literal_fast_path_matches_go_without_normalizing ... ok
+test ringpop_discovery::tests::system_lookup_matches_go_system_oracle ... ok
+test ringpop_discovery::tests::system_resolver_can_be_initialized_and_dropped_inside_tokio ... ok
+test ringpop_discovery::tests::system_srv_ordering_keeps_priority_and_rfc2782_weight_groups ... ok
+test ringpop_discovery::tests::matches_actual_go_provider_oracle_fixture ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.09s
+

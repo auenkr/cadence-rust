@@ -1,0 +1,23 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 00s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-e426148a/rust/target/debug/deps/cadence_server-fad39675bdf7b3f5)
+
+running 15 tests
+test ringpop_discovery::tests::dns_provider_matches_go_cache_errors_and_host_port_formatting ... ok
+test ringpop_discovery::tests::dns_provider_relooks_up_between_hosts_calls_and_propagates_bad_inputs ... ok
+test ringpop_discovery::tests::dns_srv_provider_preserves_targets_ipv6_and_trailing_dot_domain ... ok
+test ringpop_discovery::tests::dns_srv_provider_caches_by_service_only_and_requeries_each_call ... ok
+test ringpop_discovery::tests::file_reads_each_time_and_preserves_array_contents ... ok
+test ringpop_discovery::tests::file_matches_go_string_replacement_and_number_type_errors ... ok
+test ringpop_discovery::tests::malformed_utf8_outside_strings_remains_json_syntax_error ... ok
+test ringpop_discovery::tests::missing_file_is_io_error_and_config_selects_supported_provider ... ok
+test ringpop_discovery::tests::split_and_join_host_port_match_go_ipv6_and_string_port_rules ... ok
+test ringpop_discovery::tests::static_hosts_preserve_order_duplicates_and_strings ... ok
+test ringpop_discovery::tests::system_dns_literal_fast_path_matches_go_without_normalizing ... ok
+test ringpop_discovery::tests::system_lookup_matches_go_system_oracle ... ok
+test ringpop_discovery::tests::matches_actual_go_provider_oracle_fixture ... ok
+test ringpop_discovery::tests::system_srv_ordering_keeps_priority_and_rfc2782_weight_groups ... ok
+test ringpop_discovery::tests::system_resolver_can_be_initialized_and_dropped_inside_tokio ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.05s
+

@@ -1,0 +1,55 @@
+    Checking tokio v1.53.3
+    Checking tokio-util v0.7.20
+    Checking h2 v0.4.20
+    Checking hyper v1.12.0
+    Checking hyper-util v0.1.21
+    Checking tower v0.5.3
+    Checking axum v0.7.9
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-common)
+    Checking tower v0.4.13
+    Checking hyper-timeout v0.5.2
+    Checking tokio-stream v0.1.19
+    Checking tonic v0.12.3
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-proto)
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-api)
+    Checking hickory-proto v0.24.4
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-thrift)
+    Checking fs-err v3.3.2
+    Checking tokio-rustls v0.26.6
+    Checking axum-server v0.8.0
+    Checking axum v0.8.9
+    Checking hickory-resolver v0.24.4
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-persistence)
+    Checking tonic-reflection v0.12.3
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+error: unneeded `return` statement
+   --> crates/cadence-server/src/ringpop_discovery.rs:226:13
+    |
+226 | /             return thread::spawn(move || lookup_host_getaddrinfo(&host))
+227 | |                 .join()
+228 | |                 .map_err(|_| DnsLookupError::Other("resolver thread panicked".into()))?;
+    | |_______________________________________________________________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_return
+    = note: `-D clippy::needless-return` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::needless_return)]`
+help: remove `return`
+    |
+226 ~             thread::spawn(move || lookup_host_getaddrinfo(&host))
+227 +                 .join()
+228 ~                 .map_err(|_| DnsLookupError::Other("resolver thread panicked".into()))?
+    |
+
+error: this `let...else` may be rewritten with the `?` operator
+   --> crates/cadence-server/src/ringpop_discovery.rs:367:5
+    |
+367 | /     let Some((address, zone)) = host.split_once('%') else {
+368 | |         return None;
+369 | |     };
+    | |______^ help: replace it with: `let (address, zone) = host.split_once('%')?;`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#question_mark
+    = note: `-D clippy::question-mark` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::question_mark)]`
+
+error: could not compile `cadence-server` (lib) due to 2 previous errors

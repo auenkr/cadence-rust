@@ -1,0 +1,23 @@
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> crates/cadence-server/src/ringpop_discovery.rs:772:25
+    |
+772 | ...s: Mutex<HashMap<String, VecDeque<Result<Vec<String>, DnsLookupError>>>>,
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity
+    = note: `-D clippy::type-complexity` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> crates/cadence-server/src/ringpop_discovery.rs:773:24
+    |
+773 |   ...   srv_responses: Mutex<
+    |  ______________________^
+774 | | ...       HashMap<(String, String, String), VecDeque<Result<Vec<SrvRe...
+775 | | ...   >,
+    | |_______^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity
+
+error: could not compile `cadence-server` (lib test) due to 2 previous errors

@@ -116,3 +116,42 @@ Full final logs and exit markers are stored under
 `memory/evidence/ringpop-bootstrap-provider/parity-final-*`. This remains a
 provider/config compatibility slice; production discovery wiring, DNS/SRV,
 readiness/lifecycle, and mixed Go/Rust Matching validation are still open.
+
+## DNS and DNS-SRV provider implementation (2026-10-19)
+
+`ringpop_discovery` now has injectable DNS and DNS-SRV providers with per-`Hosts`
+successful-answer caches, Go's randomized set-based seed traversal, host/port
+formatting, not-found suppression, target lookup error behavior, SRV priority
+and weighted ordering, and the Go SRV cache's service-name-only key quirk.
+`Provider::from_config` selects both modes. Fake resolver cases are checked
+against the pinned Go factory through `tests/run-ringpop-bootstrap-provider-oracle.py`
+and `tests/fixtures/ringpop_dns_provider.json`.
+
+On Linux, ordinary host lookups use libc `getaddrinfo` with Go's cgo flags
+(`AF_UNSPEC`, `SOCK_STREAM`, `AI_CANONNAME|AI_V4MAPPED|AI_ALL`, no
+`AI_ADDRCONFIG`), retain libc's returned order and duplicates, and map IPv6
+scope IDs to interface names. IP literals are returned unchanged, including
+scoped IPv6. Hickory 0.24.4 handles SRV queries; its resolver is initialized and
+queried on a blocking thread, has answer caching disabled, and is dropped off
+any active Tokio runtime.
+
+This does not establish universal Go resolver parity. Linux libc matches Go's
+cgo path and therefore follows the host's NSS services. Go can instead select
+its pure-Go resolver through `netgo`, `GODEBUG=netdns=go`, platform rules, or
+recognized NSS configuration; Rust has no corresponding Go resolver-selection
+switch. Non-Linux host lookups currently use Hickory and do not implement all
+platform NSS behavior. Hickory's cached SRV resolver configuration also does
+not yet reload changed system resolver settings; Go's resolver polls/reloads
+system DNS configuration. These remain explicit audit gaps. The provider is
+also not yet wired into Matching's runtime lifecycle; mixed Go/Rust service
+validation, restart/recovery, and end-to-end SDK workflows remain required
+before declaring Matching complete.
+
+Final focused Rust provider tests pass (15 tests), including a Tokio lifecycle test.
+The machine-specific Go/Rust Linux localhost/literal comparison passes through
+`tests/run-linux-system-lookup-parity.py`; strict `cadence-server` all-target
+Clippy and the actual pinned-Go provider/DNS oracle also pass. Exact final source,
+commands, logs, exits, hashes, and resolver limitations are recorded in
+`memory/evidence/ringpop-dns-provider/final.md`. These checks validate this
+provider slice only; runtime wiring, mixed service validation, restart/recovery,
+and SDK workflows remain open.

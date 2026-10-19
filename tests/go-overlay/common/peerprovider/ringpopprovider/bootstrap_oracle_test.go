@@ -1,10 +1,13 @@
 package ringpopprovider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/uber/cadence/common/log/testlogger"
@@ -184,6 +187,162 @@ func TestBootstrapProviderActualOracle(t *testing.T) {
 		t.Fatal(err)
 	}
 	fmt.Printf("BOOTSTRAP_PROVIDER_ORACLE=%s\n", b)
+}
+
+type dnsOracleResolver struct {
+	hostAnswers map[string][][]string
+	hostErrors  map[string]error
+	hostCalls   []string
+	srvAnswers map[string][]*net.SRV
+	srvErrors  map[string]error
+	srvCalls   []map[string]string
+}
+
+func (r *dnsOracleResolver) LookupHost(_ context.Context, host string) ([]string, error) {
+	r.hostCalls = append(r.hostCalls, host)
+	if err := r.hostErrors[host]; err != nil {
+		return nil, err
+	}
+	answers := r.hostAnswers[host]
+	if len(answers) == 0 {
+		return nil, fmt.Errorf("Host was not resolved: %s", host)
+	}
+	answerIndex := 0
+	for _, prior := range r.hostCalls[:len(r.hostCalls)-1] {
+		if prior == host {
+			answerIndex++
+		}
+	}
+	if answerIndex >= len(answers) {
+		answerIndex = len(answers) - 1
+	}
+	return answers[answerIndex], nil
+}
+
+func (r *dnsOracleResolver) LookupSRV(_ context.Context, service, proto, name string) (string, []*net.SRV, error) {
+	r.srvCalls = append(r.srvCalls, map[string]string{"service": service, "proto": proto, "name": name})
+	if err := r.srvErrors[service]; err != nil {
+		return "", nil, err
+	}
+	answers, ok := r.srvAnswers[service]
+	if !ok {
+		return "", nil, fmt.Errorf("Host was not resolved: %s", service)
+	}
+	return "oracle", answers, nil
+}
+
+func TestDiscoveryDNSActualOracle(t *testing.T) {
+	logger := testlogger.New(t)
+	result := map[string]any{}
+	resolver := &dnsOracleResolver{hostAnswers: map[string][][]string{
+		"seed.example.net": {{"10.0.0.1", "2001:db8::1", "10.0.0.1"}},
+	},}
+	provider := newDNSProvider([]string{"seed.example.net:1111", "seed.example.net:2222", "seed.example.net:1111"}, resolver, logger)
+	addresses, err := provider.Hosts()
+	if err != nil { t.Fatal(err) }
+	sort.Strings(addresses)
+	result["dnsSuccess"] = map[string]any{"addresses": addresses, "hostCallCount": len(resolver.hostCalls)}
+
+	resolver = &dnsOracleResolver{hostAnswers: map[string][][]string{"2001:db8::1": {{"2001:db8::1"}}}}
+	provider = newDNSProvider([]string{"[2001:db8::1]:0007"}, resolver, logger)
+	addresses, err = provider.Hosts()
+	if err != nil { t.Fatal(err) }
+	result["dnsIpv6Seed"] = addresses
+
+	notFound := &net.DNSError{Err: "no such host", Name: "missing.example.net", IsNotFound: true}
+	resolver = &dnsOracleResolver{hostErrors: map[string]error{"missing.example.net": notFound}}
+	provider = newDNSProvider([]string{"missing.example.net:1", "missing.example.net:2"}, resolver, logger)
+	addresses, err = provider.Hosts()
+	if err != nil { t.Fatal(err) }
+	result["dnsNotFound"] = map[string]any{"addresses": addresses, "hostCallCount": len(resolver.hostCalls)}
+
+	resolver = &dnsOracleResolver{hostAnswers: map[string][][]string{"empty.example.net": {nil}}}
+	provider = newDNSProvider([]string{"empty.example.net:1", "empty.example.net:2"}, resolver, logger)
+	addresses, err = provider.Hosts()
+	if err != nil { t.Fatal(err) }
+	result["dnsEmptySuccess"] = map[string]any{"addresses": addresses, "hostCallCount": len(resolver.hostCalls)}
+
+	resolver = &dnsOracleResolver{hostAnswers: map[string][][]string{"again.example.net": {{"10.1.0.1"}, {"10.1.0.2"}}}}
+	provider = newDNSProvider([]string{"again.example.net:99"}, resolver, logger)
+	first, err := provider.Hosts(); if err != nil { t.Fatal(err) }
+	second, err := provider.Hosts(); if err != nil { t.Fatal(err) }
+	result["dnsAcrossCalls"] = map[string]any{"first": first, "second": second, "hostCallCount": len(resolver.hostCalls)}
+
+	resolver = &dnsOracleResolver{hostErrors: map[string]error{"bad.example.net": fmt.Errorf("temporary resolver failure")}}
+	provider = newDNSProvider([]string{"bad.example.net:8"}, resolver, logger)
+	_, err = provider.Hosts()
+	if err == nil { t.Fatal("expected non-not-found DNS failure") }
+	result["dnsOtherError"] = err.Error()
+
+	resolver = &dnsOracleResolver{srvAnswers: map[string][]*net.SRV{"api": {
+		{Target: "v4.example.net.", Port: 7755, Priority: 1, Weight: 1},
+		{Target: "missing.example.net.", Port: 7000, Priority: 1, Weight: 1},
+		{Target: "v6.example.net.", Port: 7566, Priority: 2, Weight: 1},
+	}}, hostAnswers: map[string][][]string{
+		"v4.example.net.": {{"10.0.0.1", "10.0.0.2"}},
+		"v6.example.net.": {{"2001:db8::2"}},
+	}, hostErrors: map[string]error{"missing.example.net.": notFound}}
+	providerSRV := newDNSSRVProvider([]string{"api.example.net."}, resolver, logger)
+	addresses, err = providerSRV.Hosts()
+	if err != nil { t.Fatal(err) }
+	result["srvSuccess"] = map[string]any{"addresses": addresses, "srvCalls": resolver.srvCalls}
+
+	resolver = &dnsOracleResolver{srvErrors: map[string]error{"missing": notFound}}
+	providerSRV = newDNSSRVProvider([]string{"missing.example.net"}, resolver, logger)
+	_, err = providerSRV.Hosts()
+	if err == nil { t.Fatal("expected SRV lookup failure") }
+	result["srvLookupError"] = err.Error()
+
+	providerSRV = newDNSSRVProvider([]string{"short.name"}, &dnsOracleResolver{}, logger)
+	_, err = providerSRV.Hosts()
+	if err == nil { t.Fatal("expected malformed SRV seed") }
+	result["srvMalformedSeed"] = err.Error()
+
+	resolver = &dnsOracleResolver{srvAnswers: map[string][]*net.SRV{"api": {
+		{Target: "good.example.net.", Port: 7001}, {Target: "bad.example.net.", Port: 7002},
+	}}, hostAnswers: map[string][][]string{"good.example.net.": {{"10.2.0.1"}}},
+		hostErrors: map[string]error{"bad.example.net.": fmt.Errorf("temporary target failure")}}
+	providerSRV = newDNSSRVProvider([]string{"api.example.net"}, resolver, logger)
+	_, err = providerSRV.Hosts()
+	if err == nil { t.Fatal("expected target lookup failure") }
+	result["srvTargetError"] = err.Error()
+
+	resolver = &dnsOracleResolver{srvAnswers: map[string][]*net.SRV{
+		"api": {{Target: "one.example.", Port: 80}},
+	}, hostAnswers: map[string][][]string{
+		"one.example.": {{"10.3.0.1"}}, "two.example.": {{"10.3.0.2"}},
+	}}
+	providerSRV = newDNSSRVProvider([]string{"api.one.example", "api.two.example"}, resolver, logger)
+	addresses, err = providerSRV.Hosts()
+	if err != nil { t.Fatal(err) }
+	allowed := equalStringSlices(addresses, []string{"10.3.0.1:80", "10.3.0.1:80"}) || equalStringSlices(addresses, []string{"10.3.0.2:80", "10.3.0.2:80"})
+	if !allowed || len(resolver.srvCalls) != 1 { t.Fatalf("service-only cache semantics: hosts=%v calls=%v", addresses, resolver.srvCalls) }
+	result["srvServiceOnlyCacheValidated"] = true
+
+	b, err := json.Marshal(result)
+	if err != nil { t.Fatal(err) }
+	fmt.Printf("DNS_PROVIDER_ORACLE=%s\n", b)
+}
+
+// TestSystemLookupHostOracle supplies this machine's actual Go resolver
+// results to the Rust/Linux resolver parity test. The result is deliberately
+// not a checked-in fixture because NSS, /etc/hosts, and interface names vary.
+func TestSystemLookupHostOracle(t *testing.T) {
+	localhost, err := net.DefaultResolver.LookupHost(context.Background(), "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	literal := "2001:0db8::1"
+	literalResult, err := net.DefaultResolver.LookupHost(context.Background(), literal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := map[string][]string{"localhost": localhost, "literal": literalResult}
+	b, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("SYSTEM_LOOKUP_HOST_ORACLE=%s\n", b)
 }
 
 func equalStringSlices(a, b []string) bool {

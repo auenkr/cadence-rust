@@ -1,0 +1,13 @@
+=== RUN   TestSystemLookupHostOracle
+SYSTEM_LOOKUP_HOST_ORACLE={"literal":["2001:0db8::1"],"localhost":["127.0.0.1"]}
+--- PASS: TestSystemLookupHostOracle (0.00s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.038s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.02s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-fad39675bdf7b3f5)
+
+running 1 test
+test ringpop_discovery::tests::system_lookup_matches_go_system_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 228 filtered out; finished in 0.00s
+
