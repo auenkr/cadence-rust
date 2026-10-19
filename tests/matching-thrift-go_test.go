@@ -18,6 +18,11 @@ import (
 	"github.com/uber/cadence/.gen/go/matching/matchingserviceclient"
 	s "github.com/uber/cadence/.gen/go/shared"
 	"github.com/uber/cadence/common"
+	"github.com/uber/cadence/common/config"
+	"github.com/uber/cadence/common/log"
+	p "github.com/uber/cadence/common/persistence"
+	"github.com/uber/cadence/common/persistence/serialization"
+	sqlstore "github.com/uber/cadence/common/persistence/sql"
 	"go.uber.org/yarpc"
 	"go.uber.org/yarpc/api/transport"
 	yhttp "go.uber.org/yarpc/transport/http"
@@ -129,9 +134,23 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Insert an earlier task ID through Go's configured SQL TaskStore.
+			// Rust must poll and start this row, proving Go-to-Rust task delivery
+			// over the same configured database (the Rust-created row remains queued).
+			if path := os.Getenv("CADENCE_MATCHING_SQLITE_DB"); path != "" {
+				insertGoQueuedActivityTask(t, path, domainID, list.GetName(), workflowID, run.GetRunId(), scheduleID)
+			}
 			activity, err := matching.PollForActivityTask(ctx, &m.PollForActivityTaskRequest{DomainUUID: common.StringPtr(domainID), PollerID: common.StringPtr(uuid.NewString()), PollRequest: &s.PollForActivityTaskRequest{TaskList: list, Identity: common.StringPtr("activity-worker"), TaskListMetadata: &s.TaskListMetadata{MaxTasksPerSecond: common.Float64Ptr(50)}}})
 			if err != nil || string(activity.Input) != "input" || activity.GetActivityId() != "activity" {
 				t.Fatalf("activity delivery: %v %v", activity, err)
+			}
+			if path := os.Getenv("CADENCE_MATCHING_SQLITE_DB"); path != "" {
+				assertGoQueuedActivityTaskConsumed(t, path, domainID, list.GetName())
+			}
+			if verifyPath := os.Getenv("CADENCE_MATCHING_VERIFY_TASK_LIST"); verifyPath != "" {
+				if err := os.WriteFile(verifyPath, []byte(domainID+"\n"+list.GetName()+"\n"), 0600); err != nil {
+					t.Fatalf("write configured task-list verification input: %v", err)
+				}
 			}
 			lists, err := matching.GetTaskListsByDomain(ctx, &s.GetTaskListsByDomainRequest{DomainName: common.StringPtr(domain)})
 			if err != nil || lists.DecisionTaskListMap[list.GetName()] == nil || lists.ActivityTaskListMap[list.GetName()] == nil {
@@ -239,6 +258,62 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			}
 			fmt.Println("Verified all ten native Matching Thrift methods via", mode)
 		})
+	}
+}
+
+func insertGoQueuedActivityTask(t *testing.T, path, domainID, taskList, workflowID, runID string, scheduleID int64) {
+	t.Helper()
+	dc := p.NewDefaultDynamicConfiguration()
+	parser, err := serialization.NewParser(dc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := sqlstore.NewFactory(config.SQL{PluginName: "sqlite", DatabaseName: path, NumShards: 1, MaxConns: 1, MaxIdleConns: 1, MaxConnLifetime: time.Hour}, "cluster0", log.NewNoop(), parser, dc)
+	store, err := factory.NewTaskStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	metadata, err := store.GetTaskList(ctx, &p.GetTaskListRequest{DomainID: domainID, TaskList: taskList, TaskType: 1})
+	if err != nil {
+		t.Fatalf("Go TaskStore could not load Rust-created activity task list: %v", err)
+	}
+	_, err = store.CreateTasks(ctx, &p.CreateTasksRequest{
+		TaskListInfo:     metadata.TaskListInfo,
+		CurrentTimeStamp: time.Now(),
+		Tasks: []*p.CreateTaskInfo{{TaskID: 0, Data: &p.TaskInfo{
+			DomainID: domainID, WorkflowID: workflowID, RunID: runID, ScheduleID: scheduleID,
+			ScheduleToStartTimeoutSeconds: 30, ScheduleToCloseTimeoutSeconds: 30,
+			StartToCloseTimeoutSeconds: 30,
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("Go TaskStore could not enqueue activity task for Rust Matching: %v", err)
+	}
+}
+
+func assertGoQueuedActivityTaskConsumed(t *testing.T, path, domainID, taskList string) {
+	t.Helper()
+	dc := p.NewDefaultDynamicConfiguration()
+	parser, err := serialization.NewParser(dc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := sqlstore.NewFactory(config.SQL{PluginName: "sqlite", DatabaseName: path, NumShards: 1, MaxConns: 1, MaxIdleConns: 1, MaxConnLifetime: time.Hour}, "cluster0", log.NewNoop(), parser, dc)
+	store, err := factory.NewTaskStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	tasks, err := store.GetTasks(context.Background(), &p.GetTasksRequest{DomainID: domainID, TaskList: taskList, TaskType: 1, ReadLevel: -1, BatchSize: 100})
+	if err != nil {
+		t.Fatalf("Go TaskStore could not inspect Rust's post-poll queue: %v", err)
+	}
+	for _, task := range tasks.Tasks {
+		if task.TaskID == 0 {
+			t.Fatal("Go-enqueued task ID 0 remains queued after Rust Matching delivered the activity")
+		}
 	}
 }
 

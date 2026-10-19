@@ -8,6 +8,10 @@ use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
+    #[error("unsupported SQLite task-store configuration: {0}")]
+    UnsupportedConfiguration(String),
+    #[error("incompatible Go SQLite Matching schema: {0}")]
+    IncompatibleSchema(String),
     #[error("{0}")]
     ConditionFailed(String),
     #[error("task list does not exist")]
@@ -46,14 +50,126 @@ pub struct SqliteTaskStore {
     encoding: BlobEncoding,
 }
 impl SqliteTaskStore {
+    fn validate_schema(connection: &Connection) -> Result<()> {
+        // These SELECTs verify every column used by Matching queue operations.
+        // Task expiry and task-list last-updated timestamps live in the Thrift
+        // `data` blobs in Go's SQLite schema; there are no SQL datetime columns
+        // in either table, so `_timefmt` does not encode those fields.
+        connection.prepare("SELECT shard_id, domain_id, name, task_type, range_id, data, data_encoding FROM task_lists LIMIT 0")?;
+        connection.prepare("SELECT domain_id, task_list_name, task_type, task_id, data, data_encoding FROM tasks LIMIT 0")?;
+
+        for (table, pragma, expected) in [
+            (
+                "task_lists",
+                "PRAGMA table_info(task_lists)",
+                &["shard_id", "domain_id", "name", "task_type"][..],
+            ),
+            (
+                "tasks",
+                "PRAGMA table_info(tasks)",
+                &["domain_id", "task_list_name", "task_type", "task_id"][..],
+            ),
+        ] {
+            let mut statement = connection.prepare(pragma)?;
+            let columns = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let mut keys = columns
+                .into_iter()
+                .filter(|(_, primary_key_order)| *primary_key_order > 0)
+                .collect::<Vec<_>>();
+            keys.sort_by_key(|(_, order)| *order);
+            let actual = keys.into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+            let matches = actual.len() == expected.len()
+                && actual
+                    .iter()
+                    .zip(expected)
+                    .all(|(actual, expected)| actual == expected);
+            if !matches {
+                return Err(StorageError::IncompatibleSchema(format!(
+                    "{table} primary key is {actual:?}, expected {expected:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Open a database whose Cadence schema was already installed. No schema
     /// changes or execution-store access occur here.
     pub fn open(path: impl AsRef<Path>, encoding: BlobEncoding) -> Result<Self> {
         let connection =
             Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         connection.busy_timeout(Duration::from_secs(10))?;
-        connection.prepare("SELECT shard_id, domain_id, name, task_type, range_id, data, data_encoding FROM task_lists LIMIT 0")?;
-        connection.prepare("SELECT domain_id, task_list_name, task_type, task_id, data, data_encoding FROM tasks LIMIT 0")?;
+        Self::validate_schema(&connection)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+            encoding,
+        })
+    }
+
+    /// Open the configured Go SQLite task store. The database name is passed
+    /// through Go's `file:<databaseName>?mode=<mode>` URI boundary; callers
+    /// validate connect attributes and supply the effective Go defaults.
+    /// Unlike `create`, this never installs a partial Cadence schema.
+    pub fn open_with_go_sqlite_options(
+        database_name: &str,
+        encoding: BlobEncoding,
+        mode: &str,
+        busy_timeout: Duration,
+        journal_mode: &str,
+    ) -> Result<Self> {
+        if busy_timeout.as_millis() > i32::MAX as u128 {
+            return Err(StorageError::UnsupportedConfiguration(
+                "busy timeout exceeds SQLite's supported millisecond range".into(),
+            ));
+        }
+        let (uri_mode, flags) = match mode {
+            "rw" => ("rw", rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE),
+            "rwc" => (
+                "rwc",
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+            ),
+            "ro" => {
+                return Err(StorageError::UnsupportedConfiguration(
+                    "mode=ro cannot be used for Matching task persistence".into(),
+                ));
+            }
+            _ => {
+                return Err(StorageError::UnsupportedConfiguration(format!(
+                    "unsupported SQLite URI mode {mode:?}"
+                )));
+            }
+        };
+        let journal_mode = journal_mode.to_ascii_lowercase();
+        if !matches!(
+            journal_mode.as_str(),
+            "delete" | "truncate" | "persist" | "memory" | "wal" | "off"
+        ) {
+            return Err(StorageError::UnsupportedConfiguration(format!(
+                "unsupported SQLite journal_mode {journal_mode:?}"
+            )));
+        }
+        let uri = format!("file:{database_name}?mode={uri_mode}");
+        let connection =
+            Connection::open_with_flags(uri, flags | rusqlite::OpenFlags::SQLITE_OPEN_URI)?;
+        connection.busy_timeout(busy_timeout)?;
+        // journal_mode is selected from SQLite's closed set above, so it is
+        // safe to include as a PRAGMA token. Go applies this on every pool
+        // connection when it opens the configured SQLite datastore.
+        let actual_mode: String = connection.query_row(
+            &format!("PRAGMA journal_mode = {journal_mode}"),
+            [],
+            |row| row.get(0),
+        )?;
+        if !actual_mode.eq_ignore_ascii_case(&journal_mode) {
+            return Err(StorageError::UnsupportedConfiguration(format!(
+                "SQLite requested journal_mode {journal_mode:?}, opened as {actual_mode:?}"
+            )));
+        }
+        Self::validate_schema(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
             encoding,
@@ -343,6 +459,66 @@ mod tests {
             vec![task(1), task(3)]
         );
     }
+
+    #[test]
+    fn configured_go_sqlite_open_uses_shared_schema_and_writer_options() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cadence.sqlite");
+        drop(SqliteTaskStore::create(&path, BlobEncoding::ThriftRWSnappy).unwrap());
+        let store = SqliteTaskStore::open_with_go_sqlite_options(
+            path.to_str().unwrap(),
+            BlobEncoding::ThriftRWSnappy,
+            "rw",
+            Duration::from_millis(2400),
+            "WAL",
+        )
+        .unwrap();
+        let observer = Connection::open(&path).unwrap();
+        let journal_mode: String = observer
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+        drop(observer);
+        drop(store);
+    }
+
+    #[test]
+    fn configured_go_sqlite_open_rejects_read_only_task_store_mode() {
+        assert!(matches!(
+            SqliteTaskStore::open_with_go_sqlite_options(
+                "missing.sqlite",
+                BlobEncoding::ThriftRWSnappy,
+                "ro",
+                Duration::from_secs(60),
+                "wal",
+            ),
+            Err(StorageError::UnsupportedConfiguration(_))
+        ));
+    }
+
+    #[test]
+    fn configured_go_sqlite_open_rejects_incompatible_queue_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("wrong-schema.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE task_lists (shard_id INT, domain_id BLOB, name TEXT, task_type INT, range_id INT, data BLOB, data_encoding TEXT, PRIMARY KEY(domain_id, name, task_type));
+                 CREATE TABLE tasks (domain_id BLOB, task_list_name TEXT, task_type INT, task_id INT, data BLOB, data_encoding TEXT, PRIMARY KEY(domain_id, task_list_name, task_type, task_id));",
+            )
+            .unwrap();
+        drop(connection);
+        assert!(matches!(
+            SqliteTaskStore::open_with_go_sqlite_options(
+                path.to_str().unwrap(),
+                BlobEncoding::ThriftRWSnappy,
+                "rw",
+                Duration::from_secs(60),
+                "wal",
+            ),
+            Err(StorageError::IncompatibleSchema(_))
+        ));
+    }
     #[test]
     fn matching_sqlite_atomic_batches_bounds_expiry_and_deletes() {
         let directory = tempfile::tempdir().unwrap();
@@ -380,16 +556,30 @@ mod tests {
     #[test]
     fn matching_sqlite_preserves_go_signed_limit_behavior() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteTaskStore::create(directory.path().join("signed-limit.db"), BlobEncoding::ThriftRW).unwrap();
+        let store = SqliteTaskStore::create(
+            directory.path().join("signed-limit.db"),
+            BlobEncoding::ThriftRW,
+        )
+        .unwrap();
         let key = key("signed-limit");
         store.lease(&key, 0, 0, 10).unwrap();
-        store.create_tasks(&key, 1, &[task(1), task(2), task(3)]).unwrap();
-        assert!(matches!(store.complete_tasks_less_than(&key, 3, 0), Err(StorageError::MissingLimit)));
+        store
+            .create_tasks(&key, 1, &[task(1), task(2), task(3)])
+            .unwrap();
+        assert!(matches!(
+            store.complete_tasks_less_than(&key, 3, 0),
+            Err(StorageError::MissingLimit)
+        ));
         assert_eq!(store.task_list_size(&key, 0).unwrap(), 3);
         assert_eq!(store.complete_tasks_less_than(&key, 3, -1).unwrap(), 3);
         assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
         store.create_tasks(&key, 1, &[task(4), task(5)]).unwrap();
-        assert_eq!(store.complete_tasks_less_than(&key, 5, i64::from(u32::MAX) + 1).unwrap(), 2);
+        assert_eq!(
+            store
+                .complete_tasks_less_than(&key, 5, i64::from(u32::MAX) + 1)
+                .unwrap(),
+            2
+        );
     }
     #[test]
     fn matching_sqlite_namespaces_and_task_types_are_isolated() {

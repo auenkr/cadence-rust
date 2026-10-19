@@ -194,11 +194,23 @@ with (artifacts / 'server.log').open('w') as log:
                 if time.monotonic() >= deadline:
                     raise RuntimeError('Rust Matching listener did not start')
                 time.sleep(0.1)
+        verify_task_list = artifacts / 'rust-configured-task-list.txt'
+        verify_task_list.unlink(missing_ok=True)
         subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
                         '-run', '^TestRustMatchingNativeThrift$', '-count=1', '-v'], cwd=root / 'go', check=True, timeout=180,
                        env={**os.environ, 'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
                             'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
-                            'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{matching_http}/matching'})
+                            'CADENCE_MATCHING_HTTP': f'http://127.0.0.1:{matching_http}/matching',
+                            'CADENCE_MATCHING_SQLITE_DB': str(domain_database),
+                            'CADENCE_MATCHING_VERIFY_TASK_LIST': str(verify_task_list)})
+        domain_id, task_list = verify_task_list.read_text().splitlines()
+        subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './common/persistence/sql',
+                        '-run', '^TestRustMatchingSQLiteInterop$', '-count=1', '-v'],
+                       cwd=root / 'go', check=True, timeout=180,
+                       env={**domain_sql_env, 'CADENCE_MATCHING_SQLITE_PHASE': 'verify-configured-matching',
+                            'CADENCE_MATCHING_VERIFY_TASK_LIST': f'{domain_id}\n{task_list}'})
+        if (artifacts / 'data' / 'matching.db').exists():
+            raise RuntimeError('explicit production config created private --data-dir/matching.db instead of using defaultStore')
         ready = artifacts / 'failover-poll.ready'
         failover_written = artifacts / 'go-failover.ready'
         poll_env = {**os.environ, 'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',

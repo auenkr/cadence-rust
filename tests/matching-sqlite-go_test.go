@@ -5,6 +5,7 @@ import (
 	stdsql "database/sql"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,7 +45,23 @@ func TestRustMatchingSQLiteInterop(t *testing.T) {
 	run := "00000000-0000-0000-0000-000000000002"
 	now := time.Unix(0, 1700000000123456789)
 	source := "00000000-0000-0000-0000-000000000003"
-	if os.Getenv("CADENCE_MATCHING_SQLITE_PHASE") == "seed" {
+	phase := os.Getenv("CADENCE_MATCHING_SQLITE_PHASE")
+	if phase == "verify-configured-matching" {
+		encoded := os.Getenv("CADENCE_MATCHING_VERIFY_TASK_LIST")
+		domainID, taskList, ok := strings.Cut(encoded, "\n")
+		if !ok || domainID == "" || taskList == "" {
+			t.Fatalf("configured Matching verification requires domain and task-list names, got %q", encoded)
+		}
+		got, err := store.GetTaskList(ctx, &p.GetTaskListRequest{DomainID: domainID, TaskList: taskList, TaskType: 1})
+		if err != nil {
+			t.Fatalf("Go TaskStore could not read task list written by configured Rust Matching: %v", err)
+		}
+		if got.TaskListInfo == nil {
+			t.Fatal("Go TaskStore returned no task-list metadata for the Rust-written queue")
+		}
+		return
+	}
+	if phase == "seed" {
 		cross, err := store.LeaseTaskList(ctx, &p.LeaseTaskListRequest{DomainID: domain, TaskList: "cross-domain", CurrentTimeStamp: now})
 		if err != nil {
 			t.Fatal(err)

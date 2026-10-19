@@ -784,15 +784,42 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            // Explicit production config starts the durable cache before
-            // Matching, while no-config embedded mode retains the in-memory
-            // behavior and does not pretend that Cassandra is implemented.
+            // Explicit production config starts the shared metadata cache and
+            // opens Matching queues on the configured defaultStore. The
+            // private data-dir database is only an embedded-development path.
             let mut matching_runtime = if run_matching {
                 let drain = cadence_server::matching_runtime::live_shutdown_drain_duration(
                     state.admin.dynamic_config.clone(),
                 );
-                Some(match data_dir.as_ref() {
-                    Some(dir) => {
+                let source = cadence_server::matching_task_store::select_source(
+                    embedded_development,
+                    data_dir.as_deref(),
+                );
+                Some(match source {
+                    cadence_server::matching_task_store::MatchingTaskStoreSource::ConfiguredDefaultStore => {
+                        let store = cadence_server::matching_task_store::SqliteTaskStoreConfig::from_default_store(&cfg.persistence)?.open_store()?;
+                        let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
+                        let history_channel = tonic::transport::Endpoint::from_shared(history_peer)?
+                            .connect_lazy();
+                        let history = cadence_server::matching_history::MatchingHistoryClient::new(
+                            history_channel,
+                            std::time::Duration::from_secs(1),
+                            32 * 1024 * 1024,
+                        );
+                        let cache = matching_domain_cache.clone().ok_or_else(|| {
+                            anyhow::anyhow!("configured Matching persistence requires its production domain cache")
+                        })?;
+                        cadence_server::matching_runtime::MatchingRuntime::with_durable_queues_and_domain_cache(
+                            state.clone(),
+                            store,
+                            history,
+                            std::num::NonZeroU32::new(100000).expect("task id range"),
+                            std::time::Duration::from_secs(60),
+                            drain,
+                            cache,
+                        ).await?
+                    }
+                    cadence_server::matching_task_store::MatchingTaskStoreSource::EmbeddedDataDir(dir) => {
                         let path = std::path::PathBuf::from(dir).join("matching.db");
                         let store = if path.exists() {
                             cadence_persistence::matching_sqlite::SqliteTaskStore::open(
@@ -835,7 +862,7 @@ async fn main() -> anyhow::Result<()> {
                             ),
                         }
                     }
-                    None => match matching_domain_cache.clone() {
+                    cadence_server::matching_task_store::MatchingTaskStoreSource::InMemory => match matching_domain_cache.clone() {
                         Some(cache) => cadence_server::matching_runtime::MatchingRuntime::in_memory_with_domain_cache(
                             state.clone(), drain, cache,
                         ).await?,

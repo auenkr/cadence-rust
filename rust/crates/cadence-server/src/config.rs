@@ -294,6 +294,12 @@ pub struct SqlConfig {
     pub connect_addr: String,
     #[serde(default, rename = "connectAttributes")]
     pub connect_attributes: HashMap<String, String>,
+    /// Go SQL persistence uses this for physical database routing. Matching's
+    /// current Rust task adapter supports only the single database case.
+    #[serde(default, rename = "nShards")]
+    pub n_shards: i32,
+    #[serde(default, rename = "useMultipleDatabases")]
+    pub use_multiple_databases: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

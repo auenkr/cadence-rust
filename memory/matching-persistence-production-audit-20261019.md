@@ -162,7 +162,36 @@ storage failures into retries without checking Go classification.
    boundary, since the Go factory supplies these around TaskManager operations
    (`go/common/persistence/client/factory.go:197-207`).
 
-This audit does not mark Matching complete. The strongest persistence result
-remains bidirectional interop with a single-shard Go SQLite database; current
-production queue construction still selects a separate SQLite file, and
-configured multi-shard SQL and Cassandra task persistence remain unported.
+## 2026-10-19 configured-store wiring follow-up (source frozen pending build slot)
+
+Runtime construction now resolves the explicit production
+`persistence.defaultStore` and uses its SQLite file for Matching task queues;
+the private `--data-dir/matching.db` and in-memory paths remain for embedded
+development only. The resolver carries Go SQLite's `rwc`, 60-second busy
+timeout, WAL, and fixed nanosecond time-format defaults, accepts only supported
+writer options, and rejects unsupported SQL plugins, NoSQL, multi-shard or
+multiple-database layouts, in-memory DBs, read-only mode, and unknown URI
+attributes. Opening the configured store validates Go task-list/task primary
+keys and required columns without installing any schema. `connectAddr` remains
+ignored as it is for Go's SQLite plugin.
+
+The mixed Go/Rust probe has been extended in source to use the configured DB
+for both directions: Go's TaskStore reads task-list metadata written by Rust,
+and Go's TaskStore inserts activity task ID 0 after Rust creates the matching
+queue. Rust's queue scan starts at read level -1 and queries `(read_level,
+max_read_level]`, so ID 0 is eligible and sorts before Rust's positive
+allocator IDs; after poll delivery, the Go TaskStore assertion checks that ID
+0 was consumed. The activity uses the valid scheduled event produced by the
+Go Frontend/History path. The compatibility runner passes the selected DB to
+the Go probe and checks that production startup did not create the private
+data-dir database.
+
+This follow-up is **source-only and unvalidated**: History currently owns the
+shared build slot, so no compile, build, or tests have run for this delta. The
+probe's consumed-row assertion and the Rust wiring must be exercised after the
+slot is released. Even when that passes, this is only evidence for one
+single-shard SQLite backend. It does not establish configured multi-shard SQL,
+Cassandra, every SQL plugin, or overall Matching service parity. Do not move
+to History migration until the configured-store probe, full Matching parity
+audit, and mixed Go/Rust failure/restart/recovery validation have reproducible
+passing evidence.
