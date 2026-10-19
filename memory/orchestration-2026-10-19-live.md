@@ -210,3 +210,20 @@ or accepted behavior. Parent review flagged start-after-stop/stop-before-start,
 concurrent/cancelled shutdown and first-snapshot waiter termination; worker
 correcting plus fake spectator server coverage, no build grant. No service
 completion claim. Root remains only user AGENTS dirty.
+
+## Concrete Ringpop provider accepted
+
+Merged validated fcad9c78e into rootb07398ac2. Root Rust source equals tested
+worker. Core hashes210514 and211342 equal; focused common/lifecycle11/
+provider4/Ringpop41 tests and strict common/server all-target Clippy pass.
+Final211342 detailed pinned Go log verifies first labels+ports, self-eviction,
+same-address restart with higher incarnation. Fixed harness race by explicit
+stdin phase acknowledgements; old timing-sleep failure retained. No main
+assembly/full mixed-service SDK claim. Root user AGENTS remains untouched.
+
+Build lane transferred to cache worker: rebase647f configured-store/harness
+chain onto b07398ac2, validate frozen combined source incl two-way Go queued
+tasks/prod native probe/options/schema/lint. SWIM source-only next audits
+remaining Ringpop healer/partition/bootstrap parity before new implementation.
+History source-only SD chain eecb1a1c9+2e713ebed remains unvalidated config/
+standalone owner only; no registry/main ownership wiring. Current free36GB.
