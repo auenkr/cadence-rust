@@ -1,0 +1,10 @@
+=== RUN   TestRustMatchingRingpopProviderGoPeerLifecycle
+    logger.go:146: 2026-10-19T21:07:58.598Z	INFO	Received a ringpop ring changed event	{"membership-change-event": {"HostsAdded":null,"HostsUpdated":null,"HostsRemoved":["127.0.0.1:43087"]}, "logging-call-at": "provider.go:185"}
+    logger.go:146: 2026-10-19T21:08:00.629Z	INFO	Received a ringpop ring changed event	{"membership-change-event": {"HostsAdded":["127.0.0.1:43087"],"HostsUpdated":null,"HostsRemoved":null}, "logging-call-at": "provider.go:185"}
+    logger.go:146: 2026-10-19T21:08:07.799Z	INFO	Received a ringpop ring changed event	{"membership-change-event": {"HostsAdded":null,"HostsUpdated":null,"HostsRemoved":["127.0.0.1:43087"]}, "logging-call-at": "provider.go:185"}
+    rust_provider_lifecycle_test.go:116: same-address Rust restart did not recover membership: got 0 members, want 1
+--- FAIL: TestRustMatchingRingpopProviderGoPeerLifecycle (40.00s)
+FAIL
+FAIL	github.com/uber/cadence/common/peerprovider/ringpopprovider	40.036s
+FAIL
+

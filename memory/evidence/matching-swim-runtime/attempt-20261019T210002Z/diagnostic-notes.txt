@@ -1,0 +1,1 @@
+This immutable attempt passed focused common tests, lifecycle 11/11, Matching provider Rust-Rust bootstrap/evict/restart 4/4, and Ringpop unit tests; strict Clippy found one `filter_map` simplification and two same-type libc flag casts. These are fixed in commit 61f480faa; mixed Go probe not run because fail-fast.

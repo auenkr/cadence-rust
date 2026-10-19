@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 4 tests
+test matching_ringpop_provider::tests::advertised_ip_score_matches_go_listen_ip_up_and_loopback_rules ... ok
+test matching_ringpop_provider::tests::local_label_update_publishes_an_accepted_membership_change ... ok
+test matching_ringpop_provider::tests::provider_snapshot_retains_other_roles_and_only_known_ports ... ok
+test matching_ringpop_provider::tests::two_shared_tchannel_providers_discover_roles_and_self_evict ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 0.08s
+

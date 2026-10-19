@@ -1,0 +1,6 @@
+=== RUN   TestRustMatchingRingpopProviderGoPeerLifecycle
+    logger.go:146: 2026-10-19T21:11:41.272Z	INFO	Received a ringpop ring changed event	{"membership-change-event": {"HostsAdded":null,"HostsUpdated":null,"HostsRemoved":["127.0.0.1:36759"]}, "logging-call-at": "provider.go:185"}
+    logger.go:146: 2026-10-19T21:11:41.298Z	INFO	Received a ringpop ring changed event	{"membership-change-event": {"HostsAdded":["127.0.0.1:36759"],"HostsUpdated":null,"HostsRemoved":null}, "logging-call-at": "provider.go:185"}
+--- PASS: TestRustMatchingRingpopProviderGoPeerLifecycle (0.15s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.186s

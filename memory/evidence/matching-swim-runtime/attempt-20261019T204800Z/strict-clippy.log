@@ -1,0 +1,68 @@
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-common)
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-api)
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-thrift)
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-persistence)
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+error: unused import: `ringpop_state_transitions::StateTimeouts`
+  --> crates/cadence-server/src/matching_ringpop_provider.rs:19:5
+   |
+19 |     ringpop_state_transitions::StateTimeouts,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `-D unused-imports` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(unused_imports)]`
+
+error: unused variable: `host`
+  --> crates/cadence-server/src/matching_peer_provider.rs:35:13
+   |
+35 |         let host = host_from_host_port(&self.address);
+   |             ^^^^ help: if this is intentional, prefix it with an underscore: `_host`
+   |
+   = note: `-D unused-variables` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(unused_variables)]`
+
+error: function `label_to_port` is never used
+  --> crates/cadence-server/src/matching_peer_provider.rs:68:4
+   |
+68 | fn label_to_port(label: &str) -> Option<u16> {
+   |    ^^^^^^^^^^^^^
+   |
+   = note: `-D dead-code` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: this `.filter_map(..)` can be written more simply using `.map(..)`
+   --> crates/cadence-server/src/matching_ringpop_provider.rs:147:14
+    |
+147 |               .filter_map(|member| {
+    |  ______________^
+148 | |                 let status = match member.status.as_str() {
+149 | |                     ALIVE => PeerStatus::Alive,
+150 | |                     SUSPECT => PeerStatus::Suspect,
+...   |
+174 | |                 })
+175 | |             })
+    | |______________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unnecessary_filter_map
+    = note: `-D clippy::unnecessary-filter-map` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_filter_map)]`
+
+error: casting to the same type is unnecessary (`i32` -> `i32`)
+   --> crates/cadence-server/src/matching_ringpop_provider.rs:400:29
+    |
+400 |                     flags & libc::IFF_LOOPBACK as i32 != 0,
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `libc::IFF_LOOPBACK`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unnecessary_cast
+    = note: `-D clippy::unnecessary-cast` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_cast)]`
+
+error: casting to the same type is unnecessary (`i32` -> `i32`)
+   --> crates/cadence-server/src/matching_ringpop_provider.rs:401:29
+    |
+401 |                     flags & libc::IFF_UP as i32 != 0,
+    |                             ^^^^^^^^^^^^^^^^^^^ help: try: `libc::IFF_UP`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unnecessary_cast
+
+error: could not compile `cadence-server` (lib) due to 6 previous errors

@@ -1,0 +1,68 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-common)
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+warning: unused import: `ringpop_state_transitions::StateTimeouts`
+  --> crates/cadence-server/src/matching_ringpop_provider.rs:19:5
+   |
+19 |     ringpop_state_transitions::StateTimeouts,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0308]: `match` arms have incompatible types
+   --> crates/cadence-server/src/ringpop_provider.rs:516:18
+    |
+496 |           match change.status.as_str() {
+    |           ---------------------------- `match` arms have incompatible types
+497 |               ALIVE | LEAVE => self.state_transitions.cancel(&change.address),
+    |                                ---------------------------------------------- this is found to be of type `bool`
+498 |               SUSPECT => self.state_transitions.schedule(
+    |  ________________________-
+499 | |                 change.address,
+500 | |                 change.incarnation,
+501 | |                 TransitionState::Suspect,
+502 | |                 self.monotonic_now_ns(),
+503 | |             ),
+    | |_____________- this is found to be of type `bool`
+504 |               FAULTY => self.state_transitions.schedule(
+    |  _______________________-
+505 | |                 change.address,
+506 | |                 change.incarnation,
+507 | |                 TransitionState::Faulty,
+508 | |                 self.monotonic_now_ns(),
+509 | |             ),
+    | |_____________- this is found to be of type `bool`
+510 |               TOMBSTONE => self.state_transitions.schedule(
+    |  __________________________-
+511 | |                 change.address,
+512 | |                 change.incarnation,
+513 | |                 TransitionState::Tombstone,
+514 | |                 self.monotonic_now_ns(),
+515 | |             ),
+    | |_____________- this is found to be of type `bool`
+516 |               _ => {}
+    |                    ^^ expected `bool`, found `()`
+
+warning: unused variable: `host`
+  --> crates/cadence-server/src/matching_peer_provider.rs:35:13
+   |
+35 |         let host = host_from_host_port(&self.address);
+   |             ^^^^ help: if this is intentional, prefix it with an underscore: `_host`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> crates/cadence-server/src/matching_ringpop_provider.rs:469:13
+    |
+469 |         let mut changes = node.subscribe_membership_changes();
+    |             ----^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0308`.
+warning: `cadence-server` (lib test) generated 3 warnings
+error: could not compile `cadence-server` (lib test) due to 1 previous error; 3 warnings emitted

@@ -1,0 +1,6 @@
+# github.com/uber/cadence/common/peerprovider/ringpopprovider [github.com/uber/cadence/common/peerprovider/ringpopprovider.test]
+../tests/go-overlay/common/peerprovider/ringpopprovider/rust_provider_lifecycle_test.go:40:15: assignment mismatch: 2 variables but net.SplitHostPort returns 3 values
+../tests/go-overlay/common/peerprovider/ringpopprovider/rust_provider_lifecycle_test.go:69:7: channel.Close() (no value) used as value
+FAIL	github.com/uber/cadence/common/peerprovider/ringpopprovider [build failed]
+FAIL
+

@@ -1,0 +1,1 @@
+The source-hash-frozen run failed in lifecycle mapping parity: for malformed address `[::1]x:7935` and valid grpc port, Rust returned empty endpoint while Go ignores SplitHostPort failure and formats `:80`. Production mapping now defaults the parsed host to empty before JoinHostPort; correction committed as 6984564a0. No downstream gates ran due fail-fast.

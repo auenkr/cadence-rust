@@ -1,0 +1,1 @@
+Frozen attempt failed after 10/11 lifecycle tests passed. The existing test helper eagerly parsed every grpc label as u16 and panicked on 65536; it now creates named_ports only for valid decimal u16 values, matching the provider boundary. This correction was committed after all processes exited as 925a3e436. No later gates were run because the runner failed fast.

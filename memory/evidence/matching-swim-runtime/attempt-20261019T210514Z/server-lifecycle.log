@@ -1,0 +1,19 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 44.76s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 11 tests
+test matching_membership_lifecycle::tests::cancelled_teardown_keeps_provider_stop_running ... ok
+test matching_membership_lifecycle::tests::cancelled_withdrawal_keeps_owned_eviction_running ... ok
+test matching_membership_lifecycle::tests::dropping_lifecycle_aborts_a_stuck_snapshot_worker ... ok
+test matching_membership_lifecycle::tests::failed_and_unchanged_snapshots_preserve_go_refresh_timestamp ... ok
+test matching_membership_lifecycle::tests::hint_inside_min_refresh_waits_for_two_second_ticker ... ok
+test matching_membership_lifecycle::tests::initial_snapshot_maps_role_status_identity_and_endpoint ... ok
+test matching_membership_lifecycle::tests::mapping_matches_go_port_and_identity_boundaries ... ok
+test matching_membership_lifecycle::tests::closed_event_stream_keeps_periodic_refresh_alive ... ok
+test matching_membership_lifecycle::tests::shutdown_self_evicts_before_stop_and_clears_placement ... ok
+test matching_membership_lifecycle::tests::startup_failures_stop_provider_and_start_is_idempotent ... ok
+test matching_membership_lifecycle::tests::mutable_provider_updates_coalesce_and_failures_preserve_last_good ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 285 filtered out; finished in 3.24s
+

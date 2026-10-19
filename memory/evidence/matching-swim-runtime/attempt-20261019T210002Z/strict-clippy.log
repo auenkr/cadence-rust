@@ -1,0 +1,37 @@
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+error: this `.filter_map(..)` can be written more simply using `.map(..)`
+   --> crates/cadence-server/src/matching_ringpop_provider.rs:146:14
+    |
+146 |               .filter_map(|member| {
+    |  ______________^
+147 | |                 let status = match member.status.as_str() {
+148 | |                     ALIVE => PeerStatus::Alive,
+149 | |                     SUSPECT => PeerStatus::Suspect,
+...   |
+173 | |                 })
+174 | |             })
+    | |______________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unnecessary_filter_map
+    = note: `-D clippy::unnecessary-filter-map` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_filter_map)]`
+
+error: casting to the same type is unnecessary (`i32` -> `i32`)
+   --> crates/cadence-server/src/matching_ringpop_provider.rs:399:29
+    |
+399 |                     flags & libc::IFF_LOOPBACK as i32 != 0,
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `libc::IFF_LOOPBACK`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unnecessary_cast
+    = note: `-D clippy::unnecessary-cast` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_cast)]`
+
+error: casting to the same type is unnecessary (`i32` -> `i32`)
+   --> crates/cadence-server/src/matching_ringpop_provider.rs:400:29
+    |
+400 |                     flags & libc::IFF_UP as i32 != 0,
+    |                             ^^^^^^^^^^^^^^^^^^^ help: try: `libc::IFF_UP`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unnecessary_cast
+
+error: could not compile `cadence-server` (lib) due to 3 previous errors

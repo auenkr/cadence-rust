@@ -1,0 +1,1 @@
+This immutable attempt passed common focused tests, lifecycle 11/11, Rust-Rust bootstrap/evict/restart 4/4, and all Ringpop provider tests. Strict Clippy found one redundant struct update in a Member test fixture; it is removed in commit 109da7c10. The Go peer gate was not reached.

@@ -1,0 +1,23 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.65s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 4 tests
+test matching_ringpop_provider::tests::advertised_ip_score_matches_go_listen_ip_up_and_loopback_rules ... ok
+test matching_ringpop_provider::tests::local_label_update_publishes_an_accepted_membership_change ... ok
+test matching_ringpop_provider::tests::provider_snapshot_retains_other_roles_and_only_known_ports ... ok
+
+thread 'matching_ringpop_provider::tests::two_shared_tchannel_providers_discover_roles_and_self_evict' (1905289) panicked at crates/cadence-server/src/matching_ringpop_provider.rs:555:9:
+assertion `left == right` failed
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test matching_ringpop_provider::tests::two_shared_tchannel_providers_discover_roles_and_self_evict ... FAILED
+
+failures:
+
+failures:
+    matching_ringpop_provider::tests::two_shared_tchannel_providers_discover_roles_and_self_evict
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 292 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p cadence-server --lib`

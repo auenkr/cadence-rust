@@ -1,0 +1,1 @@
+Phase-controlled mixed probe passed and logs raw Go/Cargo artifacts, but the first added log attempted to read a nonexistent public HostInfo.Labels field. Replaced with actual resolved TChannel/gRPC endpoints plus initial/restarted incarnation; source commit 851e20445.
