@@ -349,6 +349,7 @@ dependencies = [
  "clap",
  "crc32c",
  "crc32fast",
+ "farmhash",
  "hickory-resolver",
  "if-addrs",
  "libc",

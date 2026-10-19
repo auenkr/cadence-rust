@@ -75,3 +75,10 @@ errors in the deadline-aware refresh/describe calls, and the peer resolver
 used `farmhash` without declaring it as a cadence-server dependency. Those
 compile failures were corrected before rerunning the complete gate set; no
 test assertion ran in this attempt.
+
+Attempt `attempt-20261019T201435Z-ncZKcM` was interrupted after Cargo exposed
+that the newly declared direct `farmhash` dependency needed its normal
+`Cargo.lock` package-list update. It reached cadence-server compilation and
+reported only two dead-code warnings for helpers used by tests; those helpers
+are now test-gated. No test result was recorded, and the final runner now uses
+`--locked` for every Cargo gate.

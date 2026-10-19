@@ -77,6 +77,7 @@ pub(crate) fn missing_execution(error: &Status) -> bool {
                     == Some("uber.cadence.api.v1.EntityNotExistsError")
             })
 }
+#[cfg(test)]
 fn retryable(error: &Status) -> bool {
     start_error_kind(error) == StartErrorKind::Retry
 }
@@ -237,6 +238,7 @@ impl MatchingHistoryClient {
             .unwrap_or(self.operation_timeout);
         (!timeout.is_zero()).then_some(timeout)
     }
+    #[cfg(test)]
     fn request<T>(&self, payload: T) -> Request<T> {
         self.request_with_timeout(payload, Some(self.history_rpc_timeout))
     }

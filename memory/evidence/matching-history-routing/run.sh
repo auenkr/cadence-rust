@@ -52,11 +52,11 @@ stage() {
 }
 
 stage diff-check git diff --check
-stage history-client-tests cargo test --manifest-path rust/Cargo.toml -p cadence-server matching_history::tests -- --nocapture
-stage history-peer-resolver-tests cargo test --manifest-path rust/Cargo.toml -p cadence-server matching_history_peer_resolver::tests -- --nocapture
-stage history-membership-tests cargo test --manifest-path rust/Cargo.toml -p cadence-server matching_history_membership::tests -- --nocapture
-stage dispatch-regression-test cargo test --manifest-path rust/Cargo.toml -p cadence-server matching_dispatch::tests::matching_dispatch_poller_wait_ends_before_history_and_restarts_after_failure -- --exact --nocapture
-stage strict-clippy cargo clippy --manifest-path rust/Cargo.toml -p cadence-server --all-targets -- -D warnings
+stage history-client-tests cargo test --locked --manifest-path rust/Cargo.toml -p cadence-server matching_history::tests -- --nocapture
+stage history-peer-resolver-tests cargo test --locked --manifest-path rust/Cargo.toml -p cadence-server matching_history_peer_resolver::tests -- --nocapture
+stage history-membership-tests cargo test --locked --manifest-path rust/Cargo.toml -p cadence-server matching_history_membership::tests -- --nocapture
+stage dispatch-regression-test cargo test --locked --manifest-path rust/Cargo.toml -p cadence-server matching_dispatch::tests::matching_dispatch_poller_wait_ends_before_history_and_restarts_after_failure -- --exact --nocapture
+stage strict-clippy cargo clippy --locked --manifest-path rust/Cargo.toml -p cadence-server --all-targets -- -D warnings
 stage go-history-peer-oracle python3 tests/matching-history-peer-oracle/run.py
 cmp "$attempt/oracle.expected.json" tests/matching-history-peer-oracle/evidence/matching_history_peer_oracle.json
 cmp "$attempt/oracle.expected-source-sha256.json" tests/matching-history-peer-oracle/evidence/source-sha256.json
