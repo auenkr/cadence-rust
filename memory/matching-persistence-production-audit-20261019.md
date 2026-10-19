@@ -238,6 +238,8 @@ workspace-wide strict Clippy (`-D warnings`). The compatibility probe verifies
 Rust task-list data through Go persistence and Go activity task ID 2 delivery
 plus subsequent Rust-side task-list readback/collection. Run with
 `python3 tests/run-matching-configured-store-validation.py --server-bin rust/target/debug/cadence-server`.
+Cargo commands use `--locked`, default to one build job, and inherit an existing
+`CARGO_TARGET_DIR`; `--target-dir` can select the shared warmed target explicitly.
 
 This is a source-only checkpoint. The runner has not been executed because the
 shared build slot is held by History. It is not acceptance evidence until all

@@ -8,6 +8,7 @@ pass --server-bin for a binary built from the recorded source revision.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -29,8 +30,10 @@ def run(command, *, cwd, log_path, timeout=None):
     with log_path.open("w") as log:
         log.write("$ " + " ".join(map(str, command)) + "\n")
         log.flush()
-        result = subprocess.run(command, cwd=cwd, stdout=log, stderr=subprocess.STDOUT,
-                                timeout=timeout, check=False)
+        env = os.environ.copy()
+        env.setdefault("CARGO_BUILD_JOBS", "1")
+        result = subprocess.run(command, cwd=cwd, env=env, stdout=log,
+                                stderr=subprocess.STDOUT, timeout=timeout, check=False)
     return result.returncode
 
 
@@ -46,6 +49,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-bin", type=Path,
                         default=ROOT / "rust/target/debug/cadence-server")
+    parser.add_argument("--target-dir", type=Path,
+                        help="Cargo target directory; defaults to inherited CARGO_TARGET_DIR")
     parser.add_argument("--artifacts-dir", type=Path)
     args = parser.parse_args()
     started = datetime.now(timezone.utc)
@@ -54,20 +59,23 @@ def main():
     artifacts.mkdir(parents=True, exist_ok=False)
     before = hashes()
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    if args.target_dir:
+        os.environ["CARGO_TARGET_DIR"] = str(args.target_dir.resolve())
     report = {
         "startedUtc": started.isoformat(), "head": head,
         "serverBinary": str(args.server_bin.resolve()), "sourceSha256Before": before,
+        "cargoTargetDir": os.environ.get("CARGO_TARGET_DIR", str(ROOT / "rust/target")),
         "gates": [],
     }
     (artifacts / "source-freeze.json").write_text(json.dumps(report, indent=2) + "\n")
 
     gates = [
-        ("sqlite-option-and-schema-tests", ["cargo", "test", "-p", "cadence-persistence", "--lib", "matching_sqlite"]),
-        ("configured-store-resolution-tests", ["cargo", "test", "-p", "cadence-server", "--lib", "matching_task_store"]),
+        ("sqlite-option-and-schema-tests", ["cargo", "test", "--locked", "-p", "cadence-persistence", "--lib", "matching_sqlite"]),
+        ("configured-store-resolution-tests", ["cargo", "test", "--locked", "-p", "cadence-server", "--lib", "matching_task_store"]),
         ("configured-two-way-go-native-thrift-probe", [sys.executable,
          str(ROOT / "tests/run-matching-thrift-compat.py"), "--server-bin", str(args.server_bin.resolve()),
          "--artifacts-dir", str(artifacts / "go-native-thrift")]),
-        ("strict-rust-lint", ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]),
+        ("strict-rust-lint", ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]),
     ]
     for name, command in gates:
         log_path = artifacts / f"{name}.log"
