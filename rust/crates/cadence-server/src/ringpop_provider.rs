@@ -494,25 +494,33 @@ impl State {
         self.disseminator.adjust_max_propagations(pingable);
         self.disseminator.record(change.clone());
         match change.status.as_str() {
-            ALIVE | LEAVE => self.state_transitions.cancel(&change.address),
-            SUSPECT => self.state_transitions.schedule(
-                change.address,
-                change.incarnation,
-                TransitionState::Suspect,
-                self.monotonic_now_ns(),
-            ),
-            FAULTY => self.state_transitions.schedule(
-                change.address,
-                change.incarnation,
-                TransitionState::Faulty,
-                self.monotonic_now_ns(),
-            ),
-            TOMBSTONE => self.state_transitions.schedule(
-                change.address,
-                change.incarnation,
-                TransitionState::Tombstone,
-                self.monotonic_now_ns(),
-            ),
+            ALIVE | LEAVE => {
+                self.state_transitions.cancel(&change.address);
+            }
+            SUSPECT => {
+                self.state_transitions.schedule(
+                    change.address,
+                    change.incarnation,
+                    TransitionState::Suspect,
+                    self.monotonic_now_ns(),
+                );
+            }
+            FAULTY => {
+                self.state_transitions.schedule(
+                    change.address,
+                    change.incarnation,
+                    TransitionState::Faulty,
+                    self.monotonic_now_ns(),
+                );
+            }
+            TOMBSTONE => {
+                self.state_transitions.schedule(
+                    change.address,
+                    change.incarnation,
+                    TransitionState::Tombstone,
+                    self.monotonic_now_ns(),
+                );
+            }
             _ => {}
         }
         self.transition_notify.notify_one();

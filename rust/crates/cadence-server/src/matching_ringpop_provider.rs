@@ -16,7 +16,6 @@ use crate::{
 };
 use cadence_common::{
     ringpop_bootstrap_selection::{BootstrapSelection, Options},
-    ringpop_state_transitions::StateTimeouts,
     ringpop_wire::{Member, ALIVE, FAULTY, LEAVE, SUSPECT},
 };
 use std::{
@@ -466,7 +465,7 @@ mod tests {
             ..Default::default()
         };
         let node = RingpopNode::new("cadence", member, false);
-        let mut changes = node.subscribe_membership_changes();
+        let changes = node.subscribe_membership_changes();
         node.set_local_labels(&BTreeMap::from([(
             "serviceName".into(),
             "cadence-matching".into(),

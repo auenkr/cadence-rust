@@ -32,10 +32,7 @@ impl PeerMember {
         {
             return None;
         }
-        let host = host_from_host_port(&self.address);
-        let grpc = self
-            .named_address("grpc")
-            .unwrap_or_default();
+        let grpc = self.named_address("grpc").unwrap_or_default();
         Some(Host {
             address: self.address.clone(),
             identity: if self.identity.is_empty() {
@@ -134,7 +131,10 @@ mod named_port_tests {
         let host = member.matching_host("cadence-matching").unwrap();
         assert_eq!(host.identity, "stable-id");
         assert_eq!(host.grpc_address, "[2001:db8::1]:7835");
-        assert_eq!(member.tchannel_address().as_deref(), Some("[2001:db8::1]:7935"));
+        assert_eq!(
+            member.tchannel_address().as_deref(),
+            Some("[2001:db8::1]:7935")
+        );
         assert!(member.matching_host("matching").is_none());
         assert!(PeerMember {
             status: PeerStatus::Faulty,
