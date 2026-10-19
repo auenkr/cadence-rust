@@ -1,0 +1,13 @@
+ok  	github.com/uber/ringpop-go/swim	0.035s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running unittests src/lib.rs (target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 3 tests
+test ringpop_state_transitions::tests::captures_subject_and_retains_fired_timer_until_canceled_or_replaced ... ok
+test ringpop_state_transitions::tests::cancellation_disable_enable_local_and_nonpositive_timeouts ... ok
+test ringpop_state_transitions::tests::pinned_go_oracle_trace_matches_core ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 56 filtered out; finished in 0.01s
+
+Rust transition trace matches the pinned Ringpop v0.10.0 scheduler oracle
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s

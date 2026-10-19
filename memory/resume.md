@@ -1,3 +1,16 @@
+## Authoritative integration checkpoint — 2026-10-19
+
+Main6977c326d now integrates timer core a1f802896 (worker8e4e993eb) and static/file discovery b73abb5ed+c735426a3+6977c326d (worker056ee6890+0eba7a373+481471c4f). Parent checked integrated source/tests byte-identical to worker-tested versions. Timer actual pinned-Go differential,3Rust focused,strictcommonClippy passed; accepted log memory/evidence/ringpop-state-transitions/accepted.*. Discovery actualGo oracle,6Rust focused,strictserverall-targetClippy passed; evidence memory/evidence/ringpop-bootstrap-provider/parity-final-*. No full combined regression on main yet. Matching still incomplete.
+
+Worker reuse/new independent tasks (normal-speed Luna):
+- /root/relay_completion: saved t3-6f14baa6, final focused realGo->Rust->Go success/failure +Clippy underway, heavy build slot. Fresh probe harness/advertised listener identity repaired, no accepted relay commit yet.
+- /root/discovery_review: NEW DNS/SRV implementation task from6977c326d; own discovery module/resolver/oracles, no main/SWIM overlap. Source work first; hold heavy builds pending relay release.
+- /root/state_transitions: NEW read-only Go-compatible SQLite domain metadata store/codec from6977c326d, needed by Matching shared domain cache. Own persistence+Go DB interoperability tests; no Frontend/main/cache migration. Source work first; hold heavy builds pending relay release.
+
+Important source findings preserved: Go JSON validates entire syntax before type errors; malformed UTF8 and lone surrogates replaced only in strings; root oversized numbers are type errors; Go highprecision time.ParseDuration float fraction rounding differs from rational truncation. Timer cascade at15s is real (faulty callback at5s schedules10s later), NOT an event to deduplicate. Core runtime adapter must implement it; not yet wired. Outgoing indirect ping Go inconclusive guard compares errors to CONFIGURED size, not actual selected helper count, so sparse helper pools fall through to suspect; preserve quirk when porting.
+
+Actual cadence-server binary production gate remains memory/matching-production-binary-gate.md; current mixed test starts an ignored test executable. Last full frozen evidence3c8c5f98a does not cover current integrated source. Build concurrency caused10min relay compile timeout; processes verified terminal, build slots now serialized. Disk35GBfree,975/e426/a33 preserved. Full migration goal active; do not start History before Matching completion audit.
+
 ## Authoritative continuation checkpoint — 2026-10-19
 
 Parent source365d9b219. Whole migration goal remains active; Matching incomplete, no History migration until full service parity and mixed original-Go verification. Current orchestration uses native Luna workers (normal Standard speed), not stale T3 task71/72 IDs owned by another thread.
