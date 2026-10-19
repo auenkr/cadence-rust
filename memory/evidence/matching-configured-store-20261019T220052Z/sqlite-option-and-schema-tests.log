@@ -1,0 +1,17 @@
+$ cargo test --locked -p cadence-persistence --lib matching_sqlite
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_persistence-d957beebee0b5c0b)
+
+running 9 tests
+test matching_sqlite::interop_tests::matching_sqlite_go_database_interop ... ignored, requires original-Go SQLite seed; run tests/run-matching-storage-compat.py
+test matching_sqlite::tests::configured_go_sqlite_open_rejects_read_only_task_store_mode ... ok
+test matching_sqlite::tests::configured_go_sqlite_open_rejects_incompatible_queue_keys ... ok
+test matching_sqlite::tests::configured_go_sqlite_open_uses_shared_schema_and_writer_options ... ok
+test matching_sqlite::tests::matching_sqlite_leases_fence_writes_and_survive_reopen ... ok
+test matching_sqlite::tests::matching_sqlite_atomic_batches_bounds_expiry_and_deletes ... ok
+test matching_sqlite::tests::matching_sqlite_preserves_go_signed_limit_behavior ... ok
+test matching_sqlite::tests::matching_sqlite_schema_matches_go ... ok
+test matching_sqlite::tests::matching_sqlite_namespaces_and_task_types_are_isolated ... ok
+
+test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 198 filtered out; finished in 0.02s
+

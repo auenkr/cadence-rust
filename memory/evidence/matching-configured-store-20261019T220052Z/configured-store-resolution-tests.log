@@ -1,0 +1,13 @@
+$ cargo test --locked -p cadence-server --lib matching_task_store
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 18s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 4 tests
+test matching_task_store::tests::configured_default_store_applies_go_sqlite_defaults ... ok
+test matching_task_store::tests::explicit_production_config_wins_over_data_dir_but_embedded_mode_keeps_it ... ok
+test matching_task_store::tests::rejects_unimplemented_persistence_shapes_and_attributes ... ok
+test matching_task_store::tests::configured_default_store_keeps_go_sqlite_writer_options ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 296 filtered out; finished in 0.08s
+

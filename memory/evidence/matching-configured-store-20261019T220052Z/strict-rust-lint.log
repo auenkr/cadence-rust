@@ -1,0 +1,4 @@
+$ cargo clippy --locked -p cadence-persistence -p cadence-server --all-targets -- -D warnings
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-persistence)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 40.23s

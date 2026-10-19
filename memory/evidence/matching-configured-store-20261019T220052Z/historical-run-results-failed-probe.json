@@ -1,0 +1,54 @@
+{
+  "startedUtc": "2026-10-19T21:26:55.498323+00:00",
+  "head": "9619136057cfd3419d802068fd9bb1f8fa0da974",
+  "serverBinary": "/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/cadence-server",
+  "sourceSha256Before": {
+    "rust/crates/cadence-persistence/src/matching_sqlite.rs": "68ce832df747489cd208d44b4801de6b45c5d7b4ec9892f1ed6c8a1fde6ba1d1",
+    "rust/crates/cadence-server/src/matching_task_store.rs": "43177edb7d64578d5e713e664c89b4ce261f5b915b4eaffd0be2d655b662a36a",
+    "rust/crates/cadence-server/src/main.rs": "bb0fe6b02fb2ef31a72b05e9214a9b054a6767aafe3c55893422b4126a5cba02",
+    "tests/run-matching-thrift-compat.py": "7ea25bb09db660c80f161931d8633c38ce7ea69aac55bf9b1c142c860395145d",
+    "tests/run-matching-configured-store-validation.py": "30d5d21d9ce1ef3b6e596ece63e794f46412961a2367bddab63e9c239ea339c7",
+    "tests/matching-sqlite-go_test.go": "f7fe8cf7913052d0810d25ecdb065b01827f8d40fe3e8b28a81bd53c035ea739",
+    "memory/matching-persistence-production-audit-20261019.md": "fd12c66fa7ec3854e87fd287349669b8baf8dd0c0e0ed0eabc6e7e8b2f713f97"
+  },
+  "cargoTargetDir": "/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target",
+  "gates": [
+    {
+      "name": "sqlite-option-and-schema-tests",
+      "exitCode": 0,
+      "log": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/artifacts/matching-configured-store-20261019T212655Z/sqlite-option-and-schema-tests.log"
+    },
+    {
+      "name": "configured-store-resolution-tests",
+      "exitCode": 0,
+      "log": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/artifacts/matching-configured-store-20261019T212655Z/configured-store-resolution-tests.log"
+    },
+    {
+      "name": "cadence-server-build",
+      "exitCode": 0,
+      "log": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/artifacts/matching-configured-store-20261019T212655Z/cadence-server-build.log"
+    },
+    {
+      "name": "configured-two-way-go-native-thrift-probe",
+      "exitCode": 1,
+      "log": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/artifacts/matching-configured-store-20261019T212655Z/configured-two-way-go-native-thrift-probe.log"
+    },
+    {
+      "name": "strict-rust-lint",
+      "exitCode": 0,
+      "log": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/artifacts/matching-configured-store-20261019T212655Z/strict-rust-lint.log"
+    }
+  ],
+  "finishedUtc": "2026-10-19T21:32:14.786266+00:00",
+  "sourceSha256After": {
+    "rust/crates/cadence-persistence/src/matching_sqlite.rs": "68ce832df747489cd208d44b4801de6b45c5d7b4ec9892f1ed6c8a1fde6ba1d1",
+    "rust/crates/cadence-server/src/matching_task_store.rs": "43177edb7d64578d5e713e664c89b4ce261f5b915b4eaffd0be2d655b662a36a",
+    "rust/crates/cadence-server/src/main.rs": "bb0fe6b02fb2ef31a72b05e9214a9b054a6767aafe3c55893422b4126a5cba02",
+    "tests/run-matching-thrift-compat.py": "7ea25bb09db660c80f161931d8633c38ce7ea69aac55bf9b1c142c860395145d",
+    "tests/run-matching-configured-store-validation.py": "30d5d21d9ce1ef3b6e596ece63e794f46412961a2367bddab63e9c239ea339c7",
+    "tests/matching-sqlite-go_test.go": "f7fe8cf7913052d0810d25ecdb065b01827f8d40fe3e8b28a81bd53c035ea739",
+    "memory/matching-persistence-production-audit-20261019.md": "fd12c66fa7ec3854e87fd287349669b8baf8dd0c0e0ed0eabc6e7e8b2f713f97"
+  },
+  "sourceUnchanged": true,
+  "passed": false
+}

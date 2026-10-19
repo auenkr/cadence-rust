@@ -1,0 +1,13 @@
+Go lookup parity audit (read-only; 2026-10-19)
+
+Go common/config/config.go declares DefaultStore as a string. Go
+common/persistence/client/factory.go uses f.config.DataStores[f.config.DefaultStore]
+and limiters[f.config.DefaultStore] directly; common/config/persistence.go
+also indexes DataStores[c.DefaultStore]. No normalization or trimming occurs
+in these lookup paths. Rust SqliteTaskStoreConfig::from_default_store and
+MatchingDomainCache::from_default_store call persistence.default_store.trim()
+before lookup. Therefore whitespace around a non-empty YAML scalar is
+silently accepted/normalized by Rust, whereas Go attempts an exact key lookup
+and fails if that exact key is absent. This is a config parity gap. Do not
+change already-validated Rust source as part of this evidence package; fix and
+test exact-key behavior before Matching completion.

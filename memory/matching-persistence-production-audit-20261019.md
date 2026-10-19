@@ -293,3 +293,14 @@ Matching-to-History discovery, or establish Matching service completion. The
 separate staged production mixed probe remains unvalidated until production
 main assembles the Matching Ringpop membership/provider lifecycle and the
 discovered History peer resolver.
+
+The Rust-side SQLite/options/build/Clippy gates passed independently at
+`9619136057cfd3419d802068fd9bb1f8fa0da974`; their machine-readable run record
+reported exit 0 for those four gates and is preserved as
+`historical-run-results-failed-probe.json` in
+`memory/evidence/matching-configured-store-20261019T220052Z/`. Its Go probe
+failed at that earlier source revision and is explicitly retained only as
+historical failure evidence. The focused final probe was consumed
+interactively (no raw stdout log was captured); it still requires a tee-captured
+rerun when the build slot is available. The source freeze manifest records the
+exact source hashes for the successful run state.

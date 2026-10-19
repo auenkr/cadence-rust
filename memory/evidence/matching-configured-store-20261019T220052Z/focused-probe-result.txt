@@ -1,0 +1,11 @@
+Focused configured-store/native Matching probe
+Date: 2026-10-19 UTC
+Validated source commit: 1d8d9ba164923c8331cbbc55389cca9a32807de6
+Tested Rust source revision was unchanged from 9619136057cfd3419d802068fd9bb1f8fa0da974; Go fixture/runner and audit updates were the only deltas for this probe. Source correspondence: source-freeze.json.
+
+Command:
+python3 tests/run-matching-thrift-compat.py --server-bin /home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/cadence-server --artifacts-dir artifacts/matching-configured-store-20261019T220052Z
+
+Exit code: 0. Runner output reported: Go TLS classifier tests passed; overlay compile diagnostics passed; configured Go SQLite seed/readback passed; TestRustMatchingNativeThrift passed over TChannel, HTTP, HTTP trailing slash and TLS, verifying all ten native Matching Thrift methods; Rust-created live task metadata and task payload were read by Go TaskStore; Go task ID 2 was delivered by Rust and later collected; dynamic failover checks passed; drain health and TLS/plain HTTP checks passed; embedded start and occupied listener startup checks passed. Production explicit-config negative assertion passed: artifacts/.../data/matching.db did not exist. Embedded and listener-failure checks used dedicated data directories.
+
+Run output was consumed interactively rather than redirected to a raw log. The listed artifacts directory retains server logs, TLS/config test material, task-list identity and failover markers; it also contains SQLite databases and private TLS key files and must not be committed wholesale. The 67MB generated test binaries were removed.
