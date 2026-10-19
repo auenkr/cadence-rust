@@ -1,0 +1,162 @@
+# Matching persistence production parity audit (2026-10-19)
+
+Read-only source audit for Matching storage and recovery. Root reference is
+`a7e33258d` (root working branch includes `f6e6363d7` and subsequent runtime
+work); this audit's selected worktree is `t3/matching-history-peer-validation`
+at `08265d333`. Also inspected the uncommitted production-cache draft in
+`/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider`, branch
+`t3/matching-runtime-owner` at `6011effad` plus its working-tree changes. No
+build, test, or implementation command was run.
+
+## What is already proven
+
+The Rust SQLite store is a meaningful interop slice, not an unverified format
+port. `rust/crates/cadence-persistence/src/matching_sqlite.rs:302-307` compares
+the two Matching table definitions to Go's SQLite schema. The source supports
+both Go encodings (`thriftrw`, `thriftrw_snappy`) and reads the row's stored
+`data_encoding` (`matching_sqlite.rs:82-92, 120-122, 214-245`).
+`memory/matching-storage-next.md` records passing bidirectional real-Go SQLite
+interop for task and task-list blobs, both codecs, leases, stale-write fencing,
+partition metadata and recovery. Those results establish the tested Go SQLite
+schema/codec path; they do not establish production backend selection or
+cross-database migration.
+
+The current Rust store implements the SQLite queue operations used by its
+durable queue: lease, metadata update, atomic task append, bounded ordered read,
+size, delete, bounded GC and task-list removal
+(`matching_sqlite.rs:95-278`). Lease and queue-range behavior has focused tests,
+and the implementation explicitly preserves SQL lease conventions
+(`matching_sqlite.rs:125-161`). I found no new serialization defect in that
+tested SQLite path, so these are evidence boundaries rather than rewrite tasks.
+
+## Production gaps
+
+**Rust does not select the configured Go Matching task persistence.** Go's
+Matching service receives the resource TaskManager together with the other
+production dependencies (`go/service/matching/service.go:100-118`). Go's
+persistence factory creates TaskManager over the configured default store and
+wraps it with error injection, a configured rate limiter and persistence
+metrics (`go/common/persistence/client/factory.go:190-207,684-718`). The store
+factory accepts SQL, NoSQL and sharded NoSQL configurations
+(`factory.go:690-713`).
+
+At root, Rust chooses durable matching queues only when `--data-dir` is set;
+otherwise it starts the in-memory runtime. With a data directory it opens or
+creates `<data-dir>/matching.db` as a SQLite store, always writes
+`thriftrw_snappy`, and uses that direct store for the runtime
+(`rust/crates/cadence-server/src/main.rs:742-785`). This is separate from the
+Go-configured SQL/Cassandra task store. The cache draft wires configured
+persistence into a live domain metadata cache, but leaves the task queue on the
+same standalone `matching.db` path and SQLite constructor
+(`/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server/src/main.rs:777-826`).
+That draft advances domain metadata integration; it does not implement or
+select the Matching task backend.
+
+**The SQLite implementation is pinned to the one-shard layout.** The Go SQL
+task store computes a DB shard from `FarmHash32(domainID + "_" + taskList)` and
+the configured shard count (`go/common/persistence/sql/sqlplugin/dbSharding.go:44-47`);
+SQL config supports `nShards` and multiple databases
+(`go/common/config/config.go:329-347`). Rust SQL reads, inserts and task-list
+updates/deletes hard-code `shard_id=0` (`matching_sqlite.rs:82-86,120-122,144-145,272-273`).
+The existing Go interop evidence uses one SQLite database and shard zero. A
+multi-shard SQL deployment cannot be opened by this implementation as a
+configured equivalent, even though the table schema matches.
+
+**Cassandra/NoSQL has no Rust task-store implementation.** Go config accepts
+NoSQL and ShardedNoSQL, with task-list-to-shard routing through configured
+`taskListHashing.shardOrder` (`go/common/config/config.go:216-219,260-299`;
+`go/common/persistence/nosql/sharding_policy.go:72-78,98-109`). Go's Cassandra
+backend stores typed columns and partition configuration in its CQL row model,
+starts task-list ranges at 1, uses conditional updates for the lease and
+conditional logged-batch insertion for task rows, and can apply Cassandra TTL
+(`go/common/persistence/nosql/nosql_task_store.go:94-179,291-359`;
+`go/common/persistence/nosql/nosqlplugin/cassandra/tasks.go:37-46,178-205,342-411`).
+Its `ListTaskList` and `GetOrphanTasks` calls are explicitly unsupported, so
+these should not be described as Cassandra-only Rust regressions
+(`nosql_task_store.go:253-260,68-72`). Rust SQLite's Thrift blobs and SQL
+transactions are not a drop-in Cassandra representation or LWT implementation.
+
+**A Rust restart recovers only the selected Rust SQLite file.** `open()` uses
+`SQLITE_OPEN_READ_WRITE` and checks for the two expected tables; `create()`
+installs only their DDL in a new database (`matching_sqlite.rs:49-80`). The
+root binary uses a Rust-named `matching.db`; it does not discover the
+pre-existing Go TaskManager database or any configured SQL/Cassandra shard.
+When pointed manually at a Go SQLite DB, the passing single-shard interop
+establishes that tasks can be read and written there, but no runtime config or
+cutover path currently selects that file. There is no import/migration tool for
+MySQL, Postgres or Cassandra state. A same-process or rollback plan also needs
+to establish who owns leases during cutover; a DB copy without preserved
+`range_id`, `ack_level`, task IDs, task rows and `data_encoding` is not a safe
+restart migration.
+
+**Persistence surface is narrower than Go's SQL TaskManager.** Rust's store
+has no `list_task_list` pagination or SQL orphan-task scan. Go SQL implements
+both; listing encodes a sharded cursor with Go Gob, and orphan scanning returns
+task keys (`go/common/persistence/sql/sql_task_store.go:312-380,586-608`). These
+are lower priority than the active queue path but matter to a general-purpose
+TaskManager and cleanup/recovery tools. Cassandra Go also leaves those two
+operations unsupported, so preserve backend-specific behavior if portability
+is implemented instead of inventing a universal success path.
+
+**Retry and error classification are currently SQLite-specific.** Rust's
+`matching_retry` retries every `StorageError::Sql` for up to the configured
+30-second exponential policy and stops retrying non-SQL and condition failures
+(`rust/crates/cadence-persistence/src/matching_retry.rs:7-45`). The durable
+queue uses this for opening/renewing leases and each bounded task read
+(`matching_queue.rs:174-176,227-240,135-139`); task append, ack metadata and
+partition metadata writes are direct store calls (`matching_queue.rs:253-283,497-539`).
+Go Matching uses `persistence.IsTransientError` with its persistence retry
+policy for lease and read paths (`go/service/matching/tasklist/task_writer.go:205-229`;
+`task_reader.go:145-148,226-245`). Go's store layer also has backend-specific
+condition/consistency handling; Cassandra retries delete at a lower
+consistency level only for consistency failures
+(`go/common/persistence/nosql/nosqlplugin/cassandra/tasks.go:318-339`). The
+existing retry fixture validates a bounded set of outcomes, but it does not
+establish SQL-driver/Cassandra classification parity. Retain that fixture and
+add backend-error cases when adding configured stores; do not broaden all
+storage failures into retries without checking Go classification.
+
+## Prioritized bounded work
+
+1. **Make the queue store a runtime dependency.** Define a small async/sync
+   `MatchingTaskStore` boundary for the queue's actual calls, keep SQLite as the
+   test/development adapter, and remove the `--data-dir` gate as the only way
+   to get restartable queues. Have Matching runtime construction receive the
+   task store explicitly from production config. Document whether it uses Go's
+   default Task store, then wire the configured backend rather than creating a
+   parallel private file. The cache draft's domain metadata integration can
+   stay independent.
+2. **Complete configured SQL compatibility.** Implement Go's DB-shard hash and
+   configured `nShards`/multiple-database routing before claiming SQL parity;
+   add a backend adapter for the SQL drivers Cadence actually configures, with
+   the same schema and transaction fencing. Keep the SQLite schema/codec oracle
+   as regression coverage. Validate opening a Go-created single-shard DB and a
+   multi-shard fixture through the configured runtime, including stale leases
+   and process restart.
+3. **Port the configured Cassandra backend as its own slice.** Mirror the
+   CQL task-list sentinel row, initial range 1, LWT create/renew/delete,
+   consistency fallback, configured task-list shard order, TTL limits, and
+   partition-config map conversions. Exercise lost lease, competing owners,
+   expired task, Cassandra restart/reconnect and persisted queue recovery
+   against the real Go schema/provider or a compatibility fake backed by Go
+   fixtures. Reuse Go's unsupported-operation results for ListTaskList and
+   GetOrphanTasks until those features are actually ported.
+4. **Lock down error/recovery contracts.** Compare `IsTransientError` and
+   backend-specific retry paths with Rust's retry boundaries for lease, read,
+   append, ack and metadata updates. Add exact error mapping for condition
+   failures and tests for uncertain write outcomes so task IDs remain reserved
+   and acknowledged rows are not lost. Add an operational cutover/recovery
+   test that starts from a Go-owned configured store, removes Go Matching,
+   restarts Rust against the same selected backend, and proves old backlog and
+   ack/range state resume correctly.
+5. **Finish the SQL manager surface and instrumentation.** Port SQL task-list
+   pagination/Gob cursor compatibility and orphan enumeration where required;
+   preserve Cassandra's explicit unsupported responses. Apply configured
+   persistence QPS/error-injection/metrics wrappers at the matching task-store
+   boundary, since the Go factory supplies these around TaskManager operations
+   (`go/common/persistence/client/factory.go:197-207`).
+
+This audit does not mark Matching complete. The strongest persistence result
+remains bidirectional interop with a single-shard Go SQLite database; current
+production queue construction still selects a separate SQLite file, and
+configured multi-shard SQL and Cassandra task persistence remain unported.
