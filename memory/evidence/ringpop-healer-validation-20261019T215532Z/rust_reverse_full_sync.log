@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 1 test
+test ringpop_provider::tests::receiver_full_sync_starts_reverse_join_and_converges_two_live_peers ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 302 filtered out; finished in 0.02s
+

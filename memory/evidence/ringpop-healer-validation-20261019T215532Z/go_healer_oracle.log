@@ -1,0 +1,70 @@
+Go oracle source: /home/ubuntu/go/pkg/mod/github.com/uber/ringpop-go@v0.10.0 (ringpop-go v0.10.0, Go module cache)
+source sha256 swim/heal_partition.go: e1b3994d288212863bd09062a1ce067a1e92b3efbb54afdd1ae9576996445bab
+source sha256 swim/heal_via_discover_provider.go: d5f9784482ad5f41ccbf99d8acc0c70fec43afed99a35b201a7a4ac02505a19b
+source sha256 swim/node.go: 9537bc1b19c797eb44c4036e825ff68f4b9bf506d2df43c6726dde7edf74b913
+source sha256 swim/ping_handler.go: 14c1fd00425c9341e5f926842756665a22b2430704e4b9cf1425552dce6d1691
+source sha256 swim/disseminator.go: 6c872d3eb0f6c9f2eedd8a13c349644802d42063b2e866e4d88be1fc350cbc0d
+harness sha256 tests/ringpop-healer-go_test.go: 9122281be1b59110ece1ddf00c54d9074f71588edd7e71ae47d11ca13da96364
+expected fixture sha256 rust/crates/cadence-server/tests/fixtures/ringpop_healer_go_expected.json: 4b058d8def737d614315fcb5672298806497ffbc2390b88aca49af319962bc27
+Fixture is source-derived expected data until this comparison runner is executed successfully.
+=== RUN   TestGenerateRingpopHealerGoTrace
+    zz_cadence_ringpop_healer_test.go:207: CADENCE_RINGPOP_HEALER_ORACLE={
+          "delDuplicateRemaining": [
+            "other"
+          ],
+          "duplicateTargetAttempts": 2,
+          "failedDiscoveryPreviousHostCount": 7,
+          "failureCap": 10,
+          "localFaultyWins": {
+            "forLocal": [],
+            "forRemote": [
+              {
+                "address": "shared",
+                "status": "suspect",
+                "incarnation": 20,
+                "source": "",
+                "sourceIncarnation": 0
+              }
+            ]
+          },
+          "localHostFaultyCandidate": 1,
+          "maxReverseFullSyncJobs": 5,
+          "noConflict": {
+            "forLocal": [],
+            "forRemote": []
+          },
+          "noPendingChangesFullSync": {
+            "fullSync": true,
+            "membersReturned": 1
+          },
+          "partitionHealPeriodNanos": 30000000000,
+          "probabilityDoesNotShrink": 0.375,
+          "probabilityLocalReachable": 3,
+          "remoteFaultyWins": {
+            "forLocal": [
+              {
+                "address": "shared",
+                "status": "suspect",
+                "incarnation": 20,
+                "source": "",
+                "sourceIncarnation": 0
+              }
+            ],
+            "forRemote": []
+          },
+          "reverseFullSyncJobsStarted": 5,
+          "stopWaitsForActiveHeal": true,
+          "twoPartitionRepair": {
+            "allAlive": true,
+            "membersA": 2,
+            "membersB": 2
+          },
+          "unknownHost": {
+            "attempts": 1,
+            "successfulTargets": 0
+          }
+        }
+--- PASS: TestGenerateRingpopHealerGoTrace (0.04s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.051s
+Captured pinned Go trace matches the checked-in expected fixture /home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server/tests/fixtures/ringpop_healer_go_expected.json

@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.11s
+     Running unittests src/lib.rs (rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 1 test
+test matching_ringpop_provider::tests::go_healer_expected_trace_covers_probability_candidate_and_retry_edges ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 302 filtered out; finished in 0.03s
+

@@ -42,5 +42,18 @@ milliseconds and is also used by the normal successful JOIN path, matching Go's
 Clippy are recorded as skipped if that gate fails, while independent common
 Clippy/memberlist checks still execute.
 
-Attempt 1 was not validation success. The corrected source and runner need a
-fresh full lane run; no tests of the corrected source have been executed yet.
+Attempt 1 was not validation success. The corrected source and runner were
+validated in a fresh full lane run recorded below.
+
+The corrected source was committed as `acb23e94a`; the full serialized runner
+then completed in tmux window `ringpop-healer-validation-2` at
+`memory/evidence/ringpop-healer-validation-20261019T215532Z`. Every command
+returned exit 0: pinned Go oracle compare; server test compile; Rust expected
+healer fixture; blocked-JOIN stop; live partition healing; receiver reverse
+full-sync; shared-TChannel provider lifecycle; DNS discovery; strict Clippy for
+both affected crates with `-D warnings`; and both selected common memberlist
+regressions. The before/after candidate diff SHA-256 was
+`b3e823acc81f005c85f5f29ac4532b180f214b7a8b9476aa23fcdf5accf4fd80` at HEAD
+`acb23e94adf0018f29f424509b9b900924ba8473`. The warmed target was
+`rust/target` (13 GB after this run); no other target was used. Attempt 1's
+compile-failure logs remain alongside this successful corrected run.

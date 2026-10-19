@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (rust/target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 1 test
+test ringpop_memberlist::tests::remote_acceptance_refutation_tombstone_and_checksum ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 65 filtered out; finished in 0.00s
+
