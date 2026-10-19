@@ -117,7 +117,7 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 		t.Fatalf("Rust grpc label = %q, %v; want 127.0.0.1:7234", grpcAddress, err)
 	}
 	firstIncarnation := peerIncarnation(t, goProvider, rustAddress)
-	t.Logf("initial Rust member accepted: address=%s incarnation=%d labels=%v", rustAddress, firstIncarnation, initial[0].Labels)
+	t.Logf("initial Rust member accepted: address=%s incarnation=%d tchannel=%s grpc=%s", rustAddress, firstIncarnation, tchannelAddress, grpcAddress)
 	if _, err := io.WriteString(stdin, "evict\n"); err != nil {
 		t.Fatalf("allowing Rust self-eviction: %v", err)
 	}
@@ -136,13 +136,15 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	if err != nil || len(recovered) != 1 {
 		t.Fatalf("restarted Rust Matching membership: %#v, %v", recovered, err)
 	}
-	if grpc, err := recovered[0].GetNamedAddress(membership.PortGRPC); err != nil || grpc != "127.0.0.1:7234" {
-		t.Fatalf("restarted Rust grpc label = %q, %v; want 127.0.0.1:7234", grpc, err)
+	recoveredGRPC, err := recovered[0].GetNamedAddress(membership.PortGRPC)
+	if err != nil || recoveredGRPC != "127.0.0.1:7234" {
+		t.Fatalf("restarted Rust grpc label = %q, %v; want 127.0.0.1:7234", recoveredGRPC, err)
 	}
-	if tchannel, err := recovered[0].GetNamedAddress(membership.PortTchannel); err != nil || tchannel != rustAddress {
-		t.Fatalf("restarted Rust tchannel label = %q, %v; want %q", tchannel, err, rustAddress)
+	recoveredTChannel, err := recovered[0].GetNamedAddress(membership.PortTchannel)
+	if err != nil || recoveredTChannel != rustAddress {
+		t.Fatalf("restarted Rust tchannel label = %q, %v; want %q", recoveredTChannel, err, rustAddress)
 	}
-	t.Logf("restarted Rust member accepted: address=%s incarnation=%d previous=%d labels=%v", rustAddress, restartedIncarnation, firstIncarnation, recovered[0].Labels)
+	t.Logf("restarted Rust member accepted: address=%s incarnation=%d previous=%d tchannel=%s grpc=%s", rustAddress, restartedIncarnation, firstIncarnation, recoveredTChannel, recoveredGRPC)
 	if _, err := io.WriteString(stdin, "stop\n"); err != nil {
 		t.Fatalf("allowing final Rust provider stop: %v", err)
 	}
