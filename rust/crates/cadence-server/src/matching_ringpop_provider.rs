@@ -24,6 +24,8 @@ use std::{
     net::{IpAddr, SocketAddr},
     sync::{Arc, RwLock},
 };
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::sync::{broadcast, watch, Mutex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,6 +60,8 @@ pub struct MatchingRingpopProvider {
     lifecycle: Mutex<Lifecycle>,
     snapshot: Arc<RwLock<MatchingPeerSnapshot>>,
     events: broadcast::Sender<PeerChange>,
+    #[cfg(test)]
+    healer_test_trigger: Arc<Notify>,
 }
 
 impl MatchingRingpopProvider {
@@ -122,6 +126,8 @@ impl MatchingRingpopProvider {
                 members: Arc::new(Vec::new()),
             })),
             events,
+            #[cfg(test)]
+            healer_test_trigger: Arc::new(Notify::new()),
         })
     }
 
@@ -272,12 +278,19 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
 
         let healer_node = self.node.clone();
         let discovery = Arc::clone(&self.discovery);
+        #[cfg(test)]
+        let healer_test_trigger = Arc::clone(&self.healer_test_trigger);
         let healer = tokio::spawn(async move {
             let period = std::time::Duration::from_secs(30);
             let mut previous_host_list_size = 0usize;
             loop {
+                #[cfg(test)]
+                let requested_tick = healer_test_trigger.notified();
+                #[cfg(not(test))]
+                let requested_tick = std::future::pending::<()>();
                 tokio::select! {
                     _ = tokio::time::sleep(period) => {},
+                    _ = requested_tick => {},
                     changed = healer_stopped.changed() => {
                         if changed.is_err() || *healer_stopped.borrow() { break; }
                     }
@@ -577,6 +590,124 @@ mod tests {
         assert_eq!(oracle["twoPartitionRepair"]["membersA"], 2);
         assert_eq!(oracle["twoPartitionRepair"]["membersB"], 2);
         assert_eq!(oracle["twoPartitionRepair"]["allAlive"], true);
+    }
+
+    #[tokio::test]
+    async fn stop_waits_for_active_healer_join_response() {
+        use crate::{
+            grpc_matching::Matching, handlers::AppState, ringpop_tchannel::RingpopHandler,
+        };
+        use std::{future::Future, task::Poll};
+        use tokio::{
+            net::TcpListener,
+            sync::Notify,
+            time::{timeout, Duration},
+        };
+
+        let discovery_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(discovery_file.path(), b"[]").unwrap();
+
+        let provider_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let provider_address = provider_listener.local_addr().unwrap();
+        let provider = Arc::new(
+            MatchingRingpopProvider::new(
+                RingpopConfig {
+                    name: "healer-stop-test".into(),
+                    bootstrap_mode: BootstrapMode::File,
+                    bootstrap_file: discovery_file.path().display().to_string(),
+                    max_join_duration_nanos: 1_000_000_000,
+                    ..Default::default()
+                },
+                "cadence-matching",
+                provider_address,
+                7835,
+            )
+            .unwrap(),
+        );
+        let provider_server = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            provider_listener,
+            Matching::new(AppState::default()),
+            provider.handler(),
+        ));
+        provider.start().await.unwrap();
+
+        let peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let peer_address = peer_listener.local_addr().unwrap();
+        let peer = RingpopNode::new(
+            "healer-stop-test",
+            Member {
+                address: peer_address.to_string(),
+                status: ALIVE.into(),
+                incarnation: 2,
+                labels: None,
+            },
+            false,
+        );
+        peer.set_ready(true);
+
+        // The actual TChannel listener decodes the JOIN before this gate holds
+        // its response. The healer therefore owns a real in-flight RPC while
+        // shutdown begins.
+        let join_received = Arc::new(Notify::new());
+        let release_join = Arc::new(Notify::new());
+        let peer_handler = peer.handler();
+        let gated_handler = RingpopHandler::new({
+            let join_received = Arc::clone(&join_received);
+            let release_join = Arc::clone(&release_join);
+            move |method, headers, body| {
+                let peer_handler = peer_handler.clone();
+                let join_received = Arc::clone(&join_received);
+                let release_join = Arc::clone(&release_join);
+                async move {
+                    if method == "/protocol/join" {
+                        join_received.notify_one();
+                        release_join.notified().await;
+                    }
+                    peer_handler.call(method, headers, body).await
+                }
+            }
+        });
+        let peer_server = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            peer_listener,
+            Matching::new(AppState::default()),
+            gated_handler,
+        ));
+
+        // Startup consumed the empty discovery list and bootstrapped locally.
+        // The next Hosts read returns the peer as a heal candidate.
+        std::fs::write(
+            discovery_file.path(),
+            serde_json::to_vec(&[peer_address.to_string()]).unwrap(),
+        )
+        .unwrap();
+        provider.healer_test_trigger.notify_one();
+        timeout(Duration::from_secs(2), join_received.notified())
+            .await
+            .expect("healer did not issue JOIN to the gated peer");
+
+        // Poll stop once: it sends the shutdown signal and starts owned cleanup,
+        // then must remain pending on the active healer task.
+        let mut stop = Box::pin(provider.stop());
+        let waiting_for_healer = std::future::poll_fn(|cx| match stop.as_mut().poll(cx) {
+            Poll::Pending => Poll::Ready(true),
+            Poll::Ready(_) => Poll::Ready(false),
+        })
+        .await;
+        assert!(
+            waiting_for_healer,
+            "provider stop completed while the healer JOIN response was blocked"
+        );
+
+        release_join.notify_one();
+        timeout(Duration::from_secs(3), stop)
+            .await
+            .expect("provider cleanup did not finish after releasing JOIN")
+            .expect("provider cleanup failed");
+        peer.destroy_and_wait().await;
+        provider_server.abort();
+        peer_server.abort();
+        let _ = provider_server.await;
+        let _ = peer_server.await;
     }
 
     #[test]

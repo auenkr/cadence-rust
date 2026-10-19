@@ -59,17 +59,13 @@ run_command() {
 # The Go runner is comparison-only. Never pass --update in this lane.
 run_command go_healer_oracle python3 tests/run-ringpop-healer-go-oracle.py
 run_command rust_healer_fixture cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib go_healer_expected_trace
+run_command rust_healer_blocked_join_stop cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib stop_waits_for_active_healer_join_response
 run_command rust_partition_heal cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib partition_heal_joins_two_live_protocol_peers_and_converges_membership
 run_command rust_reverse_full_sync cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib receiver_full_sync_starts_reverse_join_and_converges_two_live_peers
 run_command rust_shared_tchannel_provider cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib two_shared_tchannel_providers_discover_roles_and_self_evict
 run_command rust_memberlist_refutation cargo test --manifest-path rust/Cargo.toml -p cadence-common --lib remote_acceptance_refutation_tombstone_and_checksum
 run_command rust_memberlist_go_trace cargo test --manifest-path rust/Cargo.toml -p cadence-common --lib single_remote_iterator_round_matches_pinned_go_trace
 run_command rust_discovery_provider_regressions cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib dns_provider_matches_go_cache_errors_and_host_port_formatting
-
-# The current Rust source has no blocked-JOIN/healer-stop test. Do not count the
-# Go oracle's `stopWaitsForActiveHeal` trace field as Rust implementation proof.
-printf 'missing\tNA\tRust blocked-JOIN healer stop test is absent; add it before claiming this lane complete\tNA\n' >> "$STATUS"
-echo "MISSING: Rust blocked-JOIN healer-stop regression test (Go oracle coverage is not Rust evidence)." >&2
 
 run_command strict_common_server_clippy cargo clippy --manifest-path rust/Cargo.toml -p cadence-common -p cadence-server --all-targets -- -D warnings
 
