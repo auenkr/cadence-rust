@@ -61,3 +61,7 @@ Main56142ba02 accepts runtime-owner worker97f1dd008. Parent compared final main/
 Sole heavy build grant transferred to outbound_luna for SWIM, existing t3-975b4b2d target, jobs1. Parent verified no jobs at transfer. No routing builds yet.
 
 Routing r5 source completed unbuilt at t3-13f816cc: Record* redirect chains share per-attempt budget; mutable/describe/refresh no invented fixed deadline, optional caller-deadline methods, poll deadline passed into mutable-state call in grpc_matching.rs. Source tests added; describe/refresh outer interface propagation still open. Carry this latest source (not earlier t3-12810cdd) into next routing validation task. No component acceptance yet.
+
+## Next implementation lane
+
+Runtime Luna now owns SOURCE-ONLY production Matching domain-cache integration in its existing matching-dns-provider worktree. It may carry accepted cache commits a972cad3f+d40c84e48, wire Go-shaped defaultStore SQLite selection, runtime ownership/readiness and actual domain consumers/failover signals. It must not touch History routing/Ringpop/TChannel and has no Cargo grant while SWIM runs. Existing query timeout block in grpc_matching.rs is owned by routing draft t3-13f816cc; coordinate eventual merge. Shared-store Go seed/update evidence is required; unsupported backend must not silently use seeded snapshots. This does not waive other backend parity or mixed-cluster gates.
