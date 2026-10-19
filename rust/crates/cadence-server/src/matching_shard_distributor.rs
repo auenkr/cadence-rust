@@ -11,8 +11,8 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        Arc, Mutex, RwLock,
         atomic::{AtomicU8, Ordering},
+        Arc, Mutex, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -27,6 +27,21 @@ const SPECTATOR_STREAM_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const SPECTATOR_RPC_RETRY_EXPIRATION: Duration = Duration::from_secs(15);
 const SPECTATOR_RPC_RETRY_INITIAL: Duration = Duration::from_millis(200);
 const SPECTATOR_RPC_RETRY_MAX: Duration = Duration::from_secs(10);
+const LIFECYCLE_NEW: u8 = 0;
+const LIFECYCLE_RUNNING: u8 = 1;
+const LIFECYCLE_STOPPING: u8 = 2;
+const LIFECYCLE_STOPPED: u8 = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LifecycleError(&'static str);
+
+impl std::fmt::Display for LifecycleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for LifecycleError {}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShardReport {
@@ -71,6 +86,9 @@ pub struct TonicSpectator {
     stop_tx: watch::Sender<bool>,
     stop_rx: watch::Receiver<bool>,
     task: Arc<tokio::sync::Mutex<Option<JoinHandle<()>>>>,
+    lifecycle: Arc<AtomicU8>,
+    stopped_tx: watch::Sender<bool>,
+    stopped_rx: watch::Receiver<bool>,
     lifecycle_owner: bool,
 }
 
@@ -86,6 +104,9 @@ impl Clone for TonicSpectator {
             stop_tx: self.stop_tx.clone(),
             stop_rx: self.stop_rx.clone(),
             task: self.task.clone(),
+            lifecycle: self.lifecycle.clone(),
+            stopped_tx: self.stopped_tx.clone(),
+            stopped_rx: self.stopped_rx.clone(),
             lifecycle_owner: false,
         }
     }
@@ -99,6 +120,7 @@ impl TonicSpectator {
     ) -> Self {
         let (first_state_tx, first_state_rx) = watch::channel(false);
         let (stop_tx, stop_rx) = watch::channel(false);
+        let (stopped_tx, stopped_rx) = watch::channel(false);
         Self {
             channel,
             namespace: namespace.into(),
@@ -109,35 +131,110 @@ impl TonicSpectator {
             stop_tx,
             stop_rx,
             task: Arc::new(tokio::sync::Mutex::new(None)),
+            lifecycle: Arc::new(AtomicU8::new(LIFECYCLE_NEW)),
+            stopped_tx,
+            stopped_rx,
             lifecycle_owner: true,
         }
     }
 
-    pub async fn start(&self) {
+    pub async fn start(&self) -> Result<(), LifecycleError> {
         let mut task = self.task.lock().await;
-        if task.is_some() {
-            return;
-        }
+        self.lifecycle
+            .compare_exchange(
+                LIFECYCLE_NEW,
+                LIFECYCLE_RUNNING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map_err(|_| LifecycleError("spectator can only be started once"))?;
         let this = self.clone();
-        *task = Some(tokio::spawn(async move { this.watch_loop().await }));
+        *task = Some(tokio::spawn(async move {
+            this.watch_loop().await;
+            this.lifecycle.store(LIFECYCLE_STOPPED, Ordering::Release);
+            let _ = this.stopped_tx.send(true);
+        }));
+        Ok(())
     }
 
     pub async fn shutdown(&self) {
-        let _ = self.stop_tx.send(true);
+        loop {
+            match self.lifecycle.load(Ordering::Acquire) {
+                LIFECYCLE_NEW => {
+                    if self
+                        .lifecycle
+                        .compare_exchange(
+                            LIFECYCLE_NEW,
+                            LIFECYCLE_STOPPED,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_ok()
+                    {
+                        let _ = self.stop_tx.send(true);
+                        self.reset_first_state();
+                        let _ = self.stopped_tx.send(true);
+                        break;
+                    }
+                }
+                LIFECYCLE_RUNNING => {
+                    if self
+                        .lifecycle
+                        .compare_exchange(
+                            LIFECYCLE_RUNNING,
+                            LIFECYCLE_STOPPING,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_ok()
+                    {
+                        let _ = self.stop_tx.send(true);
+                        break;
+                    }
+                }
+                LIFECYCLE_STOPPING | LIFECYCLE_STOPPED => break,
+                _ => unreachable!("invalid spectator lifecycle"),
+            }
+        }
+        self.wait_stopped().await;
         if let Some(task) = self.task.lock().await.take() {
             let _ = task.await;
         }
     }
 
+    async fn wait_stopped(&self) {
+        let mut stopped = self.stopped_rx.clone();
+        while !*stopped.borrow_and_update() {
+            if stopped.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
     /// Waits for the first complete namespace snapshot, then serves cached
     /// ownership and falls back to GetShardOwner on a cache miss, matching Go.
-    pub async fn get_shard_owner(&self, shard_key: &str) -> Result<ShardOwner, String> {
+    pub async fn get_shard_owner(
+        &self,
+        shard_key: &str,
+        deadline: tokio::time::Instant,
+    ) -> Result<ShardOwner, String> {
         let mut first = self.first_state_rx.clone();
+        let mut stop = self.stop_rx.clone();
         while !*first.borrow_and_update() {
-            first
-                .changed()
-                .await
-                .map_err(|_| "spectator stopped before initial namespace state".to_string())?;
+            tokio::select! {
+                _ = tokio::time::sleep_until(deadline) => return Err("spectator initial state deadline exceeded".into()),
+                changed = stop.changed() => {
+                    if changed.is_err() || *stop.borrow_and_update() {
+                        return Err("spectator stopped before initial namespace state".into());
+                    }
+                }
+                changed = first.changed() => {
+                    if changed.is_err() { return Err("spectator stopped before initial namespace state".into()); }
+                }
+            }
+        }
+        if *stop.borrow_and_update() {
+            return Err("spectator stopped before GetShardOwner".into());
         }
         if let Some(owner) = self
             .owners
@@ -152,17 +249,34 @@ impl TonicSpectator {
         let started = Instant::now();
         let mut retry_delay = SPECTATOR_RPC_RETRY_INITIAL;
         loop {
+            if tokio::time::Instant::now() >= deadline {
+                return Err("GetShardOwner caller deadline exceeded".into());
+            }
+            if *stop.borrow_and_update() {
+                return Err("spectator stopped during GetShardOwner".into());
+            }
             let mut client = sd::shard_distributor_api_client::ShardDistributorApiClient::new(
                 self.channel.clone(),
             );
-            let response = tokio::time::timeout(
-                RPC_TIMEOUT,
+            let call_timeout =
+                RPC_TIMEOUT.min(deadline.saturating_duration_since(tokio::time::Instant::now()));
+            let call = tokio::time::timeout(
+                call_timeout,
                 client.get_shard_owner(sd::GetShardOwnerRequest {
                     shard_key: shard_key.to_string(),
                     namespace: self.namespace.to_string(),
                 }),
-            )
-            .await;
+            );
+            let response = tokio::select! {
+                response = call => response,
+                _ = tokio::time::sleep_until(deadline) => return Err("GetShardOwner caller deadline exceeded".into()),
+                changed = stop.changed() => {
+                    if changed.is_err() || *stop.borrow_and_update() {
+                        return Err("spectator stopped during GetShardOwner".into());
+                    }
+                    continue;
+                }
+            };
             match response {
                 Ok(Ok(response)) => {
                     let response = response.into_inner();
@@ -186,7 +300,15 @@ impl TonicSpectator {
                 }
             }
             let remaining = SPECTATOR_RPC_RETRY_EXPIRATION.saturating_sub(started.elapsed());
-            tokio::time::sleep(retry_delay.min(remaining)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(retry_delay.min(remaining)) => {},
+                _ = tokio::time::sleep_until(deadline) => return Err("GetShardOwner caller deadline exceeded".into()),
+                changed = stop.changed() => {
+                    if changed.is_err() || *stop.borrow_and_update() {
+                        return Err("spectator stopped during GetShardOwner".into());
+                    }
+                }
+            }
             retry_delay = retry_delay.saturating_mul(2).min(SPECTATOR_RPC_RETRY_MAX);
         }
     }
@@ -201,6 +323,10 @@ impl TonicSpectator {
     async fn watch_loop(&self) {
         let mut stop = self.stop_rx.clone();
         loop {
+            if *stop.borrow_and_update() {
+                self.reset_first_state();
+                return;
+            }
             if !(self.enabled)() {
                 self.reset_first_state();
                 tokio::select! {
@@ -211,11 +337,18 @@ impl TonicSpectator {
             let mut client = sd::shard_distributor_api_client::ShardDistributorApiClient::new(
                 self.channel.clone(),
             );
-            let stream = client
-                .watch_namespace_state(sd::WatchNamespaceStateRequest {
+            let stream = tokio::select! {
+                response = client.watch_namespace_state(sd::WatchNamespaceStateRequest {
                     namespace: self.namespace.to_string(),
-                })
-                .await;
+                }) => response,
+                changed = stop.changed() => {
+                    if changed.is_err() || *stop.borrow_and_update() {
+                        self.reset_first_state();
+                        return;
+                    }
+                    continue;
+                }
+            };
             match stream {
                 Ok(response) => {
                     let mut stream = response.into_inner();
@@ -386,7 +519,10 @@ pub struct ShardDistributorExecutor {
     stop_tx: watch::Sender<bool>,
     stop_rx: watch::Receiver<bool>,
     drain_rx: Option<watch::Receiver<bool>>,
-    loops: Arc<tokio::sync::Mutex<Vec<JoinHandle<()>>>>,
+    supervisor: Arc<tokio::sync::Mutex<Option<JoinHandle<()>>>>,
+    lifecycle: Arc<AtomicU8>,
+    stopped_tx: watch::Sender<bool>,
+    stopped_rx: watch::Receiver<bool>,
     lifecycle_owner: bool,
 }
 
@@ -405,7 +541,10 @@ impl Clone for ShardDistributorExecutor {
             stop_tx: self.stop_tx.clone(),
             stop_rx: self.stop_rx.clone(),
             drain_rx: self.drain_rx.clone(),
-            loops: self.loops.clone(),
+            supervisor: self.supervisor.clone(),
+            lifecycle: self.lifecycle.clone(),
+            stopped_tx: self.stopped_tx.clone(),
+            stopped_rx: self.stopped_rx.clone(),
             lifecycle_owner: false,
         }
     }
@@ -433,6 +572,7 @@ impl ShardDistributorExecutor {
             "heartbeat_interval must be greater than 0"
         );
         let (stop_tx, stop_rx) = watch::channel(false);
+        let (stopped_tx, stopped_rx) = watch::channel(false);
         Ok(Self {
             namespace: namespace.namespace.clone().into(),
             executor_id: uuid::Uuid::new_v4().to_string().into(),
@@ -446,7 +586,10 @@ impl ShardDistributorExecutor {
             stop_tx,
             stop_rx,
             drain_rx,
-            loops: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            supervisor: Arc::new(tokio::sync::Mutex::new(None)),
+            lifecycle: Arc::new(AtomicU8::new(LIFECYCLE_NEW)),
+            stopped_tx,
+            stopped_rx,
             lifecycle_owner: true,
         })
     }
@@ -467,29 +610,86 @@ impl ShardDistributorExecutor {
         self.metadata.lock().expect("SD metadata lock").clone()
     }
 
-    /// Start heartbeat and idle-report cleanup loops. Calls are idempotent.
-    pub async fn start(&self) {
-        let mut loops = self.loops.lock().await;
-        if !loops.is_empty() {
-            return;
-        }
-        let heartbeat = self.clone();
-        loops.push(tokio::spawn(
-            async move { heartbeat.heartbeat_loop().await },
-        ));
-        let cleanup = self.clone();
-        loops.push(tokio::spawn(async move { cleanup.cleanup_loop().await }));
+    /// Start the executor exactly once. A stopped executor cannot be restarted,
+    /// matching the closed stop-channel lifecycle of the pinned Go client.
+    pub async fn start(&self) -> Result<(), LifecycleError> {
+        let mut supervisor_slot = self.supervisor.lock().await;
+        self.lifecycle
+            .compare_exchange(
+                LIFECYCLE_NEW,
+                LIFECYCLE_RUNNING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map_err(|_| LifecycleError("executor can only be started once"))?;
+        let this = self.clone();
+        *supervisor_slot = Some(tokio::spawn(async move {
+            let heartbeat = this.clone();
+            let heartbeat_loop = tokio::spawn(async move { heartbeat.heartbeat_loop().await });
+            let cleanup = this.clone();
+            let cleanup_loop = tokio::spawn(async move { cleanup.cleanup_loop().await });
+            let _ = heartbeat_loop.await;
+            let _ = cleanup_loop.await;
+            this.lifecycle.store(LIFECYCLE_STOPPED, Ordering::Release);
+            let _ = this.stopped_tx.send(true);
+        }));
+        Ok(())
     }
 
     /// Go's Stop closes the stop signal, stops all processors, reports
     /// DRAINING with a bounded RPC deadline, and joins both background loops.
     pub async fn shutdown(&self) {
-        let _ = self.stop_tx.send(true);
-        let handles = std::mem::take(&mut *self.loops.lock().await);
-        for handle in handles {
-            let _ = handle.await;
+        loop {
+            match self.lifecycle.load(Ordering::Acquire) {
+                LIFECYCLE_NEW => {
+                    if self
+                        .lifecycle
+                        .compare_exchange(
+                            LIFECYCLE_NEW,
+                            LIFECYCLE_STOPPED,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_ok()
+                    {
+                        let _ = self.stop_tx.send(true);
+                        self.stop_all_processors().await;
+                        let _ = self.stopped_tx.send(true);
+                        break;
+                    }
+                }
+                LIFECYCLE_RUNNING => {
+                    if self
+                        .lifecycle
+                        .compare_exchange(
+                            LIFECYCLE_RUNNING,
+                            LIFECYCLE_STOPPING,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_ok()
+                    {
+                        let _ = self.stop_tx.send(true);
+                        break;
+                    }
+                }
+                LIFECYCLE_STOPPING | LIFECYCLE_STOPPED => break,
+                _ => unreachable!("invalid executor lifecycle"),
+            }
         }
-        self.stop_all_processors().await;
+        self.wait_stopped().await;
+        if let Some(supervisor) = self.supervisor.lock().await.take() {
+            let _ = supervisor.await;
+        }
+    }
+
+    async fn wait_stopped(&self) {
+        let mut stopped = self.stopped_rx.clone();
+        while !*stopped.borrow_and_update() {
+            if stopped.changed().await.is_err() {
+                return;
+            }
+        }
     }
 
     pub async fn get_shard_process(
@@ -707,6 +907,15 @@ impl ShardDistributorExecutor {
         let mut stop = self.stop_rx.clone();
         let mut drain = self.drain_rx.clone();
         loop {
+            if *stop.borrow_and_update() {
+                self.stop_all_processors().await;
+                if (self.enabled)() {
+                    let _ = self
+                        .send_heartbeat(sd::ExecutorStatus::Draining, DRAINING_HEARTBEAT_TIMEOUT)
+                        .await;
+                }
+                return;
+            }
             let delay = jitter(self.heartbeat_interval);
             tokio::select! {
                 _ = tokio::time::sleep(delay) => {
@@ -745,6 +954,9 @@ impl ShardDistributorExecutor {
     ) -> bool {
         let Some(drain) = drain else { return false };
         loop {
+            if *stop.borrow_and_update() {
+                return false;
+            }
             tokio::select! {
                 changed = stop.changed() => {
                     if changed.is_err() || *stop.borrow_and_update() { return false; }
@@ -763,6 +975,9 @@ impl ShardDistributorExecutor {
         }
         let mut stop = self.stop_rx.clone();
         loop {
+            if *stop.borrow_and_update() {
+                return;
+            }
             tokio::select! {
                 _ = tokio::time::sleep(jitter(self.ttl_shard)) => {
                     if !(self.enabled)() { continue; }
@@ -920,6 +1135,89 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct FakeSpectatorService {
+        get_requests: Arc<Mutex<Vec<sd::GetShardOwnerRequest>>>,
+    }
+
+    #[tonic::async_trait]
+    impl sd::shard_distributor_api_server::ShardDistributorApi for FakeSpectatorService {
+        async fn get_shard_owner(
+            &self,
+            request: tonic::Request<sd::GetShardOwnerRequest>,
+        ) -> Result<tonic::Response<sd::GetShardOwnerResponse>, tonic::Status> {
+            let request = request.into_inner();
+            self.get_requests.lock().unwrap().push(request.clone());
+            Ok(tonic::Response::new(sd::GetShardOwnerResponse {
+                owner: "source-go-executor".into(),
+                namespace: request.namespace,
+                metadata: HashMap::from([("grpc".into(), "7835".into())]),
+            }))
+        }
+
+        async fn inspect_shard(
+            &self,
+            _request: tonic::Request<sd::InspectShardRequest>,
+        ) -> Result<tonic::Response<sd::InspectShardResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("unused"))
+        }
+
+        async fn get_namespace_state(
+            &self,
+            _request: tonic::Request<sd::GetNamespaceStateRequest>,
+        ) -> Result<tonic::Response<sd::GetNamespaceStateResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("unused"))
+        }
+
+        async fn watch_namespace_state(
+            &self,
+            _request: tonic::Request<sd::WatchNamespaceStateRequest>,
+        ) -> Result<
+            tonic::Response<tonic::codegen::BoxStream<sd::WatchNamespaceStateResponse>>,
+            tonic::Status,
+        > {
+            let stream = tokio_stream::iter(vec![Ok(sd::WatchNamespaceStateResponse {
+                executors: Vec::new(),
+            })]);
+            Ok(tonic::Response::new(Box::pin(stream)))
+        }
+
+        async fn list_namespaces(
+            &self,
+            _request: tonic::Request<sd::ListNamespacesRequest>,
+        ) -> Result<tonic::Response<sd::ListNamespacesResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("unused"))
+        }
+
+        async fn drain_shards(
+            &self,
+            _request: tonic::Request<sd::DrainShardsRequest>,
+        ) -> Result<tonic::Response<sd::DrainShardsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("unused"))
+        }
+
+        async fn undrain_shards(
+            &self,
+            _request: tonic::Request<sd::UndrainShardsRequest>,
+        ) -> Result<tonic::Response<sd::UndrainShardsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("unused"))
+        }
+
+        async fn get_drained_shards(
+            &self,
+            _request: tonic::Request<sd::GetDrainedShardsRequest>,
+        ) -> Result<tonic::Response<sd::GetDrainedShardsResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("unused"))
+        }
+
+        async fn force_reset_namespace(
+            &self,
+            _request: tonic::Request<sd::ForceResetNamespaceRequest>,
+        ) -> Result<tonic::Response<sd::ForceResetNamespaceResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("unused"))
+        }
+    }
+
     #[tokio::test]
     async fn pinned_executor_heartbeat_assignment_and_drain_contract() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1000,8 +1298,9 @@ mod tests {
             Err(GetShardProcessError::Heartbeat(_))
         ));
         fail.store(false, Ordering::SeqCst);
-        executor.start().await;
+        executor.start().await.unwrap();
         executor.shutdown().await;
+        assert!(executor.start().await.is_err(), "shutdown is terminal");
         assert_eq!(
             requests.lock().unwrap().last().unwrap().status,
             sd::ExecutorStatus::Draining as i32
@@ -1029,11 +1328,134 @@ mod tests {
             },
         )]));
         let _ = spectator.first_state_tx.send(true);
-        let owner = spectator.get_shard_owner("task-list-a").await.unwrap();
+        let owner = spectator
+            .get_shard_owner(
+                "task-list-a",
+                tokio::time::Instant::now() + Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
         assert_eq!(owner.executor_id, "executor-a");
         assert_eq!(owner.metadata["grpc"], "7835");
         spectator.reset_first_state();
         assert!(!*spectator.first_state_rx.borrow());
         assert!(spectator.owners.read().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn spectator_fake_tonic_peer_covers_snapshot_fallback_and_terminal_shutdown() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let get_requests = Arc::new(Mutex::new(Vec::new()));
+        let server = tokio::spawn({
+            let service = FakeSpectatorService {
+                get_requests: get_requests.clone(),
+            };
+            async move {
+                tonic::transport::Server::builder()
+                    .add_service(
+                        sd::shard_distributor_api_server::ShardDistributorApiServer::new(service),
+                    )
+                    .serve_with_incoming(TcpListenerStream::new(listener))
+                    .await
+                    .unwrap();
+            }
+        });
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect_lazy();
+        let spectator = TonicSpectator::new(channel, "matching", Arc::new(|| true));
+        spectator.start().await.unwrap();
+        let owner = tokio::time::timeout(
+            Duration::from_secs(2),
+            spectator.get_shard_owner(
+                "remote-task-list",
+                tokio::time::Instant::now() + Duration::from_secs(2),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(owner.executor_id, "source-go-executor");
+        assert_eq!(owner.metadata["grpc"], "7835");
+        assert_eq!(get_requests.lock().unwrap()[0].namespace, "matching");
+        assert_eq!(
+            get_requests.lock().unwrap()[0].shard_key,
+            "remote-task-list"
+        );
+
+        let (first_shutdown, second_shutdown) =
+            tokio::join!(spectator.shutdown(), spectator.shutdown());
+        let _ = (first_shutdown, second_shutdown);
+        assert!(spectator.start().await.is_err(), "shutdown is terminal");
+        assert!(spectator
+            .get_shard_owner(
+                "remote-task-list",
+                tokio::time::Instant::now() + Duration::from_secs(10),
+            )
+            .await
+            .is_err());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn spectator_initial_snapshot_wait_obeys_caller_deadline() {
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+        let spectator = TonicSpectator::new(channel, "matching", Arc::new(|| true));
+        let error = spectator
+            .get_shard_owner(
+                "task-list-a",
+                tokio::time::Instant::now() + Duration::from_millis(1),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.contains("deadline"));
+    }
+
+    #[tokio::test]
+    async fn spectator_shutdown_before_start_is_terminal_and_wakes_waiters() {
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+        let spectator = TonicSpectator::new(channel, "matching", Arc::new(|| true));
+        let waiting = {
+            let spectator = spectator.clone();
+            tokio::spawn(async move {
+                spectator
+                    .get_shard_owner(
+                        "task-list-a",
+                        tokio::time::Instant::now() + Duration::from_secs(10),
+                    )
+                    .await
+            })
+        };
+        spectator.shutdown().await;
+        assert!(waiting.await.unwrap().is_err());
+        assert!(spectator.start().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn executor_shutdown_before_start_is_terminal() {
+        let config = crate::config::ShardDistributorMatchingConfig {
+            namespaces: vec![crate::config::ShardDistributorNamespaceConfig {
+                namespace: "matching".into(),
+                heartbeat_interval_nanos: 1_000_000_000,
+                ttl_shard_nanos: 0,
+                ttl_report_nanos: 60_000_000_000,
+            }],
+            peer_ttl_nanos: 0,
+        };
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+        let executor = ShardDistributorExecutor::new(
+            &config,
+            Arc::new(TonicExecutorRpc::from_channel(channel)),
+            Arc::new(FakeFactory(Arc::new(FakeProcessor::default()))),
+            Arc::new(|| true),
+            HashMap::new(),
+            None,
+        )
+        .unwrap();
+        let (first_shutdown, second_shutdown) =
+            tokio::join!(executor.shutdown(), executor.shutdown());
+        let _ = (first_shutdown, second_shutdown);
+        assert!(executor.start().await.is_err());
     }
 }
