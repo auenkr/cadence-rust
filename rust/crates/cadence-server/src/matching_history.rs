@@ -519,7 +519,8 @@ impl MatchingHistoryClient {
                 None,
                 caller_deadline,
                 &task.data.workflow_id,
-                &mut |mut client, request| async move {
+                &mut |mut client: h::history_api_client::HistoryApiClient<tonic::transport::Channel>,
+                      request: Request<h::RefreshWorkflowTasksRequest>| async move {
                     client.refresh_workflow_tasks(request).await.map(|_| ())
                 },
             )
@@ -561,7 +562,8 @@ impl MatchingHistoryClient {
             None,
             caller_deadline,
             &task.data.workflow_id,
-            &mut |mut client, request| async move {
+            &mut |mut client: h::history_api_client::HistoryApiClient<tonic::transport::Channel>,
+                  request: Request<h::DescribeWorkflowExecutionRequest>| async move {
                 client
                     .describe_workflow_execution(request)
                     .await

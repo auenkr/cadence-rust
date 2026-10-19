@@ -11,6 +11,8 @@ export CARGO_BUILD_JOBS=1
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target}"
 
 sources=(
+  rust/Cargo.lock
+  rust/crates/cadence-server/Cargo.toml
   rust/crates/cadence-server/src/matching_history.rs
   rust/crates/cadence-server/src/matching_history_peer_resolver.rs
   rust/crates/cadence-server/src/matching_history_membership.rs

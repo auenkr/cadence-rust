@@ -1,8 +1,8 @@
 # Matching History routing validation handoff
 
-This runner is prepared but has **not** been executed. The cache worktree owns
- the serialized build slot. Run only after the parent transfers that slot and
-integrates the frozen routing commits into the target tree.
+Run this runner from the rebased routing worktree after the build slot is
+transferred. It records an attempt directory with source hashes and per-gate
+logs.
 
 Run it from the integrated repository tree with the slot granted:
 
@@ -21,11 +21,10 @@ codes are stored in the attempt directory.
 
 ## Frozen candidate
 
-The routing source under review is the candidate series
-`fad59909a`, `25dbbcbf3`, `438007ce0`, `08265d333`, plus the duplicate test
-attribute correction `4d4359734`. The latter removes the duplicate `#[test]`
-on the membership-snapshot regression. Routing source is currently clean at
-that HEAD. This is not yet a production integration acceptance: `main.rs` still
+The routing source under review is rebased onto cache commit `e1b78e5f1` and
+includes the History peer resolver, live membership adapter, caller-deadline
+propagation, and duplicate test-attribute correction. This is not yet a
+production integration acceptance: `main.rs` still
 creates `MatchingHistoryClient` from one fixed History channel and does not
 install the peer resolver/live membership adapter. TChannel remains outside
 this source slice.
@@ -60,12 +59,19 @@ retries stopping at the caller deadline. The retry test uses distinct attempt
 messages and asserts that cancellation during a later backoff returns the first
 operation error. These tests are included by the module-filter stage.
 
-The dispatcher change that propagates the poll deadline into Record*Started
-and inactive-domain refresh has no dedicated test that observes the exact
-caller deadline at the History RPC boundary. The integrated runner includes
-the existing queue lifecycle regression, but it does not prove that forwarding
-edge. Before claiming end-to-end deadline parity, add a deterministic History
-server test that captures the received deadline/timeout metadata for a task
-claim and for the query mutable-state branch, then expires the client poll and
-asserts cancellation plus the expected queued-task/ack behavior. Do not add
-sleep-only evidence or loosen the deadline assertion.
+The boundary test in `matching_history::tests` passes GetMutableState,
+RecordDecisionTaskStarted, and RecordActivityTaskStarted request shapes through
+the shared RPC request builder and checks that a shorter caller deadline
+constrains the outgoing `grpc-timeout`. It does not exercise the dispatch or
+query handlers end to end, and it does not prove cancellation or queue/ack
+behavior. The runner's dispatch regression is separate; do not claim full
+end-to-end deadline parity from these gates.
+
+## Attempt log
+
+Attempt `attempt-20261019T201218Z-ucRiFc` stopped at the first History client
+test compile with exit 101. The candidate had two generic closure inference
+errors in the deadline-aware refresh/describe calls, and the peer resolver
+used `farmhash` without declaring it as a cadence-server dependency. Those
+compile failures were corrected before rerunning the complete gate set; no
+test assertion ran in this attempt.
