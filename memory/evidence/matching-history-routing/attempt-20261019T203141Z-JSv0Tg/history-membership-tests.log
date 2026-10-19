@@ -1,0 +1,21 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 4 tests
+test matching_history_membership::tests::filters_go_reachable_history_members_and_maps_identity_and_grpc ... ok
+test matching_history_membership::tests::grpc_has_no_address_port_fallback ... ok
+test matching_history_membership::tests::go_port_and_split_host_port_edge_cases_are_preserved ... ok
+
+thread 'matching_history_membership::tests::reads_membership_snapshot_again_after_member_changes' (1884645) panicked at crates/cadence-server/src/matching_history_membership.rs:268:14:
+called `Result::unwrap()` on an `Err` value: Application("node is not ready to handle requests")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test matching_history_membership::tests::reads_membership_snapshot_again_after_member_changes ... FAILED
+
+failures:
+
+failures:
+    matching_history_membership::tests::reads_membership_snapshot_again_after_member_changes
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 284 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `-p cadence-server --lib`

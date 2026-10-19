@@ -1,0 +1,18 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-server)
+warning: function `retryable` is never used
+  --> crates/cadence-server/src/matching_history.rs:80:4
+   |
+80 | fn retryable(error: &Status) -> bool {
+   |    ^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `request` is never used
+   --> crates/cadence-server/src/matching_history.rs:240:8
+    |
+142 | impl MatchingHistoryClient {
+    | -------------------------- method in this implementation
+...
+240 |     fn request<T>(&self, payload: T) -> Request<T> {
+    |        ^^^^^^^
+

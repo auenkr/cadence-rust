@@ -1,0 +1,40 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 52s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 14 tests
+test matching_history::tests::history_caller_deadline_bounds_all_resource_retries ... ok
+test matching_history::tests::history_factory_deadline_error_is_not_retryable_by_resource_wrapper ... ok
+test matching_history::tests::history_rpc_boundary_uses_caller_deadline_for_query_and_task_start_calls ... ok
+test matching_history::tests::history_rpc_timeout_resets_for_each_resource_retry ... ok
+test matching_history::tests::history_service_retry_classifier_matches_go_transient_and_terminal_cases ... ok
+test matching_history::tests::matching_history_record_started_timeout_reads_live_per_domain ... ok
+test matching_history::tests::matching_history_redirects_between_two_tonic_peers_on_typed_owner_loss ... ok
+test matching_history::tests::caller_deadline_drops_the_redirect_rpc_future ... ok
+test matching_history::tests::matching_history_retry_classification_requires_cadence_error_type ... ok
+test matching_history::tests::matching_history_terminal_errors_and_cancellation_stop_retries ... ok
+test matching_history::tests::ownership_loss_decoder_obeys_go_status_and_first_detail_mapping ... ok
+test matching_history::tests::record_started_redirects_share_one_attempt_budget ... ok
+test matching_history::tests::record_started_retries_stop_at_caller_deadline ... ok
+test matching_history::tests::matching_history_retries_preserve_request_id_and_yarpc_metadata ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 274 filtered out; finished in 0.39s
+
+     Running unittests src/main.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-d8c11a5e190ba1da)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/e2e.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/e2e-99f99bdc94e5cdc6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+     Running tests/matching_delivery.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/matching_delivery-843a0e993c505d63)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

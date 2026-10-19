@@ -1,0 +1,136 @@
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-common)
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-api)
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-thrift)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-proto)
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-persistence)
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-server)
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:24:24
+   |
+24 |     fn hosts(&self) -> Result<Vec<Host>, Status>;
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+   = note: `-D clippy::result-large-err` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::result_large_err)]`
+
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:25:62
+   |
+25 | ...-> Result<String, Status> {
+   |       ^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:49:10
+   |
+49 |     ) -> Result<Self, Status> {
+   |          ^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:62:50
+   |
+62 |     pub fn workflow(&self, workflow_id: &str) -> Result<String, Status> {
+   |                                                  ^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:66:46
+   |
+66 |     pub fn domain(&self, domain_id: &str) -> Result<String, Status> {
+   |                                              ^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:70:41
+   |
+70 |     fn shard_key(&self, value: &str) -> Result<String, Status> {
+   |                                         ^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:79:46
+   |
+79 |     pub fn shard_id(&self, shard_id: u32) -> Result<String, Status> {
+   |                                              ^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:87:50
+   |
+87 |     pub fn host_address(&self, address: &str) -> Result<String, Status> {
+   |                                                  ^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+  --> crates/cadence-server/src/matching_history_peer_resolver.rs:98:32
+   |
+98 |     pub fn all_peers(&self) -> Result<Vec<String>, Status> {
+   |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this closure is very large
+   --> crates/cadence-server/src/matching_history_peer_resolver.rs:102:18
+    |
+102 |             .map(|host| self.endpoint(host))
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+    |
+    = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+   --> crates/cadence-server/src/matching_history_peer_resolver.rs:106:35
+    |
+106 |     fn owner(&self, key: &str) -> Result<String, Status> {
+    |                                   ^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+    |
+    = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this closure is very large
+   --> crates/cadence-server/src/matching_history_peer_resolver.rs:110:18
+    |
+110 |             .map(|host| self.endpoint(host))
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+    |
+    = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: the `Err`-variant returned from this function is very large
+   --> crates/cadence-server/src/matching_history_peer_resolver.rs:115:40
+    |
+115 |     fn endpoint(&self, host: &Host) -> Result<String, Status> {
+    |                                        ^^^^^^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+    |
+    = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#result_large_err
+
+error: redundant closure
+  --> crates/cadence-server/src/matching_history_membership.rs:39:21
+   |
+39 |         .filter_map(|member| history_host(member))
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself: `history_host`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#redundant_closure
+   = note: `-D clippy::redundant-closure` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::redundant_closure)]`
+
+error: could not compile `cadence-server` (lib) due to 14 previous errors

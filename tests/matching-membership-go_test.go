@@ -63,3 +63,22 @@ func TestRustMatchingMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGoFarmhashFingerprint32ShortByteVectors(t *testing.T) {
+	for _, tc := range []struct {
+		input []byte
+		want  uint32
+	}{
+		{[]byte{}, 3696677242},
+		{[]byte{0x80}, 801663339},
+		{[]byte{0xff}, 495582926},
+		{[]byte{0xef, 0xbf, 0xbd}, 4143110158},
+		{[]byte{0x80, 0xff, 0xef, 0xbf}, 740356336},
+		{[]byte{0xef, 0xbf, 0xbd, 0x01}, 110792607},
+		{[]byte{0x80, 0x00, 0xff, 0x7f}, 847840402},
+	} {
+		if got := farm.Fingerprint32(tc.input); got != tc.want {
+			t.Errorf("Fingerprint32(%x) = %d, want %d", tc.input, got, tc.want)
+		}
+	}
+}

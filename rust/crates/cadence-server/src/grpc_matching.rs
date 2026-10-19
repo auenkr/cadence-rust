@@ -1303,7 +1303,17 @@ impl m::matching_api_server::MatchingApi for Matching {
                 query=queue.queries.next()=>{
                     let _wait=query_lifecycle.begin();
                     let execution=query.request.workflow_execution.clone().unwrap_or_default();
-                    match queue.dispatcher.query_mutable_state(&execution).await {
+                    let query_state = queue
+                        .dispatcher
+                        .query_mutable_state_with_deadline(&execution, incoming_deadline);
+                    let query_state = if let Some(deadline) = incoming_deadline {
+                        tokio::time::timeout_at(deadline, query_state)
+                            .await
+                            .unwrap_or_else(|_| Err(Status::deadline_exceeded("Matching poll deadline exceeded.")))
+                    } else {
+                        query_state.await
+                    };
+                    match query_state {
                         Ok(state)=>{
                             let mut response=crate::matching_query::query_response(query, &state);
                             response.load_balancer_hints=queue.load_balancer_hints(matching_now());

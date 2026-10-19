@@ -1,0 +1,9 @@
+{
+  "go/client/history/peer_resolver.go": "928698d3bef0d2c78379e4a7b14846b4256bd2df87c3d3f7ddb3439074e7df62",
+  "go/common/membership/hashring.go": "ac6c6424ac973b19eaf39a6761c91ae3a332d29119703a02dc3cc0d44c1abd45",
+  "go/common/membership/resolver.go": "52dcbc4a4e95115b4b5edecc1fc83e4417103714e32e21a8552085958e151b29",
+  "go/common/membership/hostinfo.go": "202668dc171de64bf530022b2ebff2a99859787814d595a4ba8e18533d0ef49d",
+  "go/service/history/lookup/lookup.go": "3994de74e2b2802b574d6716d0896b75629e8a1aa5be6d2a975e2329c2315cbb",
+  "go/common/util.go": "36c32521a1afcbd8aa0dcfbd2a6cf336cb9ed1991e252bd92da777392afab87a",
+  "tests/matching-history-peer-oracle/oracle_test.go": "106e0218d5e65316d90bddbdc825433ef8eaa1f0ed39ffcce9f062a15a2b7aae"
+}

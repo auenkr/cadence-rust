@@ -1,0 +1,41 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-server)
+error[E0618]: expected function, found `matching_history::MatchingHistoryClient`
+    --> crates/cadence-server/src/matching_history.rs:1248:13
+     |
+ 794 |     fn client() -> MatchingHistoryClient {
+     |     ------------------------------------ this function of the same name is available here, but it's shadowed by the local binding
+...
+1215 |         let client =
+     |             ------ `client` has type `matching_history::MatchingHistoryClient`
+...
+1248 |             client().request(()).metadata().get("grpc-timeout"),
+     |             ^^^^^^--
+     |             |
+     |             call expression requires function
+
+error[E0369]: binary operation `==` cannot be applied to type `Result<String, Status>`
+   --> crates/cadence-server/src/matching_history_membership.rs:298:9
+    |
+298 | /         assert_eq!(
+299 | |             adapter.named_address(
+300 | |                 &selected_remote,
+301 | |                 crate::matching_history_peer_resolver::NamedPort::Grpc,
+302 | |             ),
+303 | |             Ok("remote-history:7934".into())
+304 | |         );
+    | |         ^
+    | |         |
+    | |_________Result<String, Status>
+    |           Result<String, Status>
+    |
+note: `tonic::Status` does not implement `PartialEq`
+   --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tonic-0.12.3/src/status.rs:37:1
+    |
+ 37 | pub struct Status {
+    | ^^^^^^^^^^^^^^^^^ `tonic::Status` is defined in another crate
+    = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-2330720371d93706.long-type-17714667446122800344.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+Some errors have detailed explanations: E0369, E0618.
+For more information about an error, try `rustc --explain E0369`.
+error: could not compile `cadence-server` (lib test) due to 2 previous errors

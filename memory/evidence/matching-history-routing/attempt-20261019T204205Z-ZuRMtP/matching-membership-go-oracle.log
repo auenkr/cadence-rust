@@ -1,0 +1,39 @@
+ok  	github.com/uber/cadence/common/membership	0.101s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 1 test
+test membership::tests::matching_membership_go_ring_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 0.20s
+
+     Running tests/ringpop_bootstrap_selection_oracle.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/ringpop_bootstrap_selection_oracle-86925d64a056762c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/ringpop_disseminator.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/ringpop_disseminator-495e2285822a22e0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/ringpop_disseminator_oracle.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/ringpop_disseminator_oracle-0c26e606e1088b52)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/ringpop_member_oracle.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/ringpop_member_oracle-1b97b8588868e28a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/ringpop_memberlist_update_oracle.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/ringpop_memberlist_update_oracle-55698274a46d7c63)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

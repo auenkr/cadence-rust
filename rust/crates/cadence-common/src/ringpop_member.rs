@@ -1,6 +1,9 @@
 //! Deterministic Ringpop v0.10.0 member checksum and merge primitives.
 //! These functions are deliberately pure; they do not implement SWIM lifecycle.
-use crate::ringpop_wire::{Member, ALIVE, FAULTY, LEAVE, SUSPECT, TOMBSTONE};
+use crate::{
+    membership::fingerprint32,
+    ringpop_wire::{Member, ALIVE, FAULTY, LEAVE, SUSPECT, TOMBSTONE},
+};
 use std::collections::BTreeMap;
 
 /// FarmHash32 checksum for a Ringpop label map (XOR of each encoded pair).
@@ -13,7 +16,7 @@ pub fn labels_checksum(labels: Option<&BTreeMap<String, String>>) -> i32 {
             bytes.extend_from_slice(key.as_bytes());
             bytes.extend_from_slice(&(value.len() as i32).to_be_bytes());
             bytes.extend_from_slice(value.as_bytes());
-            checksum ^= farmhash::fingerprint32(&bytes);
+            checksum ^= fingerprint32(&bytes);
         }
     }
     checksum as i32
@@ -43,7 +46,7 @@ pub fn memberlist_checksum(members: &[Member]) -> u32 {
         input.push_str(&entry);
         input.push(';');
     }
-    farmhash::fingerprint32(input.as_bytes())
+    fingerprint32(input.as_bytes())
 }
 
 pub fn state_precedence(status: &str) -> i32 {
@@ -82,17 +85,33 @@ mod tests {
     use super::*;
 
     fn member(status: &str, incarnation: i64) -> Member {
-        Member { address: "node".into(), status: status.into(), incarnation, labels: None }
+        Member {
+            address: "node".into(),
+            status: status.into(),
+            incarnation,
+            labels: None,
+        }
     }
 
     #[test]
     fn merge_precedence_and_incarnation_rules() {
-        let statuses = ["alive", "suspect", "faulty", "leave", "tombstone", "unknown"];
+        let statuses = [
+            "alive",
+            "suspect",
+            "faulty",
+            "leave",
+            "tombstone",
+            "unknown",
+        ];
         for old_status in statuses {
             for gossip_status in statuses {
                 let old = member(old_status, 4);
                 let gossip = member(gossip_status, 4);
-                assert_eq!(should_process_gossip(Some(&old), &gossip), state_precedence(gossip_status) > state_precedence(old_status), "{old_status} -> {gossip_status}");
+                assert_eq!(
+                    should_process_gossip(Some(&old), &gossip),
+                    state_precedence(gossip_status) > state_precedence(old_status),
+                    "{old_status} -> {gossip_status}"
+                );
             }
         }
         let old = member("alive", 3);
@@ -130,10 +149,16 @@ mod tests {
         let mut found_negative = false;
         for i in 0..1000 {
             let labels = BTreeMap::from([("k".to_string(), format!("value-{i}"))]);
-            if labels_checksum(Some(&labels)) < 0 { found_negative = true; break; }
+            if labels_checksum(Some(&labels)) < 0 {
+                found_negative = true;
+                break;
+            }
         }
         assert!(found_negative);
-        assert_eq!(labels_checksum(None), labels_checksum(Some(&BTreeMap::new())));
+        assert_eq!(
+            labels_checksum(None),
+            labels_checksum(Some(&BTreeMap::new()))
+        );
     }
 
     #[test]
@@ -141,8 +166,11 @@ mod tests {
         let a = member("alive", 1);
         let b = member("suspect", 2);
         let tombstone = member("tombstone", 99);
-        assert_eq!(memberlist_checksum(&[a.clone(), b.clone()]), memberlist_checksum(&[b, a.clone(), tombstone]));
-        assert_eq!(memberlist_checksum(&[]), farmhash::fingerprint32(b""));
+        assert_eq!(
+            memberlist_checksum(&[a.clone(), b.clone()]),
+            memberlist_checksum(&[b, a.clone(), tombstone])
+        );
+        assert_eq!(memberlist_checksum(&[]), fingerprint32(b""));
         assert_eq!(member_checksum_string(&a), "nodealive1");
     }
 }

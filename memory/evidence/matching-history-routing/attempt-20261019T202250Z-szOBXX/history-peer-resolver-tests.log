@@ -1,0 +1,24 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.95s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-2330720371d93706)
+
+running 5 tests
+test matching_history_peer_resolver::tests::address_redirect_and_all_members_use_selected_named_endpoint ... ok
+test matching_history_peer_resolver::tests::shard_key_matches_go_rune_replacement_for_invalid_scalar ... ok
+test matching_history_peer_resolver::tests::two_peer_placement_refresh_and_owner_redirect_use_current_membership ... ok
+test matching_history_peer_resolver::tests::workflow_and_domain_share_go_hash_and_rune_shard_lookup ... ok
+
+thread 'matching_history_peer_resolver::tests::matching_history_placement_matches_accepted_go_peer_oracle' (1873301) panicked at crates/cadence-server/src/matching_history_peer_resolver.rs:314:13:
+assertion `left == right` failed: Go placement mismatch for "shard:1114112"
+  left: "10.8.0.3:7836"
+ right: "10.8.0.2:7835"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test matching_history_peer_resolver::tests::matching_history_placement_matches_accepted_go_peer_oracle ... FAILED
+
+failures:
+
+failures:
+    matching_history_peer_resolver::tests::matching_history_placement_matches_accepted_go_peer_oracle
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 283 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p cadence-server --lib`
