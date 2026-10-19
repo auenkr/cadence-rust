@@ -1,3 +1,13 @@
+## Live orchestration checkpoint — 2026-10-19 (post-compaction)
+
+Main starts at42d78bf1e, clean. Matching remains incomplete and the whole migration goal active. Native workers confirmed running; no duplicate tasks started.
+
+- relay_completion in t3-6f14baa6 owns exclusive heavy Rust build slot. Final3 focused PING-REQ tests passed5; actual Go oracle/Go->Rust->Go integration rebuilding/running, then strict server Clippy. Logs /tmp/pingreq-relay-final3-*. Request decode repairs empty/null/single streaming JSON value, plus stopped/destroyed relay behavior and failure dissemination tests. Baselinee1f379685 and repairs remain unintegrated pending complete evidence/review.
+- discovery_review in matching-dns-provider continues DNS/SRV implementation and injected Go fixtures. Hold Rust build pending relay release. Parent additionally requested actual literal-IP, hosts-file/NSS and IPv6-zone resolver compatibility review.
+- state_transitions in matching-domain-metadata has source and focused tests for read-only Go-compatible metadata; real shared SQLite oracle work continues. Next heavy build slot after relay. Tests not yet run; no acceptance claim.
+
+Disk35GB free. Keep heavy linking serialized, jobs1, long processes in tmux cadence-rust. Production binary/runtime gate remains outstanding; last frozen full regression3c8c5f98a does not cover main. Next inspect/integrate completed relay, then indirect-probe/runtime slice, continue domain and DNS checks. No History migration until full Matching gate.
+
 ## Authoritative integration checkpoint — 2026-10-19
 
 Main6977c326d now integrates timer core a1f802896 (worker8e4e993eb) and static/file discovery b73abb5ed+c735426a3+6977c326d (worker056ee6890+0eba7a373+481471c4f). Parent checked integrated source/tests byte-identical to worker-tested versions. Timer actual pinned-Go differential,3Rust focused,strictcommonClippy passed; accepted log memory/evidence/ringpop-state-transitions/accepted.*. Discovery actualGo oracle,6Rust focused,strictserverall-targetClippy passed; evidence memory/evidence/ringpop-bootstrap-provider/parity-final-*. No full combined regression on main yet. Matching still incomplete.
