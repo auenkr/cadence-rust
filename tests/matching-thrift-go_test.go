@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	_ "github.com/ncruces/go-sqlite3/driver"
+	_ "github.com/ncruces/go-sqlite3/embed"
 	"github.com/uber/cadence/.gen/go/cadence/workflowserviceclient"
 	"github.com/uber/cadence/.gen/go/health/metaclient"
 	m "github.com/uber/cadence/.gen/go/matching"
