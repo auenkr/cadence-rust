@@ -1,9 +1,10 @@
 # Matching persistence production parity audit (2026-10-19)
 
 Read-only source audit for Matching storage and recovery. Root reference is
-`a7e33258d` (root working branch includes `f6e6363d7` and subsequent runtime
-work); this audit's selected worktree is `t3/matching-history-peer-validation`
-at `08265d333`. Also inspected the uncommitted production-cache draft in
+`a7e33258d`, a docs-only checkpoint after `f6e6363d7`; the latter contains
+the preceding Matching shard-distributor production gap audit. This audit's
+selected worktree is `t3/matching-history-peer-validation` at `08265d333`. Also
+inspected the uncommitted production-cache draft in
 `/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider`, branch
 `t3/matching-runtime-owner` at `6011effad` plus its working-tree changes. No
 build, test, or implementation command was run.
@@ -52,15 +53,20 @@ same standalone `matching.db` path and SQLite constructor
 That draft advances domain metadata integration; it does not implement or
 select the Matching task backend.
 
-**The SQLite implementation is pinned to the one-shard layout.** The Go SQL
-task store computes a DB shard from `FarmHash32(domainID + "_" + taskList)` and
-the configured shard count (`go/common/persistence/sql/sqlplugin/dbSharding.go:44-47`);
-SQL config supports `nShards` and multiple databases
-(`go/common/config/config.go:329-347`). Rust SQL reads, inserts and task-list
-updates/deletes hard-code `shard_id=0` (`matching_sqlite.rs:82-86,120-122,144-145,272-273`).
-The existing Go interop evidence uses one SQLite database and shard zero. A
-multi-shard SQL deployment cannot be opened by this implementation as a
-configured equivalent, even though the table schema matches.
+**Rust implements neither Go SQL shard behavior beyond the single-shard case.**
+Go has two distinct shard concepts here. Its SQL task store's `nShards` pages
+through persisted task-list `shard_id` values in `ListTaskList`
+(`go/common/persistence/sql/sql_task_store.go:41,49-60,328-342`). Separately,
+per-task-list operations calculate a shard index from
+`FarmHash32(domainID + "_" + taskList)` and `GetTotalNumDBShards()` for physical
+database routing (`sql_task_store.go:87-94`;
+`go/common/persistence/sql/sqlplugin/dbSharding.go:44-47`); SQL config supports
+multiple databases (`go/common/config/config.go:329-347`). Rust currently
+hard-codes persisted row `shard_id=0` and keeps one SQLite connection, with no
+physical database routing (`matching_sqlite.rs:44-58,82-86,144-145,272-273`).
+The existing Go interop evidence uses one SQLite database and shard zero. It
+therefore establishes neither persisted task-list shard pagination nor
+configured physical database routing for multi-shard SQL.
 
 **Cassandra/NoSQL has no Rust task-store implementation.** Go config accepts
 NoSQL and ShardedNoSQL, with task-list-to-shard routing through configured
