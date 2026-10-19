@@ -227,3 +227,24 @@ tasks/prod native probe/options/schema/lint. SWIM source-only next audits
 remaining Ringpop healer/partition/bootstrap parity before new implementation.
 History source-only SD chain eecb1a1c9+2e713ebed remains unvalidated config/
 standalone owner only; no registry/main ownership wiring. Current free36GB.
+
+## Resumed checkpoint after compaction
+
+Accepted root b1a7f52e6 remains pushed; user AGENTS.md edits preserved.
+Configured-store worker remains sole build owner. Rust gates passed frozen
+961913605; actual two-way Go probe has not passed. Fixture fixes through
+17b3b6adb include SQL plugin/driver registration and embedded TaskInfo.TaskID2.
+Current tmux matching-two-way-taskid run retains original tested Rust binary.
+Parent flagged cached max_read_level: inserting Go ID2 after Rust writer ID1
+may exceed the live queue read bound. Worker must distinguish invalid concurrent
+same-lease fixture from product defect; prefer Go seed before queue open/restart
+if required, without changing Go semantics. Earlier failures retained.
+
+Unmerged healer chain65d46a130..9e5591fef and SD clienteecb1a1c9+2e713ebed
+remain source-only/unvalidated. Idle workers resumed for bounded source audits:
+SWIM remaining provider parity/validation runner; History production main wiring
+contract. Neither may build while configured-store worker owns lane. Sole warmed
+target /home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target retained;
+obsolete17GB cache target removed after process check; about48GB free.
+Matching remains incomplete; production provider/history assembly and actual
+mixed Go/Rust SDK/recovery acceptance still outstanding.
