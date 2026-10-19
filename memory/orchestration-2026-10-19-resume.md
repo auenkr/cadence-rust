@@ -53,3 +53,11 @@ Runtime production binary and focused 3 tests pass. Production Go probe first fa
 Parent inspected runtime worker combined-run2.log/exit0: real generated Go Matching Thrift + Ringpop JSON on same TChannel port passed. Earlier Go probe constructor/context compile errors were fixed with failing logs retained. Runtime strict Clippy/final commit still pending; no full mixed cluster claim.
 
 Withdrawn SWIM review finding: reviewer initially claimed Go RemoveMember swaps the last element. Parent read exact pinned ringpop-go v0.10.0 memberlist.go175-179: append(list[:i], list[i+1:]...) preserves remaining order and tuple assignment clears old final slot. Rust Vec::remove is correct. Reviewer acknowledged mistake; outbound owner made no source edit. Do not resurrect a swap_remove fix from the earlier message.
+
+## Runtime accepted; SWIM build grant
+
+Main56142ba02 accepts runtime-owner worker97f1dd008. Parent compared final main/runtime/TChannel/probe source and tests byte-identical after cherry-pick; lib retains independently accepted cache export. Worker76140e924 doc-only follow-up fixes command cwd/target reproducibility. Component evidence includes production binary, 3 focused tests, actual Go Thrift mid-drain/repeated SIGTERM/bind failure/TLS probes, same-port Matching+Ringpop probe, strict server all-target lint. Combined merged-main regression remains pending.
+
+Sole heavy build grant transferred to outbound_luna for SWIM, existing t3-975b4b2d target, jobs1. Parent verified no jobs at transfer. No routing builds yet.
+
+Routing r5 source completed unbuilt at t3-13f816cc: Record* redirect chains share per-attempt budget; mutable/describe/refresh no invented fixed deadline, optional caller-deadline methods, poll deadline passed into mutable-state call in grpc_matching.rs. Source tests added; describe/refresh outer interface propagation still open. Carry this latest source (not earlier t3-12810cdd) into next routing validation task. No component acceptance yet.
