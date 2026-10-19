@@ -1,18 +1,21 @@
 package ringpopprovider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/uber/cadence/common/log/testlogger"
 	"github.com/uber/cadence/common/membership"
 	ringpopconfig "github.com/uber/cadence/common/peerprovider/ringpopprovider/config"
+	"github.com/uber/ringpop-go/swim"
 	tchannel "github.com/uber/tchannel-go"
 )
 
@@ -57,15 +60,23 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		if err := goProvider.Stop(stopCtx); err != nil {
+			t.Errorf("stopping Go Ringpop provider: %v", err)
+		}
+		_ = channel.Close()
+	}()
 	startDone := make(chan error, 1)
 	go func() { startDone <- goProvider.Start(ctx) }()
 
 	// Keep the reservation made in the provider's seed list. Start a Rust node
 	// there only after the Go listener is ready to answer Ringpop JOIN calls.
 	command := exec.CommandContext(ctx, probe, rustAddress, goAddress)
-	var output strings.Builder
-	command.Stdout = &output
-	command.Stderr = &output
+	output := &lockedBuffer{}
+	command.Stdout = output
+	command.Stderr = output
 	if err := command.Start(); err != nil {
 		cancel()
 		t.Fatal(err)
@@ -75,14 +86,6 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 			_ = command.Process.Kill()
 			_ = command.Wait()
 		}
-	}()
-	defer func() {
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stopCancel()
-		if err := goProvider.Stop(stopCtx); err != nil {
-			t.Errorf("stopping Go Ringpop provider: %v", err)
-		}
-		_ = channel.Close()
 	}()
 
 	select {
@@ -107,9 +110,13 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	if err != nil || grpcAddress != "127.0.0.1:7234" {
 		t.Fatalf("Rust grpc label = %q, %v; want 127.0.0.1:7234", grpcAddress, err)
 	}
+	firstIncarnation := peerIncarnation(t, goProvider, rustAddress)
 
 	waitMembers(t, ctx, goProvider, 0, "Go peer did not observe Rust self-eviction")
 	waitMembers(t, ctx, goProvider, 1, "same-address Rust restart did not recover membership")
+	if incarnation := peerIncarnation(t, goProvider, rustAddress); incarnation <= firstIncarnation {
+		t.Fatalf("restarted Rust incarnation = %d, want > %d", incarnation, firstIncarnation)
+	}
 
 	if err := command.Wait(); err != nil {
 		t.Fatalf("Rust provider lifecycle probe failed: %v\n%s", err, output.String())
@@ -117,6 +124,42 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	if !strings.Contains(output.String(), "rust-peer-recovered") {
 		t.Fatalf("Rust lifecycle probe did not report recovery:\n%s", output.String())
 	}
+}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(value []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.Write(value)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.String()
+}
+
+func peerIncarnation(t *testing.T, provider *Provider, address string) int64 {
+	t.Helper()
+	var incarnation int64
+	_, err := provider.ringpop.GetReachableMembers(func(member swim.Member) bool {
+		if member.Address == address {
+			incarnation = member.Incarnation
+			return true
+		}
+		return false
+	})
+	if err != nil {
+		t.Fatalf("reading Rust member incarnation: %v", err)
+	}
+	if incarnation == 0 {
+		t.Fatalf("Rust address %s was not in Go's reachable member set", address)
+	}
+	return incarnation
 }
 
 func reserveRustAddress(t *testing.T) string {
