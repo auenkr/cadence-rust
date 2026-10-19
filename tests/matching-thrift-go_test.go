@@ -23,6 +23,7 @@ import (
 	p "github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/persistence/serialization"
 	sqlstore "github.com/uber/cadence/common/persistence/sql"
+	_ "github.com/uber/cadence/common/persistence/sql/sqlplugin/sqlite"
 	"go.uber.org/yarpc"
 	"go.uber.org/yarpc/api/transport"
 	yhttp "go.uber.org/yarpc/transport/http"
