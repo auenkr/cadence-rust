@@ -77,18 +77,9 @@ and owns probe/transition tasks across start, stop, and destroy. Injectable
 transport/randomness supports deterministic tests. A probe example and a Go
 interoperability test exercise a Rust runtime against a live pinned Go peer.
 
-Verified so far: `python3 tests/run-ringpop-swim-runtime-go-oracle.py` passes;
-the exact output and checked-in fixture are in
-`memory/evidence/ringpop-swim-runtime/go-oracle.log` and
-`tests/fixtures/ringpop_swim_runtime_oracle.json`. The oracle covers iterator
-behavior, direct success, no/sparse helpers, configured-size all-errors,
-suspect→faulty→tombstone→eviction, cancellation, and stop/restart. The added
-interop test compiles as part of that Go package invocation, but its live Rust
-probe passed against a live pinned Go peer. The evidence for that baseline run
-is `memory/evidence/ringpop-swim-runtime/go-interop-current.log` (exit 0); it
-verified the Go peer observed Rust as ALIVE before the Rust process stopped,
-and that Rust merged the Go peer. The current source extends that baseline and
-still needs revalidation.
+Earlier baseline evidence is retained alongside final logs for diagnosis. The final
+`compat-final` run includes the refreshed cadence oracle and live peer/blocked
+shutdown tests; consult that log for the complete current oracle values.
 
 The runtime now follows pinned Go adaptive cadence: randomized first delay,
 then `max(lastPeriod + lastRate - now, minProtocolPeriod)`; a 10-entry uniform
@@ -103,17 +94,8 @@ is rejected until that shutdown completes. The existing synchronous `stop`
 still aborts tasks for synchronous callers, so callers needing Go's wait
 boundary must use the async method.
 
-The current source-only cadence and shutdown changes have not yet been built or
-tested. A fresh baseline target is warmed at `rust/target` (about 2.7 GB). The
-parent owns the serialized build grant; request it before running Cargo or the
-Go compatibility runner. Planned commands after regrant:
-
-- `python3 tests/run-ringpop-swim-runtime-go-oracle.py`
-- `CARGO_BUILD_JOBS=1 cargo test --locked -p cadence-server ringpop_runtime --lib`
-- `CARGO_BUILD_JOBS=1 python3 tests/run-ringpop-swim-runtime-compat.py`
-- `CARGO_BUILD_JOBS=1 cargo clippy --locked -p cadence-server --all-targets -- -D warnings`
-
-Record each command and exit status under `memory/evidence/ringpop-swim-runtime/`.
+The final source passed the commands listed above. Historical failed and baseline
+logs remain retained and do not supersede the final evidence.
 
 ## Remaining production integration and parity gates
 
@@ -127,9 +109,8 @@ Record each command and exit status under `memory/evidence/ringpop-swim-runtime/
 - Confirm transport details against Go in the mixed cluster: helper selection,
   timeouts, membership gossip merge, startup join, restart/recovery, and actual
   SDK workflow traffic with Go History/Frontend/Worker and no Go Matching.
-- Run the pinned Go interoperability runner with the built Rust probe, focused
-  Rust common/server tests, and strict cadence-server all-target Clippy. Save
-  command, exit code, and logs under `memory/evidence/ringpop-swim-runtime/`.
+- Repeat combined validation after production wiring or other source changes;
+  the focused component evidence above covers the accepted runtime source.
 - Complete Matching parity audit beyond this SWIM slice, including persistence,
   configuration, discovery, transports, lifecycle, and all service-facing
   interactions. Do not treat this adapter/oracle as service completion.

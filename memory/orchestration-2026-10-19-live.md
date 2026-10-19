@@ -100,3 +100,15 @@ Source-ready worker is to remain idle until regrant.
 Sole heavy slot now granted back to runtime_cache for its corrected final
 gates. Next SWIM, then History routing. Both use warmed targets, jobs1, tmux
 cadence-rust. Latest disk44GBfree. Original user AGENTS edit remains untouched.
+
+## SWIM component accepted
+
+Integrated worker c5a87b35 as c31ab6641. Final evidence: 8 common memberlist
+tests, 59 server Ringpop tests, strict common/server all-target Clippy, live
+Go/Rust peer interop and actual Go blocked-probe shutdown all pass. Current
+cadence fixture is reproduced in compat-final (sample size10, p50 rate50ns,
+floor1ns); go-oracle-final is an older retained trace despite its filename.
+Corrected stale source-only/untested paragraphs in the component memory.
+Production main still needs concrete Ringpop lifecycle wiring. Cache retains
+sole heavy slot, final attempt20261019T200114Z-1846622. History worker is
+preparing source-only validation/integration review while waiting.
