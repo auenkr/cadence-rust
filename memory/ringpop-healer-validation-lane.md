@@ -28,5 +28,19 @@ within a bound; the test then destroys/joins both peer listeners. This avoids
 sleep-based race assertions and makes Rust behavior observable independently
 of the Go fixture. The test and runner have not been executed.
 
-The runner has not been started. `bash -n` and `git diff --check` passed while
-preparing it; no Go/Rust build, test, or Clippy command was run.
+Initial frozen runner attempt 1 ran in `cadence-rust` at
+`memory/evidence/ringpop-healer-validation-20261019T215112Z`. The Go oracle
+comparison and both selected `cadence-common` memberlist tests passed. All
+`cadence-server` test targets and Clippy failed to compile because three
+`ringpop_provider.rs` call sites referred to an undefined `wall_clock_millis`
+(lines 1222, 1232, and 2183 at that revision). The runner repeated the same
+compile error for multiple filters; the captured logs are retained as the
+initial failure record. A module-local helper now supplies Unix wall-clock
+milliseconds and is also used by the normal successful JOIN path, matching Go's
+`UnixMilli` timestamp intent. The serialized runner now has a single
+`cadence-server --no-run` compile gate; dependent test filters and combined
+Clippy are recorded as skipped if that gate fails, while independent common
+Clippy/memberlist checks still execute.
+
+Attempt 1 was not validation success. The corrected source and runner need a
+fresh full lane run; no tests of the corrected source have been executed yet.

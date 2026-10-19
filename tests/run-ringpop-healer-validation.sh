@@ -51,23 +51,37 @@ run_command() {
   echo "[$name] $command"
   (cd "$ROOT" && "$@") > "$log" 2>&1
   local result=$?
+  LAST_RESULT="$result"
   cat "$log"
   printf 'run\t%s\t%s\t%s\n' "$result" "$command" "$log" >> "$STATUS"
   return 0
 }
 
+record_skip() {
+  local name="$1"
+  local reason="$2"
+  printf 'skip\tNA\t%s: %s\tNA\n' "$name" "$reason" >> "$STATUS"
+  echo "[$name] skipped: $reason"
+}
+
 # The Go runner is comparison-only. Never pass --update in this lane.
 run_command go_healer_oracle python3 tests/run-ringpop-healer-go-oracle.py
-run_command rust_healer_fixture cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib go_healer_expected_trace
-run_command rust_healer_blocked_join_stop cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib stop_waits_for_active_healer_join_response
-run_command rust_partition_heal cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib partition_heal_joins_two_live_protocol_peers_and_converges_membership
-run_command rust_reverse_full_sync cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib receiver_full_sync_starts_reverse_join_and_converges_two_live_peers
-run_command rust_shared_tchannel_provider cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib two_shared_tchannel_providers_discover_roles_and_self_evict
+run_command rust_server_test_compile cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib --no-run
+if [[ "$LAST_RESULT" == 0 ]]; then
+  run_command rust_healer_fixture cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib go_healer_expected_trace
+  run_command rust_healer_blocked_join_stop cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib stop_waits_for_active_healer_join_response
+  run_command rust_partition_heal cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib partition_heal_joins_two_live_protocol_peers_and_converges_membership
+  run_command rust_reverse_full_sync cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib receiver_full_sync_starts_reverse_join_and_converges_two_live_peers
+  run_command rust_shared_tchannel_provider cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib two_shared_tchannel_providers_discover_roles_and_self_evict
+  run_command rust_discovery_provider_regressions cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib dns_provider_matches_go_cache_errors_and_host_port_formatting
+  run_command strict_common_server_clippy cargo clippy --manifest-path rust/Cargo.toml -p cadence-common -p cadence-server --all-targets -- -D warnings
+else
+  record_skip rust_server_healer_and_provider_tests "cadence-server --lib --no-run failed; see rust_server_test_compile.log"
+  record_skip strict_common_server_clippy "cadence-server test compilation failed; see rust_server_test_compile.log"
+  run_command strict_common_clippy cargo clippy --manifest-path rust/Cargo.toml -p cadence-common --all-targets -- -D warnings
+fi
 run_command rust_memberlist_refutation cargo test --manifest-path rust/Cargo.toml -p cadence-common --lib remote_acceptance_refutation_tombstone_and_checksum
 run_command rust_memberlist_go_trace cargo test --manifest-path rust/Cargo.toml -p cadence-common --lib single_remote_iterator_round_matches_pinned_go_trace
-run_command rust_discovery_provider_regressions cargo test --manifest-path rust/Cargo.toml -p cadence-server --lib dns_provider_matches_go_cache_errors_and_host_port_formatting
-
-run_command strict_common_server_clippy cargo clippy --manifest-path rust/Cargo.toml -p cadence-common -p cadence-server --all-targets -- -D warnings
 
 record_source_hash after
 

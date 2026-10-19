@@ -1,0 +1,28 @@
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-proto)
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+error[E0425]: cannot find value `wall_clock_millis` in this scope
+    --> crates/cadence-server/src/ringpop_provider.rs:1222:48
+     |
+1222 |                 node.apply_changes(&changes_a, wall_clock_millis, |len| {
+     |                                                ^^^^^^^^^^^^^^^^^ not found in this scope
+     |
+note: function `crate::matching_ringpop_provider::wall_clock_millis` exists but is inaccessible
+    --> crates/cadence-server/src/matching_ringpop_provider.rs:446:1
+     |
+ 446 | fn wall_clock_millis() -> i64 {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not accessible
+
+error[E0425]: cannot find value `wall_clock_millis` in this scope
+    --> crates/cadence-server/src/ringpop_provider.rs:1232:53
+     |
+1232 | ...ote_members, wall_clock_millis, |len| {
+     |                 ^^^^^^^^^^^^^^^^^ not found in this scope
+     |
+note: function `crate::matching_ringpop_provider::wall_clock_millis` exists but is inaccessible
+    --> crates/cadence-server/src/matching_ringpop_provider.rs:446:1
+     |
+ 446 | fn wall_clock_millis() -> i64 {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not accessible
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `cadence-server` (lib) due to 2 previous errors

@@ -1169,17 +1169,9 @@ impl RingpopNode {
         if node.stopped {
             return Ok(join);
         }
-        apply_join_list(
-            &mut node,
-            changes,
-            || {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64
-            },
-            |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
-        );
+        apply_join_list(&mut node, changes, wall_clock_millis, |len| {
+            rand::Rng::gen_range(&mut rand::thread_rng(), 0..len)
+        });
         Ok(join)
     }
 
@@ -1809,6 +1801,14 @@ fn apply_join_list<F, R>(
             node.disseminator.clear_address(&change.address);
         }
     }
+}
+
+/// Return the Go-compatible wall-clock incarnation timestamp in milliseconds.
+fn wall_clock_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 fn decode<T: DeserializeOwned + Default>(body: &[u8]) -> Result<T, RingpopError> {
