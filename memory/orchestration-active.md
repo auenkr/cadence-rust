@@ -1,3 +1,15 @@
+## 2026-10-19 — current orchestrator recovery and Luna workers
+
+Parent source ec059ca8e. Whole migration goal active; Matching remains incomplete and service order remains Matching -> History -> Frontend -> Worker. Original T3 task IDs71/72 cannot be queried from this new thread (task_not_found / different owning thread), so recovered saved worktrees rather than treating stale status as live work.
+
+Current native delegated workers use gpt-6-luna, medium reasoning, normal inherited Standard service tier:
+- `/root/discovery_review`: finishes saved discovery review in `t3-367ce881`, HEAD0eba7a373 + retained dirty JSON decoder/Cargo edits. Source baseline includes056ee6890. Actual Go raw-byte/large-number/syntax-priority differential and Rust/Clippy requested. No candidate integrated yet.
+- `/root/relay_completion`: finishes saved indirect-ping relay in `t3-6f14baa6`, HEADe1f379685 + retained dirty Go/Rust harness edits. Real Go requester -> Rust relay -> Go target required, plus failure/state/dissemination evidence. No candidate integrated yet. Go handler intentionally ignores reverse-full-sync flag; this is not a relay gap.
+- `/root/state_transitions`: new isolated `ringpop-state-transitions` fromec059ca8e. Owns only deterministic common state-transition timer core, actual pinned-Go clock oracle, docs. No runtime/main/provider overlap. Must preserve redundant same-state schedule, original captured incarnation, map retention, cancellation/enable/disable/local/signed-duration semantics. Runtime scheduling integration remains separate.
+- `/root/storage_recovery`: complete; recovered ~36.9GB from inactive reproducible targets. See storage-recovery-20261019.md. Active975/e426 and newest a33 caches preserved; old ce1e72cb full-regression target deleted before late preservation message. Sources/commits/evidence intact. Filesystem now37GB free.
+
+Parent source review warns discovery must match Go syntax-before-type validation, malformed UTF-8 only within strings, unpaired surrogates and oversized numbers. Workers must finish actual checks in tmux cadence-rust, jobs1, no push/delegates/broad formatting. Parent reviews final commits before integration. Last full frozen validation still3c8c5f98a, not current source; do not infer production completion. Next after current candidates: outgoing indirect probes, gossip/state runtime, DNS/SRV/bootstrap/labels/production wiring and remaining production audit gaps, then full frozen mixed Go/Rust verification.
+
 ## 2026-10-18 — discovery70 and relay69 reviewed; follow-ups active
 
 Discovery70 returned a70752d3a on d55ad694, not integrated: null decoding repaired, raw shared-input fixture added, Go source test moved to tests-only overlay. Parent review raised additional invalid Unicode/large-number JSON compatibility questions. Final integration review72 running.
