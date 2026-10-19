@@ -5,7 +5,7 @@
 //! client; this module owns only the TChannel/Thrift wire boundary and never
 //! owns retries or operation deadlines.
 
-use cadence_thrift::{protocol::Reader, value::Struct, TType, Value};
+use cadence_thrift::{protocol::Reader, TType};
 use std::time::Duration;
 use tonic::{Code, Status};
 
@@ -29,9 +29,9 @@ impl TChannelHistoryClient {
     pub(crate) async fn call(
         &self,
         method: &'static str,
-        body: Vec<u8>,
+        body: &TypedStruct,
         timeout: Duration,
-    ) -> Result<Struct, Status> {
+    ) -> Result<TypedStruct, Status> {
         let method = format!("History::{method}");
         let headers = vec![
             ("$rpc$-caller".to_owned(), "internal".to_owned()),
@@ -42,7 +42,7 @@ impl TChannelHistoryClient {
             HISTORY_SERVICE,
             &method,
             &headers,
-            &body,
+            &encode_typed_struct(body),
             timeout,
         )
         .await
@@ -61,7 +61,7 @@ impl TChannelHistoryClient {
         if response.application_error {
             return Err(application_error(&response.headers, &response.body));
         }
-        decode_struct(&response.body)
+        decode_typed_struct(&response.body)
             .map_err(|error| Status::internal(format!("invalid History Thrift reply: {error}")))
     }
 }
@@ -85,121 +85,6 @@ fn application_error(headers: &[(String, String)], body: &[u8]) -> Status {
         Code::Unknown,
         format!("{name}: {details}"),
     )
-}
-
-pub(crate) fn encode_struct(value: &Struct) -> Vec<u8> {
-    let mut writer = cadence_thrift::protocol::Writer::new();
-    write_struct(&mut writer, value);
-    writer.into_bytes()
-}
-
-pub(crate) fn decode_struct(bytes: &[u8]) -> cadence_thrift::Result<Struct> {
-    let mut reader = Reader::new(bytes);
-    let value = read_struct(&mut reader)?;
-    if reader.remaining() != 0 {
-        return Err(cadence_thrift::Error::Invalid(
-            "trailing bytes after Thrift struct".into(),
-        ));
-    }
-    Ok(value)
-}
-
-fn read_struct(reader: &mut Reader<'_>) -> cadence_thrift::Result<Struct> {
-    let mut fields = Vec::new();
-    while let Some((ty, id)) = reader.read_field_begin()? {
-        fields.push((id, read_value(reader, ty)?));
-    }
-    Ok(Struct { fields })
-}
-
-fn read_value(reader: &mut Reader<'_>, ty: TType) -> cadence_thrift::Result<Value> {
-    match ty {
-        TType::Bool => Ok(Value::Bool(reader.read_bool()?)),
-        TType::Byte => Ok(Value::I8(reader.read_u8()? as i8)),
-        TType::I16 => Ok(Value::I16(reader.read_i16()?)),
-        TType::I32 => Ok(Value::I32(reader.read_i32()?)),
-        TType::I64 => Ok(Value::I64(reader.read_i64()?)),
-        TType::Double => Ok(Value::F64(reader.read_f64()?)),
-        TType::String => Ok(Value::Bytes(reader.read_bytes()?.to_vec())),
-        TType::Struct => Ok(Value::Struct(read_struct(reader)?)),
-        TType::List | TType::Set => {
-            let (element_ty, count) = reader.read_list_begin()?;
-            let values = (0..count)
-                .map(|_| read_value(reader, element_ty))
-                .collect::<cadence_thrift::Result<Vec<_>>>()?;
-            if ty == TType::List {
-                Ok(Value::List(values))
-            } else {
-                Ok(Value::Set(values))
-            }
-        }
-        TType::Map => {
-            let (key_ty, value_ty, count) = reader.read_map_begin()?;
-            let values = (0..count)
-                .map(|_| Ok((read_value(reader, key_ty)?, read_value(reader, value_ty)?)))
-                .collect::<cadence_thrift::Result<Vec<_>>>()?;
-            Ok(Value::Map(values))
-        }
-        TType::Stop => Err(cadence_thrift::Error::Invalid(
-            "STOP is not a value type".into(),
-        )),
-    }
-}
-
-fn write_struct(writer: &mut cadence_thrift::protocol::Writer, value: &Struct) {
-    for (id, field) in &value.fields {
-        let ty = value_type(field);
-        writer.write_field_begin(ty, *id);
-        write_value(writer, field);
-    }
-    writer.write_field_stop();
-}
-
-fn value_type(value: &Value) -> TType {
-    match value {
-        Value::Bool(_) => TType::Bool,
-        Value::I8(_) => TType::Byte,
-        Value::I16(_) => TType::I16,
-        Value::I32(_) => TType::I32,
-        Value::I64(_) => TType::I64,
-        Value::F64(_) => TType::Double,
-        Value::Bytes(_) => TType::String,
-        Value::Struct(_) => TType::Struct,
-        Value::Map(_) => TType::Map,
-        Value::Set(_) => TType::Set,
-        Value::List(_) => TType::List,
-    }
-}
-
-fn write_value(writer: &mut cadence_thrift::protocol::Writer, value: &Value) {
-    match value {
-        Value::Bool(value) => writer.write_bool(*value),
-        Value::I8(value) => writer.write_u8(*value as u8),
-        Value::I16(value) => writer.write_i16(*value),
-        Value::I32(value) => writer.write_i32(*value),
-        Value::I64(value) => writer.write_i64(*value),
-        Value::F64(value) => writer.write_f64(*value),
-        Value::Bytes(value) => writer.write_bytes(value),
-        Value::Struct(value) => write_struct(writer, value),
-        Value::List(values) | Value::Set(values) => {
-            let element_type = values.first().map(value_type).unwrap_or(TType::Stop);
-            writer.write_list_begin(element_type, values.len());
-            for value in values {
-                write_value(writer, value);
-            }
-        }
-        Value::Map(values) => {
-            let (key_type, value_type) = values
-                .first()
-                .map(|(key, value)| (value_type(key), value_type(value)))
-                .unwrap_or((TType::Stop, TType::Stop));
-            writer.write_map_begin(key_type, value_type, values.len());
-            for (key, value) in values {
-                write_value(writer, key);
-                write_value(writer, value);
-            }
-        }
-    }
 }
 
 /// Local typed representation used by schema adapters. Unlike the shared
