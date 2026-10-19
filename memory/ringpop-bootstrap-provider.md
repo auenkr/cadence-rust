@@ -155,3 +155,37 @@ commands, logs, exits, hashes, and resolver limitations are recorded in
 `memory/evidence/ringpop-dns-provider/final.md`. These checks validate this
 provider slice only; runtime wiring, mixed service validation, restart/recovery,
 and SDK workflows remain open.
+
+## Production Matching provider draft (2026-10-19)
+
+Candidate commit `e6fc0fd79` adds `MatchingRingpopProvider` and source-level
+lifecycle integration. Its follow-up draft removes the role-specific snapshot
+restriction so one provider can answer both Matching and History lookups,
+captures the bound local address rather than assuming member index zero, and
+matches Go `rpc.ListenIP` scoring for wildcard listeners by reading interface
+UP/LOOPBACK flags. Explicit Ringpop `broadcastAddress` still takes precedence.
+A pure score fixture covers UP, DOWN, IPv4, IPv6, and loopback cases.
+
+The unrun provider integration test constructs two providers on prebound
+TChannel listeners using `serve_matching_with_ringpop_listener`, gives them
+Matching and History role labels, bootstraps them against one another, checks
+role lookup, evicts one node, and restarts it at the same address to check
+membership recovery. This test is source only: no build, test, or actual Go-peer
+interoperability run has been performed for this candidate. Do not treat it as
+parity evidence or as service completion.
+
+When validation is authorized, run the test from the isolated candidate worktree
+with the designated shared build cache. Then add an actual pinned-Go
+Ringpop-provider peer on the same TChannel protocol path and exercise join,
+label change, self-eviction, restart, and recovery. The full mixed Go
+Frontend/History/Worker + Rust Matching SDK workflow remains the service gate.
+
+Production startup recipe: bind Matching's TChannel listener; construct the
+provider using that listener's concrete `local_addr()`; install
+`provider.handler()` with `serve_matching_with_ringpop_listener` on that same
+listener; call `provider.start()` (discovery JOIN, SWIM, readiness, role/port
+labels); then install/refresh Matching membership. Shutdown order is
+`lifecycle.withdraw()`, drain and stop the Matching handler, then
+`lifecycle.stop_after_drain()` so peers can learn the FAULTY transition before
+Ringpop is destroyed. `main.rs` remains unwired; the runtime owner must apply
+this sequence.

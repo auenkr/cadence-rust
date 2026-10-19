@@ -49,6 +49,7 @@ enum Lifecycle {
 /// generation for both operations.
 pub struct MatchingRingpopProvider {
     node: RingpopNode,
+    local_address: String,
     service: String,
     discovery: DiscoveryProvider,
     max_join_duration_nanos: i64,
@@ -97,7 +98,7 @@ impl MatchingRingpopProvider {
         };
         let address = SocketAddr::new(advertised_ip, listener_addr.port()).to_string();
         let local = Member {
-            address,
+            address: address.clone(),
             status: ALIVE.to_owned(),
             incarnation: wall_clock_millis(),
             labels: None,
@@ -109,6 +110,7 @@ impl MatchingRingpopProvider {
         let (events, _) = broadcast::channel(32);
         Ok(Self {
             node,
+            local_address: address,
             service: service.into(),
             discovery,
             max_join_duration_nanos: config.max_join_duration_nanos,
@@ -187,6 +189,17 @@ impl MatchingRingpopProvider {
         current.members = Arc::new(members);
         let _ = events.send(PeerChange);
     }
+
+    fn service_members(members: &[PeerMember], service: &str) -> Vec<PeerMember> {
+        members
+            .iter()
+            .filter(|member| {
+                member.labels.get("serviceName").map(String::as_str) == Some(service)
+                    && matches!(member.status, PeerStatus::Alive | PeerStatus::Suspect)
+            })
+            .cloned()
+            .collect()
+    }
 }
 
 impl MatchingPeerProvider for MatchingRingpopProvider {
@@ -210,7 +223,7 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
             .hosts()
             .map_err(|error| ProviderError(format!("discovering Ringpop seeds: {error}")))?;
         let selection = BootstrapSelection::new(
-            &self.node.membership_snapshot().0[0].address,
+            &self.local_address,
             &seeds,
             Options::from_signed(0, self.max_join_duration_nanos, 0, 0),
         );
@@ -271,19 +284,7 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
     }
 
     async fn members(&self, service: &str) -> Result<Vec<PeerMember>, ProviderError> {
-        if service != self.service {
-            return Ok(Vec::new());
-        }
-        Ok(self
-            .snapshot()
-            .members
-            .iter()
-            .filter(|member| {
-                member.labels.get("serviceName").map(String::as_str) == Some(service)
-                    && matches!(member.status, PeerStatus::Alive | PeerStatus::Suspect)
-            })
-            .cloned()
-            .collect())
+        Ok(Self::service_members(&self.snapshot().members, service))
     }
 
     async fn subscribe(
@@ -357,25 +358,76 @@ fn parse_port_label(label: &str) -> Option<u16> {
 }
 
 fn select_advertised_ip() -> anyhow::Result<IpAddr> {
-    let mut best = None;
-    for interface in if_addrs::get_if_addrs()? {
-        let ip = interface.ip();
-        let mut score = if ip.is_ipv4() { 300 } else { 0 };
-        if !interface.is_loopback() && !ip.is_loopback() {
-            score += 200;
+    use std::ptr;
+
+    let mut first = ptr::null_mut();
+    let result = unsafe { libc::getifaddrs(&mut first) };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    struct IfAddrsGuard(*mut libc::ifaddrs);
+    impl Drop for IfAddrsGuard {
+        fn drop(&mut self) {
+            unsafe { libc::freeifaddrs(self.0) };
         }
-        if best.as_ref().is_none_or(|(previous, _)| score > *previous) {
-            best = Some((score, ip));
+    }
+    let _guard = IfAddrsGuard(first);
+    let mut best: Option<(i32, IpAddr)> = None;
+    let mut entry = first;
+    while !entry.is_null() {
+        let current = unsafe { &*entry };
+        if !current.ifa_addr.is_null() {
+            let ip = match unsafe { (*current.ifa_addr).sa_family as i32 } {
+                libc::AF_INET => {
+                    let address = unsafe { &*(current.ifa_addr.cast::<libc::sockaddr_in>()) };
+                    Some(IpAddr::V4(std::net::Ipv4Addr::from(u32::from_be(
+                        address.sin_addr.s_addr,
+                    ))))
+                }
+                libc::AF_INET6 => {
+                    let address = unsafe { &*(current.ifa_addr.cast::<libc::sockaddr_in6>()) };
+                    Some(IpAddr::V6(std::net::Ipv6Addr::from(
+                        address.sin6_addr.s6_addr,
+                    )))
+                }
+                _ => None,
+            };
+            if let Some(ip) = ip {
+                let flags = current.ifa_flags as i32;
+                let score = listen_ip_score(
+                    ip.is_ipv4(),
+                    ip.is_loopback(),
+                    flags & libc::IFF_LOOPBACK as i32 != 0,
+                    flags & libc::IFF_UP as i32 != 0,
+                );
+                if best.as_ref().is_none_or(|(previous, _)| score > *previous) {
+                    best = Some((score, ip));
+                }
+            }
         }
+        entry = current.ifa_next;
     }
     best.map(|(_, ip)| ip)
         .ok_or_else(|| anyhow::anyhow!("no addresses to advertise for Ringpop"))
 }
 
+fn listen_ip_score(is_ipv4: bool, ip_loopback: bool, interface_loopback: bool, up: bool) -> i32 {
+    let mut score = if is_ipv4 { 300 } else { 0 };
+    if !interface_loopback && !ip_loopback {
+        score += 100;
+        if up {
+            score += 100;
+        }
+    }
+    score
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::BootstrapMode;
     use cadence_common::ringpop_wire::Member;
+    use tokio::net::TcpListener;
 
     #[test]
     fn provider_snapshot_retains_other_roles_and_only_known_ports() {
@@ -398,6 +450,11 @@ mod tests {
         assert_eq!(members[0].named_ports.len(), 2);
         assert_eq!(members[0].named_ports["grpc"], 7835);
         assert_eq!(members[0].named_ports["tchannel"], 7935);
+        assert_eq!(
+            MatchingRingpopProvider::service_members(&members, "cadence-history").len(),
+            1
+        );
+        assert!(MatchingRingpopProvider::service_members(&members, "cadence-matching").is_empty());
     }
 
     #[test]
@@ -415,5 +472,152 @@ mod tests {
             "cadence-matching".into(),
         )]));
         assert!(changes.has_changed().unwrap());
+    }
+
+    #[test]
+    fn advertised_ip_score_matches_go_listen_ip_up_and_loopback_rules() {
+        assert_eq!(listen_ip_score(true, false, false, true), 500);
+        assert_eq!(listen_ip_score(true, false, false, false), 400);
+        assert_eq!(listen_ip_score(false, false, false, true), 200);
+        assert_eq!(listen_ip_score(true, true, true, true), 300);
+        assert_eq!(listen_ip_score(true, false, true, true), 300);
+    }
+
+    #[tokio::test]
+    async fn two_shared_tchannel_providers_discover_roles_and_self_evict() {
+        let listener_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr_a = listener_a.local_addr().unwrap();
+        let addr_b = listener_b.local_addr().unwrap();
+        let provider_a = Arc::new(
+            MatchingRingpopProvider::new(
+                RingpopConfig {
+                    name: "cadence".into(),
+                    bootstrap_mode: BootstrapMode::Hosts,
+                    bootstrap_hosts: vec![addr_b.to_string()],
+                    max_join_duration_nanos: 1_000_000_000,
+                    ..Default::default()
+                },
+                "cadence-matching",
+                addr_a,
+                7835,
+            )
+            .unwrap(),
+        );
+        let provider_b = Arc::new(
+            MatchingRingpopProvider::new(
+                RingpopConfig {
+                    name: "cadence".into(),
+                    bootstrap_mode: BootstrapMode::Hosts,
+                    bootstrap_hosts: vec![addr_a.to_string()],
+                    max_join_duration_nanos: 1_000_000_000,
+                    ..Default::default()
+                },
+                "cadence-history",
+                addr_b,
+                7836,
+            )
+            .unwrap(),
+        );
+        let server_a = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            listener_a,
+            crate::grpc_matching::Matching::new(crate::handlers::AppState::default()),
+            provider_a.handler(),
+        ));
+        let server_b = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            listener_b,
+            crate::grpc_matching::Matching::new(crate::handlers::AppState::default()),
+            provider_b.handler(),
+        ));
+
+        let (started_a, started_b) = tokio::join!(provider_a.start(), provider_b.start());
+        assert!(
+            started_a.is_ok(),
+            "provider A bootstrap failed: {started_a:?}"
+        );
+        assert!(
+            started_b.is_ok(),
+            "provider B bootstrap failed: {started_b:?}"
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if provider_a
+                    .members("cadence-history")
+                    .await
+                    .is_ok_and(|members| members.len() == 1)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("provider A did not observe History role labels");
+        assert_eq!(
+            provider_a.members("cadence-matching").await.unwrap().len(),
+            0
+        );
+
+        provider_a.self_evict().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if provider_b
+                    .members("cadence-matching")
+                    .await
+                    .is_ok_and(|members| members.is_empty())
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("provider B retained the self-evicted Matching peer");
+
+        provider_a.stop().await.unwrap();
+        server_a.abort();
+        let _ = server_a.await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let restarted_listener = TcpListener::bind(addr_a).await.unwrap();
+        let restarted_provider = Arc::new(
+            MatchingRingpopProvider::new(
+                RingpopConfig {
+                    name: "cadence".into(),
+                    bootstrap_mode: BootstrapMode::Hosts,
+                    bootstrap_hosts: vec![addr_b.to_string()],
+                    max_join_duration_nanos: 1_000_000_000,
+                    ..Default::default()
+                },
+                "cadence-matching",
+                addr_a,
+                7835,
+            )
+            .unwrap(),
+        );
+        let restarted_server = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+            restarted_listener,
+            crate::grpc_matching::Matching::new(crate::handlers::AppState::default()),
+            restarted_provider.handler(),
+        ));
+        restarted_provider.start().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if provider_b
+                    .members("cadence-matching")
+                    .await
+                    .is_ok_and(|members| members.len() == 1)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("restarted provider did not restore Matching membership");
+
+        restarted_provider.stop().await.unwrap();
+        provider_b.stop().await.unwrap();
+        restarted_server.abort();
+        server_b.abort();
     }
 }
