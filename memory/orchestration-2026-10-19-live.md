@@ -177,3 +177,19 @@ GC. Staged real-discovery mixed binary harness avoids Fx Matching decorator,
 but waits production main/provider and discovered History injection; output
 explicitly preliminary/acceptanceEligible:false. Both workers idle awaiting
 grants, not running background builds. Current free disk37GB.
+
+## History routing accepted
+
+Merged validated worker f8646963d into root219f86054. All13 final exit files
+in attempt20261019T204205Z-ZuRMtP are0, before/after source hashes identical;
+root Rust source byte-identical to worker final source. Includes Go byte hash
+fix, Go Ring oracle, Ringpop member regressions, History client14/resolver5/
+membership4, dispatcher regression, strict common/server Clippy, pinned Go
+History placement oracle equivalence. No production resolver injection or
+TChannel adapter/E2E poll-query caller deadline proof claimed.
+
+SWIM now sole heavy slot, rebase providerd0cc154f5 chain onto219f86054 then
+validate combined source plus actual Go peer. Cache source-only rebase its
+configured store/harness chain onto219f86054 for next lane. History source-only
+next audits pinned Matching shard-distributor APIs/slices before implementation.
+No competing build processes at transfer. Root only dirty user AGENTS.
