@@ -47,3 +47,9 @@ Parent integrated the worker's precise Go timeout audit as memory/matching-histo
 No routing build grant. Cache Luna now independently reviews unbuilt SWIM source, read-only.
 
 Runtime production binary and focused 3 tests pass. Production Go probe first failed relative overlay path, then Go TChannel transport constructor tuple handling; worker fixed both and is rerunning with retained failed logs. Sole build grant remains runtime; no actual successful mid-drain evidence yet. No component/service completion inferred from the build.
+
+## Runtime shared-listener and SWIM review evidence
+
+Parent inspected runtime worker combined-run2.log/exit0: real generated Go Matching Thrift + Ringpop JSON on same TChannel port passed. Earlier Go probe constructor/context compile errors were fixed with failing logs retained. Runtime strict Clippy/final commit still pending; no full mixed cluster claim.
+
+Withdrawn SWIM review finding: reviewer initially claimed Go RemoveMember swaps the last element. Parent read exact pinned ringpop-go v0.10.0 memberlist.go175-179: append(list[:i], list[i+1:]...) preserves remaining order and tuple assignment clears old final slot. Rust Vec::remove is correct. Reviewer acknowledged mistake; outbound owner made no source edit. Do not resurrect a swap_remove fix from the earlier message.
