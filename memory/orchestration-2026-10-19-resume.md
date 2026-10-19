@@ -23,3 +23,11 @@ Track this task with T3 task_status/task_cancel; do not duplicate it. Build queu
 Round 1 History resolver returned source-only seam, leaving constructor-channel RPC routing unchanged; not accepted as the requested implementation. Round 2 now owns completion of actual opt-in resolver-aware Matching History calls and Go multi-peer placement evidence in a new T3 worktree, same explicit standard-tier Luna model. Task ID suffix replaces `r1` with `r2` in the full task ID above. Prior source is retained at t3-04a109d4 for carrying forward; no builds authorized for this worker.
 
 Runtime check passed after Option/mut fixes, then worker released build slot while correcting drain/listener lifetime. Cache has sole grant for focused persistence/cache tests and strict Clippy, using t3-a33b4846 target. Parent verified live persistence test build PID1593320. No combined current-main validation or service acceptance yet.
+
+## Cache and routed History review continuation
+
+Cache component validation reached 9 persistence tests (1 pre-existing Go-file-dependent test ignored), 14 cache tests, strict all-target Clippy, and final Rust/Go trace equality. Worker then corrected generic SQL scan/driver error retry classification; those checks must be rerun before acceptance. Parent also requested unbiased uniform jitter matching Go rand.Intn. Cache retains sole build slot until frozen/committed.
+
+History routing rounds 2 and 3 remained partial (per-peer channels and membership test source, but no ownership redirects or executable placement oracle). Neither is accepted. Current implementation task is standard-tier gpt-6-luna high reasoning, narrowly implementing redirects across all five Matching outbound methods, carrying prior source from t3-c63f01e1. Task ID:
+`node:delegated-task:command%3Amcp%3A6a1e03e1-ed6f-4ea2-b645-7d7964f28ed9%3Adelegate-task%3Amatching-history-redirect-luna-20261019-r4`
+Outbound native Luna independently owns actual Go placement oracle in its existing SWIM worktree; no Cargo grant. Runtime worker is source-ready after listener ownership changes; needs regrant after cache and actual mid-drain Go RPC verification. No component patches integrated yet.
