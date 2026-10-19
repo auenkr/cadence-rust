@@ -299,8 +299,8 @@ mod tests {
             adapter.named_address(
                 &selected_remote,
                 crate::matching_history_peer_resolver::NamedPort::Grpc,
-            ),
-            Ok("remote-history:7934".into())
+            ).unwrap(),
+            "remote-history:7934"
         );
     }
 }

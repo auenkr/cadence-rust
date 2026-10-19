@@ -82,3 +82,8 @@ that the newly declared direct `farmhash` dependency needed its normal
 reported only two dead-code warnings for helpers used by tests; those helpers
 are now test-gated. No test result was recorded, and the final runner now uses
 `--locked` for every Cargo gate.
+
+Attempt `attempt-20261019T201548Z-211EUS` compiled the library but stopped
+while compiling the test target (exit 101). It found a test fixture shadowing
+bug and an assertion comparing `Result<_, tonic::Status>` directly; both have
+been corrected. No test assertion ran in that attempt.

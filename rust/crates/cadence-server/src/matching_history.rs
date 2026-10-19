@@ -1212,7 +1212,7 @@ mod tests {
             Some(&grpc_timeout(default))
         );
         // Go reads `matching.recordTaskStartedTimeout(domain)` per attempt.
-        let client =
+        let configured_client =
             history_client
                 .clone()
                 .with_record_started_timeout(Arc::new(|domain_id: &str| {
@@ -1223,14 +1223,14 @@ mod tests {
                     }
                 }));
         assert_eq!(
-            client.record_started_timeout("domain-a"),
+            configured_client.record_started_timeout("domain-a"),
             Some(Duration::from_millis(250))
         );
         assert_eq!(
-            client.record_started_timeout("domain-b"),
+            configured_client.record_started_timeout("domain-b"),
             Some(Duration::from_secs(9))
         );
-        let unbounded = client
+        let unbounded = configured_client
             .clone()
             .with_record_started_timeout(Arc::new(|_: &str| Duration::ZERO));
         assert_eq!(
@@ -1238,14 +1238,17 @@ mod tests {
             None,
             "Go WithOperationTimeout(0) leaves the caller deadline unchanged"
         );
-        let request = client.request_with_timeout((), client.record_started_timeout("domain-a"));
+        let request = configured_client.request_with_timeout(
+            (),
+            configured_client.record_started_timeout("domain-a"),
+        );
         assert_eq!(
             request.metadata().get("grpc-timeout"),
             Some(&grpc_timeout(Duration::from_millis(250)))
         );
         // The factory applies its separate 30s timeout to each History RPC.
         assert_eq!(
-            client().request(()).metadata().get("grpc-timeout"),
+            history_client.request(()).metadata().get("grpc-timeout"),
             Some(&grpc_timeout(DEFAULT_HISTORY_RPC_TIMEOUT))
         );
     }
