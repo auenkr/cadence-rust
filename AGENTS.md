@@ -54,3 +54,5 @@ Like gpt 6 luna, or opencode free model. Normal speed mode(Not fast mode)
 
 ## NOTE
 This machine have only 100GB storage, so clean up the things which are not needed or saved already.
+Do not keep running subagents forever. Sometimes agents get stuck and in status it shows working since 16+hr.
+So after assigning Keep checking on subagents weather they are working correctly or not.
