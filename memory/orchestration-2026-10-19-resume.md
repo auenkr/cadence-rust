@@ -39,3 +39,11 @@ Main d40c84e48 contains accepted cache source (worker 66006fd0f + 921fe51a7); 0a
 Redirect task r4 completed source at `/home/ubuntu/.t3/worktrees/cadence-rust/t3-12810cdd`: all five calls use typed ownership redirects with shared timeout, plus two-tonic-peer test source. Uncommitted and unbuilt, not accepted. Cache Luna read-only review confirms five workflow key paths but flags added hard client-side timeout versus prior header-only timeout and Go caller-context semantics; confirm/fix before acceptance. Runtime injection remains separate (main loopback unchanged), TChannel named-port adapter absent. No Cargo grant for routing patch yet.
 
 Runtime worker holds sole build slot. Spawned listener assembly failed E0597 because borrowed matching RPC config crosses tokio::spawn; worker instructed to own/clone config and use bin check before link. Failed artifacts retained. SWIM source remains unbuilt; queue after runtime. User AGENTS.md change remains uncommitted and preserved.
+
+## Deadline fidelity and runtime probe continuation
+
+Parent integrated the worker's precise Go timeout audit as memory/matching-history-timeout-audit.md. Only Record*TaskStarted get fixed per-attempt child deadlines; mutable-state/refresh/standby-describe rely on caller context. Routing r4 remains unaccepted for its fixed deadline across all five methods. Standard-speed high-reasoning Luna task now corrects these semantics and adds optional caller context propagation/tests, carrying prior source from t3-12810cdd:
+`node:delegated-task:command%3Amcp%3A6a1e03e1-ed6f-4ea2-b645-7d7964f28ed9%3Adelegate-task%3Amatching-history-timeouts-luna-20261019-r5`
+No routing build grant. Cache Luna now independently reviews unbuilt SWIM source, read-only.
+
+Runtime production binary and focused 3 tests pass. Production Go probe first failed relative overlay path, then Go TChannel transport constructor tuple handling; worker fixed both and is rerunning with retained failed logs. Sole build grant remains runtime; no actual successful mid-drain evidence yet. No component/service completion inferred from the build.
