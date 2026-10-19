@@ -13,7 +13,6 @@ use tonic::Status;
 const SERVICE_LABEL: &str = "serviceName";
 const IDENTITY_LABEL: &str = "__identity";
 const GRPC_PORT_LABEL: &str = "grpc";
-const TCHANNEL_PORT_LABEL: &str = "tchannel";
 
 /// Reads the current Ringpop memberlist on every call, so placement immediately
 /// reflects joins, failures, and recovery without a second cached view.
@@ -31,27 +30,6 @@ impl HistoryMembership for RingpopHistoryMembership {
     fn hosts(&self) -> Result<Vec<Host>, Status> {
         let (members, _) = self.node.membership_snapshot();
         Ok(history_hosts(&members))
-    }
-
-    fn named_address(
-        &self,
-        host: &Host,
-        port: crate::matching_history_peer_resolver::NamedPort,
-    ) -> Result<String, Status> {
-        let port_name = match port {
-            crate::matching_history_peer_resolver::NamedPort::Grpc => GRPC_PORT_LABEL,
-            crate::matching_history_peer_resolver::NamedPort::Tchannel => TCHANNEL_PORT_LABEL,
-        };
-        let (members, _) = self.node.membership_snapshot();
-        let member = members
-            .iter()
-            .find(|member| member.address == host.address)
-            .ok_or_else(|| {
-                Status::unavailable(format!("History member {:?} was not found.", host.address))
-            })?;
-        named_address(member, port_name).ok_or_else(|| {
-            Status::unavailable(format!("History member has no valid {port_name} port."))
-        })
     }
 }
 
@@ -75,9 +53,9 @@ fn history_host(member: &Member) -> Option<Host> {
         .cloned()
         .unwrap_or_else(|| member.address.clone());
 
-    // Go's provider uses a named grpc label only. Unlike its TChannel port,
-    // grpc has no address-port fallback for legacy members.
-    let grpc_address = named_address(member, GRPC_PORT_LABEL).unwrap_or_default();
+    // The Go History RPC uses its named gRPC port. Keep the endpoint inside
+    // this Host snapshot so selection and endpoint resolution see one view.
+    let grpc_address = grpc_address(member).unwrap_or_default();
 
     Some(Host {
         address: member.address.clone(),
@@ -86,16 +64,8 @@ fn history_host(member: &Member) -> Option<Host> {
     })
 }
 
-fn named_address(member: &Member, name: &str) -> Option<String> {
-    let labels = member.labels.as_ref()?;
-    let port = match labels.get(name) {
-        Some(label) => parse_go_port(label),
-        None if name == TCHANNEL_PORT_LABEL => {
-            let (_, address_port) = go_split_host_port(&member.address)?;
-            parse_go_port(address_port)
-        }
-        None => None,
-    }?;
+fn grpc_address(member: &Member) -> Option<String> {
+    let port = parse_go_port(member.labels.as_ref()?.get(GRPC_PORT_LABEL)?)?;
 
     // Go NewDetailedHostInfo ignores SplitHostPort errors and retains an empty
     // host; GetNamedAddress then returns JoinHostPort("", port), i.e. ":port".
@@ -258,24 +228,6 @@ mod tests {
     }
 
     #[test]
-    fn tchannel_uses_the_go_legacy_address_port_fallback() {
-        let legacy = member(
-            "legacy-history:7933",
-            ALIVE,
-            &[("serviceName", "cadence-history")],
-        );
-        assert_eq!(
-            named_address(&legacy, TCHANNEL_PORT_LABEL),
-            Some("legacy-history:7933".into())
-        );
-        let malformed = member(
-            "legacy-history:bad",
-            ALIVE,
-            &[("serviceName", "cadence-history")],
-        );
-        assert_eq!(named_address(&malformed, TCHANNEL_PORT_LABEL), None);
-    }
-
     #[test]
     fn reads_membership_snapshot_again_after_member_changes() {
         let node = Arc::new(RingpopNode::new(
@@ -284,10 +236,10 @@ mod tests {
                 address: "local-history:7933".into(),
                 status: ALIVE.into(),
                 incarnation: 1,
-                labels: Some(BTreeMap::from([(
-                    "serviceName".into(),
-                    "cadence-history".into(),
-                )])),
+                labels: Some(BTreeMap::from([
+                    ("serviceName".into(), "cadence-history".into()),
+                    ("grpc".into(), "7934".into()),
+                ])),
             },
             false,
         ));
@@ -315,7 +267,13 @@ mod tests {
         };
         node.handle_ping_with(&serde_json::to_vec(&ping).unwrap(), || 2, |_| 0)
             .unwrap();
-        assert_eq!(adapter.hosts().unwrap().len(), 2);
+        let after_add = adapter.hosts().unwrap();
+        assert_eq!(after_add.len(), 2);
+        let selected_remote = after_add
+            .iter()
+            .find(|host| host.address == "remote-history:7933")
+            .unwrap()
+            .clone();
 
         let ping = Ping {
             app: "cadence-history".into(),
@@ -335,5 +293,15 @@ mod tests {
         node.handle_ping_with(&serde_json::to_vec(&ping).unwrap(), || 3, |_| 0)
             .unwrap();
         assert_eq!(adapter.hosts().unwrap().len(), 1);
+
+        // Go's selected HostInfo retains named ports from the same snapshot;
+        // a later memberlist change does not re-resolve the old Host.
+        assert_eq!(
+            adapter.named_address(
+                &selected_remote,
+                crate::matching_history_peer_resolver::NamedPort::Grpc,
+            ),
+            Ok("remote-history:7934".into())
+        );
     }
 }
