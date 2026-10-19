@@ -8,10 +8,12 @@ use cadence_common::ringpop_memberlist::Memberlist;
 use cadence_common::ringpop_wire::{
     Change, JoinRequest, JoinResponse, Member, Ping, PingRequest, PingResponse, ALIVE, SUSPECT,
 };
+use rand::seq::SliceRandom;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::{future::Future, pin::Pin};
+use tokio::sync::mpsc;
 
 use crate::ringpop_tchannel::{RingpopError, RingpopHandler, RingpopResponse};
 use crate::tchannel_json_client::{self, JsonCallError};
@@ -30,6 +32,14 @@ pub struct JoinGroupResult {
     pub attempt: i64,
     pub successes: Vec<String>,
     pub failures: Vec<String>,
+}
+
+/// One completed indirect probe result, corresponding to Go's `interface{}`
+/// values emitted by `sendPingRequests`.
+#[derive(Debug)]
+pub enum PingRequestResult {
+    Response(PingResponse),
+    Error(JsonCallError),
 }
 
 /// Mutable state owned by one bootstrap sender across JOIN retry attempts.
@@ -534,6 +544,178 @@ impl RingpopNode {
         // Go's sendPing callback above succeeds even if the node stopped while
         // the response was in flight; memberlist.Update itself is stop guarded.
         Ok(ping)
+    }
+
+    /// Send one Ringpop v0.10.0 PING-REQ through `peer` to `target`.
+    /// A decoded response merges its membership delta even when `pingStatus`
+    /// is false. Go's PING-REQ sender advances dissemination counters on RPC
+    /// or JSON decode error, but not on success; that callback is independent
+    /// of the stopped-state memberlist guard.
+    pub async fn ping_request(
+        &self,
+        peer: &str,
+        target: &str,
+        timeout: Duration,
+    ) -> Result<PingResponse, JsonCallError> {
+        let (request, sent_changes) = {
+            let node = self.state.lock().expect("Ringpop state poisoned");
+            let local = node.memberlist.member(&node.address).expect("local member");
+            let changes = node.disseminator.issue_sender();
+            (
+                PingRequest {
+                    source: local.address.clone(),
+                    source_incarnation: local.incarnation,
+                    target: target.to_owned(),
+                    checksum: node.memberlist.checksum(),
+                    changes: Some(changes.clone()),
+                },
+                changes,
+            )
+        };
+        let request = serde_json::to_value(&request).expect("PingRequest serialization");
+        let callback_state = self.state.clone();
+        let peer = peer.to_owned();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        // Go's MakeCall runs independently of SendPingRequest's timeout
+        // select. Keep the transport and its error callback alive if the
+        // caller times out or is cancelled; a late successful response is
+        // discarded because only the caller applies response membership.
+        tokio::spawn(async move {
+            let result = async {
+                let response = tchannel_json_client::call(
+                    &peer,
+                    "ringpop",
+                    "/protocol/ping-req",
+                    None,
+                    &request,
+                    timeout,
+                )
+                .await?;
+                serde_json::from_value::<PingResponse>(response.body)
+                    .map_err(|error| JsonCallError::Transport(anyhow::anyhow!(error)))
+            }
+            .await;
+            if result.is_err() {
+                callback_state
+                    .lock()
+                    .expect("Ringpop state poisoned")
+                    .disseminator
+                    .complete_sender(&sent_changes, true);
+            }
+            let _ = result_tx.send(result);
+        });
+        let result = match tokio::time::timeout(timeout, result_rx).await {
+            Err(_) => {
+                return Err(JsonCallError::Transport(anyhow::anyhow!(
+                    "ping request timed out"
+                )))
+            }
+            Ok(Err(_)) => {
+                return Err(JsonCallError::Transport(anyhow::anyhow!(
+                    "ping request sender task terminated"
+                )))
+            }
+            Ok(Ok(Err(error))) => return Err(error),
+            Ok(Ok(Ok(response))) => response,
+        };
+        let mut node = self.state.lock().expect("Ringpop state poisoned");
+        // Unlike direct PING, a successful PING-REQ does not bump sender
+        // piggyback counters in the pinned Go implementation.
+        if !node.stopped {
+            let local_address = node.address.clone();
+            let update = node.memberlist.update(
+                result.changes.as_deref().unwrap_or_default(),
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64
+                },
+                |len| rand::Rng::gen_range(&mut rand::thread_rng(), 0..len),
+            );
+            if !update.accepted.is_empty() {
+                let pingable = node
+                    .memberlist
+                    .members()
+                    .iter()
+                    .filter(|member| {
+                        member.address != local_address
+                            && (member.status == ALIVE || member.status == SUSPECT)
+                    })
+                    .count();
+                node.disseminator.adjust_max_propagations(pingable);
+                for change in update.accepted {
+                    node.disseminator.record(change);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Launch one PING-REQ per randomly selected pingable helper. The helpers
+    /// run independently; dropping this receiver after the first positive
+    /// response does not cancel outstanding calls.
+    pub fn send_ping_requests(
+        &self,
+        target: &str,
+        amount: usize,
+        timeout: Duration,
+    ) -> mpsc::Receiver<PingRequestResult> {
+        let (tx, rx) = mpsc::channel(amount.max(1));
+        let mut helpers: Vec<String> = {
+            let node = self.state.lock().expect("Ringpop state poisoned");
+            node.memberlist
+                .members()
+                .iter()
+                .filter(|member| {
+                    member.address != node.address
+                        && member.address != target
+                        && (member.status == ALIVE || member.status == SUSPECT)
+                })
+                .map(|member| member.address.clone())
+                .collect()
+        };
+        helpers.shuffle(&mut rand::thread_rng());
+        // Go appends a pingable member before checking `len >= n`, so its
+        // zero-sized request still selects one helper. Negative sizes panic in
+        // Go before requests are launched; this unsigned API cannot express it.
+        helpers.truncate(amount.max(1));
+        for helper in helpers {
+            let sender = tx.clone();
+            let node = self.clone();
+            let target = target.to_owned();
+            tokio::spawn(async move {
+                let outcome = match node.ping_request(&helper, &target, timeout).await {
+                    Ok(response) => PingRequestResult::Response(response),
+                    Err(error) => PingRequestResult::Error(error),
+                };
+                let _ = sender.send(outcome).await;
+            });
+        }
+        drop(tx);
+        rx
+    }
+
+    /// Await concurrent helpers until one reports `pingStatus=true` or all
+    /// finish. Errors collected before an early success are preserved.
+    pub async fn indirect_ping(
+        &self,
+        target: &str,
+        amount: usize,
+        timeout: Duration,
+    ) -> (bool, Vec<JsonCallError>) {
+        let mut results = self.send_ping_requests(target, amount, timeout);
+        let mut errors = Vec::new();
+        while let Some(result) = results.recv().await {
+            match result {
+                PingRequestResult::Response(response) if response.ping_status => {
+                    return (true, errors)
+                }
+                PingRequestResult::Error(error) => errors.push(error),
+                PingRequestResult::Response(_) => {}
+            }
+        }
+        (false, errors)
     }
 
     /// Relay one SWIM PING on behalf of a PING-REQ caller. Go's
@@ -1858,6 +2040,265 @@ mod tests {
         assert_eq!(node.membership_snapshot(), before);
         assert_eq!(node.dissemination_counts().get("127.0.0.1:7933"), Some(&1));
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn outbound_ping_req_merges_false_responses_and_bumps_only_failed_sends() {
+        let changed = Change {
+            source: "target:7933".into(),
+            source_incarnation: 7,
+            address: "target:7933".into(),
+            incarnation: 7,
+            status: ALIVE.into(),
+            ..Default::default()
+        };
+        for (status, expect_member) in [(false, true), (true, true)] {
+            let node = node();
+            let response = PingResponse {
+                ping_status: status,
+                target: "target:7933".into(),
+                changes: Some(vec![changed.clone()]),
+            };
+            let handler = RingpopHandler::new(move |method, _, request| {
+                let response = response.clone();
+                async move {
+                    assert_eq!(method, "/protocol/ping-req");
+                    let request: PingRequest = serde_json::from_slice(&request).unwrap();
+                    assert_eq!(request.source, "127.0.0.1:7933");
+                    assert_eq!(request.source_incarnation, 100);
+                    assert_eq!(request.target, "target:7933");
+                    assert_eq!(request.checksum, 0);
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: serde_json::to_vec(&response).unwrap(),
+                    })
+                }
+            });
+            let (address, server) = outbound_test_server(handler).await;
+            let result = node
+                .ping_request(&address, "target:7933", Duration::from_secs(1))
+                .await
+                .unwrap();
+            assert_eq!(result.ping_status, status);
+            assert_eq!(
+                node.membership_snapshot()
+                    .0
+                    .iter()
+                    .any(|m| m.address == "target:7933"),
+                expect_member
+            );
+            assert_eq!(node.dissemination_counts().get("127.0.0.1:7933"), Some(&0));
+            server.abort();
+        }
+
+        // Go's MakeCall invokes the bump callback on either RPC or JSON decode
+        // error. A malformed response and an unavailable helper both count.
+        for malformed in [true, false] {
+            let node = node();
+            if malformed {
+                let handler = RingpopHandler::new(|_, _, _| async {
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: br#"{"pingStatus":"not-a-bool"}"#.to_vec(),
+                    })
+                });
+                let (address, server) = outbound_test_server(handler).await;
+                assert!(node
+                    .ping_request(&address, "target:7933", Duration::from_secs(1))
+                    .await
+                    .is_err());
+                server.abort();
+            } else {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let address = listener.local_addr().unwrap().to_string();
+                drop(listener);
+                assert!(node
+                    .ping_request(&address, "target:7933", Duration::from_millis(100))
+                    .await
+                    .is_err());
+            }
+            assert_eq!(node.dissemination_counts().get("127.0.0.1:7933"), Some(&1));
+        }
+
+        // The MakeCall-equivalent task owns its callback after the waiting
+        // caller is cancelled; its late JSON decode error still advances the
+        // counter without applying response membership.
+        let node = node();
+        let handler = RingpopHandler::new(|_, _, _| async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok(RingpopResponse {
+                headers: None,
+                body: b"{".to_vec(),
+            })
+        });
+        let (address, server) = outbound_test_server(handler).await;
+        let caller = node.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .ping_request(&address, "target:7933", Duration::from_secs(1))
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        call.abort();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while node.dissemination_counts().get("127.0.0.1:7933") != Some(&1) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("detached sender callback did not run after caller cancellation");
+        assert_eq!(node.membership_snapshot().0.len(), 1);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn indirect_ping_runs_helpers_concurrently_and_keeps_late_work_alive() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let node = node();
+        let error_handler = RingpopHandler::new(|_, _, _| async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            Err(RingpopError::Application("helper rejected request".into()))
+        });
+        let (error_address, error_server) = outbound_test_server(error_handler).await;
+        let positive_handler = RingpopHandler::new(|_, _, _| async {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            Ok(RingpopResponse {
+                headers: None,
+                body: br#"{"pingStatus":true,"target":"target:7933","changes":[]}"#.to_vec(),
+            })
+        });
+        let (positive_address, positive_server) = outbound_test_server(positive_handler).await;
+        let late_done = Arc::new(AtomicBool::new(false));
+        let late_done_handler = late_done.clone();
+        let late_handler = RingpopHandler::new(move |_, _, _| {
+            let done = late_done_handler.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(180)).await;
+                done.store(true, Ordering::SeqCst);
+                Ok(RingpopResponse {
+                    headers: None,
+                    body: br#"{"pingStatus":false,"target":"target:7933","changes":[]}"#.to_vec(),
+                })
+            }
+        });
+        let (late_address, late_server) = outbound_test_server(late_handler).await;
+        {
+            let mut state = node.state.lock().unwrap();
+            let changes = [&error_address, &positive_address, &late_address]
+                .into_iter()
+                .map(|address| Change {
+                    source: address.clone(),
+                    source_incarnation: 1,
+                    address: address.clone(),
+                    incarnation: 1,
+                    status: ALIVE.into(),
+                    ..Default::default()
+                })
+                .collect::<Vec<_>>();
+            state
+                .memberlist
+                .update(&changes, || unreachable!(), |len| len - 1);
+        }
+
+        let started = tokio::time::Instant::now();
+        let (reached, errors) = node
+            .indirect_ping("target:7933", 3, Duration::from_secs(1))
+            .await;
+        assert!(reached);
+        assert_eq!(errors.len(), 1);
+        assert!(started.elapsed() < Duration::from_millis(170));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !late_done.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("early success cancelled a remaining helper");
+        error_server.abort();
+        positive_server.abort();
+        late_server.abort();
+    }
+
+    #[tokio::test]
+    async fn ping_request_selection_excludes_local_target_and_dead_and_zero_still_selects_one() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let node = node();
+        let mut servers = Vec::new();
+        let mut counters = Vec::new();
+        for _ in [ALIVE, SUSPECT, ALIVE, "faulty"] {
+            let counter = Arc::new(AtomicUsize::new(0));
+            let handler_counter = counter.clone();
+            let handler = RingpopHandler::new(move |method, _, _| {
+                let counter = handler_counter.clone();
+                async move {
+                    assert_eq!(method, "/protocol/ping-req");
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Ok(RingpopResponse {
+                        headers: None,
+                        body: br#"{"pingStatus":false,"target":"target","changes":[]}"#.to_vec(),
+                    })
+                }
+            });
+            let (address, server) = outbound_test_server(handler).await;
+            servers.push(server);
+            counters.push((address, counter));
+        }
+
+        let target = counters[2].0.clone();
+        let changes = counters
+            .iter()
+            .zip([ALIVE, SUSPECT, ALIVE, "faulty"])
+            .map(|((address, _), status)| Change {
+                source: address.clone(),
+                source_incarnation: 1,
+                address: address.clone(),
+                incarnation: 1,
+                status: status.into(),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        node.state
+            .lock()
+            .unwrap()
+            .memberlist
+            .update(&changes, || unreachable!(), |len| len - 1);
+
+        // Go appends a pingable member before checking len >= n, so amount 0
+        // still launches exactly one call. Random selection may choose either
+        // ALIVE or SUSPECT, but never local, target, or faulty.
+        let mut results = node.send_ping_requests(&target, 0, Duration::from_secs(1));
+        assert!(matches!(
+            results.recv().await,
+            Some(PingRequestResult::Response(_))
+        ));
+        assert!(results.recv().await.is_none());
+        let selected = counters
+            .iter()
+            .filter(|(address, count)| address != &target && count.load(Ordering::SeqCst) > 0)
+            .count();
+        assert_eq!(selected, 1);
+        assert_eq!(counters[2].1.load(Ordering::SeqCst), 0);
+        assert_eq!(counters[3].1.load(Ordering::SeqCst), 0);
+        let mut sparse = node.send_ping_requests("absent-target", 5, Duration::from_secs(1));
+        assert!(matches!(
+            sparse.recv().await,
+            Some(PingRequestResult::Response(_))
+        ));
+        assert!(matches!(
+            sparse.recv().await,
+            Some(PingRequestResult::Response(_))
+        ));
+        assert!(matches!(
+            sparse.recv().await,
+            Some(PingRequestResult::Response(_))
+        ));
+        assert!(sparse.recv().await.is_none());
+
+        for server in servers {
+            server.abort();
+        }
     }
 
     #[tokio::test]

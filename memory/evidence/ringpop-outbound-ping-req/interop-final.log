@@ -1,0 +1,9 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 24s
+=== RUN   TestRustOutboundPingRequestAgainstGo
+--- PASS: TestRustOutboundPingRequestAgainstGo (0.02s)
+=== RUN   TestGoPingRequestSenderCounterOracle
+--- PASS: TestGoPingRequestSenderCounterOracle (0.01s)
+PASS
+ok  	github.com/uber/ringpop-go/swim	0.045s
+Rust outbound indirect PING-REQ passed against pinned Go helper and target nodes
