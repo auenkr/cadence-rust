@@ -112,3 +112,19 @@ Corrected stale source-only/untested paragraphs in the component memory.
 Production main still needs concrete Ringpop lifecycle wiring. Cache retains
 sole heavy slot, final attempt20261019T200114Z-1846622. History worker is
 preparing source-only validation/integration review while waiting.
+
+## Production cache accepted and build lane transferred
+
+Accepted worker e43410611 as e1b78e5f1; integrated source equals tested source
+for cache/persistence/main/dispatch files. Pushed to origin. Final timestamped
+attempt20261019T200502Z-1851423 passes all nine gates, including actual binary
+Go native Thrift/WAL failover and separate raw malformed-blob oracle interop.
+Earlier attempt had only needless_update Clippy failure, repaired before final.
+This remains component evidence, not full mixed service/SDK completion.
+
+History worker now owns sole heavy slot, rebasing its routing commits plus
+test-attribute repair/runner/new RPC-boundary tests onto e1b78e5f1 before
+validation. Can reuse cache warmed target after release. SWIM worker is
+source-only implementing concrete provider, prebound listener, local label/status
+and self-eviction primitives; production main recipe separate. Cache worker
+source-only plans configured SQLite task persistence next; no extra builds.
