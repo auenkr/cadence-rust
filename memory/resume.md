@@ -1,3 +1,11 @@
+## Accepted relay and next work — 2026-10-19
+
+Main4ae1e0fee integrates inbound PING-REQ baseline90358b167 and final repair4ae1e0fee (workere1f379685+a0c5c3b27). Parent verified production source/example/Go test/runner byte-identical to worker-tested version; cherry-picks conflict-free, diff-check clean, pushed. Evidence memory/evidence/ringpop-ping-req/: final4 Rust5focused tests, final5 fresh Go->Rust->Go probe/ReadJSON oracle, strict server all-target Clippy all exit0. Ready zero/null Go request panics on blank peer while Rust returns false: explicitly recorded edge divergence, not exact end-to-end parity. No combined regression yet and no Matching completion.
+
+relay_completion now owns next source-only outbound PING-REQ/indirect group task in existing worktree, refreshed from4ae1e0fee. Must preserve error-only sender callback, false-status response merging, uncancelled late helpers and sparse pool behavior; actual Rust requester->Go relay->Go target required. No timers/main edits in this slice.
+
+state_transitions has actual Go domain-store oracle compiling/seeding successfully; focused persistence tests running tmux cadence-rust (/tmp/cadence-domain-metadata-cargo.*), then shared DB assertions/update/reopen. It owns build slot. discovery_review DNS/SRV source ready, Go injected oracle passes; direct Linux getaddrinfo path added after NSS review, literal spelling/zone and empty-host behavior handled. Discovery receives next build slot, relay remains source-only. Linux cgo path does not prove all Go pure-Go resolver-selection parity. Whole migration remains active, current service Matching.
+
 ## Live orchestration checkpoint — 2026-10-19 (post-compaction)
 
 Main starts at42d78bf1e, clean. Matching remains incomplete and the whole migration goal active. Native workers confirmed running; no duplicate tasks started.
