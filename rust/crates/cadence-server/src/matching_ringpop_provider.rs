@@ -552,10 +552,9 @@ mod tests {
         })
         .await
         .expect("provider A did not observe History role labels");
-        assert_eq!(
-            provider_a.members("cadence-matching").await.unwrap().len(),
-            0
-        );
+        let matching_members = provider_a.members("cadence-matching").await.unwrap();
+        assert_eq!(matching_members.len(), 1);
+        assert_eq!(matching_members[0].address, addr_a.to_string());
 
         provider_a.self_evict().await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
