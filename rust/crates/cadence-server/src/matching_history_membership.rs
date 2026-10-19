@@ -228,7 +228,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn reads_membership_snapshot_again_after_member_changes() {
         let node = Arc::new(RingpopNode::new(
             "cadence-history",
