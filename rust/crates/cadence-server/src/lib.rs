@@ -30,6 +30,7 @@ pub mod yarpc;
 #[allow(clippy::result_large_err)]
 pub mod matching_history;
 pub mod matching_history_peer_resolver;
+pub mod matching_history_membership;
 #[allow(clippy::result_large_err)]
 pub mod matching_standby;
 
