@@ -113,7 +113,9 @@ func TestRustMatchingRingpopProviderGoPeerLifecycle(t *testing.T) {
 	firstIncarnation := peerIncarnation(t, goProvider, rustAddress)
 
 	waitMembers(t, ctx, goProvider, 0, "Go peer did not observe Rust self-eviction")
-	waitMembers(t, ctx, goProvider, 1, "same-address Rust restart did not recover membership")
+	waitMembers(t, ctx, goProvider, 1, "same-address Rust restart did not recover membership", func() string {
+		return fmt.Sprintf("Rust probe output:\n%s\nGo reachable members: %s", output.String(), reachableMembers(goProvider))
+	})
 	if incarnation := peerIncarnation(t, goProvider, rustAddress); incarnation <= firstIncarnation {
 		t.Fatalf("restarted Rust incarnation = %d, want > %d", incarnation, firstIncarnation)
 	}
@@ -175,7 +177,7 @@ func reserveRustAddress(t *testing.T) string {
 	return address
 }
 
-func waitMembers(t *testing.T, ctx context.Context, provider *Provider, count int, message string) {
+func waitMembers(t *testing.T, ctx context.Context, provider *Provider, count int, message string, diagnostics ...func() string) {
 	t.Helper()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -189,8 +191,24 @@ func waitMembers(t *testing.T, ctx context.Context, provider *Provider, count in
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("%s: got %d members, want %d", message, len(members), count)
+			detail := ""
+			if len(diagnostics) > 0 {
+				detail = "\n" + diagnostics[0]()
+			}
+			t.Fatalf("%s: got %d members, want %d%s", message, len(members), count, detail)
 		case <-ticker.C:
 		}
 	}
+}
+
+func reachableMembers(provider *Provider) string {
+	var members []string
+	_, err := provider.ringpop.GetReachableMembers(func(member swim.Member) bool {
+		members = append(members, fmt.Sprintf("%s status=%s incarnation=%d labels=%v", member.Address, member.Status, member.Incarnation, member.Labels))
+		return false
+	})
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	return strings.Join(members, "; ")
 }
