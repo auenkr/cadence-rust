@@ -25,6 +25,9 @@ pub struct MatchingMembershipLifecycle<P: MatchingPeerProvider> {
     membership: Membership,
     stopped: Arc<AtomicBool>,
     withdrawn: bool,
+    withdrawal: Option<JoinHandle<Result<(), ProviderError>>>,
+    teardown: Option<JoinHandle<Result<(), ProviderError>>>,
+    teardown_complete: bool,
     worker: Option<JoinHandle<()>>,
     shutdown: Option<watch::Sender<bool>>,
 }
@@ -36,6 +39,9 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
             membership,
             stopped: Arc::new(AtomicBool::new(false)),
             withdrawn: false,
+            withdrawal: None,
+            teardown: None,
+            teardown_complete: false,
             worker: None,
             shutdown: None,
         }
@@ -140,7 +146,13 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
         if self.withdrawn {
             return Ok(());
         }
-        self.provider.self_evict().await?;
+        if self.withdrawal.is_none() {
+            let provider = self.provider.clone();
+            self.withdrawal = Some(tokio::spawn(async move { provider.self_evict().await }));
+        }
+        let result = self.withdrawal.as_mut().unwrap().await;
+        self.withdrawal = None;
+        result.map_err(|error| ProviderError(format!("withdrawal task failed: {error}")))??;
         self.withdrawn = true;
         Ok(())
     }
@@ -148,21 +160,31 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
     /// Stop provider refresh and Ringpop after the Matching handler has stopped
     /// accepting work. This mirrors Go Service.Stop's base-resource teardown.
     pub async fn stop_after_drain(&mut self) -> Result<(), ProviderError> {
-        if self.worker.is_none() && self.stopped.load(Ordering::Acquire) {
+        if self.teardown_complete {
             return Ok(());
         }
-        if self.stopped.swap(true, Ordering::AcqRel) {
-            return Ok(());
+        if self.teardown.is_none() {
+            self.stopped.store(true, Ordering::Release);
+            if let Some(tx) = self.shutdown.take() {
+                let _ = tx.send(true);
+            }
+            let worker = self.worker.take();
+            let membership = self.membership.clone();
+            let provider = self.provider.clone();
+            self.teardown = Some(tokio::spawn(async move {
+                if let Some(worker) = worker {
+                    worker.abort();
+                    let _ = worker.await;
+                }
+                membership.replace(Vec::new());
+                provider.stop().await
+            }));
         }
-        if let Some(tx) = self.shutdown.take() {
-            let _ = tx.send(true);
-        }
-        if let Some(worker) = self.worker.take() {
-            worker.abort();
-            let _ = worker.await;
-        }
-        self.membership.replace(Vec::new());
-        self.provider.stop().await
+        let result = self.teardown.as_mut().unwrap().await;
+        self.teardown = None;
+        result.map_err(|error| ProviderError(format!("teardown task failed: {error}")))??;
+        self.teardown_complete = true;
+        Ok(())
     }
 
     /// Convenience shutdown for owners without a separate traffic-drain phase.
@@ -219,6 +241,12 @@ mod tests {
         hang: AtomicBool,
         snapshot_started: tokio::sync::Notify,
         cancelled_snapshots: AtomicUsize,
+        block_evict: AtomicBool,
+        evict_started: tokio::sync::Notify,
+        release_evict: tokio::sync::Notify,
+        block_stop: AtomicBool,
+        stop_started: tokio::sync::Notify,
+        release_stop: tokio::sync::Notify,
     }
     impl Fake {
         fn new() -> Self {
@@ -234,6 +262,12 @@ mod tests {
                 hang: AtomicBool::new(false),
                 snapshot_started: tokio::sync::Notify::new(),
                 cancelled_snapshots: AtomicUsize::new(0),
+                block_evict: AtomicBool::new(false),
+                evict_started: tokio::sync::Notify::new(),
+                release_evict: tokio::sync::Notify::new(),
+                block_stop: AtomicBool::new(false),
+                stop_started: tokio::sync::Notify::new(),
+                release_stop: tokio::sync::Notify::new(),
             }
         }
         fn set(&self, peers: Vec<PeerMember>) {
@@ -281,10 +315,18 @@ mod tests {
         }
         async fn self_evict(&self) -> Result<(), ProviderError> {
             self.order.lock().unwrap().push("evict");
+            if self.block_evict.load(Ordering::SeqCst) {
+                self.evict_started.notify_one();
+                self.release_evict.notified().await;
+            }
             Ok(())
         }
         async fn stop(&self) -> Result<(), ProviderError> {
             self.order.lock().unwrap().push("stop");
+            if self.block_stop.load(Ordering::SeqCst) {
+                self.stop_started.notify_one();
+                self.release_stop.notified().await;
+            }
             Ok(())
         }
     }
@@ -565,6 +607,58 @@ mod tests {
         assert_eq!(
             *p.order.lock().unwrap(),
             vec!["start", "subscribe", "evict", "stop"]
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_withdrawal_keeps_owned_eviction_running() {
+        let p = Arc::new(Fake::new());
+        p.block_evict.store(true, Ordering::SeqCst);
+        let mut lifecycle = MatchingMembershipLifecycle::new(
+            "matching",
+            p.clone(),
+            Membership::new("self", vec![]),
+        );
+        let result = tokio::time::timeout(Duration::from_millis(10), lifecycle.withdraw()).await;
+        assert!(result.is_err());
+        p.evict_started.notified().await;
+        p.release_evict.notify_one();
+        lifecycle.withdraw().await.unwrap();
+        assert_eq!(
+            p.order
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|&&v| v == "evict")
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_teardown_keeps_provider_stop_running() {
+        let p = Arc::new(Fake::new());
+        p.block_stop.store(true, Ordering::SeqCst);
+        let mut lifecycle = MatchingMembershipLifecycle::new(
+            "matching",
+            p.clone(),
+            Membership::new("self", vec![]),
+        );
+        lifecycle.start().await.unwrap();
+        let result =
+            tokio::time::timeout(Duration::from_millis(10), lifecycle.stop_after_drain()).await;
+        assert!(result.is_err());
+        p.stop_started.notified().await;
+        p.release_stop.notify_one();
+        lifecycle.stop_after_drain().await.unwrap();
+        assert_eq!(
+            p.order
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|&&v| v == "stop")
+                .count(),
+            1
         );
     }
 
