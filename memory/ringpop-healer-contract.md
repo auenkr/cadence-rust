@@ -100,8 +100,11 @@ test, or live mixed-cluster validation was run.
   trait/provider surface in the audited files. Confirm whether call sites need
   this parity surface before considering provider API complete.
 - Go `SelfEvict` directly calls Ringpop (`provider.go:198-200`); Rust delegates
-  to node self-eviction (`matching_ringpop_provider.rs:361-366`). Source-level
-  path exists; externally observed event/leave behavior is unverified.
+  to node self-eviction (`matching_ringpop_provider.rs:361-366`). Accepted
+  mixed Go-peer lifecycle evidence confirms withdrawal of the Rust member and
+  same-address restart at a higher incarnation
+  (`memory/evidence/matching-swim-runtime/attempt-20261019T211342Z/mixed-runner-raw/go-peer-lifecycle.log`).
+  Full production-cluster shutdown behavior remains unverified.
 
 ### Configuration and discovery modes
 
