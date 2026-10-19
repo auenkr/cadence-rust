@@ -52,3 +52,23 @@ if not args.regenerate:
         go('verify')
         rust('verify')
     print('Verified bidirectional original-Go/Rust SQLite matching persistence')
+
+    with tempfile.TemporaryDirectory(prefix='cadence-matching-domain-') as directory:
+        database=Path(directory)/'domains.db'
+        with sqlite3.connect(database) as connection:
+            connection.executescript((root/'go/schema/sqlite/cadence/schema.sql').read_text())
+        overlay=Path(directory)/'overlay.json'
+        overlay.write_text(json.dumps({'Replace': {
+            str(root/'go/common/persistence/sql/rust_matching_sqlite_test.go'): str(root/'tests/matching-sqlite-go_test.go')
+        }}))
+        env={**os.environ,'CADENCE_MATCHING_SQLITE_DB':str(database)}
+        subprocess.run(['go','test','-overlay',str(overlay),'./common/persistence/sql',
+            '-run','^TestRustMatchingDomainMetadataInterop$','-count=1'],cwd=root/'go',
+            env={**env,'CADENCE_MATCHING_SQLITE_PHASE':'seed'},check=True)
+        subprocess.run(['cargo','test','--manifest-path',str(root/'rust/Cargo.toml'),'-p','cadence-persistence',
+            'matching_domain_metadata::tests::go_domain_store_database_interop','--','--ignored','--exact'],
+            env=env,check=True)
+        subprocess.run(['go','test','-overlay',str(overlay),'./common/persistence/sql',
+            '-run','^TestRustMatchingDomainMetadataInterop$','-count=1'],cwd=root/'go',
+            env={**env,'CADENCE_MATCHING_SQLITE_PHASE':'verify'},check=True)
+    print('Verified Go SQL DomainStore records through the read-only Rust SQLite metadata reader')

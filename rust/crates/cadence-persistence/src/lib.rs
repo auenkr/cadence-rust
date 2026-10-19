@@ -35,3 +35,4 @@ pub mod matching_writer_actor;
 pub mod matching_gc;
 
 pub mod matching_retry;
+pub mod matching_domain_metadata;

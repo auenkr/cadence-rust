@@ -2,6 +2,7 @@ package sql_test
 
 import (
 	"context"
+	stdsql "database/sql"
 	"errors"
 	"os"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
 	"github.com/uber/cadence/common/config"
+	"github.com/uber/cadence/common/constants"
 	"github.com/uber/cadence/common/dynamicconfig/dynamicproperties"
 	"github.com/uber/cadence/common/log"
 	p "github.com/uber/cadence/common/persistence"
@@ -158,5 +160,117 @@ func TestRustMatchingSQLiteInterop(t *testing.T) {
 		if err != nil || large.TasksCompleted != 1 {
 			t.Fatalf("large signed SQLite LIMIT was truncated: result=%+v err=%v", large, err)
 		}
+	}
+}
+
+// TestRustMatchingDomainMetadataInterop exercises Go's real SQL domain store
+// against the shared SQLite DB consumed by the Rust reader.
+func TestRustMatchingDomainMetadataInterop(t *testing.T) {
+	path := os.Getenv("CADENCE_MATCHING_SQLITE_DB")
+	if path == "" {
+		t.Fatal("database path required")
+	}
+	dc := p.NewDefaultDynamicConfiguration()
+	parser, err := serialization.NewParser(dc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := sqlstore.NewFactory(config.SQL{PluginName: "sqlite", DatabaseName: path, NumShards: 1, MaxConns: 1, MaxIdleConns: 1, MaxConnLifetime: time.Hour}, "cluster0", log.NewNoop(), parser, dc)
+	store, err := factory.NewDomainStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	phase := os.Getenv("CADENCE_MATCHING_SQLITE_PHASE")
+	if phase == "seed" {
+		for _, spec := range []struct {
+			id, name     string
+			global       bool
+			clusters     []*p.ClusterReplicationConfig
+			active       string
+			activeConfig *p.DataBlob
+		}{
+			{id: "00000000-0000-0000-0000-000000000001", name: "metadata-standard", clusters: []*p.ClusterReplicationConfig{{ClusterName: "cluster0"}}},
+			{id: "00000000-0000-0000-0000-000000000002", name: "metadata-active-active", global: true, clusters: []*p.ClusterReplicationConfig{{ClusterName: "cluster0"}, {ClusterName: "cluster1"}}, active: "", activeConfig: p.NewDataBlob([]byte{0x80, 0}, constants.EncodingTypeThriftRW)},
+		} {
+			_, err := store.CreateDomain(ctx, &p.InternalCreateDomainRequest{
+				Info:              &p.DomainInfo{ID: spec.id, Name: spec.name, Status: 1, Description: "Go oracle domain", OwnerEmail: "cadence@example.test", Data: map[string]string{"source": "go"}},
+				Config:            &p.InternalDomainConfig{Retention: 7 * 24 * time.Hour, EmitMetric: true, IsolationGroups: p.NewDataBlob([]byte{0, 255, 7}, constants.EncodingTypeThriftRW), AsyncWorkflowsConfig: p.NewDataBlob([]byte{9, 8, 7}, constants.EncodingTypeThriftRWSnappy)},
+				ReplicationConfig: &p.InternalDomainReplicationConfig{Clusters: spec.clusters, ActiveClusterName: spec.active, ActiveClustersConfig: spec.activeConfig},
+				IsGlobalDomain:    spec.global, ConfigVersion: 13, FailoverVersion: 17, LastUpdatedTime: time.Unix(0, 1700000000123456789),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := store.GetDomain(ctx, &p.GetDomainRequest{Name: "metadata-standard"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata, err := store.GetMetadata(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := time.Unix(0, 1700000000987654321)
+		if err := store.UpdateDomain(ctx, &p.InternalUpdateDomainRequest{
+			Info: got.Info, Config: got.Config, ReplicationConfig: got.ReplicationConfig,
+			ConfigVersion: 19, FailoverVersion: 23, FailoverNotificationVersion: 29,
+			PreviousFailoverVersion: 17, FailoverEndTime: &end, LastUpdatedTime: time.Unix(0, 1700000000999999999),
+			NotificationVersion: metadata.NotificationVersion,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		db, err := stdsql.Open("sqlite3", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var blob []byte
+		if err := db.QueryRow("SELECT data FROM domains WHERE name = ?", "metadata-standard").Scan(&blob); err != nil {
+			t.Fatal(err)
+		}
+		if len(blob) == 0 || blob[len(blob)-1] != 0 {
+			t.Fatalf("unexpected ThriftRW DomainInfo tail: %x", blob)
+		}
+		// Go's generated decoder switches on (field ID, wire type), skips the
+		// i32 and string occurrences of field 28, and keeps the later i64.
+		blob = append(blob[:len(blob)-1], 8, 0, 28, 0, 0, 0, 99, 10, 0, 28, 0, 0, 0, 0, 0, 0, 0, 101, 11, 0, 28, 0, 0, 0, 4, 's', 'k', 'i', 'p',
+			15, 0, 36, 8, 0, 0, 0, 1, 0, 0, 0, 42,
+			13, 0, 38, 8, 11, 0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 5, 'v', 'a', 'l', 'u', 'e', 0)
+		if _, err := db.Exec("UPDATE domains SET data = ? WHERE name = ?", blob, "metadata-standard"); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	for _, id := range []string{"00000000-0000-0000-0000-000000000001", "{00000000-0000-0000-0000-000000000001}", "urn:uuid:00000000-0000-0000-0000-000000000001", "00000000000000000000000000000001"} {
+		if _, err := store.GetDomain(ctx, &p.GetDomainRequest{ID: id}); err != nil {
+			t.Fatalf("google/uuid form %q: %v", id, err)
+		}
+	}
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("Go MustParseUUID should panic for malformed IDs")
+			}
+		}()
+		_, _ = store.GetDomain(ctx, &p.GetDomainRequest{ID: "invalid-uuid"})
+	}()
+	got, err := store.GetDomain(ctx, &p.GetDomainRequest{Name: "metadata-standard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NotificationVersion != 101 || got.FailoverNotificationVersion != 29 || got.ConfigVersion != 19 || got.FailoverVersion != 23 || got.PreviousFailoverVersion != 17 || got.FailoverEndTime == nil || got.FailoverEndTime.UnixNano() != 1700000000987654321 {
+		t.Fatalf("Go domain update fields drifted: %+v", got)
+	}
+	if got.Info.Data != nil || len(got.ReplicationConfig.Clusters) != 1 || got.ReplicationConfig.Clusters[0].ClusterName != "cluster0" {
+		t.Fatalf("Go collection element type handling drifted: info=%+v replication=%+v", got.Info, got.ReplicationConfig)
+	}
+	if _, err := store.GetDomain(ctx, &p.GetDomainRequest{Name: "missing-domain"}); err == nil {
+		t.Fatal("expected unknown domain failure")
+	}
+	page, err := store.ListDomains(ctx, &p.ListDomainsRequest{PageSize: 1})
+	if err != nil || len(page.Domains) != 1 || len(page.NextPageToken) != 16 {
+		t.Fatalf("Go domain page: %+v err=%v", page, err)
 	}
 }
