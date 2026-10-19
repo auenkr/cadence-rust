@@ -72,3 +72,31 @@ including shared completion for concurrent stop and start rejection during
 shutdown. Actual pinned-Go blocked-ping Stop oracle added; all final builds
 and new oracle execution pending regrant. Parent caught the initial concurrent
 shutdown race before acceptance. Worker remains source-ready, idle build lane.
+
+## Further review checkpoint
+
+Root integrated the reviewed persistence audit as7e71de29c+3d9db3e75,
+distinguishing logical task-list shard IDs from physical database routing.
+No implementation accepted in this recovery round yet.
+
+Cache earlier gates reached10persistence/16cache tests, bin check/build,
+strictClippy and production native-Go probe all passing. These predate latest
+source corrections and are NOT final-source acceptance. Parent caught the
+raw SQL store vs DomainManager boundary: raw optional blobs may be opaque,
+but Go DomainManager validates bad-binaries/isolation/async/replication blobs
+before cache publication. Latest source preserves raw data/deferred error and
+rejects invalid typed conversion atomically in the cache. Raw-store oracle and
+valid production cache probe now use separate DBs. Parent also required
+no-config development mode retain its old in-memory domain behavior and
+--data-dir durability; explicit unsupported configured stores still error.
+
+SWIM reached58Rust tests and live Go/Rust interoperability including actual
+blocked-ping Go Stop proof. Parent required observed Sample().Size and
+unclamped50ns p50 oracle (not hardcoded/floor-only evidence). Latest source
+changes further fix stop-before-start, cancellation-safe owned cleanup and
+transition timer ordering during in-flight shutdown; fresh tests/lint pending.
+Source-ready worker is to remain idle until regrant.
+
+Sole heavy slot now granted back to runtime_cache for its corrected final
+gates. Next SWIM, then History routing. Both use warmed targets, jobs1, tmux
+cadence-rust. Latest disk44GBfree. Original user AGENTS edit remains untouched.
