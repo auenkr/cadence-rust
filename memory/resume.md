@@ -1,3 +1,11 @@
+## DNS accepted; explicit Luna restart — 2026-10-19
+
+Main87e3f1352 (pushed) integrates DNS/SRV worker9ff5d527d; source/manifest/lock/fixture byte-identical checked. Final15focused, actual localGo/Rust lookup, injectedGo provider oracle and strictserverClippy pass; durable memory/evidence/ringpop-dns-provider/final.md. Linux cgo/pureGo/platform and resolver-config reload differences remain explicit audit gaps.
+
+After user interruptions all previous native agents disappeared. Explicit fresh normal-speed gpt-6-luna workers now: recover_workers (DNS finished; NEXT new MatchingRuntime owner/main managed shutdown/shared TChannel source-only in existing DNS worktree branch from87e3f1352), outbound_luna (existingt3-6f14baa6, outbound sender/group finalfocused running; exclusively owns heavy build slot), cache_luna (matching-domain-metadata existing cache branch, source-only cache/Go oracle work). Parent remains integration/review. No native old discovery_review/relay_completion/state_transitions remain live. Recovery found ALL old paused PIDs terminal; no intentional stopped processes remain. Parent prior SIGKILL attempt timed out; do not signal stale PIDs. Host responsive again,25GBfree at recovery. User AGENTS.md uncommitted preserved.
+
+Builds must use parent explicit grants, jobs1, tmux cadence-rust. Consistent targets: runtime/DNS matching-dns-provider/rust/target; outbound t3-975b4b2d/rust/target; cache must record one target once granted. Previous mistaken double-link caused severe host timeouts; don't rely on stale handoff/process observations. Matching incomplete; actual-production-binary mixed gate and combined frozen regression still outstanding.
+
 ## Metadata accepted; cache next — 2026-10-19
 
 Main85f58ab2c integrates Go-compatible read-only SQLite domain metadata (worker67ea2980b -> df42703eb) and durable evidence (worker23476a912 ->85f58ab2c). Source/tests byte-identical after clean cherry-pick. Eight focused tests, actual Go seed/update -> Rust read-only -> Go reopen oracle, strict persistence all-target Clippy pass; memory/evidence/matching-domain-metadata contains final logs/exits. Known invalid-UUID/page0 panic-vs-error boundaries remain documented. No production cache wiring or Matching completion claimed.
