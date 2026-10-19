@@ -40,6 +40,10 @@ establish full mixed Go Frontend/History/Worker topology or SDK recovery.
 Shared Matching+Ringpop TChannel API and owned SWIM runtime are accepted, but
 main still does not instantiate/bootstrap the provider. Configured task writes
 still depend on data-dir; discovered History placement is not yet injected.
-Concrete provider and configured SQLite task factory are active source-only
-slices; routing is under combined validation. Keep the production mixed gate
+Concrete provider lifecycle is accepted at b07398ac2 with pinned Go peer
+self-eviction and same-address restart evidence. History placement/retry routing
+is accepted at 219f86054, but remains uninjected in main. Configured SQLite task
+factory is still a candidate: Rust gates pass, two-way Go queued-task evidence
+remains unresolved. Healer and shard-distributor candidates are unvalidated.
+Keep the production mixed gate
 open until the actual binary passes the topology and failure cases above.
