@@ -1,3 +1,7 @@
+# Superseded: incomplete raw-client timeout audit
+
+The original audit below omitted production timeout and retry wrappers. Do not use its unbounded-call or retry-removal conclusions. See `matching-history-wrapper-correction.md` for the corrected source trace; complete effective policy parity remains pending.
+
 # Matching to History timeout audit
 
 Read-only source trace, 2026-10-19. Go matching wraps only `RecordDecisionTaskStarted` and `RecordActivityTaskStarted` in `backoff.ThrottleRetry` with per-attempt `RecordTaskStartedTimeout` and context expiration (`go/service/matching/handler/engine.go:1471-1528`). `ThrottleRetry.attempt` makes a child context for each attempt; attempt timeout is retryable (`go/common/backoff/retry.go:176-195,268-287`). The retry expiration is `NoInterval`, bounded by maximum attempts (`go/common/util.go:168-175`). The History client only redirects typed ownership-loss errors and validates caller context; it adds no timeout (`go/client/history/client.go:1160-1188`). Rust's per-attempt deadline for these two calls matches that configured timeout, and redirect attempts share the per-attempt budget. The Rust outer retry should remain the owner of retrying; redirect is only an inner reroute.
