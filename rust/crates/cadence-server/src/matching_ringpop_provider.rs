@@ -313,14 +313,13 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
                 let mut failures = 0;
                 while !candidates.is_empty() && failures < 10 {
                     let target = remove_address(&mut candidates, 0);
-                    tokio::select! {
-                        result = healer_node.attempt_heal(&target) => match result {
-                            Ok(known) => for address in known { remove_all_addresses(&mut candidates, &address); },
-                            Err(_) => failures += 1,
-                        },
-                        changed = healer_stopped.changed() => {
-                            if changed.is_err() || *healer_stopped.borrow() { return; }
+                    match healer_node.attempt_heal(&target).await {
+                        Ok(known) => {
+                            for address in known {
+                                remove_all_addresses(&mut candidates, &address);
+                            }
                         }
+                        Err(_) => failures += 1,
                     }
                 }
             }
@@ -540,12 +539,22 @@ mod tests {
     }
 
     #[test]
-    fn go_healer_oracle_trace_covers_probability_candidate_and_retry_edges() {
-        let oracle: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/ringpop_healer_go.json")).unwrap();
+    fn go_healer_expected_trace_covers_probability_candidate_and_retry_edges() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/ringpop_healer_go_expected.json"
+        ))
+        .unwrap();
         assert_eq!(oracle["localFaultyWins"]["forRemote"][0]["status"], SUSPECT);
         assert_eq!(oracle["localFaultyWins"]["forRemote"][0]["source"], "");
+        assert_eq!(
+            oracle["localFaultyWins"]["forRemote"][0]["sourceIncarnation"],
+            0
+        );
         assert_eq!(oracle["remoteFaultyWins"]["forLocal"][0]["status"], SUSPECT);
+        assert_eq!(
+            oracle["remoteFaultyWins"]["forLocal"][0]["sourceIncarnation"],
+            0
+        );
         assert_eq!(
             oracle["noConflict"]["forLocal"].as_array().unwrap().len(),
             0
@@ -555,12 +564,16 @@ mod tests {
         assert_eq!(oracle["duplicateTargetAttempts"], 2);
         assert_eq!(oracle["delDuplicateRemaining"][0], "other");
         assert_eq!(oracle["failedDiscoveryPreviousHostCount"], 7);
+        assert_eq!(oracle["unknownHost"]["attempts"], 1);
+        assert_eq!(oracle["unknownHost"]["successfulTargets"], 0);
         assert_eq!(oracle["maxReverseFullSyncJobs"], 5);
         assert_eq!(oracle["reverseFullSyncJobsStarted"], 5);
         assert_eq!(oracle["partitionHealPeriodNanos"], 30_000_000_000i64);
+        assert_eq!(oracle["stopWaitsForActiveHeal"], true);
         assert_eq!(oracle["noPendingChangesFullSync"]["fullSync"], true);
-        assert_eq!(oracle["probabilityLocalReachable"], 3.0);
-        assert_eq!(oracle["probabilityDoesNotShrink"], 0.375);
+        assert_eq!(oracle["noPendingChangesFullSync"]["membersReturned"], 1);
+        assert_eq!(oracle["probabilityLocalReachable"].as_f64(), Some(3.0));
+        assert_eq!(oracle["probabilityDoesNotShrink"].as_f64(), Some(0.375));
         assert_eq!(oracle["twoPartitionRepair"]["membersA"], 2);
         assert_eq!(oracle["twoPartitionRepair"]["membersB"], 2);
         assert_eq!(oracle["twoPartitionRepair"]["allAlive"], true);

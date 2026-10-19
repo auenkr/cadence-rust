@@ -28,7 +28,9 @@ Reference: `github.com/uber/ringpop-go@v0.10.0/swim` (`node.go`,
 - Return pingable remote membership addresses to candidate filtering.
 - Removing a selected target and every address learned from a remote partition
   uses Ringpop's swap-with-last deletion, including removal of duplicate host
-  entries. Stop cancels the current async JOIN/PING repair attempt.
+  entries. Stop ends future ticks and waits for an active Heal pass to return,
+  matching Go's unbuffered quit handoff; each repair RPC has Go's one-second
+  timeout, so shutdown does not abandon a partially applied partition merge.
 
 ## Reverse full sync
 
@@ -43,8 +45,12 @@ Reference: `github.com/uber/ringpop-go@v0.10.0/swim` (`node.go`,
 
 The Matching provider owns the discovery loop and its lifecycle. The Ringpop
 node owns membership repair, receiver full-sync scheduling, and reverse job
-limits. Differential tests should compare deterministic candidate order,
-probability divisors, reincarnation deltas and merged memberships with Go
-oracle data; a two-partition protocol test must demonstrate convergence after
-healing and reverse full sync. Builds are deferred while the shared task-store
-build lane is occupied.
+limits. Source harnesses cover reincarnation deltas, discovery/retry edges,
+reverse job limits, and two live peer convergence. Builds are deferred while
+the shared task-store build lane is occupied.
+
+`rust/crates/cadence-server/tests/fixtures/ringpop_healer_go_expected.json` is a
+source-derived expected trace, not captured Go evidence yet. The pinned-Go
+runner `tests/run-ringpop-healer-go-oracle.py` must pass in comparison mode (or
+be reviewed and updated explicitly) before this fixture can be called a Go
+oracle. No Go or Rust test harness has been executed in this work slice.
