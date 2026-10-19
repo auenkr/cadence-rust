@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 2 tests
+test membership::fingerprint_tests::go_fingerprint32_matches_signed_short_byte_vectors ... ok
+test membership::fingerprint_tests::replacement_rune_has_go_ring_owner ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 0.00s
+

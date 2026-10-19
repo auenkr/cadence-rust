@@ -1,0 +1,9 @@
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-common)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.14s
+     Running tests/ringpop_memberlist_update_oracle.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/ringpop_memberlist_update_oracle-55698274a46d7c63)
+
+running 1 test
+test pinned_ringpop_memberlist_update_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

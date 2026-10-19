@@ -662,6 +662,22 @@ pub async fn serve_matching_with_ringpop(
 ) -> Result<()> {
     serve_with(addr, matching.frontend.state.clone(), Some(matching), Some(ringpop)).await
 }
+/// Serve Matching Thrift and Ringpop JSON methods on a caller-bound shared
+/// listener. This lets bootstrap derive the advertised Ringpop address from
+/// `listener.local_addr()` before JOIN begins.
+pub async fn serve_matching_with_ringpop_listener(
+    listener: TcpListener,
+    matching: crate::grpc_matching::Matching,
+    ringpop: RingpopHandler,
+) -> Result<()> {
+    serve_listener(
+        listener,
+        matching.frontend.state.clone(),
+        Some(matching),
+        Some(ringpop),
+    )
+    .await
+}
 pub async fn serve_ringpop(addr: std::net::SocketAddr, handler: RingpopHandler) -> Result<()> {
     serve_with(addr, AppState::default(), None, Some(handler)).await
 }
@@ -681,6 +697,15 @@ async fn serve_with(
     let listener = TcpListener::bind(addr)
         .await
         .context("bind TChannel frontend")?;
+    serve_listener(listener, state, matching, ringpop).await
+}
+
+async fn serve_listener(
+    listener: TcpListener,
+    state: AppState,
+    matching: Option<crate::grpc_matching::Matching>,
+    ringpop: Option<RingpopHandler>,
+) -> Result<()> {
     let mut connections = tokio::task::JoinSet::new();
     loop {
         tokio::select! {

@@ -1,0 +1,20 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_common-931a8ac7e4ecab10)
+
+running 13 tests
+test ringpop_member::tests::aggregate_sorts_and_excludes_tombstones ... ok
+test ringpop_member::tests::lower_precedence_rejects_gossip_even_with_higher_signed_label_checksum ... ok
+test ringpop_member::tests::labels_are_utf8_byte_encoded_order_independent_and_signed ... ok
+test ringpop_member::tests::merge_precedence_and_incarnation_rules ... ok
+test ringpop_memberlist::tests::local_refutation_uses_new_incarnation_and_local_member_fields ... ok
+test ringpop_memberlist::tests::insertion_position_clamps_to_go_random_range_excluding_end ... ok
+test ringpop_memberlist::tests::local_updates_merge_labels_bump_incarnation_and_refresh_checksum ... ok
+test ringpop_memberlist::tests::memberlist_iterator_returns_none_when_only_local_and_non_pingable_members_exist ... ok
+test ringpop_memberlist::tests::memberlist_iterator_shuffles_and_visits_pingable_members_once_per_round ... ok
+test ringpop_memberlist::tests::remote_acceptance_refutation_tombstone_and_checksum ... ok
+test ringpop_memberlist::tests::removing_remote_member_reindexes_and_keeps_local ... ok
+test ringpop_memberlist::tests::single_remote_iterator_round_matches_pinned_go_trace ... ok
+test ringpop_memberlist::tests::update_processes_complete_batch_larger_than_sixty_four ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 53 filtered out; finished in 0.00s
+

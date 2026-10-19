@@ -1,0 +1,6 @@
+# github.com/uber/cadence/common/peerprovider/ringpopprovider [github.com/uber/cadence/common/peerprovider/ringpopprovider.test]
+../tests/go-overlay/common/peerprovider/ringpopprovider/rust_provider_lifecycle_test.go:120:120: initial[0].Labels undefined (type "github.com/uber/cadence/common/membership".HostInfo has no field or method Labels)
+../tests/go-overlay/common/peerprovider/ringpopprovider/rust_provider_lifecycle_test.go:145:158: recovered[0].Labels undefined (type "github.com/uber/cadence/common/membership".HostInfo has no field or method Labels)
+FAIL	github.com/uber/cadence/common/peerprovider/ringpopprovider [build failed]
+FAIL
+

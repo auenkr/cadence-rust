@@ -19,6 +19,9 @@ pub struct PeerMember {
     pub identity: String,
     pub status: PeerStatus,
     pub labels: std::collections::HashMap<String, String>,
+    /// Successfully parsed numeric Ringpop port labels. Malformed labels are
+    /// omitted, matching Go's warning-and-continue conversion behavior.
+    pub named_ports: std::collections::HashMap<String, u16>,
 }
 
 impl PeerMember {
@@ -29,13 +32,7 @@ impl PeerMember {
         {
             return None;
         }
-        let host = host_from_host_port(&self.address);
-        let grpc = self
-            .labels
-            .get("grpc")
-            .and_then(|p| label_to_port(p))
-            .map(|port| join_host_port(host.as_deref().unwrap_or(""), &port.to_string()))
-            .unwrap_or_default();
+        let grpc = self.named_address("grpc").unwrap_or_default();
         Some(Host {
             address: self.address.clone(),
             identity: if self.identity.is_empty() {
@@ -46,13 +43,25 @@ impl PeerMember {
             grpc_address: grpc,
         })
     }
-}
 
-fn label_to_port(label: &str) -> Option<u16> {
-    if label.is_empty() || !label.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
+    /// Resolve a port label against this member's advertised identity address.
+    /// Legacy TChannel peers omit the label, so their address port is the
+    /// fallback used by Go's Ringpop provider.
+    pub fn named_address(&self, name: &str) -> Option<String> {
+        // Go ignores SplitHostPort errors when constructing HostInfo, then
+        // JoinHostPort formats a valid named port against the empty host.
+        let host = host_from_host_port(&self.address).unwrap_or_default();
+        let port = match self.labels.get(name) {
+            Some(_) => self.named_ports.get(name).copied(),
+            None if name == "tchannel" => port_from_host_port(&self.address),
+            None => None,
+        }?;
+        Some(join_host_port(&host, &port.to_string()))
     }
-    label.parse::<u16>().ok()
+
+    pub fn tchannel_address(&self) -> Option<String> {
+        self.named_address("tchannel")
+    }
 }
 
 fn host_from_host_port(address: &str) -> Option<String> {
@@ -85,11 +94,62 @@ fn host_from_host_port(address: &str) -> Option<String> {
     Some(host.to_owned())
 }
 
+fn port_from_host_port(address: &str) -> Option<u16> {
+    let (_, port) = address.rsplit_once(':')?;
+    port.parse().ok()
+}
+
 fn join_host_port(host: &str, port: &str) -> String {
     if host.contains(':') {
         format!("[{host}]:{port}")
     } else {
         format!("{host}:{port}")
+    }
+}
+
+#[cfg(test)]
+mod named_port_tests {
+    use super::*;
+
+    #[test]
+    fn role_filter_and_named_ports_preserve_legacy_tchannel_fallback() {
+        let member = PeerMember {
+            address: "[2001:db8::1]:7935".into(),
+            identity: "stable-id".into(),
+            status: PeerStatus::Alive,
+            labels: std::collections::HashMap::from([
+                ("serviceName".into(), "cadence-matching".into()),
+                ("grpc".into(), "7835".into()),
+            ]),
+            named_ports: std::collections::HashMap::from([("grpc".into(), 7835)]),
+        };
+        let host = member.matching_host("cadence-matching").unwrap();
+        assert_eq!(host.identity, "stable-id");
+        assert_eq!(host.grpc_address, "[2001:db8::1]:7835");
+        assert_eq!(
+            member.tchannel_address().as_deref(),
+            Some("[2001:db8::1]:7935")
+        );
+        assert!(member.matching_host("matching").is_none());
+        assert!(PeerMember {
+            status: PeerStatus::Faulty,
+            ..member
+        }
+        .matching_host("cadence-matching")
+        .is_none());
+    }
+
+    #[test]
+    fn malformed_present_tchannel_label_does_not_use_address_fallback() {
+        let member = PeerMember {
+            address: "127.0.0.1:7935".into(),
+            identity: "".into(),
+            status: PeerStatus::Suspect,
+            labels: std::collections::HashMap::from([("tchannel".into(), "bad".into())]),
+            named_ports: std::collections::HashMap::new(),
+        };
+        assert_eq!(member.identity, "");
+        assert_eq!(member.tchannel_address(), None);
     }
 }
 

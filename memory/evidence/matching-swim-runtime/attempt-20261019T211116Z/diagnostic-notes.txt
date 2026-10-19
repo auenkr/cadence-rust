@@ -1,0 +1,1 @@
+Phase-controlled mixed probe passed, but its success log had only Go ring add/remove events and omitted the captured subprocess output and member metadata. Added passing-test t.Log output for initial/restarted labels, observed incarnations, eviction phase confirmation, and Rust probe stdout; commit 7f7852a73.

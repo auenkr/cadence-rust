@@ -25,12 +25,16 @@ and channel cache eviction as-is.
 ## Scope and gaps
 
 The in-process fake-provider tests are lifecycle contract tests, **not network
-interoperability tests**. They do not prove Ringpop compatibility. This implementation
-is not wired into the server startup and does not implement a concrete provider,
-seed discovery, config, actual Ringpop SWIM, or a production static-host substitute.
-Current member mapper represents the gRPC endpoint and identity; malformed/missing
-gRPC ports map to an empty endpoint. TChannel port metadata should be carried in the
-provider representation when a concrete peer protocol requires it.
+interoperability tests**. They do not prove Ringpop compatibility. This
+transport-independent lifecycle module by itself is not wired into server
+startup. A separate `MatchingRingpopProvider` now supplies the concrete
+Ringpop provider and bootstrap/config path; see
+`memory/ringpop-bootstrap-provider.md` for its component and pinned-Go peer
+validation. Production `main` still does not compose that provider with this
+lifecycle. `PeerMember` represents identity plus parsed gRPC and TChannel named
+ports; the concrete Ringpop provider carries both labels, and malformed/missing
+gRPC ports map to an empty endpoint. Production startup composition and the full
+mixed-services SDK workflow remain open.
 
 ## Repair review (2026-10-17)
 

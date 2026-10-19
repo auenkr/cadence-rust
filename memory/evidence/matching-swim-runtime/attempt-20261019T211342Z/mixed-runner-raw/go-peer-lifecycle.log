@@ -1,0 +1,12 @@
+=== RUN   TestRustMatchingRingpopProviderGoPeerLifecycle
+    rust_provider_lifecycle_test.go:120: initial Rust member accepted: address=127.0.0.1:37789 incarnation=1792444429800 tchannel=127.0.0.1:37789 grpc=127.0.0.1:7234
+    logger.go:146: 2026-10-19T21:13:49.906Z	INFO	Received a ringpop ring changed event	{"membership-change-event": {"HostsAdded":null,"HostsUpdated":null,"HostsRemoved":["127.0.0.1:37789"]}, "logging-call-at": "provider.go:185"}
+    rust_provider_lifecycle_test.go:126: Go peer confirmed Rust self-eviction before restart
+    logger.go:146: 2026-10-19T21:13:49.929Z	INFO	Received a ringpop ring changed event	{"membership-change-event": {"HostsAdded":["127.0.0.1:37789"],"HostsUpdated":null,"HostsRemoved":null}, "logging-call-at": "provider.go:185"}
+    rust_provider_lifecycle_test.go:147: restarted Rust member accepted: address=127.0.0.1:37789 incarnation=1792444429928 previous=1792444429800 tchannel=127.0.0.1:37789 grpc=127.0.0.1:7234
+    rust_provider_lifecycle_test.go:158: Rust probe phases:
+        rust-peer-ready 2
+        rust-peer-recovered 2
+--- PASS: TestRustMatchingRingpopProviderGoPeerLifecycle (0.19s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	0.220s

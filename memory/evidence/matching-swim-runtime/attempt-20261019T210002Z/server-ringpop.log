@@ -1,0 +1,55 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (/home/ubuntu/.cache/cadence-rust-test-artifacts/matching-production-domain-cache/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 41 tests
+test matching_ringpop_provider::tests::advertised_ip_score_matches_go_listen_ip_up_and_loopback_rules ... ok
+test matching_ringpop_provider::tests::local_label_update_publishes_an_accepted_membership_change ... ok
+test matching_ringpop_provider::tests::provider_snapshot_retains_other_roles_and_only_known_ports ... ok
+test ringpop_provider::tests::accepted_suspect_cascades_through_faulty_tombstone_and_eviction ... ok
+test matching_ringpop_provider::tests::two_shared_tchannel_providers_discover_roles_and_self_evict ... ok
+test ringpop_provider::tests::exponential_join_delayer_matches_go_window_and_cap ... ok
+
+thread 'ringpop_provider::tests::exponential_join_delayer_matches_zero_and_negative_duration_edges' (1906682) panicked at crates/cadence-server/src/ringpop_provider.rs:147:13:
+invalid JOIN delay random bound: -1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'ringpop_provider::tests::exponential_join_delayer_matches_zero_and_negative_duration_edges' (1906682) panicked at crates/cadence-server/src/ringpop_provider.rs:147:13:
+invalid JOIN delay random bound: -1
+test ringpop_provider::tests::exponential_join_delayer_matches_zero_and_negative_duration_edges ... ok
+test ringpop_provider::tests::go_duration_string_preserves_fractional_precision ... ok
+test ringpop_provider::tests::handler_dispatches_only_registered_go_method_names_and_stop_preserves_ready ... ok
+test ringpop_provider::tests::alive_cancels_timer_and_stop_restart_does_not_restore_cleared_timer ... ok
+test ringpop_provider::tests::join_addjoinlist_matches_original_go_refutation_fixtures ... ok
+test ringpop_provider::tests::join_cluster_checks_success_before_deadline_and_keeps_negative_threshold ... ok
+test ringpop_provider::tests::join_cluster_deadline_is_strict_and_checked_after_each_group ... ok
+test ringpop_provider::tests::join_cluster_deadline_retains_partial_success ... ok
+test ringpop_provider::tests::join_cluster_discards_partial_success_when_destroyed_between_groups ... ok
+test ringpop_provider::tests::join_cluster_distinguishes_destroyed_from_stopped ... ok
+test ringpop_provider::tests::join_cluster_retry_sleep_yields_and_is_cancelled_on_drop ... ok
+test ringpop_provider::tests::indirect_ping_runs_helpers_concurrently_and_keeps_late_work_alive ... ok
+test ringpop_provider::tests::join_group_drop_cancels_children_and_stop_blocks_late_merge ... ok
+test ringpop_provider::tests::join_rejects_unknown_app_self_join_and_malformed_body_with_pinned_messages ... ok
+test ringpop_provider::tests::join_returns_go_shaped_membership_and_checksum_without_setting_ready ... ok
+test ringpop_provider::tests::join_snapshot_preserves_member_labels_and_tombstone_wire_normalization ... ok
+test ringpop_provider::tests::original_go_handler_json_fixture_matches_join_and_ping_responses ... ok
+test ringpop_provider::tests::join_group_waits_for_mixed_outcomes_and_merges_successful_membership ... ok
+test ringpop_provider::tests::outbound_join_refutes_local_equal_and_newer_suspect_or_faulty_changes ... ok
+test ringpop_provider::tests::outbound_join_response_after_stop_is_not_applied ... ok
+test ringpop_provider::tests::outbound_join_empty_nil_failure_malformed_and_deadline_leave_state_unchanged ... ok
+test ringpop_provider::tests::outbound_ping_req_merges_false_responses_and_bumps_only_failed_sends ... ok
+test ringpop_provider::tests::owned_timer_loop_applies_due_transition_and_cascades_eviction ... ok
+test ringpop_provider::tests::ping_app_errors_match_ringpop_and_malformed_json_is_rejected ... ok
+test ringpop_provider::tests::ping_local_refutation_uses_injected_incarnation_in_response_and_full_state ... ok
+test ringpop_provider::tests::ping_req_direct_failures_do_not_advance_sender_or_merge_target_changes ... ok
+test ringpop_provider::tests::ping_req_empty_null_and_trailing_values_match_tchannel_json_decode ... ok
+test ringpop_provider::tests::outbound_ping_applies_only_decoded_response_and_bumps_only_successful_sends ... ok
+test ringpop_provider::tests::ping_req_stopped_and_destroyed_nodes_still_relay_without_memberlist_updates ... ok
+test ringpop_provider::tests::ping_requires_readiness_then_merges_and_returns_receiver_checksum ... ok
+test ringpop_provider::tests::production_ping_req_handler_relays_direct_ping_and_returns_ping_response ... ok
+test ringpop_provider::tests::protocol_delay_matches_go_target_and_floor ... ok
+test ringpop_provider::tests::protocol_rate_uses_go_sample_percentile_and_minimum_floor ... ok
+test ringpop_provider::tests::start_stop_restart_destroy_own_both_runtime_tasks_without_changing_ready ... ok
+test ringpop_provider::tests::ping_request_selection_excludes_local_target_and_dead_and_zero_still_selects_one ... ok
+
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 255 filtered out; finished in 1.36s
+
