@@ -49,7 +49,7 @@ func main() {
 		prefix = "matching-custom"
 		rootTags["deployment"] = "canary.v2"
 	}
-	scope, _ := tally.NewRootScope(tally.ScopeOptions{
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{
 		Prefix:    prefix,
 		Tags:      rootTags,
 		Separator: tallyprom.DefaultSeparator,
@@ -67,7 +67,7 @@ func main() {
 	timerScope.Timer("cadence_client_latency").Record(2 * time.Millisecond)
 	timerScope.Histogram("cadence_client_latency_ns", buckets).RecordDuration(2 * time.Millisecond)
 	time.Sleep(20 * time.Millisecond)
-	scope.Close()
+	_ = closer.Close()
 	recorder := httptest.NewRecorder()
 	promhttp.HandlerFor(registry, promhttp.HandlerOpts{}).ServeHTTP(recorder, httptest.NewRequest("GET", "/metrics", nil))
 	fmt.Print(recorder.Body.String())
