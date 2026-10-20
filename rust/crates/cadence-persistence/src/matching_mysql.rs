@@ -1734,6 +1734,7 @@ mod tests {
         let runtime_stopped = pool.query_runtime.stopped.clone();
         let weak_pool = Arc::downgrade(&pool);
         let handle = pool.query_runtime.handle.clone();
+        let worker_owner = pool.clone();
         let (ready_tx, ready_rx) = mpsc::channel();
         let (drop_tx, drop_rx) = mpsc::channel();
         handle.spawn(async move {
@@ -1741,7 +1742,7 @@ mod tests {
             let _ = drop_rx.recv();
             // The caller drops its reference before releasing this task, so
             // QueryRuntimeOwner::drop runs on its own Tokio worker thread.
-            drop(pool);
+            drop(worker_owner);
         });
 
         ready_rx

@@ -1,6 +1,6 @@
 //! Matching persistence retry rules from Go's ThrottleRetry and persistence policy.
 //! SQLite never classifies errors as throttling, so only the main policy applies.
-use crate::matching_sqlite::{Result, StorageError};
+use crate::matching_sqlite::Result;
 use cadence_common::ExponentialRetryPolicy;
 use std::time::{Duration, Instant};
 
@@ -63,6 +63,7 @@ pub(crate) fn lease<T>(now: i64, mut operation: impl FnMut(i64) -> Result<T>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::matching_sqlite::StorageError;
     fn error(name: &str) -> StorageError {
         match name {
             "condition" => StorageError::ConditionFailed(name.into()),

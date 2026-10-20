@@ -1,7 +1,7 @@
 //! Matching-owned task persistence on Go's SQLite task_lists/tasks schema.
 //! This store is independent of the workflow execution engine. The standalone
 //! Matching RPC delivery loop is a separate consumer of this persistence API.
-use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskListData};
+use crate::matching_blob::{self as blob, BlobEncoding, TaskListData};
 pub use crate::matching_task_store::{
     AllocatedTask, MatchingTaskStoreError as StorageError, Result, TaskListKey, TaskListRecord,
 };
@@ -433,6 +433,7 @@ impl SqliteTaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::matching_blob::TaskData;
     fn key(name: &str) -> TaskListKey {
         TaskListKey {
             domain_id: Uuid::from_u128(1),
