@@ -85,6 +85,7 @@ function call(service, method, request) {
   return callRpc(service, method, request);
 }
 function callRpc(service, method, request) {
+  const taskListName = request.taskList?.name || request.request?.taskList?.name;
   const metadata = new grpc.Metadata();
   metadata.set('rpc-service', service === 'Matching' ? 'cadence-matching' : 'cadence-frontend');
   metadata.set('rpc-encoding', 'proto');
