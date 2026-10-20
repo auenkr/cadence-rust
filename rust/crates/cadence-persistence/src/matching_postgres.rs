@@ -1,9 +1,8 @@
 //! Matching task-store adapter for Cadence's existing PostgreSQL schema.
 //!
-//! This adapter never creates or migrates schema. It supports plain PostgreSQL
-//! transport (`sslmode=disable`) and one or more configured physical database
-//! shards. TLS modes are rejected until PostgreSQL TLS roots/client identity
-//! can be mapped exactly to Go's lib/pq behavior.
+//! This adapter never creates or migrates schema. It supports PostgreSQL
+//! transport settings accepted by Go's lib/pq and one or more configured
+//! physical database shards.
 
 use crate::{
     matching_blob::{self as blob, BlobEncoding, TaskListData},
@@ -12,7 +11,9 @@ use crate::{
         AllocatedTask, BackendErrorKind, MatchingTaskStore, Result, TaskListKey, TaskListRecord,
     },
 };
+use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres::{config::SslMode, types::ToSql, Client, Config, NoTls};
+use postgres_openssl::MakeTlsConnector;
 use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, Condvar, Mutex},
@@ -31,9 +32,20 @@ pub struct PostgresShardConfig {
     pub password: String,
     /// Empty database names are rejected by Go's task plugin.
     pub database_name: String,
-    /// Go `ConnectAttributes`; this initial adapter accepts `sslmode=disable`,
-    /// `connect_timeout` (seconds), `application_name`, and `options`.
+    /// Go `ConnectAttributes`; accepted settings include sslmode/cert files,
+    /// connect_timeout (seconds), application_name, and options.
     pub connect_attributes: std::collections::HashMap<String, String>,
+    /// Go PostgreSQL TLS settings; explicit connect attributes override these.
+    pub tls: Option<PostgresTlsConfig>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PostgresTlsConfig {
+    pub enabled: bool,
+    pub ssl_mode: String,
+    pub ca_file: String,
+    pub cert_file: String,
+    pub key_file: String,
 }
 
 /// PostgreSQL Matching task-store settings shared by each database shard.
@@ -68,8 +80,9 @@ struct PoolState {
     open: usize,
 }
 
-struct PostgresConnectionPool {
+pub(crate) struct PostgresConnectionPool {
     options: Config,
+    tls: Option<PostgresTlsConnectorConfig>,
     max_open: usize,
     max_idle: usize,
     max_lifetime: Option<Duration>,
@@ -77,15 +90,26 @@ struct PostgresConnectionPool {
     available: Condvar,
 }
 
+#[derive(Clone)]
+struct PostgresTlsConnectorConfig {
+    mode: SslMode,
+    allow_plaintext_first: bool,
+    root_cert: Option<String>,
+    cert: Option<String>,
+    key: Option<String>,
+}
+
 impl PostgresConnectionPool {
     fn new(
         options: Config,
+        tls: Option<PostgresTlsConnectorConfig>,
         max_open: usize,
         max_idle: usize,
         max_lifetime: Option<Duration>,
     ) -> Arc<Self> {
         Arc::new(Self {
             options,
+            tls,
             max_open,
             max_idle,
             max_lifetime,
@@ -94,7 +118,18 @@ impl PostgresConnectionPool {
         })
     }
 
-    fn checkout(self: &Arc<Self>) -> Result<PostgresLease> {
+    pub(crate) fn checkout(self: &Arc<Self>) -> Result<PostgresLease> {
+        self.checkout_until(None)
+    }
+
+    pub(crate) fn checkout_with_timeout(
+        self: &Arc<Self>,
+        timeout: Duration,
+    ) -> Result<PostgresLease> {
+        self.checkout_until(Some(Instant::now() + timeout))
+    }
+
+    fn checkout_until(self: &Arc<Self>, deadline: Option<Instant>) -> Result<PostgresLease> {
         'checkout: loop {
             let mut state = self.state.lock().expect("PostgreSQL Matching pool lock");
             if let Some(idle) = state.idle.pop() {
@@ -118,7 +153,34 @@ impl PostgresConnectionPool {
             if state.open < self.max_open {
                 state.open += 1;
                 drop(state);
-                return match self.options.connect(NoTls) {
+                let connected: Result<Client> = match &self.tls {
+                    Some(tls) if tls.allow_plaintext_first => match self.options.connect(NoTls) {
+                        Ok(client) => Ok(client),
+                        Err(plain_error) if postgres_requires_tls(&plain_error) => {
+                            let mut secure_options = self.options.clone();
+                            secure_options.ssl_mode(SslMode::Require);
+                            match postgres_tls_connector(tls) {
+                                Ok(connector) => secure_options
+                                    .connect(connector)
+                                    .map_err(normalize_postgres_error),
+                                Err(error) => Err(error),
+                            }
+                        }
+                        Err(error) => Err(normalize_postgres_error(error)),
+                    },
+                    Some(tls) => match postgres_tls_connector(tls) {
+                        Ok(connector) => self
+                            .options
+                            .connect(connector)
+                            .map_err(normalize_postgres_error),
+                        Err(error) => Err(error),
+                    },
+                    None => self
+                        .options
+                        .connect(NoTls)
+                        .map_err(normalize_postgres_error),
+                };
+                return match connected {
                     Ok(client) => Ok(PostgresLease {
                         pool: self.clone(),
                         client: Some(client),
@@ -129,20 +191,40 @@ impl PostgresConnectionPool {
                         let mut state = self.state.lock().expect("PostgreSQL Matching pool lock");
                         state.open -= 1;
                         self.available.notify_one();
-                        Err(normalize_postgres_error(error))
+                        Err(error)
                     }
                 };
             }
-            state = self
-                .available
-                .wait(state)
-                .expect("PostgreSQL Matching pool lock");
+            state = if let Some(deadline) = deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(StorageError::Backend {
+                        kind: BackendErrorKind::Timeout,
+                        message: "PostgreSQL connection pool checkout timed out".into(),
+                    });
+                }
+                let (state, timeout) = self
+                    .available
+                    .wait_timeout(state, remaining)
+                    .expect("PostgreSQL Matching pool lock");
+                if timeout.timed_out() && state.open >= self.max_open && state.idle.is_empty() {
+                    return Err(StorageError::Backend {
+                        kind: BackendErrorKind::Timeout,
+                        message: "PostgreSQL connection pool checkout timed out".into(),
+                    });
+                }
+                state
+            } else {
+                self.available
+                    .wait(state)
+                    .expect("PostgreSQL Matching pool lock")
+            };
             drop(state);
         }
     }
 }
 
-struct PostgresLease {
+pub(crate) struct PostgresLease {
     pool: Arc<PostgresConnectionPool>,
     client: Option<Client>,
     created_at: Instant,
@@ -227,8 +309,8 @@ impl PostgresTaskStore {
         let max_lifetime = config.max_conn_lifetime.filter(|value| !value.is_zero());
         let mut pools = Vec::with_capacity(config.shards.len());
         for shard in config.shards {
-            let options = postgres_options(&shard)?;
-            let pool = PostgresConnectionPool::new(options, max_open, max_idle, max_lifetime);
+            let (options, tls) = postgres_options(&shard)?;
+            let pool = PostgresConnectionPool::new(options, tls, max_open, max_idle, max_lifetime);
             let mut client = pool.checkout()?;
             validate_postgres_schema(&mut client)?;
             drop(client);
@@ -240,6 +322,25 @@ impl PostgresTaskStore {
             use_multiple_databases: config.use_multiple_databases,
             encoding: config.encoding,
         })
+    }
+
+    /// Build the task store and domain reader over the same configured pool.
+    /// Domain cache reads therefore consume the same Go-compatible maxConns.
+    pub fn connect_with_domain_metadata(
+        config: PostgresTaskStoreConfig,
+        active_cluster_name: impl Into<String>,
+    ) -> Result<(
+        Self,
+        crate::matching_domain_postgres::PostgresDomainMetadataStore,
+    )> {
+        let store = Self::connect(config)?;
+        let pool = store.pools[0].clone();
+        let metadata =
+            crate::matching_domain_postgres::PostgresDomainMetadataStore::from_shared_pool(
+                pool,
+                active_cluster_name,
+            );
+        Ok((store, metadata))
     }
 
     fn pool(&self, key: &TaskListKey) -> &Arc<PostgresConnectionPool> {
@@ -636,7 +737,9 @@ impl MatchingTaskStore for PostgresTaskStore {
     }
 }
 
-fn postgres_options(shard: &PostgresShardConfig) -> Result<Config> {
+fn postgres_options(
+    shard: &PostgresShardConfig,
+) -> Result<(Config, Option<PostgresTlsConnectorConfig>)> {
     if shard.database_name.is_empty() {
         return Err(configuration_error(
             "PostgreSQL database_name must not be empty".into(),
@@ -645,20 +748,39 @@ fn postgres_options(shard: &PostgresShardConfig) -> Result<Config> {
     let (host, port) = split_host_port(&shard.connect_addr)?;
     let mut options = Config::new();
     options
-        .ssl_mode(SslMode::Disable)
         .host(&host)
         .port(port)
         .user(&shard.user)
         .password(&shard.password)
         .dbname(&shard.database_name);
+    let mut ssl_mode = shard
+        .tls
+        .as_ref()
+        .filter(|tls| tls.enabled)
+        .map(|tls| {
+            if tls.ssl_mode.is_empty() {
+                "require".to_owned()
+            } else {
+                tls.ssl_mode.to_ascii_lowercase()
+            }
+        })
+        .unwrap_or_else(|| "disable".to_owned());
+    let active_tls = shard.tls.as_ref().filter(|tls| tls.enabled);
+    let mut root_cert = active_tls
+        .map(|tls| tls.ca_file.clone())
+        .unwrap_or_default();
+    let mut cert = active_tls
+        .map(|tls| tls.cert_file.clone())
+        .unwrap_or_default();
+    let mut key_file = active_tls
+        .map(|tls| tls.key_file.clone())
+        .unwrap_or_default();
     for (key, value) in &shard.connect_attributes {
         match key.to_ascii_lowercase().as_str() {
-            "sslmode" if value.eq_ignore_ascii_case("disable") => {}
-            "sslmode" => {
-                return Err(configuration_error(format!(
-                    "PostgreSQL sslmode={value:?} requires a TLS adapter; only disable is currently supported"
-                )))
-            }
+            "sslmode" => ssl_mode = value.to_ascii_lowercase(),
+            "sslrootcert" => root_cert = value.clone(),
+            "sslcert" => cert = value.clone(),
+            "sslkey" => key_file = value.clone(),
             "connect_timeout" => {
                 let seconds = value.parse::<u64>().map_err(|_| {
                     configuration_error(format!(
@@ -682,7 +804,98 @@ fn postgres_options(shard: &PostgresShardConfig) -> Result<Config> {
             }
         }
     }
-    Ok(options)
+    let allow_plaintext_first = ssl_mode == "allow";
+    let mode = match ssl_mode.as_str() {
+        "disable" => SslMode::Disable,
+        // The synchronous driver has no lib/pq `allow` mode. The pool emulates
+        // it by trying plaintext, then retrying TLS only when PostgreSQL
+        // explicitly rejects the plaintext connection as SSL-off.
+        "allow" => SslMode::Disable,
+        "prefer" => SslMode::Prefer,
+        "require" => SslMode::Require,
+        "verify-ca" => SslMode::VerifyCa,
+        "verify-full" => SslMode::VerifyFull,
+        other => {
+            return Err(configuration_error(format!(
+                "unsupported PostgreSQL sslmode {other:?}"
+            )))
+        }
+    };
+    options.ssl_mode(mode);
+    let tls = if ssl_mode == "disable" {
+        None
+    } else {
+        if cert.is_empty() != key_file.is_empty() {
+            return Err(configuration_error(
+                "PostgreSQL sslcert and sslkey must be configured together".into(),
+            ));
+        }
+        Some(PostgresTlsConnectorConfig {
+            mode: if allow_plaintext_first {
+                SslMode::Require
+            } else {
+                mode
+            },
+            allow_plaintext_first,
+            root_cert: (!allow_plaintext_first && !root_cert.is_empty()).then_some(root_cert),
+            cert: (!allow_plaintext_first && !cert.is_empty()).then_some(cert),
+            key: (!allow_plaintext_first && !key_file.is_empty()).then_some(key_file),
+        })
+    };
+    Ok((options, tls))
+}
+
+fn postgres_requires_tls(error: &postgres::Error) -> bool {
+    error.as_db_error().is_some_and(|db_error| {
+        db_error.code().code() == "28000"
+            && db_error.message().to_ascii_lowercase().contains("ssl off")
+    })
+}
+
+fn postgres_tls_connector(config: &PostgresTlsConnectorConfig) -> Result<MakeTlsConnector> {
+    let mut builder = SslConnector::builder(SslMethod::tls()).map_err(|error| {
+        configuration_error(format!("creating PostgreSQL TLS connector: {error}"))
+    })?;
+    if let Some(ca) = &config.root_cert {
+        builder.set_ca_file(ca).map_err(|error| {
+            configuration_error(format!("loading PostgreSQL TLS CA {ca:?}: {error}"))
+        })?;
+    }
+    if let (Some(cert), Some(key)) = (&config.cert, &config.key) {
+        builder
+            .set_certificate_file(cert, openssl::x509::X509FileType::PEM)
+            .map_err(|error| {
+                configuration_error(format!(
+                    "loading PostgreSQL client certificate {cert:?}: {error}"
+                ))
+            })?;
+        builder
+            .set_private_key_file(key, openssl::x509::X509FileType::PEM)
+            .map_err(|error| {
+                configuration_error(format!("loading PostgreSQL client key {key:?}: {error}"))
+            })?;
+        builder.check_private_key().map_err(|error| {
+            configuration_error(format!(
+                "checking PostgreSQL client certificate/key: {error}"
+            ))
+        })?;
+    }
+    let verify = matches!(config.mode, SslMode::VerifyCa | SslMode::VerifyFull);
+    if config.mode == SslMode::VerifyCa {
+        // lib/pq verify-ca validates the chain but deliberately skips host
+        // name matching. The OpenSSL connector enables host checks by default;
+        // ignore only that specific verification result.
+        builder.set_verify_callback(SslVerifyMode::PEER, |valid, context| {
+            valid || context.error() == openssl::x509::X509VerifyResult::HOSTNAME_MISMATCH
+        });
+    } else {
+        builder.set_verify(if verify {
+            SslVerifyMode::PEER
+        } else {
+            SslVerifyMode::NONE
+        });
+    }
+    Ok(MakeTlsConnector::new(builder.build()))
 }
 
 fn split_host_port(address: &str) -> Result<(String, u16)> {
@@ -825,6 +1038,7 @@ mod tests {
                 .iter()
                 .map(|(key, value)| ((*key).into(), (*value).into()))
                 .collect(),
+            tls: None,
         }
     }
 
@@ -840,10 +1054,10 @@ mod tests {
     }
 
     #[test]
-    fn postgres_connect_attributes_fail_closed_for_unported_tls() {
+    fn postgres_tls_connect_attributes_are_accepted() {
         assert!(postgres_options(&shard(&[("sslmode", "disable")])).is_ok());
-        assert!(postgres_options(&shard(&[("sslmode", "require")])).is_err());
-        assert!(postgres_options(&shard(&[("sslrootcert", "/tmp/ca.pem")])).is_err());
+        assert!(postgres_options(&shard(&[("sslmode", "require")])).is_ok());
+        assert!(postgres_options(&shard(&[("sslrootcert", "/tmp/ca.pem")])).is_ok());
         assert!(postgres_options(&shard(&[("mystery", "ignored")])).is_err());
     }
 

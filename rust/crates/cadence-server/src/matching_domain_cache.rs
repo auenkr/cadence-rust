@@ -96,7 +96,8 @@ fn metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSo
         // or internal service errors. Domain cache refresh retries those.
         MatchingDomainMetadataError::MySql(_)
         | MatchingDomainMetadataError::MySqlAsync(_)
-        | MatchingDomainMetadataError::MySqlPool(_) => true,
+        | MatchingDomainMetadataError::MySqlPool(_)
+        | MatchingDomainMetadataError::Postgres(_) => true,
         _ => false,
     };
     DomainMetadataSourceError {
@@ -209,6 +210,54 @@ impl DomainMetadataSource for cadence_persistence::matching_domain_mysql::MySqlD
             .map_err(mysql_metadata_source_error)?;
         validate_typed_domain_config(&domain)?;
         Ok(domain)
+    }
+}
+
+impl DomainMetadataSource
+    for cadence_persistence::matching_domain_postgres::PostgresDomainMetadataStore
+{
+    fn metadata_version(&self, timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
+        self.get_metadata_version_with_timeout(timeout)
+            .map_err(postgres_metadata_source_error)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page = self
+            .list_domains_with_timeout(page_size, next_page_token, timeout)
+            .map_err(postgres_metadata_source_error)?;
+        for domain in &page.domains {
+            validate_typed_domain_config(domain)?;
+        }
+        Ok(DomainMetadataPage {
+            domains: page.domains,
+            next_page_token: page.next_page_token,
+        })
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+        timeout: Duration,
+    ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        let domain = self
+            .get_domain_with_timeout(name, id, timeout)
+            .map_err(postgres_metadata_source_error)?;
+        validate_typed_domain_config(&domain)?;
+        Ok(domain)
+    }
+}
+
+fn postgres_metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSourceError {
+    if matches!(error, MatchingDomainMetadataError::OperationTimedOut) {
+        DomainMetadataSourceError::transient(error.to_string())
+    } else {
+        metadata_source_error(error)
     }
 }
 

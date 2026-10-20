@@ -90,6 +90,8 @@ pub enum MatchingDomainMetadataError {
     MySqlAsync(#[from] mysql_async::Error),
     #[error("Go MySQL domain metadata connection pool error: {0}")]
     MySqlPool(String),
+    #[error("Go PostgreSQL domain metadata database error: {0}")]
+    Postgres(#[from] postgres::Error),
     #[error("domain page size must be positive")]
     InvalidPageSize,
     #[error("domain metadata persistence operation timed out")]
@@ -98,6 +100,8 @@ pub enum MatchingDomainMetadataError {
     InvalidSqliteConfiguration(String),
     #[error("invalid MySQL domain metadata reader configuration: {0}")]
     InvalidMySqlConfiguration(String),
+    #[error("invalid PostgreSQL domain metadata reader configuration: {0}")]
+    InvalidPostgresConfiguration(String),
 }
 
 /// Read-only access to the Go `domains` and `domain_metadata` tables.
