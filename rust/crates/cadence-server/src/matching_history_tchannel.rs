@@ -249,6 +249,12 @@ fn as_i64(value: &TypedValue, id: i16) -> cadence_thrift::Result<i64> {
         _ => Err(thrift_invalid(format!("field {id}: expected i64"))),
     }
 }
+fn as_f64(value: &TypedValue, id: i16) -> cadence_thrift::Result<f64> {
+    match value {
+        TypedValue::F64(value) => Ok(*value),
+        _ => Err(thrift_invalid(format!("field {id}: expected double"))),
+    }
+}
 fn field_i32(s: &TypedStruct, id: i16) -> cadence_thrift::Result<i32> {
     typed_field(s, id).map_or(Ok(0), |v| as_i32(v, id))
 }
@@ -1197,6 +1203,554 @@ pub(crate) fn describe_workflow_execution_response_from_thrift(
         pending_activities,
         pending_children,
         pending_decision,
+    })
+}
+
+fn poll_for_decision_task_request(
+    value: &cadence_proto::api::PollForDecisionTaskRequest,
+) -> TypedValue {
+    let mut fields = vec![
+        field(10, string(&value.domain)),
+        field(30, string(&value.identity)),
+        field(40, string(&value.binary_checksum)),
+    ];
+    if let Some(task) = &value.task_list {
+        fields.push(field(20, task_list(task)));
+    }
+    struct_value(finish(fields).fields)
+}
+fn poll_for_activity_task_request(
+    value: &cadence_proto::api::PollForActivityTaskRequest,
+) -> TypedValue {
+    let mut fields = vec![
+        field(10, string(&value.domain)),
+        field(30, string(&value.identity)),
+    ];
+    if let Some(task) = &value.task_list {
+        fields.push(field(20, task_list(task)));
+    }
+    if let Some(metadata) = &value.task_list_metadata {
+        let mut metadata_fields = Vec::new();
+        if let Some(maximum) = &metadata.max_tasks_per_second {
+            metadata_fields.push(field(10, TypedValue::F64(maximum.value)));
+        }
+        fields.push(field(40, struct_value(metadata_fields)));
+    }
+    struct_value(finish(fields).fields)
+}
+pub(crate) fn record_decision_task_started_request(
+    value: &cadence_proto::history::RecordDecisionTaskStartedRequest,
+) -> TypedStruct {
+    let mut fields = vec![
+        field(10, string(&value.domain_id)),
+        field(30, i64_value(value.schedule_id)),
+        field(40, i64_value(value.task_id)),
+        field(45, string(&value.request_id)),
+    ];
+    if let Some(execution) = &value.workflow_execution {
+        fields.push(field(20, workflow_execution(execution)));
+    }
+    if let Some(request) = &value.poll_request {
+        fields.push(field(50, poll_for_decision_task_request(request)));
+    }
+    finish(fields)
+}
+pub(crate) fn record_activity_task_started_request(
+    value: &cadence_proto::history::RecordActivityTaskStartedRequest,
+) -> TypedStruct {
+    let mut fields = vec![
+        field(10, string(&value.domain_id)),
+        field(30, i64_value(value.schedule_id)),
+        field(40, i64_value(value.task_id)),
+        field(45, string(&value.request_id)),
+    ];
+    if let Some(execution) = &value.workflow_execution {
+        fields.push(field(20, workflow_execution(execution)));
+    }
+    if let Some(request) = &value.poll_request {
+        fields.push(field(50, poll_for_activity_task_request(request)));
+    }
+    finish(fields)
+}
+
+fn duration_seconds(value: &prost_types::Duration) -> i32 {
+    let nanos = i128::from(value.seconds) * 1_000_000_000 + i128::from(value.nanos);
+    (nanos / 1_000_000_000) as i32
+}
+fn api_task_list(value: &cadence_proto::api::TaskList) -> cadence_api::types::TaskList {
+    let kind = match value.kind {
+        1 => Some(cadence_api::enums::TaskListKind::Normal),
+        2 => Some(cadence_api::enums::TaskListKind::Sticky),
+        3 => Some(cadence_api::enums::TaskListKind::Ephemeral),
+        _ => None,
+    };
+    cadence_api::types::TaskList {
+        name: value.name.clone(),
+        kind,
+        base_name: value.base_name.clone(),
+    }
+}
+fn history_event_to_thrift(value: &cadence_proto::api::HistoryEvent) -> Result<TypedValue, Status> {
+    use cadence_proto::api::history_event::Attributes;
+    let mut fields = vec![
+        field(10, i64_value(value.event_id)),
+        field(35, i64_value(value.version)),
+        field(36, i64_value(value.task_id)),
+    ];
+    if let Some(timestamp) = &value.event_time {
+        fields.push(field(20, i64_value(timestamp_nanos(timestamp))));
+    }
+    let (event_type, attribute_id, attributes) = match value.attributes.as_ref() {
+        Some(Attributes::DecisionTaskScheduledEventAttributes(attrs)) => {
+            let mut nested = Vec::new();
+            if let Some(task) = &attrs.task_list {
+                nested.push(field(10, task_list(task)));
+            }
+            if let Some(timeout) = &attrs.start_to_close_timeout {
+                nested.push(field(20, TypedValue::I32(duration_seconds(timeout))));
+            }
+            nested.push(field(30, i64_value(i64::from(attrs.attempt))));
+            (4, 80, TypedValue::Struct(finish(nested)))
+        }
+        Some(Attributes::DecisionTaskStartedEventAttributes(attrs)) => (
+            5,
+            90,
+            struct_value(vec![
+                field(10, i64_value(attrs.scheduled_event_id)),
+                field(20, string(&attrs.identity)),
+                field(30, string(&attrs.request_id)),
+            ]),
+        ),
+        Some(Attributes::ActivityTaskScheduledEventAttributes(attrs)) => {
+            let mut nested = vec![
+                field(10, string(&attrs.activity_id)),
+                field(25, string(&attrs.domain)),
+                field(90, i64_value(attrs.decision_task_completed_event_id)),
+            ];
+            if let Some(kind) = &attrs.activity_type {
+                nested.push(field(20, struct_value(vec![field(10, string(&kind.name))])));
+            }
+            if let Some(task) = &attrs.task_list {
+                nested.push(field(30, task_list(task)));
+            }
+            if let Some(input) = &attrs.input {
+                nested.push(field(40, binary(&input.data)));
+            }
+            for (id, timeout) in [
+                (45, &attrs.schedule_to_close_timeout),
+                (50, &attrs.schedule_to_start_timeout),
+                (55, &attrs.start_to_close_timeout),
+                (60, &attrs.heartbeat_timeout),
+            ] {
+                if let Some(timeout) = timeout {
+                    nested.push(field(id, TypedValue::I32(duration_seconds(timeout))));
+                }
+            }
+            if let Some(policy) = &attrs.retry_policy {
+                let mut fields = vec![field(
+                    10,
+                    TypedValue::I32(policy.initial_interval.as_ref().map_or(0, duration_seconds)),
+                )];
+                fields.push(field(20, TypedValue::F64(policy.backoff_coefficient)));
+                fields.push(field(
+                    30,
+                    TypedValue::I32(policy.maximum_interval.as_ref().map_or(0, duration_seconds)),
+                ));
+                fields.push(field(40, TypedValue::I32(policy.maximum_attempts)));
+                if !policy.non_retryable_error_reasons.is_empty() {
+                    fields.push(field(
+                        50,
+                        TypedValue::List(
+                            TType::String,
+                            policy
+                                .non_retryable_error_reasons
+                                .iter()
+                                .map(|v| string(v))
+                                .collect(),
+                        ),
+                    ));
+                }
+                fields.push(field(
+                    60,
+                    TypedValue::I32(
+                        policy
+                            .expiration_interval
+                            .as_ref()
+                            .map_or(0, duration_seconds),
+                    ),
+                ));
+                fields.push(field(70, TypedValue::F64(policy.jitter_coefficient)));
+                nested.push(field(110, TypedValue::Struct(finish(fields))));
+            }
+            if let Some(header) = &attrs.header {
+                let header_fields = if header.fields.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![field(
+                        10,
+                        TypedValue::Map(
+                            TType::String,
+                            TType::String,
+                            header
+                                .fields
+                                .iter()
+                                .map(|(k, v)| (string(k), binary(&v.data)))
+                                .collect(),
+                        ),
+                    )]
+                };
+                nested.push(field(120, struct_value(header_fields)));
+            }
+            (9, 130, TypedValue::Struct(finish(nested)))
+        }
+        _ => {
+            return Err(Status::internal(
+                "History returned an unsupported event in Matching task-start response.",
+            ))
+        }
+    };
+    fields.push(field(30, TypedValue::I32(event_type)));
+    fields.push(field(attribute_id, attributes));
+    Ok(TypedValue::Struct(finish(fields)))
+}
+
+fn transient_decision_info(
+    value: &cadence_proto::shared::TransientDecisionInfo,
+) -> Result<TypedValue, Status> {
+    let mut fields = Vec::new();
+    if let Some(event) = &value.scheduled_event {
+        fields.push(field(10, history_event_to_thrift(event)?));
+    }
+    if let Some(event) = &value.started_event {
+        fields.push(field(20, history_event_to_thrift(event)?));
+    }
+    Ok(struct_value(finish(fields).fields))
+}
+
+pub(crate) fn record_decision_task_started_response(
+    value: &cadence_proto::history::RecordDecisionTaskStartedResponse,
+) -> Result<TypedStruct, Status> {
+    let mut fields = vec![
+        field(30, i64_value(value.scheduled_event_id)),
+        field(40, i64_value(value.started_event_id)),
+        field(50, i64_value(value.next_event_id)),
+        field(60, i64_value(i64::from(value.attempt))),
+        field(70, TypedValue::Bool(value.sticky_execution_enabled)),
+        field(100, TypedValue::I32(value.event_store_version)),
+        field(190, i64_value(value.history_size)),
+    ];
+    if let Some(kind) = &value.workflow_type {
+        fields.push(field(10, workflow_type(kind)));
+    }
+    if let Some(previous) = &value.previous_started_event_id {
+        fields.push(field(20, i64_value(previous.value)));
+    }
+    if let Some(info) = &value.decision_info {
+        fields.push(field(80, transient_decision_info(info)?));
+    }
+    if let Some(task) = &value.workflow_execution_task_list {
+        fields.push(field(90, task_list(task)));
+    }
+    if !value.branch_token.is_empty() {
+        fields.push(field(110, binary(&value.branch_token)));
+    }
+    if let Some(timestamp) = &value.scheduled_time {
+        fields.push(field(120, i64_value(timestamp_nanos(timestamp))));
+    }
+    if let Some(timestamp) = &value.started_time {
+        fields.push(field(130, i64_value(timestamp_nanos(timestamp))));
+    }
+    if !value.queries.is_empty() {
+        fields.push(field(
+            140,
+            TypedValue::Map(
+                TType::String,
+                TType::Struct,
+                value
+                    .queries
+                    .iter()
+                    .map(|(key, query)| {
+                        let mut query_fields = vec![field(10, string(&query.query_type))];
+                        if let Some(args) = &query.query_args {
+                            query_fields.push(field(20, binary(&args.data)));
+                        }
+                        (string(key), struct_value(query_fields))
+                    })
+                    .collect(),
+            ),
+        ));
+    }
+    Ok(finish(fields))
+}
+
+pub(crate) fn record_activity_task_started_response(
+    value: &cadence_proto::history::RecordActivityTaskStartedResponse,
+) -> Result<TypedStruct, Status> {
+    let mut fields = vec![
+        field(40, i64_value(i64::from(value.attempt))),
+        field(80, string(&value.workflow_domain)),
+    ];
+    if let Some(event) = &value.scheduled_event {
+        fields.push(field(20, history_event_to_thrift(event)?));
+    }
+    if let Some(timestamp) = &value.started_time {
+        fields.push(field(30, i64_value(timestamp_nanos(timestamp))));
+    }
+    if let Some(timestamp) = &value.scheduled_time_of_this_attempt {
+        fields.push(field(50, i64_value(timestamp_nanos(timestamp))));
+    }
+    if let Some(details) = &value.heartbeat_details {
+        fields.push(field(60, binary(&details.data)));
+    }
+    if let Some(kind) = &value.workflow_type {
+        fields.push(field(70, workflow_type(kind)));
+    }
+    Ok(finish(fields))
+}
+
+fn duration_from_seconds(value: Option<i32>) -> Option<prost_types::Duration> {
+    value.map(|seconds| prost_types::Duration {
+        seconds: i64::from(seconds),
+        nanos: 0,
+    })
+}
+fn history_event_from_thrift(
+    value: &TypedStruct,
+) -> cadence_thrift::Result<cadence_proto::api::HistoryEvent> {
+    use cadence_proto::api::history_event::Attributes;
+    let event_type = field_i32(value, 30)?;
+    let attributes = match event_type {
+        4 => {
+            let attrs = field_struct(value, 80)?
+                .ok_or_else(|| thrift_invalid("decision scheduled event is missing field 80"))?;
+            Some(Attributes::DecisionTaskScheduledEventAttributes(
+                cadence_proto::api::DecisionTaskScheduledEventAttributes {
+                    task_list: field_struct(attrs, 10)?
+                        .map(task_list_from_thrift)
+                        .transpose()?,
+                    start_to_close_timeout: duration_from_seconds(
+                        typed_field(attrs, 20).map(|v| as_i32(v, 20)).transpose()?,
+                    ),
+                    attempt: field_i64(attrs, 30)? as i32,
+                },
+            ))
+        }
+        5 => {
+            let attrs = field_struct(value, 90)?
+                .ok_or_else(|| thrift_invalid("decision started event is missing field 90"))?;
+            Some(Attributes::DecisionTaskStartedEventAttributes(
+                cadence_proto::api::DecisionTaskStartedEventAttributes {
+                    scheduled_event_id: field_i64(attrs, 10)?,
+                    identity: field_string(attrs, 20)?,
+                    request_id: field_string(attrs, 30)?,
+                },
+            ))
+        }
+        9 => {
+            let attrs = field_struct(value, 130)?
+                .ok_or_else(|| thrift_invalid("activity scheduled event is missing field 130"))?;
+            let activity_type = field_struct(attrs, 20)?
+                .map(|t| {
+                    Ok(cadence_proto::api::ActivityType {
+                        name: field_string(t, 10)?,
+                    })
+                })
+                .transpose()?;
+            let input = field_bytes(attrs, 40)?;
+            let retry_policy = field_struct(attrs, 110)?
+                .map(|policy| {
+                    let non_retryable_error_reasons = match typed_field(policy, 50) {
+                        None => Vec::new(),
+                        Some(TypedValue::List(TType::String, values)) => values
+                            .iter()
+                            .map(|value| string_value(value, 50))
+                            .collect::<cadence_thrift::Result<Vec<_>>>()?,
+                        Some(_) => {
+                            return Err(thrift_invalid(
+                                "RetryPolicy.nonRetriableErrorReasons: expected list<string>",
+                            ))
+                        }
+                    };
+                    Ok(cadence_proto::api::RetryPolicy {
+                        initial_interval: duration_from_seconds(
+                            typed_field(policy, 10).map(|v| as_i32(v, 10)).transpose()?,
+                        ),
+                        backoff_coefficient: typed_field(policy, 20)
+                            .map(|v| as_f64(v, 20))
+                            .transpose()?
+                            .unwrap_or_default(),
+                        maximum_interval: duration_from_seconds(
+                            typed_field(policy, 30).map(|v| as_i32(v, 30)).transpose()?,
+                        ),
+                        maximum_attempts: field_i32(policy, 40)?,
+                        non_retryable_error_reasons,
+                        expiration_interval: duration_from_seconds(
+                            typed_field(policy, 60).map(|v| as_i32(v, 60)).transpose()?,
+                        ),
+                        jitter_coefficient: typed_field(policy, 70)
+                            .map(|v| as_f64(v, 70))
+                            .transpose()?
+                            .unwrap_or_default(),
+                    })
+                })
+                .transpose()?;
+            let header = field_struct(attrs, 120)?
+                .map(|header| {
+                    let mut fields = std::collections::HashMap::new();
+                    for (key, data) in typed_map_entries(header, 10)? {
+                        fields.insert(
+                            string_value(key, 10)?,
+                            cadence_proto::api::Payload {
+                                data: bytes_value(data, 10)?,
+                            },
+                        );
+                    }
+                    Ok::<_, cadence_thrift::Error>(cadence_proto::api::Header { fields })
+                })
+                .transpose()?;
+            Some(Attributes::ActivityTaskScheduledEventAttributes(
+                cadence_proto::api::ActivityTaskScheduledEventAttributes {
+                    activity_id: field_string(attrs, 10)?,
+                    activity_type,
+                    domain: field_string(attrs, 25)?,
+                    task_list: field_struct(attrs, 30)?
+                        .map(task_list_from_thrift)
+                        .transpose()?,
+                    input: (!input.is_empty() || typed_field(attrs, 40).is_some())
+                        .then_some(cadence_proto::api::Payload { data: input }),
+                    schedule_to_close_timeout: duration_from_seconds(
+                        typed_field(attrs, 45).map(|v| as_i32(v, 45)).transpose()?,
+                    ),
+                    schedule_to_start_timeout: duration_from_seconds(
+                        typed_field(attrs, 50).map(|v| as_i32(v, 50)).transpose()?,
+                    ),
+                    start_to_close_timeout: duration_from_seconds(
+                        typed_field(attrs, 55).map(|v| as_i32(v, 55)).transpose()?,
+                    ),
+                    heartbeat_timeout: duration_from_seconds(
+                        typed_field(attrs, 60).map(|v| as_i32(v, 60)).transpose()?,
+                    ),
+                    decision_task_completed_event_id: field_i64(attrs, 90)?,
+                    retry_policy,
+                    header,
+                },
+            ))
+        }
+        _ => {
+            return Err(thrift_invalid(format!(
+                "unsupported Matching History event type {event_type}"
+            )))
+        }
+    };
+    Ok(cadence_proto::api::HistoryEvent {
+        event_id: field_i64(value, 10)?,
+        event_time: timestamp_from_nanos(
+            typed_field(value, 20).map(|v| as_i64(v, 20)).transpose()?,
+        ),
+        version: field_i64(value, 35)?,
+        task_id: field_i64(value, 36)?,
+        attributes,
+    })
+}
+
+fn transient_decision_info_from_thrift(
+    value: &TypedStruct,
+) -> cadence_thrift::Result<cadence_proto::shared::TransientDecisionInfo> {
+    Ok(cadence_proto::shared::TransientDecisionInfo {
+        scheduled_event: field_struct(value, 10)?
+            .map(history_event_from_thrift)
+            .transpose()?,
+        started_event: field_struct(value, 20)?
+            .map(history_event_from_thrift)
+            .transpose()?,
+    })
+}
+
+pub(crate) fn record_decision_task_started_response_from_thrift(
+    value: &TypedStruct,
+) -> cadence_thrift::Result<cadence_proto::history::RecordDecisionTaskStartedResponse> {
+    let mut queries = std::collections::HashMap::new();
+    if let Some(TypedValue::Map(TType::String, TType::Struct, values)) = typed_field(value, 140) {
+        for (key, query) in values {
+            let TypedValue::Struct(query) = query else {
+                return Err(thrift_invalid("queries map value is not struct"));
+            };
+            let query_args = typed_field(query, 20)
+                .map(|v| bytes_value(v, 20))
+                .transpose()?
+                .map(|data| cadence_proto::api::Payload { data });
+            queries.insert(
+                string_value(key, 140)?,
+                cadence_proto::api::WorkflowQuery {
+                    query_type: field_string(query, 10)?,
+                    query_args,
+                },
+            );
+        }
+    } else if typed_field(value, 140).is_some() {
+        return Err(thrift_invalid("field 140: expected map<string,struct>"));
+    }
+    let workflow_type = field_struct(value, 10)?
+        .map(workflow_type_from_thrift)
+        .transpose()?;
+    let previous_started_event_id = typed_field(value, 20)
+        .map(|v| as_i64(v, 20))
+        .transpose()?
+        .map(|value| prost_types::Int64Value { value });
+    let decision_info = field_struct(value, 80)?
+        .map(transient_decision_info_from_thrift)
+        .transpose()?;
+    Ok(cadence_proto::history::RecordDecisionTaskStartedResponse {
+        workflow_type,
+        previous_started_event_id,
+        scheduled_event_id: field_i64(value, 30)?,
+        started_event_id: field_i64(value, 40)?,
+        next_event_id: field_i64(value, 50)?,
+        attempt: field_i64(value, 60)? as i32,
+        sticky_execution_enabled: field_bool(value, 70)?,
+        decision_info,
+        workflow_execution_task_list: field_struct(value, 90)?
+            .map(task_list_from_thrift)
+            .transpose()?,
+        event_store_version: field_i32(value, 100)?,
+        branch_token: field_bytes(value, 110)?,
+        scheduled_time: timestamp_from_nanos(
+            typed_field(value, 120)
+                .map(|v| as_i64(v, 120))
+                .transpose()?,
+        ),
+        started_time: timestamp_from_nanos(
+            typed_field(value, 130)
+                .map(|v| as_i64(v, 130))
+                .transpose()?,
+        ),
+        queries,
+        history_size: field_i64(value, 150)?,
+    })
+}
+
+pub(crate) fn record_activity_task_started_response_from_thrift(
+    value: &TypedStruct,
+) -> cadence_thrift::Result<cadence_proto::history::RecordActivityTaskStartedResponse> {
+    let scheduled_event = field_struct(value, 20)?
+        .map(history_event_from_thrift)
+        .transpose()?;
+    let heartbeat = field_bytes(value, 60)?;
+    Ok(cadence_proto::history::RecordActivityTaskStartedResponse {
+        scheduled_event,
+        started_time: timestamp_from_nanos(
+            typed_field(value, 30).map(|v| as_i64(v, 30)).transpose()?,
+        ),
+        attempt: field_i64(value, 40)? as i32,
+        scheduled_time_of_this_attempt: timestamp_from_nanos(
+            typed_field(value, 50).map(|v| as_i64(v, 50)).transpose()?,
+        ),
+        heartbeat_details: (!heartbeat.is_empty() || typed_field(value, 60).is_some())
+            .then_some(cadence_proto::api::Payload { data: heartbeat }),
+        workflow_type: field_struct(value, 70)?
+            .map(workflow_type_from_thrift)
+            .transpose()?,
+        workflow_domain: field_string(value, 80)?,
     })
 }
 
