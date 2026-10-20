@@ -58,9 +58,10 @@ now mapped to concrete gaps:
 * `matcher.go:155,256` emits `sync_throttle_count_per_tl`; `:231` emits
   `sync_forward_task_throttle_errors_per_tl`. Event builders and sync-match
   latency pairs are now present, with latency emitted on a successful
-  in-process sync match. Throttle outcomes are not separable from a normal
-  no-waiting-poller result in Rust's current boolean `try_sync_match` interface,
-  so those counters remain unwired.
+  in-process sync match. Rust now distinguishes the sync limiter's throttled
+  result from a normal unmatched poller and distinguishes a forward request
+  token shortage from forward rate limiting; it records the matching throttle
+  counters at those outcomes.
 * `matcher.go:339-419` emits async local/forward counters, attempt timer and
   integer histogram pairs, latency timer and duration histogram pairs, and
   forward throttle errors. Rust now covers the task-reader async match latency,
@@ -79,6 +80,22 @@ now mapped to concrete gaps:
   cancellation) and in-process parent-dispatch forwarding, tagged with the
   child poll's task-list context as Go's forwarder does. Invalid nonempty
   isolation groups are counted at poll entry; empty groups remain valid.
+* `forwarder.go:134-137,192-195,222-225` emits ForwardTask, ForwardQuery, and
+  ForwardPoll latency timer/histogram pairs around actual calls. Poll forwarding
+  was wired in `fab15f723`; task forwarding now records direct and in-process
+  parent attempts, and query forwarding records direct and in-process attempts
+  through the result/error return. Sync-match task/query paths emit their own
+  local/forward timer families.
+* `task_writer.go:228` increments lease requests and `:232` increments lease
+  failures after a terminal renewal failure. Rust now emits the initial task
+  list lease request/failure during owner load and observes subsequent range
+  renewals through the persistence queue callback. No separate append/write
+  metric callsite was found in Go's task writer.
+* `adaptive_scaler.go:238-249,254-255,302` emits estimated QPS and partition
+  threshold gauges, scale counters and drained-partition counters. Rust now
+  emits those from root scaler ticks. Isolation balance now reports rebalance,
+  group start/stop polling, group scale changes and group partition gauges from
+  the applied state transitions. These changes are source-only and unvalidated.
 * `task_reader.go:231,273,395` updates backlog, task-count, and task-lag
   gauges. The durable queue exposes `levels().2` for backlog, but Rust's
   acknowledgement manager's `levels().2` is the same outstanding unacked item

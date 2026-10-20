@@ -54,6 +54,7 @@ pub struct DurableTaskQueue {
     gc_batch_size_provider: Mutex<Option<Arc<dyn Fn() -> i64 + Send + Sync>>>,
     stopped: AtomicBool,
     stop_waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    lease_observer: Mutex<Option<Arc<dyn Fn(bool) + Send + Sync>>>,
 }
 #[derive(Default)]
 struct ReaderGate {
@@ -191,6 +192,7 @@ impl DurableTaskQueue {
             gc_batch_size_provider: Mutex::new(None),
             stopped: AtomicBool::new(false),
             stop_waker: Mutex::new(None),
+            lease_observer: Mutex::new(None),
             writer: Mutex::new(()),
             database: Mutex::new(()),
             reader: Arc::new(ReaderGate::default()),
@@ -209,6 +211,22 @@ impl DurableTaskQueue {
             Err(QueueError::Stopped)
         } else {
             Ok(())
+        }
+    }
+    /// Install a service-owned callback for each task-list lease renewal.
+    /// `true` means the retry operation obtained a lease; a failed renewal is
+    /// reported once after its retry policy terminates.
+    pub fn set_lease_observer(&self, observer: Arc<dyn Fn(bool) + Send + Sync>) {
+        *self.lease_observer.lock().expect("matching lease observer lock") = Some(observer);
+    }
+    fn observe_lease(&self, success: bool) {
+        if let Some(observer) = self
+            .lease_observer
+            .lock()
+            .expect("matching lease observer lock")
+            .clone()
+        {
+            observer(success);
         }
     }
     fn check<T>(&self, result: StorageResult<T>) -> Result<T> {
@@ -243,6 +261,7 @@ impl DurableTaskQueue {
                     (state.next_id, state.block_end) = block(lease.range_id, self.range_size);
                     Ok(())
                 });
+                self.observe_lease(result.is_ok());
                 if result.is_err() {
                     self.stop();
                 }

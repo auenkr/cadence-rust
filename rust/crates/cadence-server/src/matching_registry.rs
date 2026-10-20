@@ -210,10 +210,33 @@ pub struct QueueHandle {
     forward_tasks: Arc<crate::matching_forward::RequestTokens>,
     forward_rate: Arc<crate::matching_forward::ForwardRate>,
 }
+pub enum ForwardTaskPermitOutcome {
+    Acquired(tokio::sync::OwnedSemaphorePermit),
+    NoToken,
+    RateLimited,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SyncMatchOutcome {
+    Matched,
+    Unmatched,
+    Throttled,
+}
 impl QueueHandle {
     pub fn try_forward_task(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
-        let permit = self.forward_tasks.try_acquire()?;
-        self.forward_rate.allow(registry_now()).then_some(permit)
+        match self.try_forward_task_observed() {
+            ForwardTaskPermitOutcome::Acquired(permit) => Some(permit),
+            ForwardTaskPermitOutcome::NoToken | ForwardTaskPermitOutcome::RateLimited => None,
+        }
+    }
+    pub fn try_forward_task_observed(&self) -> ForwardTaskPermitOutcome {
+        let Some(permit) = self.forward_tasks.try_acquire() else {
+            return ForwardTaskPermitOutcome::NoToken;
+        };
+        if self.forward_rate.allow(registry_now()) {
+            ForwardTaskPermitOutcome::Acquired(permit)
+        } else {
+            ForwardTaskPermitOutcome::RateLimited
+        }
     }
     /// Go `OfferQuery` takes a forward-task token but `ForwardQueryTask`
     /// applies no rate limit, unlike `ForwardTask`.
@@ -240,6 +263,14 @@ impl QueueHandle {
         deadline: tokio::time::Instant,
     ) -> bool {
         self.offer_sync(data, source_domain, deadline, true, false).await
+    }
+    pub async fn try_sync_match_observed(
+        &self,
+        data: &TaskData,
+        source_domain: Uuid,
+        deadline: tokio::time::Instant,
+    ) -> SyncMatchOutcome {
+        self.offer_sync_observed(data, source_domain, deadline, true, false).await
     }
     /// Go `TaskMatcher.Offer` skips the dispatch rate limiter for tasks
     /// already forwarded from a child partition; the entry partition limited
@@ -278,10 +309,23 @@ impl QueueHandle {
         limit: bool,
         forwarded: bool,
     ) -> bool {
+        matches!(
+            self.offer_sync_observed(data, source_domain, deadline, limit, forwarded).await,
+            SyncMatchOutcome::Matched
+        )
+    }
+    async fn offer_sync_observed(
+        &self,
+        data: &TaskData,
+        source_domain: Uuid,
+        deadline: tokio::time::Instant,
+        limit: bool,
+        forwarded: bool,
+    ) -> SyncMatchOutcome {
         use crate::matching_limiter::WaitOutcome;
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() || self.queue.is_stopped() {
-            return false;
+            return SyncMatchOutcome::Unmatched;
         }
         if limit {
             let limiter_deadline = self
@@ -294,12 +338,14 @@ impl QueueHandle {
                 self.limiter.wait_until(stop, Some(limiter_deadline)),
             )
             .await;
-            if !matches!(acquired, Ok(WaitOutcome::Acquired)) {
-                return false;
+            match acquired {
+                Ok(WaitOutcome::Acquired) => (),
+                Ok(WaitOutcome::Throttled) => return SyncMatchOutcome::Throttled,
+                Ok(WaitOutcome::Stopped) | Err(_) => return SyncMatchOutcome::Unmatched,
             }
         }
         let group = (self.isolation_select)(data).0;
-        self.sync_matcher
+        if self.sync_matcher
             .offer(
                 data.clone(),
                 &group,
@@ -309,6 +355,11 @@ impl QueueHandle {
                 deadline,
             )
             .await
+        {
+            SyncMatchOutcome::Matched
+        } else {
+            SyncMatchOutcome::Unmatched
+        }
     }
     pub async fn enqueue(
         &self,
@@ -746,16 +797,46 @@ impl QueueRegistry {
                 None => {
                     drop(state);
                     let domain = key.domain_id.to_string();
-                    let queue = Arc::new(
-                        DurableTaskQueue::open(
+                    let metric_context = crate::matching_metrics::PollMetricContext {
+                        domain: registry
+                            .domain_metadata
+                            .as_ref()
+                            .and_then(|(domains, _)| {
+                                domains
+                                    .describe(&cadence_api::service_types::DescribeDomainRequest {
+                                        name: None,
+                                        uuid: Some(domain.clone()),
+                                    })
+                                    .ok()
+                                    .and_then(|response| response.domain_info.map(|info| info.name))
+                            })
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or_else(|| "_unknown_".to_owned()),
+                        task_list: lookup.1.clone(),
+                        task_list_kind: i32::from(kind),
+                        task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
+                        poller_isolation_group: String::new(),
+                    };
+                    registry.metrics.lease_request(&metric_context);
+                    let opened = DurableTaskQueue::open(
                             registry.store.clone(),
                             key.clone(),
                             kind,
                             registry.range_size,
                             now,
-                        )
-                        .map_err(|error| Status::unavailable(error.to_string()))?,
-                    );
+                        );
+                    let queue = match opened {
+                        Ok(queue) => Arc::new(queue),
+                        Err(error) => {
+                            registry.metrics.lease_failure(&metric_context);
+                            return Err(Status::unavailable(error.to_string()));
+                        }
+                    };
+                    let lease_metrics = registry.metrics.clone();
+                    let lease_context = metric_context.clone();
+                    queue.set_lease_observer(Arc::new(move |success| {
+                        lease_metrics.lease_attempt(&lease_context, !success);
+                    }));
                     {
                         let provider = registry.max_task_delete_batch_size.clone();
                         let domain = domain.clone();
@@ -1224,7 +1305,30 @@ impl QueueRegistry {
         let Some(provider) = self.scaler_config.clone() else {
             return;
         };
-        let mut scaler = crate::matching_scaler::Scaler::new();
+        let metric_domain = self
+            .domain_metadata
+            .as_ref()
+            .and_then(|(domains, _)| {
+                domains
+                    .describe(&cadence_api::service_types::DescribeDomainRequest {
+                        name: None,
+                        uuid: Some(root.domain_id.to_string()),
+                    })
+                    .ok()
+                    .and_then(|response| response.domain_info.map(|info| info.name))
+            })
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "_unknown_".to_owned());
+        let mut scaler = crate::matching_scaler::Scaler::new().with_metrics(
+            self.metrics.clone(),
+            crate::matching_metrics::PollMetricContext {
+                domain: metric_domain,
+                task_list: root.name.clone(),
+                task_list_kind: 0,
+                task_type: if root.task_type == 1 { "activity_task" } else { "decision_task" },
+                poller_isolation_group: String::new(),
+            },
+        );
         loop {
             let name = match cadence_common::task_list::TaskListName::parse(&root.name) {
                 Ok(name) => name,

@@ -117,6 +117,20 @@ pub const SYNC_MATCH_FORWARD_POLL_LATENCY: &str = "syncmatch_forward_poll_latenc
 pub const SYNC_MATCH_FORWARD_POLL_LATENCY_NS: &str = "syncmatch_forward_poll_latency_per_tl_ns";
 pub const SYNC_THROTTLE_COUNT: &str = "sync_throttle_count_per_tl";
 pub const SYNC_FORWARD_TASK_THROTTLE_ERRORS: &str = "sync_forward_task_throttle_errors_per_tl";
+pub const LEASE_REQUESTS: &str = "lease_requests_per_tl";
+pub const LEASE_FAILURES: &str = "lease_failures_per_tl";
+pub const ESTIMATED_ADD_TASK_QPS: &str = "estimated_add_task_qps_per_tl";
+pub const PARTITION_UPSCALE_THRESHOLD: &str = "tasklist_partition_upscale_threshold";
+pub const PARTITION_DOWNSCALE_THRESHOLD: &str = "tasklist_partition_downscale_threshold";
+pub const PARTITION_UPSCALE: &str = "partition_upscale_per_tl";
+pub const PARTITION_DOWNSCALE: &str = "partition_downscale_per_tl";
+pub const PARTITION_DRAINED: &str = "partition_drained_per_tl";
+pub const ISOLATION_REBALANCE: &str = "isolation_rebalance_per_tl";
+pub const ISOLATION_GROUP_STARTED_POLLING: &str = "ig_started_polling_per_tl";
+pub const ISOLATION_GROUP_STOPPED_POLLING: &str = "ig_stopped_polling_per_tl";
+pub const ISOLATION_GROUP_UPSCALE: &str = "ig_upscale_per_tl";
+pub const ISOLATION_GROUP_DOWNSCALE: &str = "ig_downscale_per_tl";
+pub const ISOLATION_GROUP_PARTITIONS: &str = "ig_partitions_per_tl";
 pub const TASK_BACKLOG_PER_TASK_LIST: &str = "task_backlog_per_tl";
 pub const TASK_LAG_PER_TASK_LIST: &str = "task_lag_per_tl";
 pub const TASK_COUNT_PER_TASK_LIST: &str = "task_count_per_tl";
@@ -748,6 +762,102 @@ impl MatchingMetrics {
         self.task_list_counter(SYNC_FORWARD_TASK_THROTTLE_ERRORS, context, BTreeMap::new());
     }
 
+    pub fn lease_attempt(&self, context: &PollMetricContext, failed: bool) {
+        self.lease_request(context);
+        if failed {
+            self.lease_failure(context);
+        }
+    }
+
+    pub fn lease_request(&self, context: &PollMetricContext) {
+        self.task_list_counter(LEASE_REQUESTS, context, BTreeMap::new());
+    }
+
+    pub fn lease_failure(&self, context: &PollMetricContext) {
+        self.task_list_counter(LEASE_FAILURES, context, BTreeMap::new());
+    }
+
+    pub fn scaler_tick(
+        &self,
+        context: &PollMetricContext,
+        qps: f64,
+        write_partitions: usize,
+        upscale_rps: f64,
+        downscale_factor: f64,
+    ) {
+        for (name, value) in [
+            (ESTIMATED_ADD_TASK_QPS, qps),
+            (
+                PARTITION_UPSCALE_THRESHOLD,
+                write_partitions as f64 * upscale_rps,
+            ),
+            (
+                PARTITION_DOWNSCALE_THRESHOLD,
+                write_partitions.saturating_sub(1) as f64 * upscale_rps * downscale_factor,
+            ),
+        ] {
+            self.0.record(MetricEvent {
+                name,
+                kind: MetricKind::Gauge,
+                value: MetricValue::Number(value),
+                tags: self.task_list_tags(context),
+                histogram: None,
+            });
+        }
+    }
+
+    pub fn partition_scale_change(&self, context: &PollMetricContext, up: bool) {
+        self.task_list_counter(
+            if up {
+                PARTITION_UPSCALE
+            } else {
+                PARTITION_DOWNSCALE
+            },
+            context,
+            BTreeMap::new(),
+        );
+    }
+
+    pub fn isolation_group_counter(
+        &self,
+        name: &'static str,
+        context: &PollMetricContext,
+        group: &str,
+    ) {
+        self.task_list_counter(
+            name,
+            context,
+            BTreeMap::from([(
+                ISOLATION_GROUP_TAG.to_owned(),
+                go_sanitize_metric_value(group),
+            )]),
+        );
+    }
+
+    pub fn isolation_group_partitions(&self, context: &PollMetricContext, group: &str, count: i64) {
+        self.0.record(MetricEvent {
+            name: ISOLATION_GROUP_PARTITIONS,
+            kind: MetricKind::Gauge,
+            value: MetricValue::Number(count as f64),
+            tags: self.task_list_tags_with(
+                context,
+                BTreeMap::from([(
+                    ISOLATION_GROUP_TAG.to_owned(),
+                    go_sanitize_metric_value(group),
+                )]),
+            ),
+            histogram: None,
+        });
+    }
+
+    pub fn isolation_rebalance(&self, context: &PollMetricContext) {
+        self.task_list_counter(ISOLATION_REBALANCE, context, BTreeMap::new());
+    }
+
+    pub fn partition_drained(&self, context: &PollMetricContext) {
+        self.task_list_counter(PARTITION_DRAINED, context, BTreeMap::new());
+    }
+
     fn duration_pair(
         &self,
         context: &PollMetricContext,
@@ -791,6 +901,16 @@ impl MatchingMetrics {
             ),
             (TASK_LIST_TAG.to_owned(), go_sanitize_metric_value(list)),
         ])
+    }
+
+    fn task_list_tags_with(
+        &self,
+        context: &PollMetricContext,
+        extra: BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        let mut tags = self.task_list_tags(context);
+        tags.extend(extra);
+        tags
     }
 
     pub fn poll_match_latency(

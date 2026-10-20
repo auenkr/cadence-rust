@@ -1148,15 +1148,31 @@ impl Matching {
         let mut handle = entry.clone();
         let mut ancestor = false;
         let mut permits = Vec::new();
+        let mut in_process_forward_metrics = Vec::new();
         loop {
-            let matched = if ancestor || forwarded {
-                handle
+            let outcome = if ancestor || forwarded {
+                if handle
                     .try_sync_match_forwarded(data, source, deadline)
                     .await
+                {
+                    crate::matching_registry::SyncMatchOutcome::Matched
+                } else {
+                    crate::matching_registry::SyncMatchOutcome::Unmatched
+                }
             } else {
-                handle.try_sync_match(data, source, deadline).await
+                handle
+                    .try_sync_match_observed(data, source, deadline)
+                    .await
             };
-            if matched {
+            if outcome == crate::matching_registry::SyncMatchOutcome::Throttled {
+                let mut context = metric_context.clone();
+                context.task_list = list.name.clone();
+                self.metrics.sync_throttled(&context);
+            }
+            if outcome == crate::matching_registry::SyncMatchOutcome::Matched {
+                for (started, context) in in_process_forward_metrics.drain(..) {
+                    self.metrics.forward_task_latency(&context, started.elapsed());
+                }
                 self.metrics.sync_match_latency(
                     &metric_context,
                     ancestor || forwarded,
@@ -1169,24 +1185,48 @@ impl Matching {
             let name = TaskListName::parse(&list.name)
                 .map_err(|_| Status::invalid_argument("TaskList is not valid."))?;
             if backlog && (ancestor || forwarded) && name.is_root() {
-                return Ok(handle
+                let accepted = handle
                     .offer_forwarded_backlog(data, source, deadline)
-                    .await
-                    .then(|| entry.partitions.get().map(partition_config_to_internal)));
+                    .await;
+                for (started, context) in in_process_forward_metrics.drain(..) {
+                    self.metrics.forward_task_latency(&context, started.elapsed());
+                }
+                return Ok(accepted.then(|| entry.partitions.get().map(partition_config_to_internal)));
             }
             if name.is_root()
                 || list.kind == 2
                 || degree <= 0
                 || tokio::time::Instant::now() >= deadline
             {
+                for (started, context) in in_process_forward_metrics.drain(..) {
+                    self.metrics.forward_task_latency(&context, started.elapsed());
+                }
                 return Ok(None);
             }
             let parent = name.parent(degree);
             if parent.is_empty() {
+                for (started, context) in in_process_forward_metrics.drain(..) {
+                    self.metrics.forward_task_latency(&context, started.elapsed());
+                }
                 return Ok(None);
             }
-            let Some(permit) = handle.try_forward_task() else {
-                return Ok(None);
+            let mut forward_context = metric_context.clone();
+            forward_context.task_list = list.name.clone();
+            let permit = match handle.try_forward_task_observed() {
+                crate::matching_registry::ForwardTaskPermitOutcome::Acquired(permit) => permit,
+                crate::matching_registry::ForwardTaskPermitOutcome::NoToken => {
+                    for (started, context) in in_process_forward_metrics.drain(..) {
+                        self.metrics.forward_task_latency(&context, started.elapsed());
+                    }
+                    return Ok(None);
+                }
+                crate::matching_registry::ForwardTaskPermitOutcome::RateLimited => {
+                    self.metrics.sync_forward_throttled(&forward_context);
+                    for (started, context) in in_process_forward_metrics.drain(..) {
+                        self.metrics.forward_task_latency(&context, started.elapsed());
+                    }
+                    return Ok(None);
+                }
             };
             permits.push(permit);
             let forwarded_from = list.name.clone();
@@ -1210,6 +1250,7 @@ impl Matching {
                         .collect();
                     let mut client = m::matching_api_client::MatchingApiClient::new(channel);
                     let timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    let forward_started = tokio::time::Instant::now();
                     let result = if task_type == 0 {
                         let mut request = Request::new(m::AddDecisionTaskRequest {
                             domain_id: source.to_string(),
@@ -1245,20 +1286,34 @@ impl Matching {
                             .await
                             .map(|response| response.into_inner().partition_config)
                     };
+                    self.metrics
+                        .forward_task_latency(&forward_context, forward_started.elapsed());
+                    for (started, context) in in_process_forward_metrics.drain(..) {
+                        self.metrics.forward_task_latency(&context, started.elapsed());
+                    }
                     return Ok(result
                         .ok()
                         .map(|_| entry.partitions.get().map(partition_config_to_internal)));
                 }
             }
+            in_process_forward_metrics.push((tokio::time::Instant::now(), forward_context));
             handle = match self.durable_queue(domain_id, &list, task_type).await {
                 Ok(handle) => handle,
-                Err(_) => return Ok(None),
+                Err(_) => {
+                    for (started, context) in in_process_forward_metrics.drain(..) {
+                        self.metrics.forward_task_latency(&context, started.elapsed());
+                    }
+                    return Ok(None);
+                }
             };
             if handle.stop_if_isolation_changed()
                 || self
                     .check_write_partition(domain_id, &list, task_type, &handle)
                     .is_err()
             {
+                for (started, context) in in_process_forward_metrics.drain(..) {
+                    self.metrics.forward_task_latency(&context, started.elapsed());
+                }
                 return Ok(None);
             }
             ancestor = true;
@@ -2061,12 +2116,18 @@ impl m::matching_api_server::MatchingApi for Matching {
                     || degree <= 0
                     || tokio::time::Instant::now() >= deadline
                 {
+                    for (started, context) in in_process_forward_metrics.drain(..) {
+                        self.metrics.forward_query_latency(&context, started.elapsed());
+                    }
                     return Err(Status::internal(
                         "cannot find parent task list for forwarding",
                     ));
                 }
                 let parent = current.parent(degree);
                 if parent.is_empty() {
+                    for (started, context) in in_process_forward_metrics.drain(..) {
+                        self.metrics.forward_query_latency(&context, started.elapsed());
+                    }
                     return Err(Status::internal(
                         "cannot find parent task list for forwarding",
                     ));
@@ -2079,7 +2140,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             let parent_channel = membership.remote_channel(&parent)?;
                             if let Some(channel) = parent_channel {
                                 let forward_context = crate::matching_metrics::PollMetricContext {
-                                    domain: self.domain_name(&r.domain_id)?,
+                                    domain: payload.domain.clone(),
                                     task_list: forwarded_from.clone(),
                                     task_list_kind: list.kind,
                                     task_type: "decision_task",
@@ -2108,7 +2169,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         in_process_forward_metrics.push((
                             tokio::time::Instant::now(),
                             crate::matching_metrics::PollMetricContext {
-                                domain: self.domain_name(&r.domain_id)?,
+                                domain: payload.domain.clone(),
                                 task_list: forwarded_from,
                                 task_list_kind: list.kind,
                                 task_type: "decision_task",
@@ -2116,7 +2177,15 @@ impl m::matching_api_server::MatchingApi for Matching {
                             },
                         ));
                         list.name = parent;
-                        handle = self.durable_queue(&r.domain_id, &list, 0).await?;
+                        handle = match self.durable_queue(&r.domain_id, &list, 0).await {
+                            Ok(handle) => handle,
+                            Err(error) => {
+                                for (started, context) in in_process_forward_metrics.drain(..) {
+                                    self.metrics.forward_query_latency(&context, started.elapsed());
+                                }
+                                return Err(error);
+                            }
+                        };
                     }
                     // Go blocks on the token while racing a local match; with
                     // an exhausted pool wait on the current level instead.
