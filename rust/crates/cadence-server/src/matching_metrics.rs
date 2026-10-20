@@ -101,6 +101,15 @@ pub const ISOLATION_TASK_MATCH: &str = "isolation_task_matches_per_tl";
 pub const ISOLATION_SUCCESS: &str = "isolation_success_per_tl";
 pub const POLL_DECISION_ALREADY_STARTED: &str = "poll_decision_task_already_started_per_tl";
 pub const POLL_ACTIVITY_ALREADY_STARTED: &str = "poll_activity_task_already_started_per_tl";
+pub const POLLER_PER_TASK_LIST: &str = "poller_count_per_tl";
+pub const POLL_LOCAL_MATCH_LATENCY: &str = "poll_local_match_latency_per_tl";
+pub const POLL_LOCAL_MATCH_LATENCY_NS: &str = "poll_local_match_latency_per_tl_ns";
+pub const POLL_FORWARD_MATCH_LATENCY: &str = "poll_forward_match_latency_per_tl";
+pub const POLL_FORWARD_MATCH_LATENCY_NS: &str = "poll_forward_match_latency_per_tl_ns";
+pub const POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY: &str =
+    "poll_local_match_after_forward_failed_latency_per_tl";
+pub const POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY_NS: &str =
+    "poll_local_match_after_forward_failed_latency_per_tl_ns";
 pub const ISOLATION_GROUP_TAG: &str = "isolation_group";
 pub const POLLER_ISOLATION_GROUP_TAG: &str = "poller_isolation_group";
 
@@ -464,6 +473,83 @@ impl MatchingMetrics {
         self.task_list_counter(name, context, BTreeMap::new());
     }
 
+    pub fn poller_count(&self, context: &PollMetricContext, count: usize) {
+        let list = match context.task_list_kind {
+            1 => "__sticky__",
+            2 => "__ephemeral__",
+            0 if !context.task_list.is_empty() => context.task_list.as_str(),
+            _ => "_unknown_",
+        };
+        self.0.record(MetricEvent {
+            name: POLLER_PER_TASK_LIST,
+            kind: MetricKind::Gauge,
+            value: MetricValue::Number(count as f64),
+            tags: BTreeMap::from([
+                (
+                    DOMAIN_TAG.to_owned(),
+                    if context.domain.is_empty() {
+                        "_unknown_".to_owned()
+                    } else {
+                        context.domain.clone()
+                    },
+                ),
+                (TASK_LIST_TAG.to_owned(), go_sanitize_metric_value(list)),
+            ]),
+            histogram: None,
+        });
+    }
+
+    pub fn poll_match_latency(
+        &self,
+        context: &PollMetricContext,
+        elapsed: Duration,
+        forwarded: bool,
+        after_forward_failure: bool,
+    ) {
+        let (timer, histogram) = if forwarded {
+            (POLL_FORWARD_MATCH_LATENCY, POLL_FORWARD_MATCH_LATENCY_NS)
+        } else if after_forward_failure {
+            (
+                POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY,
+                POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY_NS,
+            )
+        } else {
+            (POLL_LOCAL_MATCH_LATENCY, POLL_LOCAL_MATCH_LATENCY_NS)
+        };
+        let mut tags = BTreeMap::from([
+            (
+                DOMAIN_TAG.to_owned(),
+                if context.domain.is_empty() {
+                    "_unknown_".to_owned()
+                } else {
+                    context.domain.clone()
+                },
+            ),
+            (
+                TASK_LIST_TAG.to_owned(),
+                go_sanitize_metric_value(match context.task_list_kind {
+                    1 => "__sticky__",
+                    2 => "__ephemeral__",
+                    0 if !context.task_list.is_empty() => context.task_list.as_str(),
+                    _ => "_unknown_",
+                }),
+            ),
+        ]);
+        for name in [timer, histogram] {
+            self.0.record(MetricEvent {
+                name,
+                kind: if name == timer {
+                    MetricKind::Timer
+                } else {
+                    MetricKind::Histogram
+                },
+                value: MetricValue::Duration(elapsed),
+                tags: std::mem::take(&mut tags),
+                histogram: (name == histogram).then_some(HistogramSpec::GoLow1ms100s),
+            });
+        }
+    }
+
     /// Record one complete inbound Matching RPC. This is called at the shared
     /// MatchingAPI trait boundary, which Thrift dispatch also invokes.
     pub async fn matching_request<F, T, E>(
@@ -816,5 +902,75 @@ mod inbound_tests {
         assert!(requests.iter().any(
             |event| event.tags[CALLER_TAG] == "caller-b" && event.tags[TRANSPORT_TAG] == "http"
         ));
+    }
+}
+
+#[cfg(test)]
+mod matcher_metric_tests {
+    use super::*;
+
+    fn context() -> PollMetricContext {
+        PollMetricContext {
+            domain: "domain-a".into(),
+            task_list: "queue/a".into(),
+            task_list_kind: 0,
+            task_type: "decision_task",
+            poller_isolation_group: String::new(),
+        }
+    }
+
+    #[test]
+    fn poll_match_latency_emits_go_timer_and_histogram_pairs() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let elapsed = Duration::from_millis(12);
+        metrics.poll_match_latency(&context(), elapsed, false, true);
+        metrics.poll_match_latency(&context(), elapsed, true, false);
+        let events = sink.events();
+        assert_eq!(events.len(), 4);
+        assert_eq!(
+            events[0].name,
+            POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY
+        );
+        assert_eq!(events[0].kind, MetricKind::Timer);
+        assert_eq!(
+            events[1].name,
+            POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY_NS
+        );
+        assert_eq!(events[1].kind, MetricKind::Histogram);
+        assert_eq!(events[2].name, POLL_FORWARD_MATCH_LATENCY);
+        assert_eq!(events[3].name, POLL_FORWARD_MATCH_LATENCY_NS);
+        assert!(events.iter().all(|event| {
+            event.value == MetricValue::Duration(elapsed)
+                && event
+                    .tags
+                    .get(DOMAIN_TAG)
+                    .is_some_and(|tag| tag == "domain-a")
+                && event
+                    .tags
+                    .get(TASK_LIST_TAG)
+                    .is_some_and(|tag| tag == "queue_a")
+        }));
+        assert_eq!(events[1].histogram, Some(HistogramSpec::GoLow1ms100s));
+        assert_eq!(events[3].histogram, Some(HistogramSpec::GoLow1ms100s));
+    }
+
+    #[test]
+    fn poller_gauge_uses_go_task_list_dimensions() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        MatchingMetrics::new(sink.clone()).poller_count(&context(), 3);
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, POLLER_PER_TASK_LIST);
+        assert_eq!(events[0].kind, MetricKind::Gauge);
+        assert_eq!(events[0].value, MetricValue::Number(3.0));
+        assert_eq!(
+            events[0].tags.get(DOMAIN_TAG).map(String::as_str),
+            Some("domain-a")
+        );
+        assert_eq!(
+            events[0].tags.get(TASK_LIST_TAG).map(String::as_str),
+            Some("queue_a")
+        );
     }
 }

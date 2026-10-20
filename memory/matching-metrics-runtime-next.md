@@ -34,3 +34,27 @@ go test ./common/config -run '^TestMetricsSuite$' -count=1
 These commands were not run in the source-only lane. Rust formatting and
 `git diff --check` passed; Cargo checks and mixed Go/Rust exporter validation
 remain for the next build lane.
+
+## Matcher event inventory (source-only checkpoint)
+
+Rust now has event builders and tests for `poller_count_per_tl` and the
+`poll_local_match_latency_per_tl`, `poll_forward_match_latency_per_tl`, and
+`poll_local_match_after_forward_failed_latency_per_tl` timer/histogram pairs.
+The poller count is emitted from poll history start/end only for nonempty
+poller identities. It uses historical identity cardinality with five-minute
+TTL eviction matching Go `poller/manager.go:GetCount` and LRU `Size` behavior.
+Go invokes the gauge callback from history updates in
+`poller/manager.go:StartPoll` and `EndPoll`; task-list manager wires that
+callback to `task_list_manager.go:213`.
+
+The three latency builders are not yet connected to dispatcher timing. Their
+Go emit sites are `tasklist/matcher.go:465,494,527,548` for local poll match,
+`:590` for successful forwarded poll, and `:617,638` for local matching after
+forward failure; each writes both timer and `_ns` histogram. Rust's
+`TaskDispatcher::delivery_loop` has the decision point where a claimed task can
+be classified, but needs a poll-start timestamp that survives forwarding and
+is retained through queue waits. Remaining telemetry gaps to audit against
+`matcher.go` and `task_reader.go` include matcher timing branches, dispatch
+attempts/latency, throttling counters, and queue backlog gauge
+(`queue.levels().2`). These remain source-only findings; no build or mixed
+Go/Rust runtime test was run in this lane.

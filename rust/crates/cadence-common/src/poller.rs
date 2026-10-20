@@ -91,6 +91,13 @@ impl Manager {
     pub fn count(&self) -> usize {
         self.history.len()
     }
+    /// Go cache `Size` evicts entries whose five-minute history TTL elapsed.
+    pub fn count_at(&mut self, now: i64) -> usize {
+        self.history
+            .retain(|_, entry| now <= entry.created.saturating_add(TTL));
+        self.order.retain(|key| self.history.contains_key(key));
+        self.history.len()
+    }
     fn recent(&mut self, now: i64, after: Option<i64>) -> Vec<&Entry> {
         self.history
             .retain(|_, entry| now <= entry.created.saturating_add(TTL));

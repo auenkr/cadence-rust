@@ -30,20 +30,33 @@ pub struct PollLifecycle {
 pub(crate) struct PollWaitGuard(PollLifecycle);
 impl PollLifecycle {
     pub(crate) fn begin(&self) -> PollWaitGuard {
-        self.manager
-            .lock()
-            .expect("poller history lock")
-            .start(&self.id, self.info.clone(), now());
+        let count = {
+            let mut manager = self.manager.lock().expect("poller history lock");
+            let timestamp = now();
+            manager.start(&self.id, self.info.clone(), timestamp);
+            manager.count_at(timestamp)
+        };
+        if !self.info.identity.is_empty() {
+            if let Some(context) = self.metric_context.as_ref() {
+                self.metrics.poller_count(context, count);
+            }
+        }
         PollWaitGuard(self.clone())
     }
 }
 impl Drop for PollWaitGuard {
     fn drop(&mut self) {
-        self.0
-            .manager
-            .lock()
-            .expect("poller history lock")
-            .end(&self.0.id, now());
+        let count = {
+            let mut manager = self.0.manager.lock().expect("poller history lock");
+            let timestamp = now();
+            manager.end(&self.0.id, timestamp);
+            manager.count_at(timestamp)
+        };
+        if !self.0.info.identity.is_empty() {
+            if let Some(context) = self.0.metric_context.as_ref() {
+                self.0.metrics.poller_count(context, count);
+            }
+        }
     }
 }
 
