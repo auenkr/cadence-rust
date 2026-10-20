@@ -167,11 +167,11 @@ async function run() {
     }
   };
   let restartEvidence;
-  let restartTaskList = null;
+  const restartState = { taskList: null, watermark: null };
   if (restartMode) {
     const restartID = `restart-${id}`;
-    restartTaskList = `restart-tasks-${id}`;
-    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
+    restartState.taskList = `restart-tasks-${id}`;
+    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartState.taskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     let restartStarted;
     const restartProvisionDeadline = Date.now() + 15000;
     for (;;) {
@@ -183,16 +183,15 @@ async function run() {
     }
     const persistedDeadline = Date.now() + 20000;
     let persisted;
-    let restartWatermark = null;
     while (Date.now() < persistedDeadline) {
-      persisted = durableTaskCount(domainId, restartTaskList, 0, path.join(work, 'matching.db'));
+      persisted = durableTaskCount(domainId, restartState.taskList, 0, path.join(work, 'matching.db'));
       if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.equal(persisted?.status, 0, `could not inspect Matching durable queue: ${persisted?.stderr}`);
     assert(Number(persisted.stdout.trim()) > 0, 'workflow task was not persisted before Matching restart');
     // The persisted watermark is read while the row is stored and undelivered.
-    restartWatermark = await awaitPersistedTask(restartTaskList, 0);
+    restartState.watermark = await awaitPersistedTask(restartState.taskList, 0);
     const beforePid = rust.pid;
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -200,13 +199,13 @@ async function run() {
     if (goServicesPid) process.kill(goServicesPid, 0);
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
-    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
+    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartState.taskList }, encoding: 'utf8', timeout: 120000 });
     fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
     if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
     const finalHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: restartID, runId: restartStarted.runId } });
     const completions = finalHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(completions, 1, 'restart workflow must have exactly one visible completion');
-    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), durableWatermarkBeforeKill: restartWatermark, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
+    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartState.taskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), durableWatermarkBeforeKill: restartState.watermark, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
     // Reuse the second live process for the existing compatibility coverage below.
   }
   let started;
@@ -479,9 +478,9 @@ async function run() {
       { label: 'mainDecision', name: taskList.name, taskType: 0, observedMaxTaskId: mainDecisionMax },
       { label: 'mainActivity', name: taskList.name, taskType: 1, observedMaxTaskId: mainActivityWatermark?.maxTaskId ?? 1 },
     ];
-    if (restartMode && restartWatermark && restartWatermark.maxTaskId !== null) {
-      gateExpectations.push({ label: 'restartDecision', name: restartTaskList, taskType: 0, observedMaxTaskId: restartWatermark.maxTaskId });
-      gateExpectations.push({ label: 'restartActivity', name: restartTaskList, taskType: 1, minAck: 1 });
+    if (restartMode && restartState.watermark && restartState.watermark.maxTaskId !== null) {
+      gateExpectations.push({ label: 'restartDecision', name: restartState.taskList, taskType: 0, observedMaxTaskId: restartState.watermark.maxTaskId });
+      gateExpectations.push({ label: 'restartActivity', name: restartState.taskList, taskType: 1, minAck: 1 });
     }
     const taskGarbageCollection = await verifyProductionMySqlTaskGc({
       query: mysqlRows,
