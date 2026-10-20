@@ -777,6 +777,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         &self,
         key: &TaskListKey,
         range: i64,
+        _now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()> {
         let shard_id = self.database_shard(key);

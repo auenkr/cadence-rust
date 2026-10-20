@@ -468,6 +468,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         &self,
         key: &TaskListKey,
         range: i64,
+        _now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()> {
         let task_type = postgres_task_type(key)?;

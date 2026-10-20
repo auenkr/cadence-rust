@@ -46,6 +46,7 @@ impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
         &self,
         key: &TaskListKey,
         range: i64,
+        _now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()> {
         SqliteTaskStore::create_tasks_with_domains(

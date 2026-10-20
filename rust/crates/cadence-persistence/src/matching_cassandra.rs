@@ -32,25 +32,25 @@ const UPDATE_LIST: &str = "UPDATE tasks SET range_id=?, task_list=?, last_update
 const UPDATE_LIST_TTL: &str = "UPDATE tasks USING TTL 86400 SET range_id=?, task_list=?, last_updated_time=? WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=? IF range_id=?";
 const DELETE_LIST: &str = "DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=? IF range_id=?";
 const SELECT_TASKS: &str = "SELECT task_id, task, TTL(task) FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=? LIMIT ?";
-type TaskListLwtRow = (
-    bool,
-    Option<Uuid>,
-    Option<String>,
-    Option<i32>,
-    Option<i32>,
-    Option<i64>,
-    Option<i64>,
-    Option<CassandraTaskUdt>,
-    Option<CassandraTaskListUdt>,
-    Option<DateTime<Utc>>,
-    Option<DateTime<Utc>>,
-);
-
 fn task_list_lwt_applied(result: QueryResult) -> Result<bool> {
-    let rows = result.into_rows_result().map_err(CassandraMatchingTaskStore::internal)?;
-    Ok(rows.maybe_first_row::<TaskListLwtRow>()
+    let rows = result
+        .into_rows_result()
+        .map_err(CassandraMatchingTaskStore::internal)?;
+    let row = rows
+        .maybe_first_row::<scylla::value::Row>()
         .map_err(CassandraMatchingTaskStore::internal)?
-        .is_some_and(|(applied, ..)| applied))
+        .ok_or_else(|| {
+            CassandraMatchingTaskStore::internal("Cassandra LWT returned no result row")
+        })?;
+    match row.first() {
+        Some(Some(scylla::value::CqlValue::Boolean(applied))) => Ok(*applied),
+        Some(value) => Err(CassandraMatchingTaskStore::internal(format!(
+            "Cassandra LWT returned invalid [applied] column: {value:?}"
+        ))),
+        None => Err(CassandraMatchingTaskStore::internal(
+            "Cassandra LWT result row has no [applied] column",
+        )),
+    }
 }
 
 pub struct CassandraMatchingTaskStore {
@@ -127,7 +127,7 @@ impl CassandraMatchingTaskStore {
         })
     }
 
-    fn list_data(row: CassandraTaskListUdt) -> TaskListData {
+    fn list_data(row: CassandraTaskListUdt) -> Result<TaskListData> {
         let adaptive_partition_config = row.adaptive_partition_config.map(|config| {
             use crate::matching_blob::{Partition, PartitionConfig};
             let convert = |parts: Option<
@@ -157,13 +157,13 @@ impl CassandraMatchingTaskStore {
                 write_partitions: convert(config.write_partitions),
             }
         });
-        TaskListData {
+        Ok(TaskListData {
             kind: row.kind as i16,
             ack_level: row.ack_level,
             expiry_nanos: 0,
-            last_updated_nanos: nanos(row.last_updated),
+            last_updated_nanos: nanos(row.last_updated)?,
             adaptive_partition_config,
-        }
+        })
     }
 
     fn task_udt(domain_id: Uuid, data: &TaskData) -> Result<CassandraTaskUdt> {
@@ -196,29 +196,38 @@ fn timestamp(nanos: i64) -> Result<DateTime<Utc>> {
         MatchingTaskStoreError::BackendConfiguration(format!("timestamp out of range: {nanos}"))
     })
 }
-fn nanos(time: DateTime<Utc>) -> i64 {
-    time.timestamp_nanos_opt().unwrap_or_default()
+fn nanos(time: DateTime<Utc>) -> Result<i64> {
+    time.timestamp_nanos_opt().ok_or_else(|| {
+        MatchingTaskStoreError::BackendConfiguration(format!(
+            "Cassandra timestamp outside nanosecond range: {time}"
+        ))
+    })
 }
-fn task_from_udt(task_id: i64, task: CassandraTaskUdt, ttl: Option<i32>) -> AllocatedTask {
-    let expiry_nanos = ttl.map_or(0, |seconds| {
-        Utc::now()
+fn task_from_udt(task_id: i64, task: CassandraTaskUdt, ttl: Option<i32>) -> Result<AllocatedTask> {
+    let expiry_nanos = match ttl {
+        Some(seconds) => Utc::now()
             .timestamp_nanos_opt()
-            .unwrap_or_default()
-            .saturating_add(i64::from(seconds).saturating_mul(1_000_000_000))
-    });
-    AllocatedTask {
+            .ok_or_else(|| {
+                MatchingTaskStoreError::BackendConfiguration(
+                    "current time outside nanosecond range".into(),
+                )
+            })?
+            .saturating_add(i64::from(seconds).saturating_mul(1_000_000_000)),
+        None => 0,
+    };
+    Ok(AllocatedTask {
         task_id,
         data: TaskData {
             workflow_id: task.workflow_id,
             run_id: task.run_id.map(|id| id.as_bytes().to_vec()),
             schedule_id: task.schedule_id,
-            created_nanos: nanos(task.created_time),
+            created_nanos: nanos(task.created_time)?,
             expiry_nanos,
             partition_config: task
                 .partition_config
                 .map(|config| config.into_iter().collect()),
         },
-    }
+    })
 }
 
 fn cql_text(value: &str) -> String {
@@ -330,7 +339,75 @@ mod tests {
         let udt = CassandraMatchingTaskStore::task_list_udt(&key, &data).unwrap();
         assert_eq!(udt.r#type, 1);
         assert_eq!(udt.adaptive_partition_config.as_ref().unwrap().version, 9);
-        assert_eq!(CassandraMatchingTaskStore::list_data(udt), data);
+        assert_eq!(CassandraMatchingTaskStore::list_data(udt).unwrap(), data);
+    }
+
+    /// Cross-language probe: the Cassandra harness seeds this row from Go,
+    /// runs this test, then asks Go to verify Rust's write.
+    #[test]
+    #[ignore = "requires tests/run-matching-cassandra-interop.py"]
+    fn go_seed_rust_write_restart_go_verify() {
+        let hosts = std::env::var("CADENCE_CASSANDRA_CONTACT_POINTS")
+            .expect("harness sets contact points")
+            .split(',')
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let port = std::env::var("CADENCE_CASSANDRA_PORT")
+            .ok()
+            .and_then(|port| port.parse::<i32>().ok())
+            .unwrap_or(9042);
+        let config = crate::cassandra::CassandraSessionConfig::from_parts(
+            hosts,
+            port,
+            std::env::var("CADENCE_CASSANDRA_USER").unwrap_or_default(),
+            std::env::var("CADENCE_CASSANDRA_PASSWORD").unwrap_or_default(),
+            std::env::var("CADENCE_CASSANDRA_KEYSPACE").expect("harness sets keyspace"),
+        )
+        .expect("valid Cassandra harness config");
+        let domain_id = Uuid::parse_str(
+            &std::env::var("CADENCE_CASSANDRA_TEST_DOMAIN_ID").expect("harness sets domain id"),
+        )
+        .expect("valid domain id");
+        let key = TaskListKey {
+            domain_id,
+            name: std::env::var("CADENCE_CASSANDRA_TEST_TASK_LIST")
+                .expect("harness sets task list"),
+            task_type: 1,
+        };
+        let driver = Arc::new(
+            CassandraBlockingSession::connect(&config).expect("connect to Go-seeded Cassandra"),
+        );
+        let store = CassandraMatchingTaskStore::new(driver.clone());
+        assert_eq!(store.get_task_list(&key).unwrap().range_id, 41);
+        let now = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("current timestamp range");
+        let lease = store.lease(&key, 0, 41, now).unwrap();
+        assert_eq!(lease.range_id, 42);
+        let task = AllocatedTask {
+            task_id: 101,
+            data: TaskData {
+                workflow_id: "rust-cassandra-interop".into(),
+                schedule_id: 23,
+                created_nanos: now - 1_000_000_000,
+                ..Default::default()
+            },
+        };
+        store
+            .create_tasks_with_domains(&key, 42, now, &[(domain_id, &task)])
+            .unwrap();
+        drop(store);
+        drop(driver);
+
+        let restarted = Arc::new(
+            CassandraBlockingSession::connect(&config)
+                .expect("reconnect after persistence restart"),
+        );
+        let recovered = CassandraMatchingTaskStore::new(restarted);
+        let tasks = recovered.get_tasks(&key, 100, 101, 10).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].data.workflow_id, "rust-cassandra-interop");
+        assert_eq!(tasks[0].data.schedule_id, 23);
     }
 }
 
@@ -359,7 +436,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         };
         Ok(TaskListRecord {
             range_id,
-            data: Self::list_data(data),
+            data: Self::list_data(data)?,
         })
     }
 
@@ -446,13 +523,48 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, created_time) VALUES (?, ?, ?, ?, ?, ?) USING TTL 86400",
             ));
             batch.append_statement(Statement::new(UPDATE_LIST_TTL));
-            self.driver.run(session.batch(&batch, (
-                (key.domain_id, &key.name, key.task_type, LIST_ROW, LIST_SENTINEL, timestamp(now_nanos)?),
-                (range, udt, timestamp(now_nanos)?, key.domain_id, &key.name, key.task_type, LIST_ROW, LIST_SENTINEL, range),
-            ))).map_err(Self::internal)?
+            self.driver
+                .run(session.batch(
+                    &batch,
+                    (
+                        (
+                            key.domain_id,
+                            &key.name,
+                            key.task_type,
+                            LIST_ROW,
+                            LIST_SENTINEL,
+                            timestamp(now_nanos)?,
+                        ),
+                        (
+                            range,
+                            udt,
+                            timestamp(now_nanos)?,
+                            key.domain_id,
+                            &key.name,
+                            key.task_type,
+                            LIST_ROW,
+                            LIST_SENTINEL,
+                            range,
+                        ),
+                    ),
+                ))
+                .map_err(Self::internal)?
         } else {
-            self.driver.run(session.query_unpaged(UPDATE_LIST,
-                (range, udt, timestamp(now_nanos)?, key.domain_id, &key.name, key.task_type, LIST_ROW, LIST_SENTINEL, range)))
+            self.driver
+                .run(session.query_unpaged(
+                    UPDATE_LIST,
+                    (
+                        range,
+                        udt,
+                        timestamp(now_nanos)?,
+                        key.domain_id,
+                        &key.name,
+                        key.task_type,
+                        LIST_ROW,
+                        LIST_SENTINEL,
+                        range,
+                    ),
+                ))
                 .map_err(Self::internal)?
         };
         if task_list_lwt_applied(result)? {
@@ -469,37 +581,36 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         &self,
         key: &TaskListKey,
         range: i64,
+        now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()> {
         // Go uses one logged conditional batch so task inserts and the lease
         // fence commit together. Literal UDT values keep each statement's
         // shape exact while avoiding heterogeneous bind-row serialization.
         let mut batch = Batch::new(BatchType::Logged);
-        let now_nanos = match tasks.first() {
-            Some((_, task)) => task.data.created_nanos,
-            None => self.get_task_list(key)?.data.last_updated_nanos,
-        };
         let mut inserted = 0;
         for (_, task) in tasks {
             if !task_not_expired(&task.data, now_nanos) {
                 continue;
             }
-            let ttl = task_ttl(&task.data)
+            // Go stamps every inserted row with the CreateTasks operation time;
+            // its TTL is computed from that same time, even when re-adding a task.
+            let mut data = task.data.clone();
+            data.created_nanos = now_nanos;
+            let ttl = task_ttl(&data)
                 .map(|ttl| format!(" USING TTL {ttl}"))
                 .unwrap_or_default();
             batch.append_statement(Statement::new(format!(
                 "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES ({}, {}, {}, {}, {}, {}{})",
                 key.domain_id, cql_text(&key.name), key.task_type, TASK_ROW, task.task_id,
-                task_literal(key.domain_id, &task.data)?, task.data.created_nanos.div_euclid(1_000_000)
+                task_literal(key.domain_id, &data)?, data.created_nanos.div_euclid(1_000_000)
             ) + &ttl));
             inserted += 1;
         }
         batch.append_statement(Statement::new(format!(
             "UPDATE tasks SET range_id={}, last_updated_time={} WHERE domain_id={} AND task_list_name={} AND task_list_type={} AND type={} AND task_id={} IF range_id={}",
             range, now_nanos.div_euclid(1_000_000), key.domain_id, cql_text(&key.name), key.task_type, LIST_ROW, LIST_SENTINEL, range)));
-        let values = std::iter::repeat(())
-            .take(inserted + 1)
-            .collect::<Vec<_>>();
+        let values = std::iter::repeat(()).take(inserted + 1).collect::<Vec<_>>();
         let session = self.session();
         let result = self
             .driver
@@ -525,6 +636,11 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         if batch_size <= 0 {
             return Ok(Vec::new());
         }
+        let cql_batch_size = i32::try_from(batch_size).map_err(|_| {
+            MatchingTaskStoreError::BackendConfiguration(format!(
+                "task batch size exceeds Cassandra limit: {batch_size}"
+            ))
+        })?;
         let session = self.session();
         let result = self
             .driver
@@ -537,7 +653,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                     TASK_ROW,
                     read_level,
                     max_read_level,
-                    batch_size as i32,
+                    cql_batch_size,
                 ),
             ))
             .map_err(Self::internal)?;
@@ -548,7 +664,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
             .map_err(Self::internal)?
         {
             let (id, task, ttl) = row.map_err(Self::internal)?;
-            tasks.push(task_from_udt(id, task, ttl));
+            tasks.push(task_from_udt(id, task, ttl)?);
             if tasks.len() >= batch_size as usize {
                 break;
             }
@@ -582,26 +698,21 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         &self,
         key: &TaskListKey,
         inclusive_task_id: i64,
-        limit: i64,
+        _limit: i64,
     ) -> Result<usize> {
-        if limit <= 0 {
-            return Err(MatchingTaskStoreError::MissingLimit);
-        }
         let session = self.session();
-        let result = self.driver.run(session.query_unpaged(
-            "SELECT task_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id<=? LIMIT ?",
-            (key.domain_id, &key.name, key.task_type, TASK_ROW, inclusive_task_id, limit as i32))).map_err(Self::internal)?;
-        let ids = result
-            .into_rows_result()
-            .map_err(Self::internal)?
-            .rows::<(i64,)>()
-            .map_err(Self::internal)?
-            .map(|row| row.map(|(id,)| id).map_err(Self::internal))
-            .collect::<Result<Vec<_>>>()?;
-        for id in &ids {
-            self.complete_task(key, *id)?;
-        }
-        Ok(ids.len())
+        let count = self.driver.run(session.query_unpaged(
+            "SELECT count(1) FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=?",
+            (key.domain_id, &key.name, key.task_type, TASK_ROW, 0_i64, inclusive_task_id))).map_err(Self::internal)?
+            .into_rows_result().map_err(Self::internal)?
+            .maybe_first_row::<(i64,)>().map_err(Self::internal)?
+            .map(|(count,)| usize::try_from(count).map_err(Self::internal))
+            .ok_or_else(|| Self::internal("Cassandra count returned no row"))?;
+        let count = count?;
+        self.driver.run(session.query_unpaged(
+            "DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=?",
+            (key.domain_id, &key.name, key.task_type, TASK_ROW, 0_i64, inclusive_task_id))).map_err(Self::internal)?;
+        Ok(count)
     }
 
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {

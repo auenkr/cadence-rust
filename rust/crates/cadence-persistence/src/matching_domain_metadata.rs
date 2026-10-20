@@ -145,29 +145,68 @@ pub(crate) fn decode_go_cassandra_domain_metadata(
     put(14, text(info.owner_email.unwrap_or_default()));
     put(16, Value::I32(info.status));
     if let Some(data) = info.data {
-        put(38, Value::Map(data.into_iter().map(|(key, value)| (text(key), text(value))).collect()));
+        put(
+            38,
+            Value::Map(
+                data.into_iter()
+                    .map(|(key, value)| (text(key), text(value)))
+                    .collect(),
+            ),
+        );
     }
     put(18, Value::I16(config.retention as i16));
     put(20, Value::Bool(config.emit_metric));
     put(22, text(config.archival_bucket.unwrap_or_default()));
-    if let Some(status) = config.archival_status { put(24, Value::I16(status as i16)); }
-    if let Some(status) = config.history_archival_status { put(42, Value::I16(status as i16)); }
-    put(44, text(config.history_archival_uri.unwrap_or_default()));
-    if let Some(status) = config.visibility_archival_status { put(46, Value::I16(status as i16)); }
-    put(48, text(config.visibility_archival_uri.unwrap_or_default()));
-    if let Some(data) = config.bad_binaries { put(39, Value::Bytes(data)); }
-    if let Some(encoding) = config.bad_binaries_encoding { put(40, text(String::from_utf8_lossy(&encoding).into_owned())); }
-    if let Some(data) = config.isolation_groups { put(56, Value::Bytes(data)); }
-    if let Some(encoding) = config.isolation_groups_encoding { put(58, text(encoding)); }
-    if let Some(data) = config.async_workflow_config { put(60, Value::Bytes(data)); }
-    if let Some(encoding) = config.async_workflow_config_encoding { put(62, text(encoding)); }
-    if let Some(active) = replication.active_cluster_name { put(34, text(active)); }
-    if let Some(clusters) = replication.clusters {
-        put(36, Value::List(clusters.into_iter().filter_map(|cluster| cluster.cluster_name)
-            .map(|cluster| text(cluster)).collect()));
+    if let Some(status) = config.archival_status {
+        put(24, Value::I16(status as i16));
     }
-    if let Some(data) = replication.active_clusters_config { put(64, Value::Bytes(data)); }
-    if let Some(encoding) = replication.active_clusters_config_encoding { put(66, text(encoding)); }
+    if let Some(status) = config.history_archival_status {
+        put(42, Value::I16(status as i16));
+    }
+    put(44, text(config.history_archival_uri.unwrap_or_default()));
+    if let Some(status) = config.visibility_archival_status {
+        put(46, Value::I16(status as i16));
+    }
+    put(48, text(config.visibility_archival_uri.unwrap_or_default()));
+    if let Some(data) = config.bad_binaries {
+        put(39, Value::Bytes(data));
+    }
+    if let Some(encoding) = config.bad_binaries_encoding {
+        put(40, text(String::from_utf8_lossy(&encoding).into_owned()));
+    }
+    if let Some(data) = config.isolation_groups {
+        put(56, Value::Bytes(data));
+    }
+    if let Some(encoding) = config.isolation_groups_encoding {
+        put(58, text(encoding));
+    }
+    if let Some(data) = config.async_workflow_config {
+        put(60, Value::Bytes(data));
+    }
+    if let Some(encoding) = config.async_workflow_config_encoding {
+        put(62, text(encoding));
+    }
+    if let Some(active) = replication.active_cluster_name {
+        put(34, text(active));
+    }
+    if let Some(clusters) = replication.clusters {
+        put(
+            36,
+            Value::List(
+                clusters
+                    .into_iter()
+                    .filter_map(|cluster| cluster.cluster_name)
+                    .map(|cluster| text(cluster))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(data) = replication.active_clusters_config {
+        put(64, Value::Bytes(data));
+    }
+    if let Some(encoding) = replication.active_clusters_config_encoding {
+        put(66, text(encoding));
+    }
     put(26, Value::I64(config_version));
     put(28, Value::I64(notification_version));
     put(30, Value::I64(failover_notification_version));
@@ -196,25 +235,61 @@ pub struct CassandraDomainMetadataStore {
 }
 
 impl CassandraDomainMetadataStore {
-    pub fn new(driver: std::sync::Arc<crate::cassandra::CassandraBlockingSession>, current_cluster: impl Into<String>) -> Self {
-        Self { driver, current_cluster: current_cluster.into() }
+    pub fn new(
+        driver: std::sync::Arc<crate::cassandra::CassandraBlockingSession>,
+        current_cluster: impl Into<String>,
+    ) -> Self {
+        Self {
+            driver,
+            current_cluster: current_cluster.into(),
+        }
     }
 
-    fn get_by_name(&self, name: &str) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
-        use crate::cassandra::{CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraDomainUdt};
+    fn get_by_name(
+        &self,
+        name: &str,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+        use crate::cassandra::{
+            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraDomainUdt,
+        };
         let session = self.driver.session();
         let result = self.driver.run(session.query_unpaged(
             "SELECT domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version FROM domains_by_name_v2 WHERE domains_partition=? AND name=?",
             (0_i32, name),
         )).map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-        let rows = result.into_rows_result().map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-        let row = rows.maybe_first_row::<(
-            CassandraDomainUdt, CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt,
-            bool, i64, i64, i64, i64, i64, i64, i64,
-        )>().map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
+        let rows = result
+            .into_rows_result()
+            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
+        let row = rows
+            .maybe_first_row::<(
+                CassandraDomainUdt,
+                CassandraDomainConfigUdt,
+                CassandraDomainReplicationConfigUdt,
+                bool,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+            )>()
+            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
             .ok_or_else(|| MatchingDomainMetadataError::NotFound(name.to_string()))?;
-        decode_go_cassandra_domain_metadata(row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7,
-            row.8, row.9, row.10, &self.current_cluster)
+        decode_go_cassandra_domain_metadata(
+            row.0,
+            row.1,
+            row.2,
+            row.3,
+            row.4,
+            row.5,
+            row.6,
+            row.7,
+            row.8,
+            row.9,
+            row.10,
+            &self.current_cluster,
+        )
     }
 
     pub fn metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
@@ -223,25 +298,42 @@ impl CassandraDomainMetadataStore {
             "SELECT notification_version FROM domains_by_name_v2 WHERE domains_partition=? AND name=?",
             (0_i32, "cadence-domain-metadata"),
         )).map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-        let rows = result.into_rows_result().map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-        Ok(rows.maybe_first_row::<(i64,)>().map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
-            .map(|(version,)| version).unwrap_or(0))
+        let rows = result
+            .into_rows_result()
+            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
+        Ok(rows
+            .maybe_first_row::<(i64,)>()
+            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
+            .map(|(version,)| version)
+            .unwrap_or(0))
     }
 
-    pub fn get_domain(&self, name: Option<&str>, id: Option<&str>) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+    pub fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
         match (name, id) {
             (Some(_), Some(_)) => Err(MatchingDomainMetadataError::BothIdAndName),
             (None, None) => Err(MatchingDomainMetadataError::EmptyIdentity),
-            (Some(name), None) if name.is_empty() => Err(MatchingDomainMetadataError::EmptyIdentity),
+            (Some(name), None) if name.is_empty() => {
+                Err(MatchingDomainMetadataError::EmptyIdentity)
+            }
             (Some(name), None) => self.get_by_name(name),
             (None, Some(id)) if id.is_empty() => Err(MatchingDomainMetadataError::EmptyIdentity),
             (None, Some(id)) => {
-                let id = uuid::Uuid::parse_str(id).map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+                let id = uuid::Uuid::parse_str(id)
+                    .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
                 let session = self.driver.session();
-                let result = self.driver.run(session.query_unpaged("SELECT domain FROM domains WHERE id=?", (id,)))
+                let result = self
+                    .driver
+                    .run(session.query_unpaged("SELECT domain FROM domains WHERE id=?", (id,)))
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-                let rows = result.into_rows_result().map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-                let row = rows.maybe_first_row::<(crate::cassandra::CassandraDomainUdt,)>()
+                let rows = result
+                    .into_rows_result()
+                    .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
+                let row = rows
+                    .maybe_first_row::<(crate::cassandra::CassandraDomainUdt,)>()
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
                     .ok_or_else(|| MatchingDomainMetadataError::NotFound(id.to_string()))?;
                 self.get_by_name(&row.0.name)
@@ -249,40 +341,93 @@ impl CassandraDomainMetadataStore {
         }
     }
 
-    pub fn list_domains(&self, page_size: usize, next_page_token: Option<&[u8]>) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
-        use crate::cassandra::{CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraDomainUdt};
-        if page_size == 0 { return Err(MatchingDomainMetadataError::InvalidPageSize); }
-        let after = next_page_token.map(|token| std::str::from_utf8(token)
-            .map(str::to_owned).map_err(|error| MatchingDomainMetadataError::InvalidBlob(format!("invalid Cassandra domain page token: {error}"))))
-            .transpose()?;
-        let limit = page_size.saturating_add(2).min(i32::MAX as usize) as i32;
-        let session = self.driver.session();
-        let query = if after.is_some() {
-            "SELECT name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version FROM domains_by_name_v2 WHERE domains_partition=? AND name>? LIMIT ?"
-        } else {
-            "SELECT name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version FROM domains_by_name_v2 WHERE domains_partition=? LIMIT ?"
+    pub fn list_domains(
+        &self,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        use crate::cassandra::{
+            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraDomainUdt,
         };
-        let result = self.driver.run(async {
-            match after.as_deref() {
-                Some(after) => session.query_unpaged(query, (0_i32, after, limit)).await,
-                None => session.query_unpaged(query, (0_i32, limit)).await,
-            }
-        }).map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-        let rows = result.into_rows_result().map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-        let mut domains = Vec::new();
-        let mut last_name = None;
-        let mut has_more = false;
-        for row in rows.rows::<(String, CassandraDomainUdt, CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, bool, i64, i64, i64, i64, i64, i64, i64)>()
-            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))? {
-            let (name, domain, config, replication, global, config_v, failover_v, failover_notify_v, previous_v, end, updated, notify) =
-                row.map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-            if name == "cadence-domain-metadata" { continue; }
-            if domains.len() == page_size { has_more = true; break; }
-            domains.push(decode_go_cassandra_domain_metadata(domain, config, replication, global, config_v, failover_v,
-                failover_notify_v, previous_v, end, updated, notify, &self.current_cluster)?);
-            last_name = Some(name);
+        use scylla::{response::PagingState, statement::Statement};
+        if page_size == 0 {
+            return Err(MatchingDomainMetadataError::InvalidPageSize);
         }
-        Ok(MatchingDomainPage { domains, next_page_token: has_more.then(|| last_name.unwrap_or_default().into_bytes()) })
+        let page_size =
+            i32::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
+        let session = self.driver.session();
+        let mut query = Statement::new("SELECT name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version FROM domains_by_name_v2 WHERE domains_partition=?");
+        query.set_page_size(page_size);
+        let paging_state = next_page_token
+            .map(|token| PagingState::new_from_raw_bytes(token.to_vec()))
+            .unwrap_or_else(PagingState::start);
+        let (result, paging_response) = self
+            .driver
+            .run(session.query_single_page(query, (0_i32,), paging_state))
+            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
+        let rows = result
+            .into_rows_result()
+            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
+        let mut domains = Vec::new();
+        for row in rows
+            .rows::<(
+                String,
+                CassandraDomainUdt,
+                CassandraDomainConfigUdt,
+                CassandraDomainReplicationConfigUdt,
+                bool,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+            )>()
+            .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
+        {
+            let (
+                name,
+                domain,
+                config,
+                replication,
+                global,
+                config_v,
+                failover_v,
+                failover_notify_v,
+                previous_v,
+                end,
+                updated,
+                notify,
+            ) = row.map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
+            if name == "cadence-domain-metadata" {
+                continue;
+            }
+            domains.push(decode_go_cassandra_domain_metadata(
+                domain,
+                config,
+                replication,
+                global,
+                config_v,
+                failover_v,
+                failover_notify_v,
+                previous_v,
+                end,
+                updated,
+                notify,
+                &self.current_cluster,
+            )?);
+        }
+        let next_page_token = match paging_response.into_paging_control_flow() {
+            std::ops::ControlFlow::Continue(state) => {
+                state.as_bytes_slice().map(|bytes| bytes.to_vec())
+            }
+            std::ops::ControlFlow::Break(()) => None,
+        };
+        Ok(MatchingDomainPage {
+            domains,
+            next_page_token,
+        })
     }
 }
 
@@ -1030,13 +1175,27 @@ mod tests {
                 active_clusters_config: None,
                 active_clusters_config_encoding: None,
             },
-            true, 11, 12, 13, 14, GO_ZERO_TIME_NANOS, 15, 16, "active",
-        ).unwrap();
+            true,
+            11,
+            12,
+            13,
+            14,
+            GO_ZERO_TIME_NANOS,
+            15,
+            16,
+            "active",
+        )
+        .unwrap();
         assert_eq!(domain.info.name, "cassandra-domain");
         assert_eq!(domain.info.status, Some(DomainStatus::Deprecated));
         assert_eq!(domain.info.description, "description");
         assert_eq!(domain.info.owner_email, "owner@example.test");
-        assert_eq!(domain.configuration.workflow_execution_retention_period_in_days, 9);
+        assert_eq!(
+            domain
+                .configuration
+                .workflow_execution_retention_period_in_days,
+            9
+        );
         assert!(domain.configuration.emit_metric);
         assert_eq!(domain.replication.active_cluster_name, "active");
         assert_eq!(domain.replication.clusters[0].cluster_name, "active");

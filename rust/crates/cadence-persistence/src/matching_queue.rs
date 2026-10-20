@@ -265,9 +265,9 @@ impl DurableTaskQueue {
             .zip(data)
             .map(|(task, (domain, _))| (*domain, task))
             .collect::<Vec<_>>();
-        let result = self
-            .store
-            .create_tasks_with_domains(&self.key, range_id, &tasks_with_domains);
+        let result =
+            self.store
+                .create_tasks_with_domains(&self.key, range_id, now, &tasks_with_domains);
         // Go advances the read boundary after the write returns, even on error.
         // Allocated IDs are never reused after an uncertain persistence outcome.
         if let Some(last) = tasks.last() {

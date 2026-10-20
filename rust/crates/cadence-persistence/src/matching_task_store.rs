@@ -117,6 +117,7 @@ pub trait MatchingTaskStore: Send + Sync {
         &self,
         key: &TaskListKey,
         range: i64,
+        now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()>;
 
