@@ -1,0 +1,19 @@
+{
+  "commit": "62d9abf21a4e24ba4b3242b9d6b5abe997052b84",
+  "files": {
+    "rust/crates/cadence-persistence/src/matching_sqlite.rs": "68ce832df747489cd208d44b4801de6b45c5d7b4ec9892f1ed6c8a1fde6ba1d1",
+    "rust/crates/cadence-server/src/config.rs": "00f0dd3153eb5084164277321e5eb94944108543b0738e02b4b0f0e5e412cf6a",
+    "rust/crates/cadence-server/src/lib.rs": "053aea7397291306fe6e7dd595f772e6c6ea672bbea25ceee4a9aad8bd856cce",
+    "rust/crates/cadence-server/src/main.rs": "bb0fe6b02fb2ef31a72b05e9214a9b054a6767aafe3c55893422b4126a5cba02",
+    "rust/crates/cadence-server/src/matching_task_store.rs": "43177edb7d64578d5e713e664c89b4ce261f5b915b4eaffd0be2d655b662a36a",
+    "rust/crates/cadence-server/src/matching_domain_cache.rs": "3f90d15356e2ca1a02a2f032cd8ec6c766ae022eb881c1f3d1d6cf860076cae9",
+    "tests/matching-sqlite-go_test.go": "f7fe8cf7913052d0810d25ecdb065b01827f8d40fe3e8b28a81bd53c035ea739",
+    "tests/matching-thrift-go_test.go": "e49161b140a8c0e3ac6bb9527c5be5f853bd47d549045f270b6efe1e640d37ac",
+    "tests/run-matching-thrift-compat.py": "37c8eb0bcc39c154fc6a248b24004ce577043fc713e632d7a30de842c3364e6d",
+    "tests/run-matching-configured-store-validation.py": "7ec77ece2000e7eceb7683049400da2f1e3c598777c0fa40650849eea20447f5",
+    "memory/matching-persistence-production-audit-20261019.md": "da2bab92fc1c44c058bab7905659bfa6dcf163d10c2e72e0e346a0d3c47f904b",
+    "rust/Cargo.lock": "a9995876e7e851652c6781142c2439b5d71e4903518df03b66a5047537d2b129"
+  },
+  "serverBinary": "/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/cadence-server",
+  "serverBinarySha256": "c24bb7c08bba9948f17fa6727c0e25def49b0be9cac180e3c4258b900bd341ac"
+}

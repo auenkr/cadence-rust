@@ -1,0 +1,77 @@
+=== RUN   TestIsTLSClientHelloRecord
+=== RUN   TestIsTLSClientHelloRecord/non_tls
+=== RUN   TestIsTLSClientHelloRecord/read_error
+=== RUN   TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length
+=== RUN   TestIsTLSClientHelloRecord/tls_header
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_0
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_1
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_2
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_3
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_4
+=== RUN   TestIsTLSClientHelloRecord/e2e_tls
+--- PASS: TestIsTLSClientHelloRecord (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/non_tls (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/read_error (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/tls_header (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_0 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_1 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_2 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_3 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_4 (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/e2e_tls (0.00s)
+PASS
+ok  	go.uber.org/yarpc/transport/internal/tls/muxlistener	0.019s
+ok  	github.com/uber/cadence/common/persistence/sql	1.522s
+ok  	github.com/uber/cadence/common/persistence/sql	1.411s
+=== RUN   TestRustMatchingNativeThrift
+=== RUN   TestRustMatchingNativeThrift/tchannel
+Verified all ten native Matching Thrift methods via tchannel
+=== RUN   TestRustMatchingNativeThrift/http
+Verified all ten native Matching Thrift methods via http
+=== RUN   TestRustMatchingNativeThrift/http-trailing-slash
+Verified all ten native Matching Thrift methods via http-trailing-slash
+--- PASS: TestRustMatchingNativeThrift (2.50s)
+    --- PASS: TestRustMatchingNativeThrift/tchannel (1.72s)
+    --- PASS: TestRustMatchingNativeThrift/http (0.34s)
+    --- PASS: TestRustMatchingNativeThrift/http-trailing-slash (0.44s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	2.565s
+=== RUN   TestRustMatchingSQLiteInterop
+--- PASS: TestRustMatchingSQLiteInterop (1.37s)
+PASS
+ok  	github.com/uber/cadence/common/persistence/sql	1.427s
+=== RUN   TestRustMatchingDrainHealth
+--- PASS: TestRustMatchingDrainHealth (0.00s)
+PASS
+=== RUN   TestRustMatchingTLS
+--- PASS: TestRustMatchingTLS (0.01s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	0.069s
+=== RUN   TestRustMatchingNativeThrift
+=== RUN   TestRustMatchingNativeThrift/tchannel
+Verified all ten native Matching Thrift methods via tchannel
+=== RUN   TestRustMatchingNativeThrift/http
+Verified all ten native Matching Thrift methods via http
+=== RUN   TestRustMatchingNativeThrift/http-trailing-slash
+Verified all ten native Matching Thrift methods via http-trailing-slash
+=== RUN   TestRustMatchingNativeThrift/http-tls
+Verified all ten native Matching Thrift methods via http-tls
+--- PASS: TestRustMatchingNativeThrift (1.24s)
+    --- PASS: TestRustMatchingNativeThrift/tchannel (0.34s)
+    --- PASS: TestRustMatchingNativeThrift/http (0.31s)
+    --- PASS: TestRustMatchingNativeThrift/http-trailing-slash (0.29s)
+    --- PASS: TestRustMatchingNativeThrift/http-tls (0.30s)
+=== RUN   TestRustMatchingTLS
+--- PASS: TestRustMatchingTLS (0.01s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	1.316s
+=== RUN   TestRustMatchingPlainHTTP
+--- PASS: TestRustMatchingPlainHTTP (0.00s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	0.061s
+=== RUN   TestRustMatchingPlainHTTP
+--- PASS: TestRustMatchingPlainHTTP (0.00s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	0.060s
+Native Matching Thrift compatibility passed; artifacts: /home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/artifacts/matching-configured-store-20261020T012423Z
