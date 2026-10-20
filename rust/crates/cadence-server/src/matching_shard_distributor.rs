@@ -32,6 +32,26 @@ const LIFECYCLE_RUNNING: u8 = 1;
 const LIFECYCLE_STOPPING: u8 = 2;
 const LIFECYCLE_STOPPED: u8 = 3;
 
+/// YARPC gRPC inbound routing metadata. These values match Go's
+/// `service.ShardDistributor`, `service.Matching`, and protobuf encoding.
+fn yarpc_grpc_request<T>(message: T) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(message);
+    let metadata = request.metadata_mut();
+    metadata.insert(
+        "rpc-service",
+        tonic::metadata::MetadataValue::from_static("shard-distributor"),
+    );
+    metadata.insert(
+        "rpc-caller",
+        tonic::metadata::MetadataValue::from_static("cadence-matching"),
+    );
+    metadata.insert(
+        "rpc-encoding",
+        tonic::metadata::MetadataValue::from_static("proto"),
+    );
+    request
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LifecycleError(&'static str);
 
@@ -262,10 +282,10 @@ impl TonicSpectator {
                 RPC_TIMEOUT.min(deadline.saturating_duration_since(tokio::time::Instant::now()));
             let call = tokio::time::timeout(
                 call_timeout,
-                client.get_shard_owner(sd::GetShardOwnerRequest {
+                client.get_shard_owner(yarpc_grpc_request(sd::GetShardOwnerRequest {
                     shard_key: shard_key.to_string(),
                     namespace: self.namespace.to_string(),
-                }),
+                })),
             );
             let response = tokio::select! {
                 response = call => response,
@@ -338,9 +358,9 @@ impl TonicSpectator {
                 self.channel.clone(),
             );
             let stream = tokio::select! {
-                response = client.watch_namespace_state(sd::WatchNamespaceStateRequest {
+                response = client.watch_namespace_state(yarpc_grpc_request(sd::WatchNamespaceStateRequest {
                     namespace: self.namespace.to_string(),
-                }) => response,
+                })) => response,
                 changed = stop.changed() => {
                     if changed.is_err() || *stop.borrow_and_update() {
                         self.reset_first_state();
@@ -443,7 +463,7 @@ impl ExecutorRpc for TonicExecutorRpc {
             tokio::time::timeout(timeout, async move {
                 let mut client = client.lock().await;
                 client
-                    .heartbeat(request)
+                    .heartbeat(yarpc_grpc_request(request))
                     .await
                     .map(tonic::Response::into_inner)
                     .map_err(|error| error.to_string())
@@ -1061,11 +1081,23 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize};
     use tokio_stream::wrappers::TcpListenerStream;
 
+    fn yarpc_headers<T>(request: &tonic::Request<T>) -> [String; 3] {
+        ["rpc-service", "rpc-caller", "rpc-encoding"].map(|key| {
+            request
+                .metadata()
+                .get(key)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_owned()
+        })
+    }
+
     #[derive(Clone)]
     struct FakeExecutorService {
         assigned: Arc<AtomicBool>,
         fail: Arc<AtomicBool>,
         requests: Arc<Mutex<Vec<sd::HeartbeatRequest>>>,
+        yarpc_metadata: Arc<Mutex<Vec<[String; 3]>>>,
     }
 
     #[tonic::async_trait]
@@ -1076,6 +1108,10 @@ mod tests {
             &self,
             request: tonic::Request<sd::HeartbeatRequest>,
         ) -> Result<tonic::Response<sd::HeartbeatResponse>, tonic::Status> {
+            self.yarpc_metadata
+                .lock()
+                .unwrap()
+                .push(yarpc_headers(&request));
             let request = request.into_inner();
             self.requests
                 .lock()
@@ -1146,6 +1182,7 @@ mod tests {
     #[derive(Clone)]
     struct FakeSpectatorService {
         get_requests: Arc<Mutex<Vec<sd::GetShardOwnerRequest>>>,
+        yarpc_metadata: Arc<Mutex<Vec<[String; 3]>>>,
     }
 
     #[tonic::async_trait]
@@ -1154,6 +1191,10 @@ mod tests {
             &self,
             request: tonic::Request<sd::GetShardOwnerRequest>,
         ) -> Result<tonic::Response<sd::GetShardOwnerResponse>, tonic::Status> {
+            self.yarpc_metadata
+                .lock()
+                .unwrap()
+                .push(yarpc_headers(&request));
             let request = request.into_inner();
             self.get_requests.lock().unwrap().push(request.clone());
             Ok(tonic::Response::new(sd::GetShardOwnerResponse {
@@ -1179,11 +1220,15 @@ mod tests {
 
         async fn watch_namespace_state(
             &self,
-            _request: tonic::Request<sd::WatchNamespaceStateRequest>,
+            request: tonic::Request<sd::WatchNamespaceStateRequest>,
         ) -> Result<
             tonic::Response<tonic::codegen::BoxStream<sd::WatchNamespaceStateResponse>>,
             tonic::Status,
         > {
+            self.yarpc_metadata
+                .lock()
+                .unwrap()
+                .push(yarpc_headers(&request));
             let stream = tokio_stream::iter(vec![Ok(sd::WatchNamespaceStateResponse {
                 executors: Vec::new(),
             })]);
@@ -1233,10 +1278,12 @@ mod tests {
         let assigned = Arc::new(AtomicBool::new(true));
         let fail = Arc::new(AtomicBool::new(false));
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let yarpc_metadata = Arc::new(Mutex::new(Vec::new()));
         let service = FakeExecutorService {
             assigned: assigned.clone(),
             fail: fail.clone(),
             requests: requests.clone(),
+            yarpc_metadata: yarpc_metadata.clone(),
         };
         let server = tokio::spawn(async move {
             tonic::transport::Server::builder()
@@ -1287,6 +1334,10 @@ mod tests {
         assert_eq!(report.metadata["grpc"], "7835");
         assert_eq!(report.metadata["tchannel"], "7935");
         assert_eq!(report.metadata["hostIP"], "127.0.0.1");
+        assert_eq!(
+            yarpc_metadata.lock().unwrap().last().unwrap(),
+            &["shard-distributor", "cadence-matching", "proto"]
+        );
         assert_eq!(
             report.shard_status_reports["task-list-a"].status,
             sd::ShardStatus::Ready as i32
@@ -1358,9 +1409,11 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let get_requests = Arc::new(Mutex::new(Vec::new()));
+        let yarpc_metadata = Arc::new(Mutex::new(Vec::new()));
         let server = tokio::spawn({
             let service = FakeSpectatorService {
                 get_requests: get_requests.clone(),
+                yarpc_metadata: yarpc_metadata.clone(),
             };
             async move {
                 tonic::transport::Server::builder()
@@ -1394,6 +1447,11 @@ mod tests {
             get_requests.lock().unwrap()[0].shard_key,
             "remote-task-list"
         );
+        let metadata = yarpc_metadata.lock().unwrap();
+        assert!(metadata.len() >= 2, "watch and GetShardOwner were called");
+        assert!(metadata
+            .iter()
+            .all(|headers| headers == &["shard-distributor", "cadence-matching", "proto"]));
 
         let (first_shutdown, second_shutdown) =
             tokio::join!(spectator.shutdown(), spectator.shutdown());
