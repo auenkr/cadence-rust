@@ -9,7 +9,10 @@ use crate::{
     matching_shard_distributor::{BoxFuture, ShardProcessor, ShardProcessorFactory, ShardReport},
 };
 use cadence_proto::sharddistributor as sd;
-use std::{sync::{Arc, Mutex}, time::Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 /// Creates callback objects over the live Matching queue registry.
 ///
@@ -113,7 +116,10 @@ impl ShardProcessor for QueueRegistryShardProcessor {
     }
 
     fn set_status(&self, status: sd::ShardStatus) {
-        self.report.lock().expect("Matching shard report lock").status = status;
+        self.report
+            .lock()
+            .expect("Matching shard report lock")
+            .status = status;
     }
 }
 
@@ -175,7 +181,7 @@ mod tests {
         assert_eq!(processor.report().load, 0.0);
         let queue = registry.get(key(1, "queue", 0), 0, 1).await.unwrap();
         let data = cadence_persistence::matching_blob::TaskData {
-            partition_config: Some(std::collections::HashMap::from([(
+            partition_config: Some(std::collections::BTreeMap::from([(
                 "isolation-group".into(),
                 "blue".into(),
             )])),

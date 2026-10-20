@@ -124,7 +124,12 @@ async fn rust_executor_and_spectator_interoperate_with_pinned_go_handlers() {
     let enabled: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| true);
     let spectator = TonicSpectator::new(channel.clone(), "matching", enabled.clone());
     spectator.start().await.unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    until(|| {
+        go.command(serde_json::json!({"op":"watchers"}))
+            .as_u64()
+            .is_some_and(|count| count > 0)
+    })
+    .await;
     let probe = Arc::new(Probe::default());
     let cfg = ShardDistributorMatchingConfig {
         namespaces: vec![ShardDistributorNamespaceConfig {

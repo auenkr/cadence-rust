@@ -153,6 +153,8 @@ func main() {
 			respond("ok")
 		case "stats":
 			respond(fixture.snapshot(cmd.Namespace))
+		case "watchers":
+			respond(fixture.watcherCount())
 		case "stop":
 			respond("stopping")
 			return
@@ -182,4 +184,10 @@ func (s *fixtureStore) snapshot(namespace string) map[string]store.HeartbeatStat
 		}
 	}
 	return result
+}
+
+func (s *fixtureStore) watcherCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.subscribers)
 }
