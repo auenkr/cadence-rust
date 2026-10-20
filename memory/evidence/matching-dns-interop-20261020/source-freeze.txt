@@ -1,0 +1,7 @@
+Rust production binary source HEAD: 7030f2ef62b9cd2c402569ea3b5b2f67806a64e7
+Rust production binary source tree: 3039c36e9bd26afad3632e0d9d9dc878f99ec59e1e
+Harness source HEAD: 9e4559a92b6c61786da52fda13d19e3006268950
+Harness source tree: 4fdb446517e494b0e84c3a5b9778a9670cd3f912
+Worktree tracked status at evidence packaging: clean
+Untracked evidence existed while packaging; generated SQLite databases and per-run binaries were removed after preserving the logs/results.
+No root worktree files were modified by this task.
