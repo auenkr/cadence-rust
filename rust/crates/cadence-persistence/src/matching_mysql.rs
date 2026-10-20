@@ -72,7 +72,7 @@ struct PoolState {
     open: usize,
 }
 
-struct SyncConnectionPool {
+pub(crate) struct SyncConnectionPool {
     options: Opts,
     max_open: usize,
     max_idle: usize,
@@ -82,7 +82,7 @@ struct SyncConnectionPool {
 }
 
 impl SyncConnectionPool {
-    fn checkout(self: &Arc<Self>) -> Result<ConnectionLease> {
+    pub(crate) fn checkout(self: &Arc<Self>) -> Result<ConnectionLease> {
         loop {
             let mut state = self.state.lock().expect("MySQL Matching pool lock");
             while let Some(idle) = state.idle.pop() {
@@ -137,7 +137,7 @@ impl SyncConnectionPool {
     }
 }
 
-struct ConnectionLease {
+pub(crate) struct ConnectionLease {
     pool: Arc<SyncConnectionPool>,
     connection: Option<Conn>,
     created_at: Instant,
@@ -200,6 +200,25 @@ impl MySqlTaskStore {
                 config.n_shards
             )));
         }
+        let pool = Self::create_mysql_pool(&config)?;
+        let store = Self {
+            pool,
+            n_shards: config.n_shards,
+            encoding: config.encoding,
+            isolation: configured_isolation(&config.connect_attributes)?,
+        };
+        store.validate_schema()?;
+        Ok(store)
+    }
+
+    pub(crate) fn create_mysql_pool(
+        config: &MySqlTaskStoreConfig,
+    ) -> Result<Arc<SyncConnectionPool>> {
+        if config.use_multiple_databases {
+            return Err(StorageError::BackendConfiguration(
+                "MySQL Matching multipleDatabasesConfig is not supported by this single-database adapter".into(),
+            ));
+        }
         let max_idle = if config.max_idle_conns > 0 {
             usize::try_from(config.max_idle_conns).unwrap_or(usize::MAX)
         } else {
@@ -211,22 +230,15 @@ impl MySqlTaskStore {
             usize::try_from(config.max_conns).unwrap_or(usize::MAX)
         };
         let max_idle = max_idle.min(max_open);
-        let options = mysql_options(&config)?;
-        let store = Self {
-            pool: Arc::new(SyncConnectionPool {
-                options,
-                max_open,
-                max_idle,
-                max_lifetime: config.max_conn_lifetime.filter(|value| !value.is_zero()),
-                state: Mutex::new(PoolState::default()),
-                available: Condvar::new(),
-            }),
-            n_shards: config.n_shards,
-            encoding: config.encoding,
-            isolation: configured_isolation(&config.connect_attributes)?,
-        };
-        store.validate_schema()?;
-        Ok(store)
+        let options = mysql_options(config)?;
+        Ok(Arc::new(SyncConnectionPool {
+            options,
+            max_open,
+            max_idle,
+            max_lifetime: config.max_conn_lifetime.filter(|value| !value.is_zero()),
+            state: Mutex::new(PoolState::default()),
+            available: Condvar::new(),
+        }))
     }
 
     fn database_shard(&self, key: &TaskListKey) -> i32 {
@@ -580,7 +592,7 @@ impl MatchingTaskStore for MySqlTaskStore {
     }
 }
 
-fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
+pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
     let mut builder = OptsBuilder::default()
         .user(Some(config.user.clone()))
         .pass(Some(config.password.clone()))
