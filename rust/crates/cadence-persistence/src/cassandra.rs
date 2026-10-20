@@ -13,8 +13,9 @@ use chrono::{DateTime, Utc};
 use scylla::{
     client::{session::Session, session_builder::SessionBuilder},
     statement::batch::{Batch, BatchType},
+    DeserializeValue, SerializeValue,
 };
-use std::{fmt, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet, HashMap}, fmt, sync::Arc};
 use uuid::Uuid;
 
 const TOKEN_ROW: i32 = 1;
@@ -31,6 +32,86 @@ const GRANT_TOKEN: &str = "UPDATE semaphore_tokens SET holder = ?, updated_time 
 const INSERT_OWNER: &str = "INSERT INTO semaphore_tokens (domain_id, semaphore_name, bucket, type, token_id, owner_id, holder, held_token, updated_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS";
 const RELEASE_TOKEN: &str = "UPDATE semaphore_tokens SET holder = ?, updated_time = ? WHERE domain_id = ? AND semaphore_name = ? AND bucket = ? AND type = ? AND token_id = ? AND owner_id = ? IF holder = ?";
 const DELETE_OWNER: &str = "DELETE FROM semaphore_tokens WHERE domain_id = ? AND semaphore_name = ? AND bucket = ? AND type = ? AND token_id = ? AND owner_id = ?";
+
+/// Current Go Cassandra `task` UDT from schema.cql. Field names are part of
+/// the wire/storage contract and deliberately match the Go UDT exactly.
+#[derive(Debug, Clone, DeserializeValue, SerializeValue)]
+pub struct CassandraTaskUdt {
+    pub domain_id: Uuid,
+    pub workflow_id: String,
+    pub run_id: Option<Uuid>,
+    pub schedule_id: i64,
+    pub created_time: DateTime<Utc>,
+    pub partition_config: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, DeserializeValue, SerializeValue)]
+pub struct CassandraTaskListPartitionUdt {
+    pub isolation_groups: Option<BTreeSet<String>>,
+}
+
+#[derive(Debug, Clone, DeserializeValue, SerializeValue)]
+pub struct CassandraTaskListPartitionConfigUdt {
+    pub version: i64,
+    pub num_read_partitions: i32,
+    pub num_write_partitions: i32,
+    pub read_partitions: Option<BTreeMap<i32, CassandraTaskListPartitionUdt>>,
+    pub write_partitions: Option<BTreeMap<i32, CassandraTaskListPartitionUdt>>,
+}
+
+/// Current Go Cassandra `task_list` UDT, including adaptive partition config.
+#[derive(Debug, Clone, DeserializeValue, SerializeValue)]
+pub struct CassandraTaskListUdt {
+    pub domain_id: Uuid,
+    pub name: String,
+    #[scylla(rename = "type")]
+    pub r#type: i32,
+    pub ack_level: i64,
+    pub kind: i32,
+    pub last_updated: DateTime<Utc>,
+    pub adaptive_partition_config: Option<CassandraTaskListPartitionConfigUdt>,
+}
+
+#[derive(Debug, Clone, DeserializeValue)]
+pub struct CassandraDomainUdt {
+    pub id: Uuid,
+    pub name: String,
+    pub status: i32,
+    pub description: Option<String>,
+    pub data: Option<HashMap<String, String>>,
+    pub owner_email: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, DeserializeValue)]
+pub struct CassandraDomainConfigUdt {
+    pub retention: i32,
+    pub emit_metric: bool,
+    pub archival_bucket: Option<String>,
+    pub archival_status: Option<i32>,
+    pub history_archival_status: Option<i32>,
+    pub history_archival_uri: Option<String>,
+    pub visibility_archival_status: Option<i32>,
+    pub visibility_archival_uri: Option<String>,
+    pub bad_binaries: Option<Vec<u8>>,
+    pub bad_binaries_encoding: Option<Vec<u8>>,
+    pub isolation_groups: Option<Vec<u8>>,
+    pub isolation_groups_encoding: Option<String>,
+    pub async_workflow_config: Option<Vec<u8>>,
+    pub async_workflow_config_encoding: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, DeserializeValue)]
+pub struct CassandraClusterReplicationConfigUdt {
+    pub cluster_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, DeserializeValue)]
+pub struct CassandraDomainReplicationConfigUdt {
+    pub active_cluster_name: Option<String>,
+    pub clusters: Option<Vec<CassandraClusterReplicationConfigUdt>>,
+    pub active_clusters_config: Option<Vec<u8>>,
+    pub active_clusters_config_encoding: Option<String>,
+}
 
 /// Go's Cassandra `semaphore_metadata` and `semaphore_tokens` persistence.
 /// The session is shared by Matching task/domain/semaphore stores when the

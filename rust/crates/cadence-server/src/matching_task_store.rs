@@ -59,8 +59,23 @@ pub fn open_configured_default_store(
     let datastore = persistence.datastores.get(name).ok_or_else(|| {
         anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
     })?;
-    if datastore.nosql.is_some() {
-        anyhow::bail!("Matching task persistence does not support NoSQL defaultStore {name:?}");
+    if let Some(nosql) = datastore.nosql.as_ref() {
+        if datastore.sql.is_some() {
+            anyhow::bail!("Matching defaultStore {name:?} configures both SQL and NoSQL backends");
+        }
+        if nosql.plugin_name != "cassandra" {
+            anyhow::bail!("Matching NoSQL persistence does not support plugin {:?}; supported plugin is cassandra", nosql.plugin_name);
+        }
+        let config = cadence_persistence::cassandra::CassandraSessionConfig::from_parts(
+            nosql.hosts_list(), nosql.port, nosql.user.clone(), nosql.password.clone(), nosql.keyspace.clone(),
+        )?;
+        let driver = Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
+        return Ok(ConfiguredMatchingStores {
+            task_store: Arc::new(cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::new(driver.clone())),
+            domain_metadata_source: Some(Arc::new(cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
+                driver, active_cluster_name,
+            ))),
+        });
     }
     let sql = datastore.sql.as_ref().ok_or_else(|| {
         anyhow::anyhow!("Matching defaultStore {name:?} has no supported SQL configuration")

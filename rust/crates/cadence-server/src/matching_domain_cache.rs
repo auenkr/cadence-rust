@@ -96,7 +96,8 @@ fn metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSo
         // or internal service errors. Domain cache refresh retries those.
         MatchingDomainMetadataError::MySql(_)
         | MatchingDomainMetadataError::MySqlAsync(_)
-        | MatchingDomainMetadataError::MySqlPool(_) => true,
+        | MatchingDomainMetadataError::MySqlPool(_)
+        | MatchingDomainMetadataError::Cassandra(_) => true,
         _ => false,
     };
     DomainMetadataSourceError {
@@ -171,6 +172,42 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
             .map_err(metadata_source_error)?;
         validate_typed_domain_config(&domain)?;
         Ok(domain)
+    }
+}
+
+impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore {
+    fn metadata_version(&self, _timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
+        self.metadata_version().map_err(|error| DomainMetadataSourceError::transient(error.to_string()))
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+        _timeout: Duration,
+    ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page = cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::list_domains(
+            self, page_size, next_page_token,
+        ).map_err(|error| match error {
+            MatchingDomainMetadataError::InvalidPageSize | MatchingDomainMetadataError::InvalidBlob(_) => DomainMetadataSourceError::permanent(error.to_string()),
+            _ => DomainMetadataSourceError::transient(error.to_string()),
+        })?;
+        for domain in &page.domains { validate_typed_domain_config(domain)?; }
+        Ok(DomainMetadataPage { domains: page.domains, next_page_token: page.next_page_token })
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+        _timeout: Duration,
+    ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(self, name, id)
+            .map_err(|error| match error {
+                MatchingDomainMetadataError::NotFound(_) | MatchingDomainMetadataError::BothIdAndName
+                | MatchingDomainMetadataError::EmptyIdentity | MatchingDomainMetadataError::InvalidUuid(_) => DomainMetadataSourceError::permanent(error.to_string()),
+                _ => DomainMetadataSourceError::transient(error.to_string()),
+            })
     }
 }
 
