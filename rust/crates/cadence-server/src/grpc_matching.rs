@@ -282,6 +282,7 @@ pub struct Matching {
     membership: Option<crate::matching_membership::Membership>,
     pub(crate) poll_expiration: std::time::Duration,
     metrics: crate::matching_metrics::MatchingMetrics,
+    domain_name_resolver: Option<Arc<dyn Fn(&str) -> Option<String> + Send + Sync>>,
 }
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
@@ -296,6 +297,7 @@ impl Matching {
             membership: None,
             poll_expiration: std::time::Duration::from_secs(60),
             metrics: crate::matching_metrics::MatchingMetrics::default(),
+            domain_name_resolver: None,
         }
     }
     /// Install an optional inbound Matching metrics sink.
@@ -305,6 +307,19 @@ impl Matching {
     }
     pub(crate) fn inbound_metrics(&self) -> &crate::matching_metrics::MatchingMetrics {
         &self.metrics
+    }
+    pub(crate) fn with_domain_cache(
+        mut self,
+        cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
+    ) -> Self {
+        self.domain_name_resolver = Some(Arc::new(move |id| cache.cached_domain_name(id)));
+        self
+    }
+    fn metric_domain_name(&self, id: &str) -> Option<String> {
+        self.domain_name_resolver
+            .as_ref()
+            .map(|resolve| resolve(id))
+            .unwrap_or_else(|| domain_name_for(&self.frontend.state.domains, id))
     }
     /// Incremental durable delivery backend. Domain metadata and the remaining
     /// administrative/query methods still use the supplied application state.
@@ -1244,7 +1259,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
-        self.metrics.matching_request("PollForDecisionTask", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "PollForDecisionTask",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         let mut payload = r
@@ -1414,7 +1434,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
-        self.metrics.matching_request("PollForActivityTask", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "PollForActivityTask",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         let mut payload = r
@@ -1567,7 +1592,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::AddDecisionTaskRequest>,
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
-        self.metrics.matching_request("AddDecisionTask", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "AddDecisionTask",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let parent_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         task_list_name(
@@ -1706,7 +1736,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::AddActivityTaskRequest>,
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
-        self.metrics.matching_request("AddActivityTask", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "AddActivityTask",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let parent_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         task_list_name(
@@ -1838,7 +1873,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::QueryWorkflowRequest>,
     ) -> Result<Response<m::QueryWorkflowResponse>, Status> {
-        self.metrics.matching_request("QueryWorkflow", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "QueryWorkflow",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         let mut payload = r
@@ -1977,7 +2017,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::GetTaskListsByDomainRequest>,
     ) -> Result<Response<m::GetTaskListsByDomainResponse>, Status> {
-        self.metrics.matching_request("GetTaskListsByDomain", Some(request.get_ref().domain.as_str()), None, Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "GetTaskListsByDomain",
+            Some(request.get_ref().domain.as_str()),
+            None,
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let r = request.into_inner();
         if let Some(queues) = &self.queues {
             let domain = self
@@ -2078,7 +2123,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::ListTaskListPartitionsRequest>,
     ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
-        self.metrics.matching_request("ListTaskListPartitions", Some(request.get_ref().domain.as_str()), request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "ListTaskListPartitions",
+            Some(request.get_ref().domain.as_str()),
+            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let r = request.into_inner();
         let task_list = r.task_list.unwrap_or_default();
         // Go resolves `request.GetDomain()` through the domain cache; the
@@ -2134,7 +2184,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::AcquireSemaphoreRequest>,
     ) -> Result<Response<m::AcquireSemaphoreResponse>, Status> {
-        self.metrics.matching_request("AcquireSemaphore", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), Some((request.get_ref().semaphore_name.as_str(), Some(0))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "AcquireSemaphore",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            Some((request.get_ref().semaphore_name.as_str(), Some(0))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         use crate::matching_semaphore::Identifier;
         use cadence_api::enums::SemaphoreAcquireOutcome;
         let r = request.into_inner();
@@ -2178,7 +2233,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::UpdateTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::UpdateTaskListPartitionConfigResponse>, Status> {
-        self.metrics.matching_request("UpdateTaskListPartitionConfig", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "UpdateTaskListPartitionConfig",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let r = request.into_inner();
         self.domain_name(&r.domain_id)?;
         let task_list = r
@@ -2260,7 +2320,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::RefreshTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::RefreshTaskListPartitionConfigResponse>, Status> {
-        self.metrics.matching_request("RefreshTaskListPartitionConfig", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "RefreshTaskListPartitionConfig",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let r = request.into_inner();
         let domain = self.domain_name(&r.domain_id)?;
         let task_list = r
@@ -2324,7 +2389,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::CancelOutstandingPollRequest>,
     ) -> Result<Response<m::CancelOutstandingPollResponse>, Status> {
-        self.metrics.matching_request("CancelOutstandingPoll", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "CancelOutstandingPoll",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let r = request.into_inner();
         self.domain_name(&r.domain_id)?;
         if !matches!(r.task_list_type, 1 | 2) {
@@ -2357,7 +2427,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::RespondQueryTaskCompletedRequest>,
     ) -> Result<Response<m::RespondQueryTaskCompletedResponse>, Status> {
-        self.metrics.matching_request("RespondQueryTaskCompleted", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "RespondQueryTaskCompleted",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         use crate::grpc_convert as cv;
         let r = request.into_inner();
         let mut payload = r
@@ -2430,7 +2505,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::DescribeTaskListRequest>,
     ) -> Result<Response<m::DescribeTaskListResponse>, Status> {
-        self.metrics.matching_request("DescribeTaskList", domain_name_for(&self.frontend.state.domains, request.get_ref().domain_id.as_str()).as_deref(), request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))), Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")), async {
+        self.metrics.matching_request(
+            "DescribeTaskList",
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
+            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+            async {
         let r = request.into_inner();
         let mut payload = r
             .request

@@ -522,6 +522,13 @@ impl MatchingDomainCache {
         Ok(self.get_domain_by_id(id)?.info.name)
     }
 
+    /// Resolve a domain name from the current snapshot without querying or
+    /// refreshing persistence. Telemetry must never make a cache miss block an
+    /// RPC handler on the synchronous domain metadata store.
+    pub fn cached_domain_name(&self, id: &str) -> Option<String> {
+        self.by_id(id).map(|domain| domain.info.name)
+    }
+
     fn by_name(&self, name: &str) -> Option<MatchingDomainMetadata> {
         let cache = self.cache.read().expect("domain cache lock");
         cache

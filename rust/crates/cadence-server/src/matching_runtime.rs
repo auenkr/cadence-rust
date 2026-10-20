@@ -110,6 +110,7 @@ impl MatchingRuntime {
     ) -> anyhow::Result<Self> {
         Self::start_domain_cache(state.domains.clone(), cache.clone()).await?;
         let mut runtime = Self::in_memory(state, drain_duration);
+        runtime.matching = runtime.matching.with_domain_cache(cache.clone());
         runtime.domain_cache = Some(cache);
         Ok(runtime)
     }
@@ -132,6 +133,7 @@ impl MatchingRuntime {
             poll_expiration,
             drain_duration,
         );
+        runtime.matching = runtime.matching.with_domain_cache(cache.clone());
         runtime.domain_cache = Some(cache);
         Ok(runtime)
     }
