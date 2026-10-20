@@ -984,7 +984,10 @@ mod tests {
         .unwrap();
         let decision_observation = std::str::from_utf8(&decision.task_token).unwrap();
         assert!(decision_observation.starts_with("go-yarpc-decision|"));
-        assert!(decision_observation.contains("|cadence-matching|cadence-matching|true|proto"));
+        assert!(
+            decision_observation.contains("|cadence-matching|cadence-matching|true|proto"),
+            "unexpected Go YARPC decision observation: {decision_observation}"
+        );
         assert_eq!(decision.started_event_id, 17);
         assert_eq!(
             decision.workflow_execution.unwrap().workflow_id,
@@ -999,7 +1002,10 @@ mod tests {
         .unwrap();
         let activity_observation = std::str::from_utf8(&activity.task_token).unwrap();
         assert!(activity_observation.starts_with("go-yarpc-activity|"));
-        assert!(activity_observation.contains("|cadence-matching|cadence-matching|true|proto"));
+        assert!(
+            activity_observation.contains("|cadence-matching|cadence-matching|true|proto"),
+            "unexpected Go YARPC activity observation: {activity_observation}"
+        );
         assert_eq!(activity.activity_id, "go-peer-activity");
         assert_eq!(
             activity.workflow_execution.unwrap().workflow_id,

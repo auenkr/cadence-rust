@@ -207,11 +207,11 @@ fn membership_with_parent_remote(
     use cadence_common::membership::Host;
     for candidate in 0..100_000 {
         let membership = crate::matching_membership::Membership::new(
-            "rust-matching",
+            format!("rust-matching-{candidate}"),
             vec![
                 Host {
                     address: format!("rust-{candidate}:7935"),
-                    identity: "rust-matching".into(),
+                    identity: format!("rust-matching-{candidate}"),
                     grpc_address: format!("rust-{candidate}:7835"),
                 },
                 Host {
@@ -221,7 +221,9 @@ fn membership_with_parent_remote(
                 },
             ],
         );
-        if membership.owner(child).is_ok_and(|host| host.identity() == "rust-matching")
+        if membership
+            .owner(child)
+            .is_ok_and(|host| host.identity() == format!("rust-matching-{candidate}"))
             && membership.owner(parent).is_ok_and(|host| host.identity() == "go-matching")
         {
             return membership;

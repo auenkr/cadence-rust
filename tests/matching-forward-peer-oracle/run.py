@@ -47,14 +47,18 @@ with tempfile.TemporaryDirectory(prefix="cadence-matching-go-peer-") as tmp:
         print(result.stdout, end="")
         print(result.stderr, end="")
         if result.returncode:
+            if log.exists():
+                print("Go peer observations from the failed Rust run:")
+                print(log.read_text(), end="")
             raise SystemExit(result.returncode)
         test_output = result.stdout + result.stderr
         expected_tests = [
             "matching_remote_routing_propagates_spectator_failure_without_ring_fallback",
             "matching_remote_adds_and_query_reach_go_yarpc_through_production_handlers",
+            "matching_remote_forward_reaches_go_yarpc_peer",
         ]
-        if "2 passed" not in test_output or any(name not in test_output for name in expected_tests):
-            raise RuntimeError("cargo test completed without proving both matching_remote_ tests ran and passed")
+        if "3 passed" not in test_output or any(name not in test_output for name in expected_tests):
+            raise RuntimeError("cargo test completed without proving all three matching_remote_ tests ran and passed")
         records = [json.loads(row) for row in log.read_text().splitlines()]
         by_method = {record["method"]: record for record in records}
         required = {
