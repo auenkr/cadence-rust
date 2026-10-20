@@ -41,6 +41,25 @@ fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net
     Ok(Some(std::net::SocketAddr::new(ip, http.port)))
 }
 
+fn dynamic_bool_property(
+    overlay: std::sync::Arc<std::sync::Mutex<cadence_server::admin::DynamicConfigOverlay>>,
+    name: &str,
+    default: bool,
+) -> bool {
+    let Ok(overlay) = overlay.lock() else {
+        return default;
+    };
+    overlay
+        .property_values(name)
+        .iter()
+        .filter(|value| value.filters.is_empty())
+        .filter_map(|value| value.value.as_ref())
+        .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
+        .filter_map(|blob| serde_json::from_slice::<bool>(&blob.data).ok())
+        .last()
+        .unwrap_or(default)
+}
+
 async fn shutdown_signal() -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -748,6 +767,43 @@ async fn main() -> anyhow::Result<()> {
                     .unwrap_or(7935),
             );
             let run_matching = wanted.contains(&service::ServiceName::Matching);
+            // Production Matching shares its prebound TChannel socket with
+            // Ringpop. Binding before provider construction ensures the
+            // advertised port is the actual listener port. The explicit
+            // no-config CLI remains the isolated embedded compatibility mode.
+            let mut matching_tchannel_listener = if run_matching && !embedded_development {
+                Some(tokio::net::TcpListener::bind(matching_tchannel_addr).await?)
+            } else {
+                None
+            };
+            let matching_ringpop_provider = if let Some(listener) = &matching_tchannel_listener {
+                Some(std::sync::Arc::new(
+                    cadence_server::matching_ringpop_provider::MatchingRingpopProvider::new(
+                        cfg.ringpop.clone(),
+                        "cadence-matching",
+                        listener.local_addr()?,
+                        matching_addr.port(),
+                    )?,
+                ))
+            } else {
+                None
+            };
+            let matching_membership = matching_ringpop_provider.as_ref().map(|provider| {
+                cadence_server::matching_membership::Membership::new(
+                    provider.local_identity().to_owned(),
+                    Vec::new(),
+                )
+            });
+            let mut matching_membership_lifecycle = matching_ringpop_provider
+                .as_ref()
+                .zip(matching_membership.clone())
+                .map(|(provider, membership)| {
+                    cadence_server::matching_membership_lifecycle::MatchingMembershipLifecycle::new(
+                        "cadence-matching",
+                        provider.clone(),
+                        membership,
+                    )
+                });
             let matching_http_addr = if run_matching {
                 matching_rpc
                     .as_ref()
@@ -774,6 +830,42 @@ async fn main() -> anyhow::Result<()> {
                 println!("Cadence internal matching gRPC listening on {matching_addr}");
                 println!("Cadence internal matching Thrift/TChannel listening on {matching_tchannel_addr}");
             }
+            let matching_history = if run_matching {
+                let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
+                let history_channel =
+                    tonic::transport::Endpoint::from_shared(history_peer)?.connect_lazy();
+                let history = cadence_server::matching_history::MatchingHistoryClient::new(
+                    history_channel,
+                    std::time::Duration::from_secs(1),
+                    32 * 1024 * 1024,
+                );
+                if let Some(provider) = matching_ringpop_provider.as_ref() {
+                    if !dynamic_bool_property(
+                        state.admin.dynamic_config.clone(),
+                        "system.enableGRPCOutbound",
+                        true,
+                    ) {
+                        anyhow::bail!("Matching History routing currently requires system.enableGRPCOutbound=true; TChannel History outbound is not yet implemented");
+                    }
+                    let history_membership = std::sync::Arc::new(
+                        cadence_server::matching_history_membership::RingpopHistoryMembership::new(
+                            std::sync::Arc::new(provider.node().clone()),
+                        ),
+                    );
+                    let history_resolver = std::sync::Arc::new(
+                        cadence_server::matching_history_peer_resolver::MatchingHistoryPeerResolver::new(
+                            num_history_shards as u32,
+                            cadence_server::matching_history_peer_resolver::NamedPort::Grpc,
+                            history_membership,
+                        )?,
+                    );
+                    Some(history.with_peer_resolver(history_resolver))
+                } else {
+                    Some(history)
+                }
+            } else {
+                None
+            };
             let matching_domain_cache = if run_matching && !embedded_development {
                 Some(
                     cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store(
@@ -798,14 +890,9 @@ async fn main() -> anyhow::Result<()> {
                 Some(match source {
                     cadence_server::matching_task_store::MatchingTaskStoreSource::ConfiguredDefaultStore => {
                         let store = cadence_server::matching_task_store::SqliteTaskStoreConfig::from_default_store(&cfg.persistence)?.open_store()?;
-                        let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
-                        let history_channel = tonic::transport::Endpoint::from_shared(history_peer)?
-                            .connect_lazy();
-                        let history = cadence_server::matching_history::MatchingHistoryClient::new(
-                            history_channel,
-                            std::time::Duration::from_secs(1),
-                            32 * 1024 * 1024,
-                        );
+                        let history = matching_history
+                            .clone()
+                            .expect("Matching history client is constructed when Matching runs");
                         let cache = matching_domain_cache.clone().ok_or_else(|| {
                             anyhow::anyhow!("configured Matching persistence requires its production domain cache")
                         })?;
@@ -832,16 +919,12 @@ async fn main() -> anyhow::Result<()> {
                                 cadence_persistence::matching_blob::BlobEncoding::ThriftRWSnappy,
                             )
                         }?;
-                        // TODO: replace this loopback adapter with configured
-                        // History discovery when production discovery is wired.
-                        let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
-                        let history_channel = tonic::transport::Endpoint::from_shared(history_peer)?
-                            .connect_lazy();
-                        let history = cadence_server::matching_history::MatchingHistoryClient::new(
-                            history_channel,
-                            std::time::Duration::from_secs(1),
-                            32 * 1024 * 1024,
-                        );
+                        // Embedded development keeps its local History
+                        // adapter; configured production uses the shared
+                        // discovery-backed client prepared above.
+                        let history = matching_history
+                            .clone()
+                            .expect("Matching history client is constructed when Matching runs");
                         match matching_domain_cache.clone() {
                             Some(cache) => cadence_server::matching_runtime::MatchingRuntime::with_durable_queues_and_domain_cache(
                                 state.clone(),
@@ -874,10 +957,72 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
+            if let (Some(runtime), Some(membership)) =
+                (matching_runtime.take(), matching_membership.clone())
+            {
+                matching_runtime = Some(runtime.with_membership(membership));
+            }
             let matching_service = matching_runtime
                 .as_ref()
                 .map(|runtime| runtime.matching().clone())
                 .unwrap_or_else(|| cadence_server::grpc_matching::Matching::new(state.clone()));
+            let matching_tchannel_service = matching_service.clone();
+            // The Ringpop JOIN handler must be reachable on the shared socket
+            // before provider bootstrap starts. It is not advertised until the
+            // provider has completed JOIN and published its service labels.
+            let (mut matching_tchannel_task, mut matching_tchannel_done) = if run_matching {
+                if let Some(listener) = matching_tchannel_listener.take() {
+                    let provider = matching_ringpop_provider
+                        .as_ref()
+                        .expect("prebound production listener has a Ringpop provider");
+                    let ringpop_handler = provider.handler();
+                    let matching = matching_tchannel_service.clone();
+                    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+                    let task = tokio::spawn(async move {
+                        let result =
+                            cadence_server::tchannel::serve_matching_with_ringpop_listener(
+                                listener,
+                                matching,
+                                ringpop_handler,
+                            )
+                            .await;
+                        let _ = done_tx.send(result);
+                    });
+                    (Some(task), Some(done_rx))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+            if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                let start_result = if let Some(listener_done) = matching_tchannel_done.as_mut() {
+                    tokio::select! {
+                        result = lifecycle.start() => result.map_err(anyhow::Error::new),
+                        result = listener_done => Err(anyhow::anyhow!("shared Matching TChannel/Ringpop listener stopped during Ringpop bootstrap: {result:?}")),
+                    }
+                } else {
+                    lifecycle.start().await.map_err(anyhow::Error::new)
+                };
+                if let Err(start_error) = start_result {
+                    // Withdraw while the shared Ringpop listener is still
+                    // accepting traffic, then drain and stop Matching.
+                    if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                        let _ = lifecycle.withdraw().await;
+                    }
+                    if let Some(runtime) = matching_runtime.as_mut() {
+                        let _ = runtime.shutdown().await;
+                    }
+                    if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                        let _ = lifecycle.stop_after_drain().await;
+                    }
+                    if let Some(task) = matching_tchannel_task.take() {
+                        task.abort();
+                        let _ = task.await;
+                    }
+                    return Err(start_error.context("starting Matching Ringpop membership"));
+                }
+            }
             let app = if run_matching {
                 if matching_http_addr.is_some() {
                     app
@@ -896,9 +1041,8 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 app
             };
-            let matching_tchannel_service = matching_service.clone();
             let mut serving = tokio::spawn(async move {
-                let _ = tokio::try_join!(
+                tokio::try_join!(
                     async {
                         axum::serve(listener, app)
                             .await
@@ -927,11 +1071,18 @@ async fn main() -> anyhow::Result<()> {
                     },
                     async {
                         if run_matching {
-                            cadence_server::tchannel::serve_matching(
-                                matching_tchannel_addr,
-                                matching_tchannel_service,
-                            )
-                            .await
+                            if let Some(done) = matching_tchannel_done.as_mut() {
+                                match done.await {
+                                    Ok(result) => result,
+                                    Err(error) => Err(anyhow::Error::new(error)),
+                                }
+                            } else {
+                                cadence_server::tchannel::serve_matching(
+                                    matching_tchannel_addr,
+                                    matching_tchannel_service,
+                                )
+                                .await
+                            }
                         } else {
                             std::future::pending::<anyhow::Result<()>>().await
                         }
@@ -1004,11 +1155,28 @@ async fn main() -> anyhow::Result<()> {
             };
             // On a signal, the listener task remains active while shutdown
             // drains traffic. Listener errors have already ended that task.
+            let withdrawal = if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                lifecycle.withdraw().await.map_err(anyhow::Error::new)
+            } else {
+                Ok(())
+            };
             let shutdown = if let Some(runtime) = matching_runtime.as_mut() {
                 runtime.shutdown().await
             } else {
                 Ok(())
             };
+            // Runtime shutdown evicts before draining and stops Matching's
+            // handler/store after the drain. Only then remove the membership
+            // watcher and destroy the shared Ringpop node.
+            let membership_shutdown =
+                if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                    lifecycle
+                        .stop_after_drain()
+                        .await
+                        .map_err(anyhow::Error::new)
+                } else {
+                    Ok(())
+                };
             if serving_result.is_none() {
                 if serving.is_finished() {
                     serving_result = Some(
@@ -1022,13 +1190,29 @@ async fn main() -> anyhow::Result<()> {
                     let _ = serving.await;
                 }
             }
-            if let Some(result) = serving_result {
-                result?;
+            if let Some(task) = matching_tchannel_task.take() {
+                task.abort();
+                let _ = task.await;
             }
-            if let Some(result) = signal_result {
-                result?;
+            let mut shutdown_errors = Vec::new();
+            if let Some(Err(error)) = serving_result {
+                shutdown_errors.push(format!("serving Matching cluster: {error:#}"));
             }
-            shutdown?;
+            if let Some(Err(error)) = signal_result {
+                shutdown_errors.push(format!("waiting for shutdown signal: {error:#}"));
+            }
+            if let Err(error) = withdrawal {
+                shutdown_errors.push(format!("withdrawing Matching membership: {error:#}"));
+            }
+            if let Err(error) = shutdown {
+                shutdown_errors.push(format!("stopping Matching runtime: {error:#}"));
+            }
+            if let Err(error) = membership_shutdown {
+                shutdown_errors.push(format!("stopping Matching membership: {error:#}"));
+            }
+            if !shutdown_errors.is_empty() {
+                anyhow::bail!("Matching shutdown failed: {}", shutdown_errors.join("; "));
+            }
             println!("shutting down");
         }
         Command::Version => {

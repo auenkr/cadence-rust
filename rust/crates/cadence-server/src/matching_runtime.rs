@@ -43,6 +43,8 @@ pub struct MatchingRuntime {
     registry: Option<crate::matching_registry::QueueRegistry>,
     maintenance_stop: Option<oneshot::Sender<()>>,
     maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
+    membership_maintenance_stop: Option<oneshot::Sender<()>>,
+    membership_maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
     drain_duration: DrainDuration,
     evict_self: Option<EvictSelf>,
@@ -56,6 +58,8 @@ impl MatchingRuntime {
             registry: None,
             maintenance_stop: None,
             maintenance: None,
+            membership_maintenance_stop: None,
+            membership_maintenance: None,
             domain_cache: None,
             drain_duration,
             evict_self: None,
@@ -89,6 +93,8 @@ impl MatchingRuntime {
             registry: Some(registry),
             maintenance_stop: Some(stop),
             maintenance: Some(maintenance),
+            membership_maintenance_stop: None,
+            membership_maintenance: None,
             domain_cache: None,
             drain_duration,
             evict_self: None,
@@ -98,6 +104,24 @@ impl MatchingRuntime {
 
     pub fn matching(&self) -> &Matching {
         &self.matching
+    }
+
+    /// Attach the service membership ring before this runtime is exposed to
+    /// RPC listeners. Both the handler and durable queue registry use this
+    /// same snapshot for ownership and forwarding.
+    pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
+        self.matching = self.matching.clone().with_membership(membership);
+        let matching = self.matching.clone();
+        let (stop, stopped) = oneshot::channel();
+        self.membership_maintenance = Some(tokio::spawn(async move {
+            matching
+                .maintain_membership_until(async {
+                    let _ = stopped.await;
+                })
+                .await
+        }));
+        self.membership_maintenance_stop = Some(stop);
+        self
     }
 
     /// Start and connect the persistence-backed domain cache before constructing
@@ -180,6 +204,9 @@ impl MatchingRuntime {
     /// maintenance so final acknowledgements and cleanup complete.
     pub async fn shutdown(&mut self) -> anyhow::Result<()> {
         let drain_result = self.drain().await;
+        if let Some(stop) = self.membership_maintenance_stop.take() {
+            let _ = stop.send(());
+        }
         if let Some(stop) = self.maintenance_stop.take() {
             let _ = stop.send(());
         }
@@ -199,11 +226,26 @@ impl MatchingRuntime {
         } else {
             Ok(())
         };
+        let membership_result = if let Some(maintenance) = self.membership_maintenance.take() {
+            maintenance
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!("joining Matching membership maintenance: {error}")
+                })
+                .and_then(|result| {
+                    result.map_err(|error| {
+                        anyhow::anyhow!("stopping Matching membership maintenance: {error}")
+                    })
+                })
+        } else {
+            Ok(())
+        };
         if let Some(cache) = self.domain_cache.take() {
             cache.unregister_callback("matching");
             cache.stop();
         }
         maintenance_result?;
+        membership_result?;
         drain_result?;
         Ok(())
     }
@@ -217,6 +259,12 @@ impl Drop for MatchingRuntime {
             let _ = stop.send(());
         }
         if let Some(task) = self.maintenance.take() {
+            task.abort();
+        }
+        if let Some(stop) = self.membership_maintenance_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(task) = self.membership_maintenance.take() {
             task.abort();
         }
     }

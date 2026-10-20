@@ -35,6 +35,16 @@ http, frontend, history, matching, tchannel, matching_tchannel, matching_http = 
 for listener in reservations:
     listener.close()
 config = (root / 'rust/config/development.yaml').read_text()
+# The production main assembly starts Matching's Ringpop provider for explicit
+# config. Keep this component probe a deterministic one-node ring on the same
+# randomized TChannel port it binds, so no unrelated Go/Rust Ringpop processes
+# are needed for the focused persistence and native Thrift assertions.
+config = re.sub(
+    r'(?m)^  bootstrapHosts:.*$',
+    f'  broadcastAddress: 127.0.0.1\n  bootstrapHosts: ["127.0.0.1:{matching_tchannel}"]',
+    config,
+    count=1,
+)
 domain_database = (artifacts / 'go-cadence.sqlite').resolve()
 oracle_database = (artifacts / 'go-oracle.sqlite').resolve()
 for path in (domain_database, oracle_database):
