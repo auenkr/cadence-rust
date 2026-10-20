@@ -228,7 +228,7 @@ with (work / 'server.log').open('w') as log:
             'goServicesPid': server.pid, 'goServicesAliveAfterProbe': server.poll() is None,
             'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
             'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
-            'ringpopGate': 'original Go PeerProvider is active; runner does not substitute or hard-code Matching members and Rust must JOIN/publish serviceName/grpc labels' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
+            'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
             'historyTransport': args.history_transport if production_matching else None,
             'rustDynamicConfigFile': str(dynamic_config) if production_matching else None,
             'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
