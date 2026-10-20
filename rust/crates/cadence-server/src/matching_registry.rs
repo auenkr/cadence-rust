@@ -136,6 +136,7 @@ pub struct QueueRegistry {
     /// Go's signed, task-list-filtered `MaxTaskDeleteBatchSize` provider.
     max_task_delete_batch_size: Option<TaskDeleteBatchSizeProvider>,
     writer_live: Option<WriterLiveProvider>,
+    metrics: crate::matching_metrics::MatchingMetrics,
 }
 /// Live adaptive-scaler configuration per domain/task-list/type, mirroring
 /// Go's `TaskListConfig` scaler reads. `None` keeps the scaler parked.
@@ -512,7 +513,15 @@ impl QueueRegistry {
             idle_tasklist_check_interval: None,
             max_task_delete_batch_size: None,
             writer_live: None,
+            metrics: crate::matching_metrics::MatchingMetrics::default(),
         }
+    }
+    pub(crate) fn with_metrics(
+        mut self,
+        metrics: crate::matching_metrics::MatchingMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
     }
     pub(crate) fn with_local_poll_service(mut self, factory: LocalPollFactory) -> Self {
         self.local_poll_service = Some(factory);
@@ -718,6 +727,7 @@ impl QueueRegistry {
                 .is_some_and(|owner| owner.queue.is_stopped())
             {
                 if let Some(owner) = state.owners.remove(&lookup) {
+                    registry.metrics.task_list_managers_gauge(state.owners.len());
                     drop(state);
                     if let Err(error) = owner.finish(now, readers) {
                         eprintln!("Matching stopped owner cleanup failed: {error}");
@@ -1161,6 +1171,9 @@ impl QueueRegistry {
                         }
                     }
                     state.owners.insert(lookup, owner.clone());
+                    registry
+                        .metrics
+                        .task_list_managers_gauge(state.owners.len());
                     registry.changed.notify_waiters();
                     owner
                 }
@@ -1405,6 +1418,7 @@ impl QueueRegistry {
                 return Ok(false);
             }
             let owner = state.owners.remove(&lookup).expect("checked owner");
+            registry.metrics.task_list_managers_gauge(state.owners.len());
             drop(state);
             owner.finish(now, readers)?;
             Ok(true)
@@ -1547,6 +1561,7 @@ impl QueueRegistry {
             .is_some_and(|owner| Arc::ptr_eq(owner, expected))
         {
             state.owners.remove(key);
+            self.metrics.task_list_managers_gauge(state.owners.len());
             true
         } else {
             false
@@ -1567,7 +1582,11 @@ impl QueueRegistry {
                 }
                 if stop {
                     state.stopped = true;
-                    state.owners.drain().collect::<Vec<_>>()
+                    let owners = state.owners.drain().collect::<Vec<_>>();
+                    for count in (0..owners.len()).rev() {
+                        registry.metrics.task_list_managers_gauge(count);
+                    }
+                    owners
                 } else {
                     state
                         .owners
@@ -1731,6 +1750,70 @@ mod tests {
             task_type: 0,
         };
         (dir, store, registry, key)
+    }
+    #[tokio::test]
+    async fn task_list_manager_gauge_tracks_registry_lifecycle_not_get_calls() {
+        use cadence_common::membership::Host;
+        use crate::matching_metrics::{MatchingMetrics, MetricValue, RecordingMetricSink, TASKLIST_MANAGERS};
+
+        let (_dir, _store, registry, key) = fixture();
+        let host = |identity: &str| Host {
+            address: format!("{identity}:7935"),
+            identity: identity.into(),
+            grpc_address: format!("{identity}:7835"),
+        };
+        let membership = crate::matching_membership::Membership::new("self", vec![host("self")]);
+        let sink = Arc::new(RecordingMetricSink::default());
+        let registry = registry
+            .with_membership(membership.clone())
+            .with_metrics(MatchingMetrics::new(sink.clone()));
+
+        let first = registry.get(key.clone(), 0, 1).await.unwrap();
+        let reused = registry.get(key.clone(), 0, 2).await.unwrap();
+        assert!(Arc::ptr_eq(&first.queue, &reused.queue));
+        assert_eq!(sink.events().len(), 1, "lookup reuse does not register another manager");
+
+        first.queue.stop();
+        let replacement = registry.get(key.clone(), 0, 3).await.unwrap();
+        assert!(!Arc::ptr_eq(&first.queue, &replacement.queue));
+        assert!(!registry
+            .unload(key.clone(), first.clone(), 4)
+            .await
+            .unwrap());
+
+        membership.replace(vec![host("other")]);
+        registry.unload_non_owned(5).await.unwrap();
+        assert!(!registry
+            .unload(key.clone(), replacement.clone(), 6)
+            .await
+            .unwrap());
+        membership.replace(vec![host("self")]);
+        let reassigned = registry.get(key, 0, 7).await.unwrap();
+        registry.shutdown(8).await.unwrap();
+
+        let gauges: Vec<_> = sink
+            .events()
+            .into_iter()
+            .filter(|event| event.name == TASKLIST_MANAGERS)
+            .map(|event| event.value)
+            .collect();
+        assert_eq!(
+            gauges,
+            vec![
+                MetricValue::Number(1.0),
+                MetricValue::Number(0.0),
+                MetricValue::Number(1.0),
+                MetricValue::Number(0.0),
+                MetricValue::Number(1.0),
+                MetricValue::Number(0.0),
+            ]
+        );
+        assert!(sink
+            .events()
+            .into_iter()
+            .filter(|event| event.name == TASKLIST_MANAGERS)
+            .all(|event| event.tags.get("operation").map(String::as_str) == Some("TaskListMgr")));
+        assert!(reassigned.queue.is_stopped());
     }
     #[tokio::test]
     async fn matching_membership_guards_creation_and_unloads_moved_owners() {

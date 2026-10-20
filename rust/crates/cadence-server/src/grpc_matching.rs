@@ -320,6 +320,9 @@ impl Matching {
     /// Install an optional inbound Matching metrics sink.
     pub fn with_metrics(mut self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
         self.metrics = crate::matching_metrics::MatchingMetrics::new(sink);
+        if let Some(queues) = self.queues.take() {
+            self.queues = Some(queues.with_metrics(self.metrics.clone()));
+        }
         self
     }
     pub(crate) fn inbound_metrics(&self) -> &crate::matching_metrics::MatchingMetrics {
