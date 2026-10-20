@@ -782,7 +782,20 @@ where
     } else {
         blob.data.clone()
     };
-    let mut reader = Reader::new(&bytes);
+    // Nested persistence DataBlobs use common/codec.ThriftRWEncoder, which
+    // prefixes the Thrift payload with the version byte 0x59. The enclosing
+    // domains row is serialized directly with thriftrw and has no such byte.
+    let Some((&version, payload)) = bytes.split_first() else {
+        return Err(MatchingDomainMetadataError::InvalidBlob(
+            "missing ThriftRW encoding version".into(),
+        ));
+    };
+    if version != 0x59 {
+        return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+            "invalid ThriftRW encoding version: {version:#04x}"
+        )));
+    }
+    let mut reader = Reader::new(payload);
     let value = T::from_thrift(&read_struct(&mut reader).map_err(protocol_error)?)
         .map_err(protocol_error)?;
     if reader.remaining() != 0 {
@@ -830,6 +843,12 @@ mod tests {
         let mut writer = Writer::new();
         write_struct(&mut writer, &Struct { fields });
         writer.into_bytes()
+    }
+
+    fn go_codec_thrift_blob(fields: Vec<(i16, Value)>) -> Vec<u8> {
+        let mut bytes = vec![0x59];
+        bytes.extend_from_slice(&thrift_blob(fields));
+        bytes
     }
 
     fn insert_domain(connection: &Connection, id: uuid::Uuid, name: &str, info: Vec<u8>) {
@@ -916,7 +935,14 @@ mod tests {
                     Value::Bytes(b"v".to_vec()),
                 )]),
             ),
-            (56, Value::Bytes(vec![0, 255, 7])),
+            (
+                56,
+                Value::Bytes({
+                    let mut data = go_codec_thrift_blob(Vec::new());
+                    data.push(0xff);
+                    data
+                }),
+            ),
             (58, Value::Bytes(b"thriftrw".to_vec())),
         ];
         insert_domain(&connection, high, "second", thrift_blob(fields.clone()));
@@ -944,7 +970,12 @@ mod tests {
         assert_eq!(domain.failover_version, 53);
         assert_eq!(domain.replication.active_cluster_name, "cluster-a");
         assert_eq!(domain.replication.clusters[0].cluster_name, "cluster-a");
-        assert_eq!(domain.isolation_groups.as_ref().unwrap().data, [0, 255, 7]);
+        assert!(domain
+            .isolation_groups
+            .as_ref()
+            .unwrap()
+            .data
+            .starts_with(&[0x59]));
         assert!(domain.decoded_isolation_groups.is_none());
         assert!(domain
             .config_decode_error
@@ -994,7 +1025,7 @@ mod tests {
 
     #[test]
     fn active_active_blob_suppresses_current_cluster_default() {
-        let active_config = vec![0];
+        let active_config = go_codec_thrift_blob(Vec::new());
         let metadata = thrift_to_metadata(
             Struct {
                 fields: vec![
@@ -1055,6 +1086,73 @@ mod tests {
         let mut info = thrift_blob(Vec::new());
         info.extend_from_slice(b"ignored tail");
         assert!(decode_domain_info_blob(&info, ENCODING_THRIFT_RW).is_ok());
+    }
+
+    #[test]
+    fn nested_thriftrw_blob_requires_and_strips_go_codec_version() {
+        let mut data = vec![0x59];
+        data.extend_from_slice(&thrift_blob(Vec::new()));
+        let decoded: BadBinaries = decode_go_blob(&GoDomainBlob {
+            data,
+            encoding: "thriftrw".into(),
+        })
+        .unwrap();
+        assert!(decoded.binaries.is_none());
+
+        for (data, expected) in [
+            (Vec::new(), "missing ThriftRW encoding version"),
+            (vec![0x58, 0], "invalid ThriftRW encoding version: 0x58"),
+        ] {
+            let error = decode_go_blob::<BadBinaries>(&GoDomainBlob {
+                data,
+                encoding: "thriftrw".into(),
+            })
+            .unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn decodes_nested_blobs_emitted_by_go_payload_serializer() {
+        // Captured from Go common/persistence.NewPayloadSerializer with
+        // EncodingTypeThriftRW for zero-value config structures.
+        let go_blobs: [(&str, &[u8]); 3] = [
+            (
+                "thriftrw",
+                &[
+                    0x59, 0x0d, 0x00, 0x0a, 0x0b, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ],
+            ),
+            ("thriftrw", &[0x59, 0x00]),
+            (
+                "thriftrw",
+                &[
+                    0x59, 0x02, 0x00, 0x0a, 0x00, 0x0b, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x0b,
+                    0x00, 0x1e, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ],
+            ),
+        ];
+        let bad_binaries: BadBinaries = decode_go_blob(&GoDomainBlob {
+            data: go_blobs[0].1.to_vec(),
+            encoding: go_blobs[0].0.into(),
+        })
+        .unwrap();
+        assert_eq!(
+            bad_binaries.binaries,
+            Some(std::collections::HashMap::new())
+        );
+        let isolation_groups: IsolationGroupConfiguration = decode_go_blob(&GoDomainBlob {
+            data: go_blobs[1].1.to_vec(),
+            encoding: go_blobs[1].0.into(),
+        })
+        .unwrap();
+        assert!(isolation_groups.isolation_groups.is_empty());
+        let async_config: AsyncWorkflowConfiguration = decode_go_blob(&GoDomainBlob {
+            data: go_blobs[2].1.to_vec(),
+            encoding: go_blobs[2].0.into(),
+        })
+        .unwrap();
+        assert!(!async_config.enabled);
     }
 
     #[test]

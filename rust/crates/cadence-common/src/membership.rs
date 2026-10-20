@@ -35,6 +35,13 @@ pub fn fingerprint32(bytes: &[u8]) -> u32 {
     fmix(mur(b, mur(bytes.len() as u32, c)))
 }
 
+/// Go `dgryski/go-farm.Fingerprint64`, used to select the shard-distributor
+/// onboarding percentage. The stable FarmHash fingerprint matches Go's
+/// `Fingerprint64` implementation (not its platform-dependent `Hash64`).
+pub fn fingerprint64(bytes: &[u8]) -> u64 {
+    farmhash::fingerprint64(bytes)
+}
+
 #[cfg(test)]
 mod fingerprint_tests {
     use super::{fingerprint32, Host, Ring};

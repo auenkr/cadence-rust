@@ -1,0 +1,17 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 10 tests
+test config::tests::shard_distributor_config_matches_go_names_and_duration_semantics ... ok
+test config::tests::shard_distributor_matching_validation_handles_zero_one_and_multiple_namespaces ... ok
+test config::tests::shard_distributor_rejects_invalid_namespace_and_heartbeat_interval ... ok
+test matching_shard_distributor::tests::go_executor_ttl_and_jitter_boundaries_are_preserved ... ok
+test matching_shard_distributor::tests::executor_shutdown_before_start_is_terminal ... ok
+test matching_shard_distributor::tests::spectator_fake_tonic_peer_covers_snapshot_fallback_and_terminal_shutdown ... ok
+test matching_shard_distributor::tests::spectator_initial_snapshot_wait_obeys_caller_deadline ... ok
+test matching_shard_distributor::tests::pinned_executor_heartbeat_assignment_and_drain_contract ... ok
+test matching_shard_distributor::tests::spectator_waits_for_initial_snapshot_and_returns_cached_owner ... ok
+test matching_shard_distributor::tests::spectator_shutdown_before_start_is_terminal_and_wakes_waiters ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 339 filtered out; finished in 0.10s
+

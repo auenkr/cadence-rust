@@ -4,6 +4,8 @@
 Run in tmux cadence-rust. Default mode is an all-Go baseline.
 --matching-delivery checks the Rust Matching RPC/History boundary.
 --rust-matching replaces Go Matching with Rust using test-only Fx discovery.
+--history-transport selects Rust Matching's outbound History transport in the
+production Ringpop lane (grpc or tchannel).
 """
 import argparse
 import json
@@ -23,6 +25,8 @@ parser.add_argument('--matching-restart', action='store_true', help='restart Rus
 parser.add_argument('--binary', type=Path, help='use an already built Go server')
 parser.add_argument('--go-mixed-server-bin', type=Path, help='reuse a Go test binary built with the Rust Matching discovery overlay')
 parser.add_argument('--rust-production-binary', type=Path, help='run an already built Rust server binary with the original Go Ringpop provider (requires production Matching Ringpop assembly)')
+parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
+    help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
@@ -35,6 +39,8 @@ if production_matching and args.go_mixed_server_bin:
     parser.error('--rust-production-binary cannot use the Go test-binary discovery overlay')
 if production_matching and (not args.rust_production_binary.is_file() or not os.access(args.rust_production_binary, os.X_OK)):
     parser.error(f'--rust-production-binary must name an existing executable: {args.rust_production_binary}')
+if args.history_transport != 'grpc' and not production_matching:
+    parser.error('--history-transport applies only with --rust-production-binary')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
@@ -77,6 +83,16 @@ if args.matching_delivery or ((args.rust_matching or args.matching_restart) and 
         raise RuntimeError(f'Cargo-reported matching_delivery test executable is missing or not executable: {matching_test_executable}')
 config = work / 'config'
 config.mkdir(exist_ok=True)
+dynamic_config = work / 'dynamic-config.yaml'
+dynamic_text = (root / 'go/config/dynamicconfig/development.yaml').read_text()
+if args.rust_matching or args.matching_restart:
+    dynamic_text += (
+        '\nsystem.enableTasklistIsolation:\n'
+        '  - value: true\n'
+        'system.allIsolationGroups:\n'
+        '  - value: ["zone-a", "zone-b"]\n'
+    )
+dynamic_config.write_text(dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
         'FRONTEND_PORT_GRPC', 'MATCHING_PORT_GRPC', 'HISTORY_PORT_GRPC',
         'FRONTEND_PORT_PPROF', 'MATCHING_PORT_PPROF', 'HISTORY_PORT_PPROF', 'WORKER_PORT_PPROF']
@@ -100,7 +116,7 @@ for key, value in ports.items():
 text = text.replace('"127.0.0.1:7933", "127.0.0.1:7934", "127.0.0.1:7935"',
     ', '.join(f'"127.0.0.1:{ports[key]}"' for key in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT' if args.rust_matching or args.matching_restart else 'MATCHING_PORT']))
 text = text.replace('localhost:7833', f'localhost:{ports["FRONTEND_PORT_GRPC"]}')
-text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(root / 'go/config/dynamicconfig/development.yaml')))
+text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(dynamic_config)))
 # Keep archival outputs in this baseline's artifacts directory as well.
 text = text.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
@@ -112,6 +128,12 @@ text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_vi
 (config / 'development_sqlite.yaml').write_text(text)
 if production_matching:
     rust_config = work / 'rust-matching.yaml'
+    rust_dynamic_config = work / 'rust-dynamic-config.yaml'
+    rust_dynamic_text = dynamic_text + (
+        '\nsystem.enableGRPCOutbound:\n'
+        f'  - value: {str(args.history_transport == "grpc").lower()}\n'
+    )
+    rust_dynamic_config.write_text(rust_dynamic_text)
     rust_text = (root / 'rust/config/development.yaml').read_text()
     database_name = json.dumps(str(work / 'cadence.db'))
     sqlite_persistence = (
@@ -138,9 +160,14 @@ if production_matching:
     rust_text, replaced = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rust_text, count=1)
     if replaced != 1:
         raise RuntimeError('could not configure Rust Ringpop bootstrap hosts')
+    # The compatibility probe launches Rust from the repository root. Keep
+    # this path anchored to the isolated run directory so the transport and
+    # isolation settings written above are the ones Rust actually loads.
+    rust_text = rust_text.replace('filepath: "config/dynamicconfig/development.yaml"',
+        'filepath: ' + json.dumps(str(rust_dynamic_config)))
     rust_config.write_text(rust_text)
     (work / 'rust-matching-command.json').write_text(json.dumps([
-        str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config),
+        str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config), '--root', str(work),
         '--services', 'matching', '--port', '0', '--history-grpc-port', ports['HISTORY_PORT_GRPC'],
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
@@ -202,8 +229,10 @@ with (work / 'server.log').open('w') as log:
             'goServicesPid': server.pid, 'goServicesAliveAfterProbe': server.poll() is None,
             'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
             'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
-            'ringpopGate': 'original Go PeerProvider is active; runner does not substitute or hard-code Matching members and Rust must JOIN/publish serviceName/grpc labels' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
-            'historyRoutingGate': 'Matching-to-History still uses the explicit loopback endpoint until discovered History peer routing is integrated' if production_matching else None,
+            'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
+            'historyTransport': args.history_transport if production_matching else None,
+            'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
+            'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
             'acceptanceEligible': not production_matching,
             'serverCommand': command}, indent=2) + '\n')
         if result.returncode:

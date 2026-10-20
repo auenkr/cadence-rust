@@ -78,7 +78,7 @@ pub(crate) fn task_writer_live_provider(
 }
 /// Go `taskListManagerImpl.AddTask` QPS reporting: an arrival counts toward the
 /// root, and toward its isolation group when the task carries one.
-fn report_arrival(
+pub(crate) fn report_arrival(
     queue: &crate::matching_registry::QueueHandle,
     data: &cadence_persistence::matching_blob::TaskData,
 ) {
@@ -157,6 +157,7 @@ fn semaphore_status(error: crate::matching_semaphore::ManagerError) -> Status {
 }
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{Arc, Mutex},
 };
 use tokio::sync::Notify;
@@ -280,8 +281,21 @@ pub struct Matching {
     /// Go `semaphoreRegistry`: one manager per semaphore bucket, in-memory.
     semaphores: crate::matching_semaphore::Registry,
     membership: Option<crate::matching_membership::Membership>,
+    shard_router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
+    task_list_ownership: Option<TaskListOwnershipCheck>,
     pub(crate) poll_expiration: std::time::Duration,
 }
+/// Runtime-provided ownership check. The cached flag is advisory and only
+/// allows the excluded-task-list Ring fast path; eligible names must still
+/// validate their local shard processor on every request.
+pub type TaskListOwnershipCheck = Arc<
+    dyn Fn(
+            String,
+            bool,
+        ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), tonic::Status>> + Send>>
+        + Send
+        + Sync,
+>;
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
         let semaphores = crate::matching_semaphore::Registry::new(state.executions.clone());
@@ -293,6 +307,8 @@ impl Matching {
             scaler_config: None,
             semaphores,
             membership: None,
+            shard_router: None,
+            task_list_ownership: None,
             poll_expiration: std::time::Duration::from_secs(60),
         }
     }
@@ -807,6 +823,82 @@ impl Matching {
         self.membership = Some(membership);
         self.bind_local_poll_service()
     }
+    pub fn with_task_list_ownership(mut self, check: TaskListOwnershipCheck) -> Self {
+        self.task_list_ownership = Some(check);
+        self
+    }
+    pub fn with_shard_router(
+        mut self,
+        router: crate::matching_shard_routing::MatchingShardRouter,
+    ) -> Self {
+        let router = Arc::new(router);
+        if let Some(queues) = &self.queues {
+            queues.set_shard_router(router.clone());
+        }
+        self.shard_router = Some(router);
+        self
+    }
+    async fn remote_channel_for_task_list(
+        &self,
+        name: &str,
+    ) -> Result<Option<tonic::transport::Channel>, Status> {
+        if let Some(router) = &self.shard_router {
+            return router
+                .remote_channel(name)
+                .await
+                .map(|(channel, _path)| channel)
+                .map_err(|error| Status::unavailable(error.to_string()));
+        }
+        self.membership
+            .as_ref()
+            .map_or(Ok(None), |membership| membership.remote_channel(name))
+    }
+    async fn owner_address_for_task_list(&self, name: &str) -> Result<Option<String>, Status> {
+        if let Some(router) = &self.shard_router {
+            return router
+                .resolve(name)
+                .await
+                .map(|(host, _path)| Some(host.address))
+                .map_err(|error| Status::unavailable(error.to_string()));
+        }
+        self.membership.as_ref().map_or(Ok(None), |membership| {
+            membership.owner(name).map(|host| Some(host.address))
+        })
+    }
+    async fn task_list_partition_metadata(
+        &self,
+        domain_id: &str,
+        name: &TaskListName,
+        task_type: i32,
+        hostname: &str,
+    ) -> Result<Vec<p::TaskListPartitionMetadata>, Status> {
+        let count = self
+            .partition_count
+            .as_ref()
+            .map(|provider| provider(domain_id, name.root(), task_type))
+            .unwrap_or(1)
+            .max(1);
+        let mut result = Vec::with_capacity(count as usize);
+        for partition in 0..count {
+            let key = name.partition_name(partition);
+            let owner_host_name = self
+                .owner_address_for_task_list(&key)
+                .await?
+                .unwrap_or_else(|| hostname.to_owned());
+            result.push(p::TaskListPartitionMetadata {
+                key,
+                owner_host_name,
+            });
+        }
+        Ok(result)
+    }
+    async fn check_task_list_ownership(&self, name: &str, cached: bool) -> Result<(), Status> {
+        if let Some(check) = &self.task_list_ownership {
+            check(name.to_owned(), cached).await
+        } else {
+            Ok(())
+        }
+    }
     fn bind_local_poll_service(mut self) -> Self {
         // The factory must not own its registry: owners retain forwarding
         // resolvers. Retain only handler state, and borrow the live registry
@@ -982,18 +1074,21 @@ impl Matching {
             3 => 2,
             _ => 0,
         };
+        let key = cadence_persistence::matching_sqlite::TaskListKey {
+            domain_id,
+            name: list.name.clone(),
+            task_type,
+        };
+        let cached = self
+            .queues
+            .as_ref()
+            .expect("durable backend selected")
+            .contains_cached(&key);
+        self.check_task_list_ownership(&list.name, cached).await?;
         self.queues
             .as_ref()
             .expect("durable backend selected")
-            .get(
-                cadence_persistence::matching_sqlite::TaskListKey {
-                    domain_id,
-                    name: list.name.clone(),
-                    task_type,
-                },
-                kind,
-                matching_now(),
-            )
+            .get(key, kind, matching_now())
             .await
     }
     fn check_write_partition(
@@ -1132,8 +1227,7 @@ impl Matching {
             permits.push(permit);
             let forwarded_from = list.name.clone();
             list.name = parent;
-            if let Some(membership) = &self.membership {
-                if let Ok(Some(channel)) = membership.remote_channel(&list.name) {
+            if let Some(channel) = self.remote_channel_for_task_list(&list.name).await? {
                     let execution = Some(p::WorkflowExecution {
                         workflow_id: data.workflow_id.clone(),
                         run_id: data
@@ -1189,7 +1283,6 @@ impl Matching {
                     return Ok(result
                         .ok()
                         .map(|_| entry.partitions.get().map(partition_config_to_internal)));
-                }
             }
             handle = match self.durable_queue(domain_id, &list, task_type).await {
                 Ok(handle) => handle,
@@ -1917,8 +2010,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         permits.push(permit);
                         let forwarded_from = list.name.clone();
                         list.name = parent;
-                        if let Some(membership) = &self.membership {
-                            if let Some(channel) = membership.remote_channel(&list.name)? {
+                        if let Some(channel) = self.remote_channel_for_task_list(&list.name).await? {
                                 let mut request = Request::new(m::QueryWorkflowRequest {
                                     domain_id: r.domain_id.clone(),
                                     request: Some(payload.clone()),
@@ -1931,7 +2023,6 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 return m::matching_api_client::MatchingApiClient::new(channel)
                                     .query_workflow(request)
                                     .await;
-                            }
                         }
                         handle = self.durable_queue(&r.domain_id, &list, 0).await?;
                     }
@@ -2074,36 +2165,15 @@ impl m::matching_api_server::MatchingApi for Matching {
         // enumerate every write partition like Go's `getAllPartitions` (root
         // first, then `__cadence|<root>/<i>`).
         let hostname = std::env::var("HOSTNAME").unwrap_or_default();
-        let partitions = |task_type: i32| -> Vec<p::TaskListPartitionMetadata> {
-            let count = self
-                .partition_count
-                .as_ref()
-                .map(|provider| provider(&domain_id, name.root(), task_type))
-                .unwrap_or(1)
-                .max(1);
-            (0..count)
-                .map(|partition| {
-                    let key = name.partition_name(partition);
-                    let owner_host_name = self
-                        .membership
-                        .as_ref()
-                        .map(|membership| {
-                            membership
-                                .owner(&key)
-                                .map(|host| host.address)
-                                .unwrap_or_default()
-                        })
-                        .unwrap_or_else(|| hostname.clone());
-                    p::TaskListPartitionMetadata {
-                        key,
-                        owner_host_name,
-                    }
-                })
-                .collect()
-        };
+        let activity_task_list_partitions = self
+            .task_list_partition_metadata(&domain_id, &name, 1, &hostname)
+            .await?;
+        let decision_task_list_partitions = self
+            .task_list_partition_metadata(&domain_id, &name, 0, &hostname)
+            .await?;
         Ok(Response::new(m::ListTaskListPartitionsResponse {
-            activity_task_list_partitions: partitions(1),
-            decision_task_list_partitions: partitions(0),
+            activity_task_list_partitions,
+            decision_task_list_partitions,
         }))
     }
     async fn acquire_semaphore(
@@ -2526,6 +2596,16 @@ pub async fn serve(
 /// matcher so production traffic uses the same partition/forwarding path as
 /// the mixed-service harness instead of the in-memory engine.
 pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    serve_with_listener(listener, matching).await
+}
+
+/// Serve a prebound Matching socket so production can fail listener startup
+/// before Ringpop advertises this node's gRPC endpoint.
+pub async fn serve_with_listener(
+    listener: tokio::net::TcpListener,
+    matching: Matching,
+) -> anyhow::Result<()> {
     let limit = matching.frontend.state.grpc_max_message_size;
     // Go runs a per-bucket liveness timer; a shared ticker unloads idle
     // semaphore buckets so a quiet host does not keep them forever.
@@ -2549,7 +2629,7 @@ pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyho
             m::matching_api_server::MatchingApiServer::new(matching)
                 .max_decoding_message_size(limit),
         )
-        .serve(addr)
+        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
         .await?;
     Ok(())
 }

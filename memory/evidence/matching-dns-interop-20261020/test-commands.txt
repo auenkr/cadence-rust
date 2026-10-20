@@ -1,0 +1,6 @@
+Production Rust binary build:
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server --bin cadence-server
+
+Both mixed SDK/restart commands are in mixed-grpc-isolated/command.txt and mixed-tchannel-isolated/command.txt. They use the same production binary SHA-256 from final-build/binary.sha256 and separate generated Go/Rust dynamic-config files.
+
+Focused test and strict Clippy results are preserved in final-unit/, final-clippy-strict-3/. The Go wire interop command/result is preserved in final-go-wire-bounded/.

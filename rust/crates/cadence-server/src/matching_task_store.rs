@@ -23,7 +23,9 @@ impl SqliteTaskStoreConfig {
     pub fn from_default_store(
         persistence: &crate::config::PersistenceConfig,
     ) -> anyhow::Result<Self> {
-        let name = persistence.default_store.trim();
+        // Go indexes persistence.datastores with the configured name exactly;
+        // whitespace is part of the key and must not be normalized here.
+        let name = persistence.default_store.as_str();
         if name.is_empty() {
             anyhow::bail!("Matching task persistence requires persistence.defaultStore");
         }
@@ -227,6 +229,19 @@ mod tests {
                 .to_string()
                 .contains("not present in persistence.datastores")
         );
+
+        let padded_name = crate::config::PersistenceConfig {
+            default_store: " primary ".into(),
+            ..persistence(Some(SqlConfig {
+                plugin_name: "sqlite".into(),
+                database_name: "cadence.sqlite".into(),
+                ..Default::default()
+            }))
+        };
+        assert!(SqliteTaskStoreConfig::from_default_store(&padded_name)
+            .unwrap_err()
+            .to_string()
+            .contains("defaultStore \" primary \" is not present"));
 
         let mut config = persistence(Some(SqlConfig {
             plugin_name: "sqlite".into(),

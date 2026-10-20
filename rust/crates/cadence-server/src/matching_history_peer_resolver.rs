@@ -22,6 +22,24 @@ pub enum NamedPort {
 /// fixed host list.
 pub trait HistoryMembership: Send + Sync + 'static {
     fn hosts(&self) -> Result<Vec<Host>, Status>;
+    /// Resolve each member's named endpoints from one membership snapshot.
+    /// Adapters with richer provider data should override this to avoid mixing
+    /// a host selection from one snapshot with ports from another.
+    fn resolved_hosts(&self) -> Result<Vec<ResolvedHistoryHost>, Status> {
+        Ok(self
+            .hosts()?
+            .into_iter()
+            .map(|host| {
+                let grpc_address = self.named_address(&host, NamedPort::Grpc).ok();
+                let tchannel_address = self.named_address(&host, NamedPort::Tchannel).ok();
+                ResolvedHistoryHost {
+                    host,
+                    grpc_address,
+                    tchannel_address,
+                }
+            })
+            .collect())
+    }
     fn named_address(&self, host: &Host, port: NamedPort) -> Result<String, Status> {
         match port {
             NamedPort::Grpc if !host.grpc_address.is_empty() => Ok(host.grpc_address.clone()),
@@ -32,6 +50,13 @@ pub trait HistoryMembership: Send + Sync + 'static {
             )),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct ResolvedHistoryHost {
+    pub host: Host,
+    pub grpc_address: Option<String>,
+    pub tchannel_address: Option<String>,
 }
 
 #[derive(Clone)]
@@ -85,10 +110,10 @@ impl MatchingHistoryPeerResolver {
     }
 
     pub fn host_address(&self, address: &str) -> Result<String, Status> {
-        let hosts = self.membership.hosts()?;
+        let hosts = self.membership.resolved_hosts()?;
         let host = hosts
             .into_iter()
-            .find(|host| host.address == address)
+            .find(|host| host.host.address == address)
             .ok_or_else(|| {
                 Status::unavailable(format!("History member {address:?} was not found."))
             })?;
@@ -97,23 +122,34 @@ impl MatchingHistoryPeerResolver {
 
     pub fn all_peers(&self) -> Result<Vec<String>, Status> {
         self.membership
-            .hosts()?
+            .resolved_hosts()?
             .iter()
             .map(|host| self.endpoint(host))
             .collect()
     }
 
     fn owner(&self, key: &str) -> Result<String, Status> {
-        let hosts = self.membership.hosts()?;
-        Ring::new(hosts)
+        let hosts = self.membership.resolved_hosts()?;
+        let ring_hosts: Vec<_> = hosts.iter().map(|peer| peer.host.clone()).collect();
+        Ring::new(ring_hosts)
             .lookup(key)
+            .and_then(|host| hosts.iter().find(|peer| peer.host.address == host.address))
             .map(|host| self.endpoint(host))
             .transpose()?
             .ok_or_else(|| Status::internal("Not enough hosts to serve the request"))
     }
 
-    fn endpoint(&self, host: &Host) -> Result<String, Status> {
-        self.membership.named_address(host, self.named_port)
+    fn endpoint(&self, host: &ResolvedHistoryHost) -> Result<String, Status> {
+        match self.named_port {
+            NamedPort::Grpc => host.grpc_address.clone(),
+            NamedPort::Tchannel => host.tchannel_address.clone(),
+        }
+        .ok_or_else(|| {
+            Status::unavailable(format!(
+                "History member {:?} has no requested named transport address.",
+                host.host.address
+            ))
+        })
     }
 }
 

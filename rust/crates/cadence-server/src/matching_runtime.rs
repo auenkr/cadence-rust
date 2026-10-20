@@ -14,6 +14,73 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+
+type ShardProcessLookup = Arc<
+    dyn Fn(
+            String,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            (),
+                            crate::matching_shard_distributor::GetShardProcessError,
+                        >,
+                    > + Send,
+            >,
+        > + Send
+        + Sync,
+>;
+
+fn shard_task_list_ownership_check(
+    membership: crate::matching_membership::Membership,
+    percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
+    exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
+    draining: tokio::sync::watch::Receiver<bool>,
+    lookup: ShardProcessLookup,
+) -> crate::grpc_matching::TaskListOwnershipCheck {
+    Arc::new(move |name, cached| {
+        let membership = membership.clone();
+        let percentage = percentage_onboarded.clone();
+        let exclude = exclude_short_lived.clone();
+        let draining = draining.clone();
+        let lookup = lookup.clone();
+        Box::pin(async move {
+            if *draining.borrow() {
+                return Err(membership.task_list_not_owned_by(&name, "not known"));
+            }
+            // Match Go's signed-to-uint64 conversion, including negative
+            // dynamic values that wrap to a large eligible percentage.
+            let excluded = crate::matching_shard_routing::task_list_excluded_from_shard_distributor(
+                &name,
+                percentage() as u64,
+                exclude(),
+            );
+            if excluded {
+                if cached {
+                    return Ok(());
+                }
+                return membership.check_task_list(&name);
+            }
+            match lookup(name.clone()).await {
+                Ok(()) => Ok(()),
+                Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(_)) => {
+                    Err(membership.task_list_not_owned_by(&name, "not known"))
+                }
+                Err(crate::matching_shard_distributor::GetShardProcessError::Heartbeat(error)) => {
+                    // Go wraps non-not-found executor errors as a generic
+                    // internal error; do not surface gRPC Unavailable as a
+                    // service-busy/YARPC transport class.
+                    Err(tonic::Status::internal(format!(
+                        "failed to lookup ownership in SD: {error}"
+                    )))
+                }
+            }
+        })
+            as std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send>,
+            >
+    })
+}
 use tokio::{sync::oneshot, task::JoinHandle};
 
 pub type DrainDuration = Arc<dyn Fn() -> Duration + Send + Sync>;
@@ -43,7 +110,14 @@ pub struct MatchingRuntime {
     registry: Option<crate::matching_registry::QueueRegistry>,
     maintenance_stop: Option<oneshot::Sender<()>>,
     maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
+    membership_maintenance_stop: Option<oneshot::Sender<()>>,
+    membership_maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
+    dynamic_config_watch: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
+    shard_distributor_executor: Option<crate::matching_shard_distributor::ShardDistributorExecutor>,
+    shard_distributor_spectator: Option<crate::matching_shard_distributor::TonicSpectator>,
+    shard_distributor_drain: Option<tokio::sync::watch::Sender<bool>>,
+    shard_distributor_peer_cleanup: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
     drain_duration: DrainDuration,
     evict_self: Option<EvictSelf>,
     drained: bool,
@@ -56,7 +130,14 @@ impl MatchingRuntime {
             registry: None,
             maintenance_stop: None,
             maintenance: None,
+            membership_maintenance_stop: None,
+            membership_maintenance: None,
             domain_cache: None,
+            dynamic_config_watch: None,
+            shard_distributor_executor: None,
+            shard_distributor_spectator: None,
+            shard_distributor_drain: None,
+            shard_distributor_peer_cleanup: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -89,7 +170,14 @@ impl MatchingRuntime {
             registry: Some(registry),
             maintenance_stop: Some(stop),
             maintenance: Some(maintenance),
+            membership_maintenance_stop: None,
+            membership_maintenance: None,
             domain_cache: None,
+            dynamic_config_watch: None,
+            shard_distributor_executor: None,
+            shard_distributor_spectator: None,
+            shard_distributor_drain: None,
+            shard_distributor_peer_cleanup: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -98,6 +186,212 @@ impl MatchingRuntime {
 
     pub fn matching(&self) -> &Matching {
         &self.matching
+    }
+
+    /// Attach shard-distributor ownership checks to both the RPC acquisition
+    /// path and registry publication/unload lifecycle. Runtime construction
+    /// owns these dependencies so handlers and processors share one policy.
+    pub fn with_task_list_ownership(
+        mut self,
+        check: crate::grpc_matching::TaskListOwnershipCheck,
+        policy: crate::matching_registry::QueueOwnershipPolicy,
+    ) -> Self {
+        self.matching = self.matching.clone().with_task_list_ownership(check);
+        if let Some(registry) = &self.registry {
+            registry.set_ownership_policy(policy);
+        }
+        self
+    }
+
+    /// Attach discovered shard routing to the same Matching instance exposed
+    /// by the owned runtime and its durable queue registry.
+    pub fn with_shard_router(
+        mut self,
+        router: crate::matching_shard_routing::MatchingShardRouter,
+    ) -> Self {
+        self.matching = self.matching.clone().with_shard_router(router);
+        self
+    }
+
+    /// Start Go's Matching shard executor and attach its assignment routing to
+    /// the same durable registry used by Matching RPCs. A configured manager
+    /// requires the production durable registry; silently running with a
+    /// no-op executor would split assignments from queue ownership.
+    pub async fn with_shard_distributor(
+        mut self,
+        config: &crate::config::ShardDistributorMatchingConfig,
+        channel: tonic::transport::Channel,
+        membership: crate::matching_membership::Membership,
+        metadata: std::collections::HashMap<String, String>,
+        percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
+        exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> anyhow::Result<Self> {
+        if config.namespaces.is_empty() {
+            return Ok(self);
+        }
+        let registry = self.registry.clone().ok_or_else(|| {
+            anyhow::anyhow!("shard-distributor Matching requires the durable queue registry")
+        })?;
+        let enabled = {
+            let percentage = percentage_onboarded.clone();
+            Arc::new(move || percentage() > 0) as Arc<dyn Fn() -> bool + Send + Sync>
+        };
+        let rpc = Arc::new(
+            crate::matching_shard_distributor::TonicExecutorRpc::from_channel(channel.clone()),
+        );
+        let factory = Arc::new(
+            crate::matching_shard_processor::QueueRegistryShardProcessorFactory::new(
+                registry.clone(),
+                config.report_ttl_nanos(),
+            ),
+        );
+        let (drain_tx, drain_rx) = tokio::sync::watch::channel(false);
+        let executor = crate::matching_shard_distributor::ShardDistributorExecutor::new(
+            config,
+            rpc,
+            factory,
+            enabled,
+            metadata,
+            Some(drain_rx),
+        )?;
+        executor
+            .start()
+            .await
+            .map_err(|error| anyhow::anyhow!("starting shard-distributor executor: {error}"))?;
+
+        let spectator = crate::matching_shard_distributor::TonicSpectator::new(
+            channel,
+            config.namespaces[0].namespace.clone(),
+            Arc::new({
+                let percentage = percentage_onboarded.clone();
+                move || percentage() > 0
+            }),
+        );
+        if let Err(error) = spectator.start().await {
+            executor.shutdown().await;
+            return Err(anyhow::anyhow!(
+                "starting shard-distributor spectator: {error}"
+            ));
+        }
+
+        let router = crate::matching_shard_routing::MatchingShardRouter::with_tonic_spectator(
+            membership.clone(),
+            Some(spectator.clone()),
+            percentage_onboarded.clone(),
+            exclude_short_lived.clone(),
+        )
+        .with_peer_ttl(Duration::from_nanos(
+            config.effective_peer_ttl_nanos() as u64
+        ));
+        let peer_cleanup = router.start_peer_cleanup();
+        let executor_for_check = executor.clone();
+        let lookup: ShardProcessLookup = Arc::new(move |name| {
+            let executor = executor_for_check.clone();
+            Box::pin(async move { executor.get_shard_process(&name).await.map(|_| ()) })
+                as Pin<
+                    Box<
+                        dyn Future<
+                                Output = Result<
+                                    (),
+                                    crate::matching_shard_distributor::GetShardProcessError,
+                                >,
+                            > + Send,
+                    >,
+                >
+        });
+        let ownership_check = shard_task_list_ownership_check(
+            membership.clone(),
+            percentage_onboarded.clone(),
+            exclude_short_lived.clone(),
+            drain_tx.subscribe(),
+            lookup,
+        );
+        let policy = crate::matching_registry::QueueOwnershipPolicy::new(
+            Arc::new({
+                let percentage = percentage_onboarded.clone();
+                let exclude = exclude_short_lived.clone();
+                move |name| {
+                    !crate::matching_shard_routing::task_list_excluded_from_shard_distributor(
+                        name,
+                        percentage() as u64,
+                        exclude(),
+                    )
+                }
+            }),
+            Arc::new({
+                let executor = executor.clone();
+                move |name| executor.has_local_shard_process(name)
+            }),
+        );
+        self = self
+            .with_task_list_ownership(ownership_check, policy)
+            .with_shard_router(router);
+        self.shard_distributor_executor = Some(executor);
+        self.shard_distributor_spectator = Some(spectator);
+        self.shard_distributor_drain = Some(drain_tx);
+        self.shard_distributor_peer_cleanup = Some(peer_cleanup);
+        Ok(self)
+    }
+
+    /// Own Go file-based dynamic-config polling for the lifetime of Matching.
+    /// The caller loads the initial snapshot synchronously before exposure.
+    pub fn with_dynamic_config_file(
+        mut self,
+        path: std::path::PathBuf,
+        poll_interval: Duration,
+        initial_load_finished: std::time::SystemTime,
+    ) -> Self {
+        let overlay = self.matching.frontend.state.admin.dynamic_config.clone();
+        let (stop, mut stopped) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let mut last_poll = initial_load_finished;
+            let poll_interval = poll_interval.max(Duration::from_secs(5));
+            let mut interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + poll_interval,
+                poll_interval,
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = &mut stopped => break,
+                    _ = interval.tick() => {
+                        match std::fs::metadata(&path).and_then(|metadata| metadata.modified()) {
+                            Ok(modified) if modified > last_poll => {
+                                match crate::admin::DynamicConfigOverlay::from_file(&path) {
+                                    Ok(snapshot) => if let Ok(mut current) = overlay.lock() { *current = snapshot; },
+                                    Err(error) => eprintln!("warning: reloading dynamic config {:?}: {error}", path),
+                                }
+                            }
+                            Err(error) => eprintln!("warning: checking dynamic config {:?}: {error}", path),
+                            Ok(_) => {}
+                        }
+                        // Go records the wall time at the end of every update
+                        // attempt (including an unsuccessful one).
+                        last_poll = std::time::SystemTime::now();
+                    }
+                }
+            }
+        });
+        self.dynamic_config_watch = Some((stop, task));
+        self
+    }
+
+    /// Attach the service membership ring before this runtime is exposed to
+    /// RPC listeners. Both the handler and durable queue registry use this
+    /// same snapshot for ownership and forwarding.
+    pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
+        self.matching = self.matching.clone().with_membership(membership);
+        let matching = self.matching.clone();
+        let (stop, stopped) = oneshot::channel();
+        self.membership_maintenance = Some(tokio::spawn(async move {
+            matching
+                .maintain_membership_until(async {
+                    let _ = stopped.await;
+                })
+                .await
+        }));
+        self.membership_maintenance_stop = Some(stop);
+        self
     }
 
     /// Start and connect the persistence-backed domain cache before constructing
@@ -171,6 +465,9 @@ impl MatchingRuntime {
         if self.drained {
             return Ok(());
         }
+        if let Some(drain) = &self.shard_distributor_drain {
+            let _ = drain.send(true);
+        }
         let result = drain_service(&mut self.evict_self, &self.drain_duration).await;
         self.drained = true;
         result
@@ -180,6 +477,33 @@ impl MatchingRuntime {
     /// maintenance so final acknowledgements and cleanup complete.
     pub async fn shutdown(&mut self) -> anyhow::Result<()> {
         let drain_result = self.drain().await;
+        let dynamic_config_result = if let Some((stop, task)) = self.dynamic_config_watch.take() {
+            let _ = stop.send(());
+            task.await.map_err(|error| {
+                anyhow::anyhow!("joining Matching dynamic-config watcher: {error}")
+            })
+        } else {
+            Ok(())
+        };
+        if let Some(executor) = self.shard_distributor_executor.take() {
+            executor.shutdown().await;
+        }
+        if let Some(spectator) = self.shard_distributor_spectator.take() {
+            spectator.shutdown().await;
+        }
+        self.shard_distributor_drain.take();
+        let peer_cleanup_result = if let Some((stop, task)) =
+            self.shard_distributor_peer_cleanup.take()
+        {
+            let _ = stop.send(());
+            task.await
+                .map_err(|error| anyhow::anyhow!("joining Matching shard peer cleanup: {error}"))
+        } else {
+            Ok(())
+        };
+        if let Some(stop) = self.membership_maintenance_stop.take() {
+            let _ = stop.send(());
+        }
         if let Some(stop) = self.maintenance_stop.take() {
             let _ = stop.send(());
         }
@@ -199,11 +523,28 @@ impl MatchingRuntime {
         } else {
             Ok(())
         };
+        let membership_result = if let Some(maintenance) = self.membership_maintenance.take() {
+            maintenance
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!("joining Matching membership maintenance: {error}")
+                })
+                .and_then(|result| {
+                    result.map_err(|error| {
+                        anyhow::anyhow!("stopping Matching membership maintenance: {error}")
+                    })
+                })
+        } else {
+            Ok(())
+        };
         if let Some(cache) = self.domain_cache.take() {
             cache.unregister_callback("matching");
             cache.stop();
         }
         maintenance_result?;
+        membership_result?;
+        peer_cleanup_result?;
+        dynamic_config_result?;
         drain_result?;
         Ok(())
     }
@@ -217,6 +558,20 @@ impl Drop for MatchingRuntime {
             let _ = stop.send(());
         }
         if let Some(task) = self.maintenance.take() {
+            task.abort();
+        }
+        if let Some(stop) = self.membership_maintenance_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(task) = self.membership_maintenance.take() {
+            task.abort();
+        }
+        if let Some((stop, task)) = self.dynamic_config_watch.take() {
+            let _ = stop.send(());
+            task.abort();
+        }
+        if let Some((stop, task)) = self.shard_distributor_peer_cleanup.take() {
+            let _ = stop.send(());
             task.abort();
         }
     }
@@ -258,6 +613,117 @@ pub fn live_shutdown_drain_duration(overlay: Arc<Mutex<DynamicConfigOverlay>>) -
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn empty_membership() -> crate::matching_membership::Membership {
+        crate::matching_membership::Membership::new("local", Vec::new())
+    }
+
+    fn installed_ownership_check(
+        percentage: i64,
+        draining: bool,
+        calls: Arc<AtomicUsize>,
+        result: Result<(), crate::matching_shard_distributor::GetShardProcessError>,
+    ) -> crate::grpc_matching::TaskListOwnershipCheck {
+        let (drain_tx, drain_rx) = tokio::sync::watch::channel(draining);
+        let _keep_drain_sender_alive = drain_tx;
+        shard_task_list_ownership_check(
+            empty_membership(),
+            Arc::new(move || percentage),
+            Arc::new(|| false),
+            drain_rx,
+            Arc::new(move |_| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let result = match &result {
+                    Ok(()) => Ok(()),
+                    Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(key)) => {
+                        Err(
+                            crate::matching_shard_distributor::GetShardProcessError::NotFound(
+                                key.clone(),
+                            ),
+                        )
+                    }
+                    Err(crate::matching_shard_distributor::GetShardProcessError::Heartbeat(
+                        error,
+                    )) => Err(
+                        crate::matching_shard_distributor::GetShardProcessError::Heartbeat(
+                            error.clone(),
+                        ),
+                    ),
+                };
+                Box::pin(async move { result })
+                    as Pin<
+                        Box<
+                            dyn Future<
+                                    Output = Result<
+                                        (),
+                                        crate::matching_shard_distributor::GetShardProcessError,
+                                    >,
+                                > + Send,
+                        >,
+                    >
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn installed_shard_ownership_check_matches_notfound_shutdown_and_transient_errors() {
+        use crate::matching_shard_distributor::GetShardProcessError;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let not_found = installed_ownership_check(
+            100,
+            false,
+            calls.clone(),
+            Err(GetShardProcessError::NotFound("queue".into())),
+        );
+        assert_eq!(
+            not_found("queue".into(), false).await.unwrap_err().code(),
+            tonic::Code::Aborted
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let transient = installed_ownership_check(
+            100,
+            false,
+            calls.clone(),
+            Err(GetShardProcessError::Heartbeat("rpc unavailable".into())),
+        );
+        let error = transient("queue".into(), false).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error
+            .message()
+            .starts_with("failed to lookup ownership in SD:"));
+
+        let shutting_down = installed_ownership_check(100, true, calls.clone(), Ok(()));
+        assert_eq!(
+            shutting_down("queue".into(), false)
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::Aborted
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "shutdown skips SD lookup");
+    }
+
+    #[tokio::test]
+    async fn installed_shard_ownership_check_bypasses_ring_for_cached_excluded_and_wraps_negative_percent(
+    ) {
+        use crate::matching_shard_distributor::GetShardProcessError;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let cached_excluded = installed_ownership_check(
+            0,
+            false,
+            calls.clone(),
+            Err(GetShardProcessError::NotFound("unused".into())),
+        );
+        assert!(cached_excluded("queue".into(), true).await.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let negative = installed_ownership_check(-1, false, calls.clone(), Ok(()));
+        assert!(negative("negative-percentage".into(), false).await.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn shutdown_drain_provider_reads_live_unfiltered_value() {

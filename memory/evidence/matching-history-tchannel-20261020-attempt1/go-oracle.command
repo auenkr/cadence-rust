@@ -1,0 +1,1 @@
+cd /home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/go && GOTOOLCHAIN=go1.25.14 CADENCE_THRIFT_WIRE_FIXTURE_OUT=/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/memory/evidence/matching-history-tchannel-20261020-attempt1/history-go-oracle.observed.json go test ./common/types/mapper/thrift -run ^TestGenerateHistoryTChannelWireOracle$ -count=1
