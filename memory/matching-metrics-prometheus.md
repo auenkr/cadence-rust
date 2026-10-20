@@ -108,7 +108,7 @@ values/tags and common tags. This direct comparison has not yet run.
 Run `tests/run-matching-telemetry-validation.sh` after the shared Cargo/Go lane
 is released. It runs nonzero focused Rust tests, pinned Go Matching/config
 oracles, the four-scenario Prometheus text diff, direct StatsD/M3 UDP
-comparisons, strict workspace Clippy, then the production server build. Every
-Cargo command uses the shared target and one build job. The UDP comparison
-runner also accepts the same required target and decodes M3 packets with the
-pinned Go reporter dependency.
+comparisons, strict workspace Clippy, the production server build, and the
+Go → Rust → Go MySQL persistence interoperability runner. Every Cargo command
+uses the shared target and one build job. The UDP comparison runner decodes M3
+packets with the pinned Go reporter dependency.

@@ -35,5 +35,7 @@ run_cargo clippy --locked --manifest-path "$repo_root/rust/Cargo.toml" \
   --workspace --all-targets -- -D warnings
 run_cargo build --locked --manifest-path "$repo_root/rust/Cargo.toml" \
   -p cadence-server --bin cadence-server
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR="$target_dir" \
+  python3 "$repo_root/tests/run-matching-mysql-interop.py"
 
-echo "Matching telemetry tests, Go reporter comparisons, strict Clippy, and build passed."
+echo "Matching telemetry/exporter tests, MySQL interoperability, strict Clippy, and build passed."
