@@ -783,7 +783,7 @@ impl ShardDistributorExecutor {
             .lock()
             .expect("SD processors lock")
             .iter()
-            .filter_map(|(key, managed)| {
+            .filter_map(|(key, _managed)| {
                 let ready = assignments.get(key).is_some_and(|assignment| {
                     assignment.status == sd::AssignmentStatus::Ready as i32
                 });
@@ -1103,7 +1103,8 @@ mod tests {
     #[derive(Default)]
     struct FakeProcessor {
         starts: AtomicUsize,
-        stops: AtomicUsize,
+        stops: Arc<AtomicUsize>,
+        stop_complete: Arc<tokio::sync::Notify>,
         status: AtomicU8,
     }
 
@@ -1113,8 +1114,12 @@ mod tests {
             Box::pin(async { Ok(()) })
         }
         fn stop(&self) -> BoxFuture<()> {
-            self.stops.fetch_add(1, Ordering::SeqCst);
-            Box::pin(async {})
+            let stops = self.stops.clone();
+            let stop_complete = self.stop_complete.clone();
+            Box::pin(async move {
+                stops.fetch_add(1, Ordering::SeqCst);
+                stop_complete.notify_one();
+            })
         }
         fn report(&self) -> ShardReport {
             ShardReport {
@@ -1287,6 +1292,9 @@ mod tests {
 
         assigned.store(false, Ordering::SeqCst);
         executor.heartbeat_and_update().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), processor.stop_complete.notified())
+            .await
+            .expect("asynchronous shard processor stop should complete");
         assert_eq!(processor.stops.load(Ordering::SeqCst), 1);
         assert!(matches!(
             executor.get_shard_process("task-list-b").await,
