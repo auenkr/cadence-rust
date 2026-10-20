@@ -21,7 +21,7 @@ artifacts = args.artifacts_dir.resolve()
 artifacts.mkdir(parents=True, exist_ok=True)
 
 command = subprocess.Popen(
-    ["go", "run", str(FIXTURE)],
+    ["go", "run", "./" + FIXTURE.as_posix()],
     cwd=GO,
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
@@ -65,6 +65,7 @@ try:
         cwd=ROOT,
         env=env,
         check=False,
+        timeout=1800,
     )
     raise SystemExit(run.returncode)
 finally:
