@@ -159,7 +159,11 @@ if production_matching:
     rust_text, replaced = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rust_text, count=1)
     if replaced != 1:
         raise RuntimeError('could not configure Rust Ringpop bootstrap hosts')
-    rust_text = rust_text.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: "dynamic-config.yaml"')
+    # The compatibility probe launches Rust from the repository root. Keep
+    # this path anchored to the isolated run directory so the transport and
+    # isolation settings written above are the ones Rust actually loads.
+    rust_text = rust_text.replace('filepath: "config/dynamicconfig/development.yaml"',
+        'filepath: ' + json.dumps(str(dynamic_config)))
     rust_config.write_text(rust_text)
     (work / 'rust-matching-command.json').write_text(json.dumps([
         str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config), '--root', str(work),
@@ -226,6 +230,7 @@ with (work / 'server.log').open('w') as log:
             'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
             'ringpopGate': 'original Go PeerProvider is active; runner does not substitute or hard-code Matching members and Rust must JOIN/publish serviceName/grpc labels' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
             'historyTransport': args.history_transport if production_matching else None,
+            'rustDynamicConfigFile': str(dynamic_config) if production_matching else None,
             'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
             'acceptanceEligible': not production_matching,
             'serverCommand': command}, indent=2) + '\n')
