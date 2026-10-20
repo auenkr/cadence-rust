@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"sort"
@@ -25,7 +26,7 @@ func main() {
 	defer listener.Close()
 	clientPrefix, scopePrefix, zone := "agent", "scope", "west"
 	if custom {
-		clientPrefix, scopePrefix, zone = "agent-canary", "matching-custom", "canary.v2"
+		clientPrefix, scopePrefix, zone = "agent-canary", "matching-custom", "canary_v2"
 	}
 	client, err := statsd.NewClientWithConfig(&statsd.ClientConfig{
 		Address: listener.LocalAddr().String(), Prefix: clientPrefix, UseBuffered: true,
@@ -36,7 +37,7 @@ func main() {
 	}
 	reporter := cadencestatsd.NewReporter(client, tallystatsd.Options{})
 	root, _ := tally.NewRootScope(tally.ScopeOptions{
-		Prefix: scopePrefix, Tags: map[string]string{"zone": zone, "cadence_service": "cadence_matching"}, Reporter: reporter,
+		Prefix: scopePrefix, Tags: map[string]string{"zone": zone, "cadence_service": "cadence-matching"}, Reporter: reporter,
 	}, 100*time.Millisecond)
 	defer client.Close()
 	tags := map[string]string{"operation": "HistoryClientGetMutableState", "cadence_role": "history_client"}
@@ -46,7 +47,10 @@ func main() {
 	scope.Gauge("queue").Update(4)
 	scope.Gauge("queue").Update(9)
 	scope.Timer("elapsed").Record(7 * time.Millisecond)
-	buckets := tally.DurationBuckets{0, 10 * time.Millisecond, 25 * time.Millisecond, 50 * time.Millisecond}
+	buckets := tally.DurationBuckets{0}
+	for i := 0; i <= 40; i++ {
+		buckets = append(buckets, time.Duration(float64(time.Millisecond)*math.Pow(2, float64(i)/2)))
+	}
 	scope.Histogram("latency", buckets).RecordDuration(20 * time.Millisecond)
 	scope.Histogram("latency", buckets).RecordDuration(21 * time.Millisecond)
 	time.Sleep(140 * time.Millisecond) // cross one Tally reporting boundary

@@ -11,3 +11,9 @@ comparison requirement.
 This is the Go side of encoder, tag, value, timestamp, histogram bucket,
 multi-host fan-out and shutdown-flush parity checks. The oracle has not been
 run in the source-only lane.
+
+`go run ./tools/matching-metrics-m3-oracle decode-hex` reads one hex-encoded
+packet per line from standard input and applies the same pinned Go v2 Thrift
+decoder. The Rust wire comparator uses this mode, removes timestamps and
+reporter-internal metrics, and compares normalized metric values/tags and
+common tags against the two-host Go output.

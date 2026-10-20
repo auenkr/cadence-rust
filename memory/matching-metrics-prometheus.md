@@ -2,6 +2,14 @@
 
 Date: 2026-10-20
 
+> **Superseded source status:** this document began as a Prometheus-only
+> checkpoint. Rust StatsD and M3 sinks and runtime wiring have since been
+> implemented. The old design-audit statements below saying that no M3 sink or
+> StatsD oracle exists are historical; use
+> [matching-metrics-runtime-next.md](matching-metrics-runtime-next.md) and the
+> comparison commands below for the current candidate. The telemetry/MySQL
+> integration candidate is still unvalidated until the gated commands pass.
+
 Commits in the `matching-telemetry` worktree:
 
 - `9a137f96a` Go-compatible Matching History metrics.
@@ -58,10 +66,10 @@ and a 300ms default flush interval; shutdown flushes the final packet.
 
 `matching_metrics_statsd.rs` ports those name and wire conventions, the
 Matching root service tag, the Go histogram bounds/duration formatter, UDP
-packet sizing, timer-based flushing, and flush-on-drop. Source verification is
-limited to rustfmt and `git diff --check`; neither the new UDP test nor Cargo
-tests were run because the runtime lane is occupied. The service runtime still
-needs to own/configure this sink in a later integration step.
+packet sizing, timer-based flushing, and flush-on-drop. The runtime now owns
+and configures the sink. `matching_metrics_statsd_oracle.rs` emits Rust UDP
+packets for the pinned Go fixture; `tests/verify-matching-metrics-udp-oracles.sh`
+sorts and compares actual packet lines for default and custom tags/prefixes.
 
 The StatsD sink now also stages counters and histogram bucket counts at a
 separate `reportingInterval` (default one second), while replacing gauges with
@@ -69,9 +77,8 @@ their latest value and emitting timers immediately. `flush()` forces pending
 aggregates into the UDP buffer before flushing packets; the periodic StatsD
 packet flush remains governed independently by `flushInterval`. A source-only
 UDP test covers these aggregate semantics with an explicit flush boundary.
-This has not yet been run, and there is not yet a pinned-Go StatsD UDP oracle;
-do not treat the implementation as validated until both are exercised and
-compared semantically.
+The Go packet producer and Rust comparison example are now present, but their
+comparison remains unrun until the shared runtime lane is available.
 
 ## M3 design audit
 
@@ -88,10 +95,20 @@ accepts common tags, queue, packet size and internal tags.
 
 The Tally M3 reporter defaults to the Thrift binary protocol; compact protocol
 is available in Tally's API but is not exposed by Cadence's YAML configuration.
-There is no M3 Rust sink or M3 metric Thrift model in the current Rust tree.
-The Cadence RPC Thrift crate is not an M3 metrics wire implementation. A
-service-scoped port will need M3 batch/metric/tag wire types and Go fixture
-oracle coverage, reporting interval aggregation matching Tally, packet sizing,
-multi-address UDP fan-out, queue/drop behavior, host/service/env/common tags,
-histogram tag formatting, and shutdown flush/close semantics. This is a design
-audit only; no M3 implementation was started.
+Rust now has a dedicated M3 v2 binary Thrift UDP sink with reporting aggregation,
+packet sizing, multi-address fan-out, host/service/env/common tags, histogram
+bucket formatting, and flush/close semantics. `matching_metrics_m3_oracle.rs`
+emits packets to two local receivers. The pinned Go oracle's `decode-hex` mode
+decodes Rust packets with Go's generated v2 Thrift reader; the comparison
+normalizes timestamp and reporter-internal fields before comparing metric
+values/tags and common tags. This direct comparison has not yet run.
+
+## Candidate validation sequence
+
+Run `tests/run-matching-telemetry-validation.sh` after the shared Cargo/Go lane
+is released. It runs nonzero focused Rust tests, pinned Go Matching/config
+oracles, the four-scenario Prometheus text diff, direct StatsD/M3 UDP
+comparisons, strict workspace Clippy, then the production server build. Every
+Cargo command uses the shared target and one build job. The UDP comparison
+runner also accepts the same required target and decodes M3 packets with the
+pinned Go reporter dependency.

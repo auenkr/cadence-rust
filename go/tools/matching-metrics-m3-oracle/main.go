@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bufio"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -17,6 +19,20 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "decode-hex" {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			packet, err := hex.DecodeString(scanner.Text())
+			if err != nil {
+				panic(err)
+			}
+			fmt.Println(decode(packet))
+		}
+		if err := scanner.Err(); err != nil {
+			panic(err)
+		}
+		return
+	}
 	left, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		panic(err)
@@ -37,7 +53,7 @@ func main() {
 		panic(err)
 	}
 	root, _ := tally.NewRootScope(tally.ScopeOptions{
-		Prefix: "cadence", Tags: map[string]string{"cadence_service": "cadence_matching"}, CachedReporter: reporter,
+		Prefix: "cadence", Tags: map[string]string{"cadence_service": "cadence-matching"}, CachedReporter: reporter,
 	}, time.Hour)
 	tags := map[string]string{"cadence_role": "history_client", "operation": "HistoryClientGetMutableState"}
 	scope := root.Tagged(tags)

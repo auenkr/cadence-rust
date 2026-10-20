@@ -13,7 +13,9 @@ for scenario in "summary default" "histogram default" "summary custom" "histogra
     cd "$repo_root/go"
     go run ./tools/matching-metrics-prometheus-oracle "$mode" "$config"
   ) >"$go_output"
-  cargo run --quiet --manifest-path "$repo_root/rust/Cargo.toml" \
+  CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:?set CARGO_BUILD_JOBS=1}" \
+  CARGO_TARGET_DIR="${CARGO_TARGET_DIR:?set the shared CARGO_TARGET_DIR}" \
+  cargo run --locked --quiet --manifest-path "$repo_root/rust/Cargo.toml" \
     -p cadence-server --example matching_metrics_prometheus_oracle -- "$mode" "$config" \
     >"$rust_output"
   if ! diff -u "$go_output" "$rust_output"; then
