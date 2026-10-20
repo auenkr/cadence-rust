@@ -481,3 +481,11 @@ Source-only unbuilt. Real Go Tally reporter oracle and summary timer support
 underway; actual Go default is summary (config comment wrong). StatsD/M3 and
 production metrics injection/instrumentation remain required. All new slices
 serve Matching only; no next-service migration.
+
+### Resumed checkpoint 2026-10-20
+
+Root user AGENTS.md, matching_registry.rs and untracked matching_shard_processor.rs remain preserved; do not import worker whole-file replacements over them.
+Runtime still owns sole serialized build lane/shared target. Coherent routing/config/SD/processor/ownership/shutdown/callback tests passed, binary check passed, pinned Go dynamic configuration oracle passed. Static History transport selector and production callback parity fixes are in isolated runtime candidate. Actual Go SD gate exposed required YARPC metadata (service shard-manager, caller cadence-matching, encoding proto), then missing heartbeat TTL. Adding tonic grpc-timeout to heartbeat/GetShardOwner advanced gate to reassignment; Ready versus DONE assertion is being checked against pinned Go enum. Gate has NOT passed yet. Final strict lint/build, mixed SDK isolation/restart and both History transports remain pending.
+MySQL source/harness remains uncompiled. Rejected KILL QUERY cancellation draft because of connection ID reuse/control connection/deadline hazards. Worker replacing domain cancellation with dedicated nonpooled mysql_async connection on owned runtime, future-owned permit and abort on deadline; real cancellation/drop/maxConns tests required. No invented fixed task DB timeout: Go task calls use context.Background; domain cache refresh has outer and child budgets.
+Telemetry exporters and Go oracles remain source-only/unrun. Inbound shared-trait instrumentation added for 13 methods with actual request dimensions, typed status counters and cancellation latency; task-list kind/context dimensions and actual gRPC/Thrift once-only tests still assigned. Production mounting/full metric parity remains pending.
+Matching remains incomplete. No History service migration started. Workers must explicitly set isolated workdir on every call because resumed calls otherwise default to root. Artifact directories may contain binaries/databases/private TLS keys: stage selected evidence only.
