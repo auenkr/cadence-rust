@@ -27,6 +27,9 @@ parser.add_argument('--go-mixed-server-bin', type=Path, help='reuse a Go test bi
 parser.add_argument('--rust-production-binary', type=Path, help='run an already built Rust server binary with the original Go Ringpop provider (requires production Matching Ringpop assembly)')
 parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
     help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
+parser.add_argument('--matching-shard-distributor-address', help='configure production Rust Matching to use this shard-manager gRPC endpoint')
+parser.add_argument('--matching-shard-distributor-namespace', help='configure one production Matching shard-manager namespace')
+parser.add_argument('--matching-onboarding-percentage', type=int, help='set matching.percentageOnboardedToShardManager in Rust dynamic config')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
@@ -41,6 +44,13 @@ if production_matching and (not args.rust_production_binary.is_file() or not os.
     parser.error(f'--rust-production-binary must name an existing executable: {args.rust_production_binary}')
 if args.history_transport != 'grpc' and not production_matching:
     parser.error('--history-transport applies only with --rust-production-binary')
+sd_options = (args.matching_shard_distributor_address, args.matching_shard_distributor_namespace, args.matching_onboarding_percentage)
+if any(value is not None for value in sd_options) and not production_matching:
+    parser.error('shard-distributor options apply only with --rust-production-binary')
+if any(value is not None for value in sd_options) and not all(value is not None for value in sd_options):
+    parser.error('shard-distributor address, namespace, and onboarding percentage must be configured together')
+if args.matching_onboarding_percentage is not None and not 0 <= args.matching_onboarding_percentage <= 100:
+    parser.error('--matching-onboarding-percentage must be between 0 and 100')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
@@ -91,6 +101,11 @@ if args.rust_matching or args.matching_restart:
         '  - value: true\n'
         'system.allIsolationGroups:\n'
         '  - value: ["zone-a", "zone-b"]\n'
+    )
+if args.matching_onboarding_percentage is not None:
+    dynamic_text += (
+        '\nmatching.percentageOnboardedToShardManager:\n'
+        f'  - value: {args.matching_onboarding_percentage}\n'
     )
 dynamic_config.write_text(dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
@@ -165,6 +180,23 @@ if production_matching:
     # isolation settings written above are the ones Rust actually loads.
     rust_text = rust_text.replace('filepath: "config/dynamicconfig/development.yaml"',
         'filepath: ' + json.dumps(str(rust_dynamic_config)))
+    if args.matching_shard_distributor_address is not None:
+        rust_text, replaced = re.subn(
+            r'(?m)^(  hostPort: ).*$',
+            r'\g<1>' + json.dumps(args.matching_shard_distributor_address),
+            rust_text,
+            count=1,
+        )
+        if replaced != 1:
+            raise RuntimeError('could not configure Rust shardDistributorClient.hostPort')
+        rust_text, replaced = re.subn(
+            r'(?m)^(    - namespace: ).*$',
+            r'\g<1>' + json.dumps(args.matching_shard_distributor_namespace),
+            rust_text,
+            count=1,
+        )
+        if replaced != 1:
+            raise RuntimeError('could not configure Rust shard-distributor namespace')
     rust_config.write_text(rust_text)
     (work / 'rust-matching-command.json').write_text(json.dumps([
         str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config), '--root', str(work),
@@ -221,7 +253,10 @@ with (work / 'server.log').open('w') as log:
                     'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
-                    'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
+                    'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db'),
+                    'CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL': os.environ.get('CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL', ''),
+                    'CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE': args.matching_shard_distributor_namespace or '',
+                    'CADENCE_MATCHING_ONBOARDING_PERCENTAGE': str(args.matching_onboarding_percentage if args.matching_onboarding_percentage is not None else '')}
             result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
                 env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,

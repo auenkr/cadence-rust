@@ -20,8 +20,68 @@ const peer = process.argv[2] || '127.0.0.1:7833';
 const restartMode = process.argv[7] === 'restart';
 const goServicesPid = Number(process.argv[8] || 0);
 const productionMode = process.argv[9] === 'production';
+const shardManagerControl = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL;
+const shardManagerNamespace = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE || 'matching';
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
+let managedShardNames = new Set();
+let assignedExecutorId = '';
+let shardAssignmentLock = Promise.resolve();
+async function shardManagerCommand(command) {
+  if (!shardManagerControl) return null;
+  const response = await fetch(`${shardManagerControl}/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ namespace: shardManagerNamespace, ...command }),
+  });
+  if (!response.ok) throw new Error(`Go shard-manager control ${command.op} failed: HTTP ${response.status}`);
+  return (await response.json()).result;
+}
+async function registerShardWithGoManager(shardName, force = false) {
+  if (!shardManagerControl) return;
+  const next = shardAssignmentLock.then(async () => {
+    const wasManaged = managedShardNames.has(shardName);
+    managedShardNames.add(shardName);
+    const deadline = Date.now() + 30000;
+    let executorId, heartbeat;
+    while (Date.now() < deadline) {
+      const stats = await shardManagerCommand({ op: 'stats' });
+      const entries = Object.entries(stats || {}).sort((a, b) =>
+        (Date.parse(b[1].LastHeartbeat || b[1].lastHeartbeat || '') || 0)
+          - (Date.parse(a[1].LastHeartbeat || a[1].lastHeartbeat || '') || 0));
+      if (entries.length) {
+        [executorId, heartbeat] = entries[0];
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!executorId) throw new Error('Rust Matching did not heartbeat to the configured Go shard-manager');
+    if (force || executorId !== assignedExecutorId || !wasManaged) {
+      await shardManagerCommand({
+        op: 'assign', executor: executorId, shards: [...managedShardNames],
+        metadata: heartbeat.Metadata || heartbeat.metadata || {},
+      });
+      assignedExecutorId = executorId;
+    }
+    const readyDeadline = Date.now() + 15000;
+    while (Date.now() < readyDeadline) {
+      const stats = await shardManagerCommand({ op: 'stats' });
+      const current = stats?.[executorId];
+      const reports = current?.ReportedShards || current?.reportedShards || {};
+      if ([...managedShardNames].every(name => {
+        const status = reports[name]?.Status ?? reports[name]?.status;
+        return status === 1 || status === 'READY' || status === 'ready';
+      })) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error(`Rust Matching did not report assigned shard ${shardName} READY`);
+  });
+  shardAssignmentLock = next.catch(() => {});
+  return next;
+}
 function call(service, method, request) {
+  const taskListName = request.taskList?.name || request.request?.taskList?.name;
+  if (taskListName) return registerShardWithGoManager(taskListName).then(() => callRpc(service, method, request));
+  return callRpc(service, method, request);
+}
+function callRpc(service, method, request) {
   const metadata = new grpc.Metadata();
   metadata.set('rpc-service', service === 'Matching' ? 'cadence-matching' : 'cadence-frontend');
   metadata.set('rpc-encoding', 'proto');

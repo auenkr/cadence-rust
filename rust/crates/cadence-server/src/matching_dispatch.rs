@@ -1006,45 +1006,6 @@ mod tests {
             "go-peer-workflow"
         );
 
-        let mut decision_add = tonic::Request::new(m::AddDecisionTaskRequest::default());
-        decision_add.set_timeout(Duration::from_secs(8));
-        matching_yarpc_grpc_metadata(&mut decision_add);
-        let decision_add = m::matching_api_client::MatchingApiClient::new(channel.clone())
-            .add_decision_task(decision_add)
-            .await
-            .unwrap();
-        assert_eq!(decision_add.partition_config.unwrap().version, 19);
-        assert_go_yarpc_observation(decision_add.metadata());
-
-        let mut activity_add = tonic::Request::new(m::AddActivityTaskRequest::default());
-        activity_add.set_timeout(Duration::from_secs(8));
-        matching_yarpc_grpc_metadata(&mut activity_add);
-        let activity_add = m::matching_api_client::MatchingApiClient::new(channel.clone())
-            .add_activity_task(activity_add)
-            .await
-            .unwrap();
-        assert_eq!(activity_add.partition_config.unwrap().version, 23);
-        assert_go_yarpc_observation(activity_add.metadata());
-
-        let mut query = tonic::Request::new(m::QueryWorkflowRequest::default());
-        query.set_timeout(Duration::from_secs(8));
-        matching_yarpc_grpc_metadata(&mut query);
-        let query = m::matching_api_client::MatchingApiClient::new(channel)
-            .query_workflow(query)
-            .await
-            .unwrap();
-        assert_eq!(query.query_result.unwrap().data, b"go-yarpc-query");
-        assert_go_yarpc_observation(query.metadata());
-    }
-    fn assert_go_yarpc_observation(metadata: &tonic::metadata::MetadataMap) {
-        for (key, value) in [
-            ("observed-rpc-service", "cadence-matching"),
-            ("observed-rpc-caller", "cadence-matching"),
-            ("observed-rpc-encoding", "proto"),
-        ] {
-            assert_eq!(metadata.get(key).unwrap(), value);
-        }
-        assert!(metadata.get("observed-deadline").is_some());
     }
     fn fixture(
         count: usize,

@@ -113,6 +113,124 @@ async fn matching_remote_routing_propagates_spectator_failure_without_ring_fallb
 }
 
 #[tokio::test]
+async fn matching_remote_adds_and_query_reach_go_yarpc_through_production_handlers() {
+    let Ok(address) = std::env::var("CADENCE_MATCHING_GO_PEER") else {
+        return;
+    };
+    let (_dir, store, matching, key) = fixture();
+    let child_name = "/__cadence_sys/queue/1";
+    let membership = membership_with_parent_remote(child_name, "queue", &address);
+    let matching = matching.with_membership(membership);
+
+    let mut decision = Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(),
+        workflow_execution: execution(),
+        task_list: Some(p::TaskList {
+            name: child_name.into(),
+            kind: 0,
+            ..Default::default()
+        }),
+        schedule_id: 31,
+        ..Default::default()
+    });
+    decision.set_timeout(Duration::from_secs(8));
+    matching.add_decision_task(decision).await.unwrap();
+    assert_eq!(
+        store
+            .task_list_size(
+                &TaskListKey {
+                    domain_id: key.domain_id,
+                    name: child_name.into(),
+                    task_type: 0,
+                },
+                0
+            )
+            .unwrap(),
+        0,
+        "successful remote sync match must not leave a local queued copy");
+
+    let mut activity = Request::new(m::AddActivityTaskRequest {
+        domain_id: key.domain_id.to_string(),
+        source_domain_id: key.domain_id.to_string(),
+        workflow_execution: execution(),
+        task_list: Some(p::TaskList {
+            name: child_name.into(),
+            kind: 1,
+            ..Default::default()
+        }),
+        schedule_id: 32,
+        ..Default::default()
+    });
+    activity.set_timeout(Duration::from_secs(8));
+    matching.add_activity_task(activity).await.unwrap();
+    assert_eq!(
+        store
+            .task_list_size(
+                &TaskListKey {
+                    domain_id: key.domain_id,
+                    name: child_name.into(),
+                    task_type: 1,
+                },
+                0
+            )
+            .unwrap(),
+        0,
+        "successful remote activity sync match must not leave a local queued copy");
+
+    let mut query = Request::new(m::QueryWorkflowRequest {
+        domain_id: key.domain_id.to_string(),
+        request: Some(p::QueryWorkflowRequest::default()),
+        task_list: Some(p::TaskList {
+            name: child_name.into(),
+            kind: 0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    query.set_timeout(Duration::from_secs(8));
+    let response = matching.query_workflow(query).await.unwrap().into_inner();
+    assert_eq!(response.query_result.unwrap().data, b"go-yarpc-query");
+    matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+}
+
+fn membership_with_parent_remote(
+    child: &str,
+    parent: &str,
+    remote_address: &str,
+) -> crate::matching_membership::Membership {
+    use cadence_common::membership::Host;
+    for candidate in 0..100_000 {
+        let membership = crate::matching_membership::Membership::new(
+            "rust-matching",
+            vec![
+                Host {
+                    address: format!("rust-{candidate}:7935"),
+                    identity: "rust-matching".into(),
+                    grpc_address: format!("rust-{candidate}:7835"),
+                },
+                Host {
+                    address: remote_address.into(),
+                    identity: "go-matching".into(),
+                    grpc_address: remote_address.into(),
+                },
+            ],
+        );
+        if membership.owner(child).is_ok_and(|host| host.identity() == "rust-matching")
+            && membership.owner(parent).is_ok_and(|host| host.identity() == "go-matching")
+        {
+            return membership;
+        }
+    }
+    panic!("could not construct a matching membership ring with local child and remote parent");
+}
+
+#[tokio::test]
 async fn durable_queue_runs_ownership_preflight_before_registry_and_propagates_transient_error() {
     use cadence_common::membership::Host;
     use std::sync::Mutex;
