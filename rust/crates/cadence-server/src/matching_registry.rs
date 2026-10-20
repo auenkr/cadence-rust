@@ -473,6 +473,11 @@ impl QueueRegistry {
         owners.iter().map(|qps| qps.qps()).sum()
     }
 
+    #[cfg(test)]
+    pub(crate) fn loaded_owner_count(&self) -> usize {
+        self.state.lock().expect("Matching registry lock").owners.len()
+    }
+
     /// Stop all loaded owners for one exact task-list name so a later Get rebuilds them.
     pub(crate) async fn stop_task_list_name(&self, name: &str) -> Result<(), Status> {
         let registry = self.clone();
