@@ -22,9 +22,11 @@ use std::{
     fmt,
     num::NonZeroUsize,
     path::PathBuf,
-    sync::atomic::{AtomicUsize, Ordering},
-    sync::Arc,
-    time::Duration,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
 };
 use uuid::Uuid;
 
@@ -709,9 +711,12 @@ impl CassandraSessionConfig {
         // into gocql ClusterConfig, so intentionally leave them unused here too.
         if !matches!(
             self.host_selection_policy.as_str(),
-            "" | "tokenaware,roundrobin" | "roundrobin"
+            "" | "tokenaware,roundrobin" | "roundrobin" | "hostpool-epsilon-greedy"
         ) {
-            anyhow::bail!("Cassandra hostSelectionPolicy {:?} has no Scylla equivalent; supported values are tokenaware,roundrobin and roundrobin", self.host_selection_policy);
+            anyhow::bail!(
+                "unknown Cassandra hostSelectionPolicy {:?}",
+                self.host_selection_policy
+            );
         }
         Ok(self)
     }
@@ -737,10 +742,14 @@ impl CassandraSessionConfig {
             })
             .collect();
         let host_selection_policy: Arc<dyn scylla::policies::load_balancing::LoadBalancingPolicy> =
-            Arc::new(CassandraRoundRobinPolicy {
-                token_aware: self.host_selection_policy != "roundrobin",
-                next: AtomicUsize::default(),
-            });
+            if self.host_selection_policy == "hostpool-epsilon-greedy" {
+                Arc::new(CassandraHostPoolPolicy::default())
+            } else {
+                Arc::new(CassandraRoundRobinPolicy {
+                    token_aware: self.host_selection_policy != "roundrobin",
+                    next: AtomicUsize::default(),
+                })
+            };
         let profile = ExecutionProfile::builder()
             .consistency(self.consistency)
             .serial_consistency(self.serial_consistency)
@@ -883,6 +892,333 @@ impl CassandraRoundRobinPolicy {
                     .find(|node| Arc::ptr_eq(node, replica))
             })
             .collect()
+    }
+}
+
+const HOSTPOOL_BUCKETS: usize = 120;
+const HOSTPOOL_BUCKET_WIDTH: Duration = Duration::from_millis(2500);
+const HOSTPOOL_INITIAL_RETRY: Duration = Duration::from_secs(30);
+const HOSTPOOL_MAX_RETRY: Duration = Duration::from_secs(900);
+const HOSTPOOL_INITIAL_EPSILON: f32 = 0.3;
+const HOSTPOOL_EPSILON_DECAY: f32 = 0.9;
+const HOSTPOOL_MIN_EPSILON: f32 = 0.01;
+
+trait CassandraClock: Send + Sync + fmt::Debug {
+    fn now(&self) -> Duration;
+}
+
+#[derive(Debug)]
+struct MonotonicCassandraClock(Instant);
+
+impl Default for MonotonicCassandraClock {
+    fn default() -> Self {
+        Self(Instant::now())
+    }
+}
+
+impl CassandraClock for MonotonicCassandraClock {
+    fn now(&self) -> Duration {
+        self.0.elapsed()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct HostpoolLatencyBucket {
+    count: u64,
+    total_nanos: u128,
+}
+
+#[derive(Debug)]
+struct HostpoolHostState {
+    dead: bool,
+    retry_at: Duration,
+    retry_delay: Duration,
+    buckets: Vec<HostpoolLatencyBucket>,
+    bucket_index: usize,
+    last_rotation: Duration,
+}
+
+impl Default for HostpoolHostState {
+    fn default() -> Self {
+        Self {
+            dead: false,
+            retry_at: Duration::ZERO,
+            retry_delay: HOSTPOOL_INITIAL_RETRY,
+            buckets: vec![HostpoolLatencyBucket::default(); HOSTPOOL_BUCKETS],
+            bucket_index: 0,
+            last_rotation: Duration::ZERO,
+        }
+    }
+}
+
+impl HostpoolHostState {
+    fn rotate(&mut self, now: Duration) {
+        let width = HOSTPOOL_BUCKET_WIDTH.as_nanos();
+        let steps = now.saturating_sub(self.last_rotation).as_nanos() / width;
+        if steps == 0 {
+            return;
+        }
+        if steps >= HOSTPOOL_BUCKETS as u128 {
+            self.buckets.fill(HostpoolLatencyBucket::default());
+            self.bucket_index = (self.bucket_index + (steps % HOSTPOOL_BUCKETS as u128) as usize)
+                % HOSTPOOL_BUCKETS;
+        } else {
+            for _ in 0..steps {
+                self.bucket_index = (self.bucket_index + 1) % HOSTPOOL_BUCKETS;
+                self.buckets[self.bucket_index] = HostpoolLatencyBucket::default();
+            }
+        }
+        if steps >= HOSTPOOL_BUCKETS as u128 {
+            self.last_rotation = now;
+        } else {
+            self.last_rotation += HOSTPOOL_BUCKET_WIDTH * (steps as u32);
+        }
+    }
+
+    fn record_latency(&mut self, latency: Duration, now: Duration) {
+        self.rotate(now);
+        let bucket = &mut self.buckets[self.bucket_index];
+        bucket.count = bucket.count.saturating_add(1);
+        bucket.total_nanos = bucket.total_nanos.saturating_add(latency.as_nanos());
+    }
+
+    /// Mirrors go-hostpool's 120-bucket linearly weighted rolling average.
+    fn weighted_average_nanos(&self) -> f64 {
+        let mut value = 0.0;
+        let mut last_value = 0.0;
+        for age in 1..=HOSTPOOL_BUCKETS {
+            let index = (self.bucket_index + age) % HOSTPOOL_BUCKETS;
+            let bucket = self.buckets[index];
+            if bucket.count > 0 {
+                last_value = bucket.total_nanos as f64 / bucket.count as f64;
+            }
+            value += last_value * age as f64 / HOSTPOOL_BUCKETS as f64;
+        }
+        value
+    }
+
+    fn mark_failed(&mut self, now: Duration) {
+        if !self.dead {
+            self.dead = true;
+            self.retry_delay = HOSTPOOL_INITIAL_RETRY;
+            self.retry_at = now + self.retry_delay;
+        }
+    }
+
+    fn retry_after_expiry(&mut self, now: Duration) {
+        self.retry_delay = (self.retry_delay * 2).min(HOSTPOOL_MAX_RETRY);
+        self.retry_at = now + self.retry_delay;
+    }
+}
+
+fn decay_hostpool_epsilon(epsilon: &mut f32) {
+    *epsilon = (*epsilon * HOSTPOOL_EPSILON_DECAY).max(HOSTPOOL_MIN_EPSILON);
+}
+
+#[derive(Debug)]
+struct HostpoolState {
+    epsilon: f32,
+    next_host_index: usize,
+    hosts: HashMap<Uuid, HostpoolHostState>,
+}
+
+impl Default for HostpoolState {
+    fn default() -> Self {
+        Self {
+            epsilon: HOSTPOOL_INITIAL_EPSILON,
+            next_host_index: 0,
+            hosts: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CassandraHostPoolPolicy {
+    clock: Arc<dyn CassandraClock>,
+    state: Mutex<HostpoolState>,
+    picks: Mutex<HashMap<usize, Uuid>>,
+}
+
+impl Default for CassandraHostPoolPolicy {
+    fn default() -> Self {
+        Self::with_clock(Arc::new(MonotonicCassandraClock::default()))
+    }
+}
+
+impl CassandraHostPoolPolicy {
+    fn with_clock(clock: Arc<dyn CassandraClock>) -> Self {
+        Self {
+            clock,
+            state: Mutex::new(HostpoolState::default()),
+            picks: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn choose<'a>(
+        &self,
+        cluster: &'a scylla::cluster::ClusterState,
+    ) -> Option<scylla::cluster::NodeRef<'a>> {
+        use rand::Rng;
+
+        let nodes: Vec<_> = cluster
+            .get_nodes_info()
+            .iter()
+            .filter(|node| node.is_connected())
+            .collect();
+        if nodes.is_empty() {
+            return None;
+        }
+        let now = self.clock.now();
+        let mut state = self.state.lock().expect("hostpool policy lock");
+        let live_ids: std::collections::HashSet<_> =
+            nodes.iter().map(|node| node.host_id).collect();
+        state.hosts.retain(|id, _| live_ids.contains(id));
+        for node in &nodes {
+            state.hosts.entry(node.host_id).or_default().rotate(now);
+        }
+
+        if rand::thread_rng().gen::<f32>() < state.epsilon {
+            decay_hostpool_epsilon(&mut state.epsilon);
+            return hostpool_round_robin(&mut state, &nodes, now);
+        }
+
+        let mut candidates = Vec::new();
+        let mut total_weight = 0.0;
+        for (index, node) in nodes.iter().enumerate() {
+            let host = state.hosts.get(&node.host_id).expect("host inserted");
+            if host.dead && host.retry_at > now {
+                continue;
+            }
+            let average = host.weighted_average_nanos();
+            if average > 0.0 {
+                let weight = 1.0 / average;
+                total_weight += weight;
+                candidates.push((index, weight));
+            }
+        }
+        if candidates.is_empty() || total_weight <= 0.0 {
+            return hostpool_round_robin(&mut state, &nodes, now);
+        }
+        let mut target = rand::thread_rng().gen::<f64>() * total_weight;
+        let mut selected = candidates.last().map(|(index, _)| *index)?;
+        for (index, weight) in candidates {
+            target -= weight;
+            if target <= 0.0 {
+                selected = index;
+                break;
+            }
+        }
+        let host = state.hosts.get_mut(&nodes[selected].host_id)?;
+        if host.dead {
+            host.retry_after_expiry(now);
+        }
+        Some(nodes[selected])
+    }
+
+    fn record(&self, host_id: Uuid, latency: Duration, failed: bool) {
+        let now = self.clock.now();
+        let mut state = self.state.lock().expect("hostpool policy lock");
+        let host = state.hosts.entry(host_id).or_default();
+        host.record_latency(latency, now);
+        if failed {
+            host.mark_failed(now);
+        } else {
+            host.dead = false;
+        }
+    }
+
+    fn request_key(request: &scylla::policies::load_balancing::RoutingInfo<'_>) -> usize {
+        request as *const _ as usize
+    }
+}
+
+fn hostpool_round_robin<'a>(
+    state: &mut HostpoolState,
+    nodes: &[scylla::cluster::NodeRef<'a>],
+    now: Duration,
+) -> Option<scylla::cluster::NodeRef<'a>> {
+    if nodes.is_empty() {
+        return None;
+    }
+    for offset in 0..nodes.len() {
+        let index = (offset + state.next_host_index) % nodes.len();
+        let host = state.hosts.entry(nodes[index].host_id).or_default();
+        if !host.dead {
+            state.next_host_index = (index + 1) % nodes.len();
+            return Some(nodes[index]);
+        }
+        if host.retry_at <= now {
+            host.retry_after_expiry(now);
+            state.next_host_index = (index + 1) % nodes.len();
+            return Some(nodes[index]);
+        }
+    }
+    // go-hostpool is configured with returnUnhealthy=true: when every member
+    // is inside backoff, it clears the dead marks and returns the first host.
+    for node in nodes {
+        state.hosts.entry(node.host_id).or_default().dead = false;
+    }
+    state.next_host_index = 1 % nodes.len();
+    Some(nodes[0])
+}
+
+impl scylla::policies::load_balancing::LoadBalancingPolicy for CassandraHostPoolPolicy {
+    fn pick<'a>(
+        &'a self,
+        request: &'a scylla::policies::load_balancing::RoutingInfo<'a>,
+        cluster: &'a scylla::cluster::ClusterState,
+    ) -> Option<(scylla::cluster::NodeRef<'a>, Option<scylla::routing::Shard>)> {
+        let node = self.choose(cluster)?;
+        self.picks
+            .lock()
+            .expect("hostpool picks lock")
+            .insert(Self::request_key(request), node.host_id);
+        Some((node, None))
+    }
+
+    fn fallback<'a>(
+        &'a self,
+        request: &'a scylla::policies::load_balancing::RoutingInfo<'a>,
+        cluster: &'a scylla::cluster::ClusterState,
+    ) -> scylla::policies::load_balancing::FallbackPlan<'a> {
+        self.picks
+            .lock()
+            .expect("hostpool picks lock")
+            .remove(&Self::request_key(request));
+        Box::new(std::iter::from_fn(move || {
+            self.choose(cluster).map(|node| (node, None))
+        }))
+    }
+
+    fn on_request_success(
+        &self,
+        request: &scylla::policies::load_balancing::RoutingInfo<'_>,
+        latency: Duration,
+        node: scylla::cluster::NodeRef<'_>,
+    ) {
+        self.picks
+            .lock()
+            .expect("hostpool picks lock")
+            .remove(&Self::request_key(request));
+        self.record(node.host_id, latency, false);
+    }
+
+    fn on_request_failure(
+        &self,
+        request: &scylla::policies::load_balancing::RoutingInfo<'_>,
+        latency: Duration,
+        node: scylla::cluster::NodeRef<'_>,
+        _error: &scylla::errors::RequestAttemptError,
+    ) {
+        self.picks
+            .lock()
+            .expect("hostpool picks lock")
+            .remove(&Self::request_key(request));
+        self.record(node.host_id, latency, true);
+    }
+
+    fn name(&self) -> String {
+        "CadenceGoHostPoolEpsilonGreedy".to_string()
     }
 }
 
@@ -1065,6 +1401,22 @@ impl scylla::authentication::AuthenticatorProvider for GoPasswordAuthenticator {
 mod session_config_tests {
     use super::*;
 
+    #[derive(Debug, Default)]
+    struct FakeClock(Mutex<Duration>);
+
+    impl CassandraClock for FakeClock {
+        fn now(&self) -> Duration {
+            *self.0.lock().unwrap()
+        }
+    }
+
+    impl FakeClock {
+        fn advance(&self, amount: Duration) {
+            let mut now = self.0.lock().unwrap();
+            *now += amount;
+        }
+    }
+
     #[test]
     fn cassandra_defaults_and_explicit_options_match_go() {
         let config = CassandraSessionConfig::from_parts(
@@ -1127,7 +1479,7 @@ mod session_config_tests {
     }
 
     #[test]
-    fn round_robin_host_policy_is_supported_but_hostpool_is_rejected() {
+    fn round_robin_and_hostpool_policies_are_supported() {
         let config = CassandraSessionConfig::from_parts(
             ["127.0.0.1".to_string()],
             9042,
@@ -1143,14 +1495,49 @@ mod session_config_tests {
                 ..Default::default()
             })
             .is_ok());
-        assert!(config
+        let hostpool = config
             .with_go_options(CassandraSessionOptions {
                 host_selection_policy: "hostpool-epsilon-greedy".into(),
                 ..Default::default()
             })
-            .unwrap_err()
-            .to_string()
-            .contains("hostSelectionPolicy"));
+            .unwrap();
+        assert_eq!(hostpool.host_selection_policy, "hostpool-epsilon-greedy");
+    }
+
+    #[test]
+    fn hostpool_latency_buckets_expire_after_the_rolling_window() {
+        let clock = Arc::new(FakeClock::default());
+        let mut host = HostpoolHostState::default();
+        host.record_latency(Duration::from_millis(40), clock.now());
+        assert!(host.weighted_average_nanos() > 0.0);
+
+        clock.advance(HOSTPOOL_BUCKET_WIDTH);
+        host.rotate(clock.now());
+        assert_eq!(host.bucket_index, 1);
+        assert!(host.weighted_average_nanos() > 0.0);
+
+        clock.advance(HOSTPOOL_BUCKET_WIDTH * HOSTPOOL_BUCKETS as u32);
+        host.rotate(clock.now());
+        assert_eq!(host.weighted_average_nanos(), 0.0);
+        assert_eq!(host.bucket_index, 1);
+    }
+
+    #[test]
+    fn hostpool_failure_backoff_doubles_after_each_expired_probe() {
+        let clock = Arc::new(FakeClock::default());
+        let mut host = HostpoolHostState::default();
+        host.mark_failed(clock.now());
+        assert_eq!(host.retry_at, HOSTPOOL_INITIAL_RETRY);
+        assert_eq!(host.retry_delay, HOSTPOOL_INITIAL_RETRY);
+
+        clock.advance(HOSTPOOL_INITIAL_RETRY);
+        host.retry_after_expiry(clock.now());
+        assert_eq!(host.retry_delay, Duration::from_secs(60));
+        assert_eq!(host.retry_at, Duration::from_secs(90));
+
+        host.retry_delay = HOSTPOOL_MAX_RETRY;
+        host.retry_after_expiry(clock.now());
+        assert_eq!(host.retry_delay, HOSTPOOL_MAX_RETRY);
     }
 }
 
