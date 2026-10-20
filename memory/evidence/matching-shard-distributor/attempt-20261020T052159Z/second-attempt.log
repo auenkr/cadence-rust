@@ -1,0 +1,151 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 29s
+  Executable unittests src/lib.rs (target/debug/deps/cadence_server-38a5878de2feb9ba)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.53s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 7 tests
+test matching_shard_distributor::tests::go_executor_ttl_and_jitter_boundaries_are_preserved ... ok
+test matching_shard_distributor::tests::executor_shutdown_before_start_is_terminal ... ok
+test matching_shard_distributor::tests::spectator_fake_tonic_peer_covers_snapshot_fallback_and_terminal_shutdown ... ok
+test matching_shard_distributor::tests::spectator_initial_snapshot_wait_obeys_caller_deadline ... ok
+test matching_shard_distributor::tests::spectator_shutdown_before_start_is_terminal_and_wakes_waiters ... ok
+test matching_shard_distributor::tests::spectator_waits_for_initial_snapshot_and_returns_cached_owner ... ok
+test matching_shard_distributor::tests::pinned_executor_heartbeat_assignment_and_drain_contract ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 310 filtered out; finished in 0.14s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 12 tests
+test config::tests::canonical_and_legacy_cluster_keys_use_go_precedence ... ok
+test config::tests::embedded_defaults_match_go_development_config ... ok
+test config::tests::parses_cassandra_csv_hosts ... ok
+test config::tests::parses_go_env_templated_ports ... ok
+test config::tests::parses_go_style_config ... ok
+test config::tests::parses_real_go_base_config_subset ... ok
+test config::tests::rejects_negative_shards ... ok
+test config::tests::ringpop_configuration_maps_defaults_validation_and_signed_values ... ok
+test config::tests::shard_distributor_config_matches_go_names_and_duration_semantics ... ok
+test config::tests::parses_real_go_development_config ... ok
+test config::tests::shard_distributor_matching_validation_handles_zero_one_and_multiple_namespaces ... ok
+test config::tests::shard_distributor_rejects_invalid_namespace_and_heartbeat_interval ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 305 filtered out; finished in 0.01s
+
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-persistence)
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+error: you seem to be trying to use `match` for destructuring a single pattern. Consider using `if let`
+   --> crates/cadence-server/src/matching_shard_distributor.rs:352:13
+    |
+352 | / ...   match stream {
+353 | | ...       Ok(response) => {
+354 | | ...           let mut stream = response.into_inner();
+355 | | ...           let stream_timeout = tokio::time::sleep(SPECTATOR_STREA...
+...   |
+387 | | ...       Err(_) => {}
+388 | | ...   }
+    | |_______^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#single_match
+    = note: `-D clippy::single-match` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::single_match)]`
+help: try
+    |
+352 ~             if let Ok(response) = stream {
+353 +                 let mut stream = response.into_inner();
+354 +                 let stream_timeout = tokio::time::sleep(SPECTATOR_STREAM_TIMEOUT);
+355 +                 tokio::pin!(stream_timeout);
+356 +                 loop {
+357 +                     tokio::select! {
+358 +                         _ = &mut stream_timeout => break,
+359 +                         _ = stop.changed() => {
+360 +                             if *stop.borrow_and_update() { return; }
+361 +                         }
+362 +                         item = stream.message() => match item {
+363 +                             Ok(Some(snapshot)) => {
+364 +                                 let mut owners = HashMap::new();
+365 +                                 for executor in snapshot.executors {
+366 +                                     let owner = ShardOwner {
+367 +                                         executor_id: executor.executor_id,
+368 +                                         metadata: executor.metadata,
+369 +                                     };
+370 +                                     for shard in executor.shards {
+371 +                                         owners.insert(shard.shard_key, owner.clone());
+372 +                                     }
+373 +                                 }
+374 +                                 *self.owners.write().expect("SD spectator owners lock") = Some(owners);
+375 +                                 let _ = self.first_state_tx.send(true);
+376 +                             }
+377 +                             Ok(None) | Err(_) => break,
+378 +                         }
+379 +                     }
+380 +                     if !(self.enabled)() {
+381 +                         self.reset_first_state();
+382 +                         break;
+383 +                     }
+384 +                 }
+385 +             }
+    |
+
+error: usage of `bool::then` in `filter_map`
+   --> crates/cadence-server/src/matching_shard_distributor.rs:734:14
+    |
+734 |   ...   .filter_map(|(key, managed)| {
+    |  ________^
+735 | | ...       (managed.state.load(Ordering::Acquire) == PROCESSOR_STARTED...
+736 | | ...           let report = managed.processor.report();
+...   |
+744 | | ...       })
+745 | | ...   })
+    | |________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#filter_map_bool_then
+    = note: `-D clippy::filter-map-bool-then` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::filter_map_bool_then)]`
+help: use `filter` then `map` instead
+    |
+734 ~             .filter(|&(key, managed)| (managed.state.load(Ordering::Acquire) == PROCESSOR_STARTED)).map(|(key, managed)| {
+735 +                     let report = managed.processor.report();
+736 +                     (
+737 +                         key.clone(),
+738 +                         sd::ShardStatusReport {
+739 +                             status: report.status as i32,
+740 +                             shard_load: report.load,
+741 +                         },
+742 +                     )
+743 +                 })
+    |
+
+error: iterating on a map's keys
+   --> crates/cadence-server/src/matching_shard_distributor.rs:780:31
+    |
+780 |           let to_stop: Vec<_> = self
+    |  _______________________________^
+781 | |             .state
+782 | |             .processors
+783 | |             .lock()
+...   |
+790 | |                 (!ready).then_some(key.clone())
+791 | |             })
+    | |______________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#iter_kv_map
+    = note: `-D clippy::iter-kv-map` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::iter_kv_map)]`
+help: try
+    |
+780 ~         let to_stop: Vec<_> = self
+781 +             .state
+782 +             .processors
+783 +             .lock()
+784 +             .expect("SD processors lock").keys().filter_map(|key| {
+785 +                 let ready = assignments.get(key).is_some_and(|assignment| {
+786 +                     assignment.status == sd::AssignmentStatus::Ready as i32
+787 +                 });
+788 +                 (!ready).then_some(key.clone())
+789 +             })
+    |
+
+error: could not compile `cadence-server` (lib) due to 3 previous errors
