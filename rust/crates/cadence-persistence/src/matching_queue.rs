@@ -1167,6 +1167,21 @@ mod tests {
         assert_eq!(queue.levels().2, 0);
     }
     #[test]
+    fn matching_queue_reader_size_and_lag_gauges_follow_ack_levels() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
+        queue.append(&[data(), data()], 2).unwrap();
+        assert_eq!(queue.task_list_size().unwrap(), 2);
+        let batch = queue.read_batch(100, n(10), 3).unwrap();
+        queue.complete(batch.tasks[0].task_id).unwrap();
+        assert_eq!(queue.task_list_size().unwrap(), 1);
+        assert_eq!(queue.task_lag(), 1);
+    }
+    #[test]
     fn matching_queue_original_go_expiry_fixtures() {
         let cases: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/matching-queue-expiry.json"
