@@ -3,7 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 expected="$repo_root/rust/crates/cadence-server/tests/fixtures/history_tchannel_wire_oracle.json"
-go_version="$(go version)"
+export GOTOOLCHAIN=go1.25.14
+go_version="$(cd "$repo_root/go" && go version)"
 case "$go_version" in
   *go1.25.14*) ;;
   *)
