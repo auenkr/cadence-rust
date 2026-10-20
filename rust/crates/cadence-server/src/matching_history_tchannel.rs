@@ -497,6 +497,53 @@ pub(crate) fn refresh_workflow_tasks_request_from_thrift(
     })
 }
 
+pub(crate) fn describe_workflow_execution_request(
+    value: &cadence_proto::history::DescribeWorkflowExecutionRequest,
+) -> TypedStruct {
+    let request = value.request.as_ref();
+    let mut fields = vec![field(10, string(&value.domain_id))];
+    let Some(request) = request else {
+        return finish(fields);
+    };
+    let mut nested = vec![field(10, string(&request.domain))];
+    if let Some(execution) = request.workflow_execution.as_ref() {
+        nested.push(field(20, workflow_execution(execution)));
+    }
+    let level = request.query_consistency_level;
+    if (1..=2).contains(&level) {
+        // Thrift QueryConsistencyLevel is zero based; proto reserves INVALID.
+        nested.push(field(30, TypedValue::I32(level - 1)));
+    }
+    fields.push(field(20, TypedValue::Struct(finish(nested))));
+    finish(fields)
+}
+
+pub(crate) fn describe_workflow_execution_request_from_thrift(
+    value: &TypedStruct,
+) -> cadence_thrift::Result<cadence_proto::history::DescribeWorkflowExecutionRequest> {
+    let inner = field_struct(value, 20)?;
+    let request = inner
+        .map(|s| {
+            let workflow_execution = field_struct(s, 20)?
+                .map(workflow_execution_from_thrift)
+                .transpose()?;
+            let query_consistency_level = typed_field(s, 30)
+                .map(|v| as_i32(v, 30))
+                .transpose()?
+                .map_or(0, |v| if (0..=1).contains(&v) { v + 1 } else { 0 });
+            Ok::<_, cadence_thrift::Error>(cadence_proto::api::DescribeWorkflowExecutionRequest {
+                domain: field_string(s, 10)?,
+                workflow_execution,
+                query_consistency_level,
+            })
+        })
+        .transpose()?;
+    Ok(cadence_proto::history::DescribeWorkflowExecutionRequest {
+        domain_id: field_string(value, 10)?,
+        request,
+    })
+}
+
 fn task_list(value: &cadence_proto::api::TaskList) -> TypedValue {
     let mut fields = vec![field(10, string(&value.name))];
     if (1..=3).contains(&value.kind) {
@@ -840,6 +887,31 @@ mod typed_codec_tests {
         let decoded = decode_typed_struct(&encoded).unwrap();
         assert_eq!(
             refresh_workflow_tasks_request_from_thrift(&decoded).unwrap(),
+            request
+        );
+    }
+
+    #[test]
+    fn describe_workflow_request_maps_query_consistency_enum_offset() {
+        let request = cadence_proto::history::DescribeWorkflowExecutionRequest {
+            domain_id: "id".into(),
+            request: Some(cadence_proto::api::DescribeWorkflowExecutionRequest {
+                domain: "name".into(),
+                workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                    workflow_id: "wf".into(),
+                    run_id: "run".into(),
+                }),
+                query_consistency_level: cadence_proto::api::QueryConsistencyLevel::Strong as i32,
+            }),
+        };
+        let encoded = encode_typed_struct(&describe_workflow_execution_request(&request));
+        let decoded = decode_typed_struct(&encoded).unwrap();
+        let TypedValue::Struct(inner) = typed_field(&decoded, 20).unwrap() else {
+            panic!("field 20 is the shared DescribeWorkflowExecutionRequest")
+        };
+        assert_eq!(typed_field(inner, 30), Some(&TypedValue::I32(1)));
+        assert_eq!(
+            describe_workflow_execution_request_from_thrift(&decoded).unwrap(),
             request
         );
     }
