@@ -27,6 +27,7 @@ parser.add_argument('--go-mixed-server-bin', type=Path, help='reuse a Go test bi
 parser.add_argument('--rust-production-binary', type=Path, help='run an already built Rust server binary with the original Go Ringpop provider (requires production Matching Ringpop assembly)')
 parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
     help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
+parser.add_argument('--postgres', action='store_true', help='run production Rust Matching and original Go services against the same Go-configured PostgreSQL schema; requires CADENCE_POSTGRES_* settings')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
@@ -41,6 +42,17 @@ if production_matching and (not args.rust_production_binary.is_file() or not os.
     parser.error(f'--rust-production-binary must name an existing executable: {args.rust_production_binary}')
 if args.history_transport != 'grpc' and not production_matching:
     parser.error('--history-transport applies only with --rust-production-binary')
+if args.postgres and not production_matching:
+    parser.error('--postgres requires --rust-production-binary')
+postgres_addr = os.environ.get('CADENCE_POSTGRES_ADDR', '127.0.0.1:5432')
+postgres_user = os.environ.get('CADENCE_POSTGRES_USER', 'postgres')
+postgres_password = os.environ.get('CADENCE_POSTGRES_PASSWORD', 'cadence')
+postgres_database = os.environ.get('CADENCE_POSTGRES_DATABASE', 'cadence')
+postgres_visibility_database = os.environ.get('CADENCE_POSTGRES_VISIBILITY_DATABASE', 'cadence_visibility')
+postgres_sslmode = os.environ.get('CADENCE_POSTGRES_SSLMODE', '')
+postgres_ca = os.environ.get('CADENCE_POSTGRES_CA_FILE', '')
+postgres_cert = os.environ.get('CADENCE_POSTGRES_CERT_FILE', '')
+postgres_key = os.environ.get('CADENCE_POSTGRES_KEY_FILE', '')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
@@ -122,10 +134,29 @@ text = text.replace('/tmp/cadence_archival/development', str(work / 'history-arc
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 text = text.replace('/tmp/blobstore', str(work / 'blobstore'))
 (config / 'development.yaml').write_text(text)
-text = (root / 'go/config/development_sqlite.yaml').read_text()
-text = text.replace('"cadence.db"', json.dumps(str(work / 'cadence.db')))
-text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_visibility.db')))
-(config / 'development_sqlite.yaml').write_text(text)
+if args.postgres:
+    text = (root / 'go/config/development_postgres.yaml').read_text()
+    # Replace each datasource explicitly so password and database values do
+    # not collide with repeated YAML scalar values.
+    text = re.sub(r'(?m)^(\s*databaseName:)\s*"cadence"\s*$', r'\1 ' + json.dumps(postgres_database), text, count=1)
+    text = re.sub(r'(?m)^(\s*databaseName:)\s*"cadence_visibility"\s*$', r'\1 ' + json.dumps(postgres_visibility_database), text, count=1)
+    text = re.sub(r'(?m)^(\s*connectAddr:)\s*"127\.0\.0\.1:5432"\s*$', r'\1 ' + json.dumps(postgres_addr), text)
+    text = re.sub(r'(?m)^(\s*user:)\s*"postgres"\s*$', r'\1 ' + json.dumps(postgres_user), text)
+    text = re.sub(r'(?m)^(\s*password:)\s*"cadence"\s*$', r'\1 ' + json.dumps(postgres_password), text)
+    if postgres_sslmode:
+        tls = ('        tls:\n'
+               '          enabled: true\n'
+               '          sslmode: ' + json.dumps(postgres_sslmode) + '\n')
+        for field, value in [('caFile', postgres_ca), ('certFile', postgres_cert), ('keyFile', postgres_key)]:
+            if value:
+                tls += f'          {field}: {json.dumps(value)}\n'
+        text = re.sub(r'(?m)^(\s*maxConns:.*)$', r'\1\n' + tls, text)
+    (config / 'development_postgres.yaml').write_text(text)
+else:
+    text = (root / 'go/config/development_sqlite.yaml').read_text()
+    text = text.replace('"cadence.db"', json.dumps(str(work / 'cadence.db')))
+    text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_visibility.db')))
+    (config / 'development_sqlite.yaml').write_text(text)
 if production_matching:
     rust_config = work / 'rust-matching.yaml'
     rust_dynamic_config = work / 'rust-dynamic-config.yaml'
@@ -136,7 +167,42 @@ if production_matching:
     rust_dynamic_config.write_text(rust_dynamic_text)
     rust_text = (root / 'rust/config/development.yaml').read_text()
     database_name = json.dumps(str(work / 'cadence.db'))
-    sqlite_persistence = (
+    if args.postgres:
+        tls_config = ''
+        if postgres_sslmode:
+            tls_config = ('        tls:\n'
+                          '          enabled: true\n'
+                          '          sslmode: ' + json.dumps(postgres_sslmode) + '\n')
+            for field, value in [('caFile', postgres_ca), ('certFile', postgres_cert), ('keyFile', postgres_key)]:
+                if value:
+                    tls_config += f'          {field}: {json.dumps(value)}\n'
+        persistence_text = (
+            'persistence:\n'
+            '  defaultStore: postgres-default\n'
+            '  visibilityStore: postgres-visibility\n'
+            '  numHistoryShards: 4\n'
+            '  datastores:\n'
+            '    postgres-default:\n'
+            '      sql:\n'
+            '        pluginName: postgres\n'
+            '        databaseName: ' + json.dumps(postgres_database) + '\n'
+            '        connectAddr: ' + json.dumps(postgres_addr) + '\n'
+            '        user: ' + json.dumps(postgres_user) + '\n'
+            '        password: ' + json.dumps(postgres_password) + '\n'
+            '        nShards: 1\n'
+            '        maxConns: 20\n' + tls_config +
+            '    postgres-visibility:\n'
+            '      sql:\n'
+            '        pluginName: postgres\n'
+            '        databaseName: ' + json.dumps(postgres_visibility_database) + '\n'
+            '        connectAddr: ' + json.dumps(postgres_addr) + '\n'
+            '        user: ' + json.dumps(postgres_user) + '\n'
+            '        password: ' + json.dumps(postgres_password) + '\n'
+            '        nShards: 1\n'
+            '        maxConns: 2\n' + tls_config
+        )
+    else:
+        persistence_text = (
         'persistence:\n'
         '  defaultStore: sqlite-default\n'
         '  visibilityStore: sqlite-visibility\n'
@@ -151,8 +217,8 @@ if production_matching:
         '      sql:\n'
         '        pluginName: sqlite\n'
         '        databaseName: ' + json.dumps(str(work / 'cadence_visibility.db')) + '\n'
-    )
-    rust_text, replaced = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', sqlite_persistence, rust_text, count=1)
+        )
+    rust_text, replaced = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', persistence_text, rust_text, count=1)
     if replaced != 1:
         raise RuntimeError('could not replace Rust Matching persistence config')
     seeds = ', '.join(json.dumps(f'127.0.0.1:{ports[key]}') for key in
@@ -172,7 +238,7 @@ if production_matching:
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
         '--data-dir', str(work / 'rust-matching-data')], indent=2) + '\n')
-command = [str(binary), '--config', str(config), '--zone', 'sqlite', 'start',
+command = [str(binary), '--config', str(config), '--zone', 'postgres' if args.postgres else 'sqlite', 'start',
            '--auto-setup', '--services', 'frontend,history,worker' if production_matching else 'frontend,history,matching,worker']
 environment = None
 if (args.rust_matching or args.matching_restart) and not production_matching:
@@ -214,6 +280,7 @@ with (work / 'server.log').open('w') as log:
             if matching_test_executable and (args.rust_matching or args.matching_restart):
                 probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
             if production_matching:
+                pg_host, pg_port = postgres_addr.rsplit(':', 1)
                 probe_environment = {**os.environ,
                     'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(args.rust_production_binary.resolve()),
                     'CADENCE_RUST_MATCHING_PRODUCTION_CONFIG': str(rust_config),
@@ -221,7 +288,13 @@ with (work / 'server.log').open('w') as log:
                     'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
-                    'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
+                    'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db'),
+                    'CADENCE_MATCHING_POSTGRES': 'true' if args.postgres else '',
+                    'CADENCE_POSTGRES_HOST': pg_host if args.postgres else '',
+                    'CADENCE_POSTGRES_PORT': pg_port if args.postgres else '',
+                    'CADENCE_POSTGRES_USER': postgres_user if args.postgres else '',
+                    'CADENCE_POSTGRES_PASSWORD': postgres_password if args.postgres else '',
+                    'CADENCE_POSTGRES_DATABASE': postgres_database if args.postgres else ''}
             result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
                 env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
@@ -248,3 +321,85 @@ if production_matching:
     print(f'Preliminary production process probe completed; it is not Matching acceptance evidence: {work / "results.json"}', flush=True)
 else:
     print(f'Service baseline passed: {work / "results.json"}', flush=True)
+
+if args.postgres:
+    # Start every Go service against the same schema after Rust Matching has
+    # exited. This confirms that Go can reopen the schema after Rust has used
+    # its task and domain tables, and leaves a second SDK workflow transcript.
+    evidence_file = work / 'rust-postgres-evidence.json'
+    if not evidence_file.is_file():
+        raise RuntimeError(f'Rust probe did not save PostgreSQL evidence: {evidence_file}')
+    rust_evidence = json.loads(evidence_file.read_text())
+    pg_host, pg_port = postgres_addr.rsplit(':', 1)
+    pg_environment = {**os.environ,
+        'PGHOST': pg_host, 'PGPORT': pg_port, 'PGUSER': postgres_user,
+        'PGPASSWORD': postgres_password, 'PGDATABASE': postgres_database,
+        'PGSSLMODE': postgres_sslmode or 'disable'}
+    if postgres_ca:
+        pg_environment['PGSSLROOTCERT'] = postgres_ca
+    if postgres_cert:
+        pg_environment['PGSSLCERT'] = postgres_cert
+    if postgres_key:
+        pg_environment['PGSSLKEY'] = postgres_key
+    sql_checks = {
+        'goDomainRow': "SELECT count(*) FROM domains WHERE id=decode(replace(:'domain_id','-',''),'hex') AND name=:'domain'",
+        'rustTaskListRow': "SELECT count(*) FROM task_lists WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND name=:'task_list' AND task_type=0",
+    }
+    sql_evidence = {}
+    for name, statement in sql_checks.items():
+        check = subprocess.run(['psql', '-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
+            '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'domain={rust_evidence["domain"]}',
+            '-v', f'task_list={rust_evidence["taskList"]}', '-c', statement],
+            env=pg_environment, capture_output=True, text=True, timeout=30)
+        (work / f'{name}.log').write_text(check.stdout + check.stderr)
+        if check.returncode:
+            raise RuntimeError(f'PostgreSQL {name} check failed; see {work / f"{name}.log"}')
+        count = int(check.stdout.strip())
+        if count < 1:
+            raise RuntimeError(f'PostgreSQL {name} check found no shared record')
+        sql_evidence[name] = count
+    (work / 'postgres-record-verification.json').write_text(json.dumps({
+        'domainRow': sql_evidence['goDomainRow'],
+        'rustMatchingTaskListRow': sql_evidence['rustTaskListRow'],
+        'database': postgres_database,
+        'evidence': str(evidence_file),
+    }, indent=2) + '\n')
+    verify_command = [str(binary), '--config', str(config), '--zone', 'postgres', 'start',
+        '--services', 'frontend,history,matching,worker']
+    verify_log = work / 'go-verification-server.log'
+    with verify_log.open('w') as log:
+        verifier = subprocess.Popen(verify_command, cwd=work, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 90
+            while True:
+                if verifier.poll() is not None:
+                    raise RuntimeError(f'Go verification services exited; see {verify_log}')
+                try:
+                    with socket.create_connection(('127.0.0.1', int(ports['FRONTEND_PORT_GRPC'])), timeout=0.5):
+                        break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f'Go verification startup timed out; see {verify_log}')
+                    time.sleep(0.1)
+            with (work / 'go-verification-probe.log').open('w') as output:
+                verification = subprocess.run(['node', str(root / 'tests/matching-postgres-go-verify.cjs'),
+                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', rust_evidence['domain'],
+                    rust_evidence['workflowId'], rust_evidence['runId'], rust_evidence['taskList']],
+                    cwd=root, stdout=output, stderr=subprocess.STDOUT, timeout=300)
+            (work / 'go-verification-results.json').write_text(json.dumps({
+                'exitCode': verification.returncode,
+                'topology': 'original Go Frontend/History/Matching/Worker reopened PostgreSQL after Rust Matching mixed-service run',
+                'serverCommand': verify_command,
+                'schemaWasSeededByGoAutoSetup': True,
+                'evidenceLog': str(work / 'go-verification-probe.log'),
+            }, indent=2) + '\n')
+            if verification.returncode:
+                raise RuntimeError(f'Go verification probe failed; see {work / "go-verification-probe.log"}')
+        finally:
+            verifier.terminate()
+            try:
+                verifier.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                verifier.kill()
+                verifier.wait(timeout=10)
+    print(f'Go PostgreSQL verification completed: {work / "go-verification-results.json"}', flush=True)

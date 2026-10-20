@@ -30,6 +30,21 @@ function call(service, method, request) {
     { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
 }
 const payload = data => ({ data: Buffer.from(data) });
+function taskCount(taskList, fallbackDatabase) {
+  if (process.env.CADENCE_MATCHING_POSTGRES) {
+    const result = spawnSync('psql', ['-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-v', `task_list=${taskList}`,
+      '-c', "SELECT count(*) FROM tasks WHERE task_list_name = :'task_list' AND task_type = 0"], {
+      encoding: 'utf8', env: { ...process.env,
+        PGHOST: process.env.CADENCE_POSTGRES_HOST, PGPORT: process.env.CADENCE_POSTGRES_PORT,
+        PGUSER: process.env.CADENCE_POSTGRES_USER, PGDATABASE: process.env.CADENCE_POSTGRES_DATABASE,
+        PGPASSWORD: process.env.CADENCE_POSTGRES_PASSWORD || '' },
+    });
+    if (result.status === 0) result.stdout = result.stdout.trim();
+    return result;
+  }
+  const database = process.env.CADENCE_MATCHING_SQLITE_DB || fallbackDatabase;
+  return spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, taskList], { encoding: 'utf8' });
+}
 async function run() {
   const id = randomUUID(), domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
   await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
@@ -120,16 +135,14 @@ async function run() {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
-    const database = productionMode ? process.env.CADENCE_MATCHING_SQLITE_DB : path.join(work, 'matching.db');
-    const sqliteCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, restartTaskList], { encoding: 'utf8' });
     const persistedDeadline = Date.now() + 20000;
     let persisted;
     while (Date.now() < persistedDeadline) {
-      persisted = sqliteCount();
+      persisted = taskCount(restartTaskList, path.join(work, 'matching.db'));
       if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    assert.equal(persisted?.status, 0, `could not inspect Matching SQLite queue: ${persisted?.stderr}`);
+    assert.equal(persisted?.status, 0, `could not inspect Matching durable queue: ${persisted?.stderr}`);
     assert(Number(persisted.stdout.trim()) > 0, 'workflow task was not persisted before Matching restart');
     const beforePid = rust.pid;
     rust.kill('SIGKILL');
@@ -193,13 +206,11 @@ async function run() {
     const drainID = `graceful-drain-${id}`, drainTaskList = `graceful-drain-tasks-${id}`;
     const drainRequest = { ...startRequest, workflowId: drainID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: drainTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     const drainStarted = await call('WorkflowAPI', 'StartWorkflowExecution', drainRequest);
-    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
-    if (!database) throw new Error('production Matching mode requires CADENCE_MATCHING_SQLITE_DB for drain/recovery evidence');
-    const taskCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, drainTaskList], { encoding: 'utf8' });
+    if (!process.env.CADENCE_MATCHING_SQLITE_DB && !process.env.CADENCE_MATCHING_POSTGRES) throw new Error('production Matching mode requires a configured persistence probe target');
     const taskDeadline = Date.now() + 20000;
     let queued;
     while (Date.now() < taskDeadline) {
-      queued = taskCount();
+      queued = taskCount(drainTaskList);
       if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -371,6 +382,12 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
+  if (productionMode && process.env.CADENCE_MATCHING_POSTGRES) {
+    fs.writeFileSync(path.join(work, 'rust-postgres-evidence.json'), JSON.stringify({
+      domain, domainId, workflowId: execution.workflowId, runId: execution.runId,
+      taskList: taskList.name, completedEvents: events.length,
+    }, null, 2) + '\n');
+  }
   console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
   } finally {
     if (productionMode) rust.kill('SIGTERM');

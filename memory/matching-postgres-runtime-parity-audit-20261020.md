@@ -1,8 +1,8 @@
-# Matching PostgreSQL runtime parity audit (2026-10-20)
+# Matching PostgreSQL runtime parity implementation and validation status (2026-10-20)
 
-Scope: source-only audit against the pinned Go implementation and current Rust
-Matching runtime at `55c4ae9ad`. No compile, lockfile resolution, database,
-SDK, restart, or recovery validation was performed. The MySQL candidate remains
+Scope: source-only implementation against pinned Go behavior from `55c4ae9ad`.
+No compile, lockfile resolution, database, SDK, restart, or recovery validation
+was performed because the build lane is reserved. The MySQL candidate remains
 untouched in its own worktree.
 
 ## Current Rust state
@@ -11,19 +11,29 @@ untouched in its own worktree.
   Matching task CRUD over Go's existing PostgreSQL `tasks` and `task_lists`
   tables and validates their columns and primary keys. It does not create or
   migrate schema.
-- Its connection options accept `sslmode=disable`, `connect_timeout`,
-  `application_name`, and `options`. Any TLS sslmode or TLS file parameter is
-  currently rejected. The adapter has no Go `TLSConfig` input.
-- `cadence-server::matching_task_store::open_configured_default_store` only
-  routes `sqlite` and `mysql`. Consequently `pluginName: postgres` can parse as
-  config but cannot start Rust Matching through the configured production
-  persistence path. Existing PostgreSQL task adapter code is not production
-  runtime integration.
-- Domain metadata source implementations exist for SQLite and MySQL only.
-  PostgreSQL does not supply `metadata_version`, `list_domains`, or `get_domain`
-  to the Matching cache. The cache needs these to hydrate domain UUID/name,
-  status, task-list settings and replication configuration from Go's durable
-  `domains.data` payload. Task-store availability alone is insufficient.
+- `open_configured_default_store` now routes `postgres` to the task adapter,
+  passes Go pool/shard/encoding settings, and attaches a read-only PostgreSQL
+  domain source. Zero `nShards` defaults to one, negative values fail, and
+  multiple-database default-store config is rejected.
+- The PostgreSQL domain source reads notification version and Go domain rows,
+  validates UUIDs, preserves Go's page token order, decodes the existing
+  nested ThriftRW DataBlob, and shares the task pool so reads count against the
+  same `maxConns`. Cache source timeout errors are retryable like Go PostgreSQL
+  persistence failures.
+- PostgreSQL TLS settings now flow from Go-shaped `TlsConfig`. TLS defaults to
+  `require` when enabled; supported modes include `disable`, `allow`, `prefer`,
+  `require`, `verify-ca`, and `verify-full`. Since the synchronous PostgreSQL
+  driver has no `allow` mode, the adapter tries plaintext first and retries
+  over TLS only when PostgreSQL reports the specific `SSL off` pg_hba failure.
+  CA/client cert/key fields and `connectAttributes` precedence are applied by
+  the adapter. `verify-ca`
+  suppresses only OpenSSL hostname-mismatch verification while retaining CA
+  chain checks.
+- `tests/run-go-service-baseline.py --postgres` emits Go and Rust configs
+  against the same PostgreSQL databases, uses Go `--auto-setup` to seed schema,
+  runs Rust Matching with Go Frontend/History/Worker and the production restart
+  probe, then starts all Go services and runs an SDK workflow probe. PostgreSQL
+  queue row inspection uses `psql`; this harness source has not been executed.
 
 ## Go contracts verified in source
 
@@ -63,29 +73,46 @@ untouched in its own worktree.
   as Go (`id > token`, ascending id, page-size limit); this repository's
   existing decoder is the shared source of domain payload semantics.
 
-## Required next implementation slice
+## Required validation slice
 
-1. Add PostgreSQL conversion and production selection in
-   `open_configured_default_store`, preserving Go defaulting and rejecting
-   invalid/multi-database default-store configuration.
-2. Implement PostgreSQL TLS through a connector supported by the selected
-   synchronous PostgreSQL client. Reproduce the effective Go DSN precedence
-   (TLS defaults first, explicit connect attributes last), support the Go
-   `sslmode` variants and CA/client identity files, and fail startup on invalid
-   credentials/certificates. Do not substitute `NoTls` for enabled TLS.
-3. Implement a read-only PostgreSQL domain metadata source on the same bounded
-   pool as task operations (or enforce a shared connection budget). Wire it to
-   the existing cache refresh and cache-miss path. Ensure metadata reads count
-   against configured `maxConns` as in Go's datastore pool.
-4. Exercise configured Rust Matching against Go PostgreSQL schema with Go
+1. Resolve and review PostgreSQL/OpenSSL dependency versions, compile the
+   persistence/server crates, and run targeted adapter/cache tests after the
+   build lane is released. The workspace Cargo.lock is intentionally not
+   updated in this source-only change.
+2. Exercise configured Rust Matching against Go PostgreSQL schema with Go
    Frontend/History/Worker, then SDK workflow, graceful restart/recovery, task
    lease, and GC checks. Record exact setup and results before calling this
    service complete.
+3. Verify the Go-only probe reopens and reads the same Go domain row, the
+   Rust-written task-list row, and the completed workflow history after Rust
+   exits. This does not assert Go consumption of a deliberately queued pending
+   task row.
 
 ## Explicit remaining gaps
 
-PostgreSQL TLS, PostgreSQL domain metadata reads/cache integration, configured
-runtime startup, and end-to-end mixed Go/Rust validation remain incomplete.
-Multi-database persistence is not appropriate for the default store under Go's
-configuration validation and remains unsupported for Matching. Cassandra and
-other NoSQL stores remain outside this SQL-only Matching work slice.
+Compilation and all runtime behavior remain unverified. PostgreSQL TLS and
+domain source code are implemented but must be exercised against real server
+certificates and Go-seeded metadata. The SQL harness expects the caller to
+provision PostgreSQL. It does not yet prove Go Matching consumed a Rust-produced
+pending queue item. Multi-database persistence is not appropriate for the
+default store under Go's configuration validation and remains unsupported for
+Matching. Cassandra and other NoSQL stores remain outside this SQL-only slice.
+
+## Reproducible validation command (pending build lane)
+
+```sh
+CADENCE_POSTGRES_ADDR=127.0.0.1:5432 \
+CADENCE_POSTGRES_USER=postgres \
+CADENCE_POSTGRES_PASSWORD=cadence \
+CADENCE_POSTGRES_DATABASE=cadence \
+CADENCE_POSTGRES_VISIBILITY_DATABASE=cadence_visibility \
+python3 tests/run-go-service-baseline.py \
+  --postgres --rust-matching --matching-restart \
+  --rust-production-binary /path/to/cadence-rust \
+  --artifacts-dir /tmp/cadence-matching-postgres
+```
+
+For TLS validation, also set `CADENCE_POSTGRES_SSLMODE` and, as needed,
+`CADENCE_POSTGRES_CA_FILE`, `CADENCE_POSTGRES_CERT_FILE`, and
+`CADENCE_POSTGRES_KEY_FILE`. Adapter tests and the mixed Go/Rust run must pass
+before this audit can be treated as parity evidence.
