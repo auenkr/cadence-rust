@@ -713,7 +713,9 @@ mod tests {
             router.resolve("negative-percentage").await.unwrap().1,
             RoutingPath::ShardDistributor
         );
-        assert_eq!(spectator.calls.load(Ordering::SeqCst), 4);
+        // Only the three eligible requests reach the spectator: the first
+        // UUID request and the zero-percent request are excluded locally.
+        assert_eq!(spectator.calls.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
