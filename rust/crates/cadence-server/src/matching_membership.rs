@@ -94,25 +94,32 @@ impl Membership {
     }
     pub fn remote_channel(&self, key: &str) -> Result<Option<tonic::transport::Channel>, Status> {
         let owner = self.owner(key)?;
-        if owner.identity() == self.identity.as_ref() {
+        self.remote_channel_for_owner(owner.identity(), &owner.grpc_address)
+    }
+    pub(crate) fn remote_channel_for_owner(
+        &self,
+        identity: &str,
+        grpc_address: &str,
+    ) -> Result<Option<tonic::transport::Channel>, Status> {
+        if identity == self.identity.as_ref() {
             return Ok(None);
         }
-        if owner.grpc_address.is_empty() {
+        if grpc_address.is_empty() {
             return Err(Status::unavailable("Matching owner has no gRPC address"));
         }
         let mut channels = self.channels.lock().expect("Matching channel cache lock");
-        if let Some(channel) = channels.get(&owner.grpc_address) {
+        if let Some(channel) = channels.get(grpc_address) {
             return Ok(Some(channel.clone()));
         }
-        let address = if owner.grpc_address.contains("://") {
-            owner.grpc_address.clone()
+        let address = if grpc_address.contains("://") {
+            grpc_address.to_owned()
         } else {
-            format!("http://{}", owner.grpc_address)
+            format!("http://{grpc_address}")
         };
         let channel = tonic::transport::Endpoint::from_shared(address)
             .map_err(|error| Status::internal(error.to_string()))?
             .connect_lazy();
-        channels.insert(owner.grpc_address, channel.clone());
+        channels.insert(grpc_address.to_owned(), channel.clone());
         Ok(Some(channel))
     }
     pub fn check_task_list(&self, name: &str) -> Result<(), Status> {
@@ -120,20 +127,22 @@ impl Membership {
         if owner.identity() == self.identity.as_ref() {
             return Ok(());
         }
-        Err(crate::grpc::detailed_status_type(
+        Err(self.task_list_not_owned_by(name, owner.identity()))
+    }
+    pub(crate) fn task_list_not_owned_by(&self, name: &str, owner: &str) -> Status {
+        crate::grpc::detailed_status_type(
             tonic::Code::Aborted,
             format!(
                 "task list is not owned by this host: OwnedBy: {}, Me: {}, Tasklist: {name}",
-                owner.identity(),
-                self.identity
+                owner, self.identity
             ),
             "type.googleapis.com/uber.cadence.shared.v1.TaskListNotOwnedByHostError".into(),
             cadence_proto::shared::TaskListNotOwnedByHostError {
-                owned_by_identity: owner.identity().into(),
+                owned_by_identity: owner.into(),
                 my_identity: self.identity.to_string(),
                 task_list_name: name.into(),
             },
-        ))
+        )
     }
     pub fn check_semaphore(
         &self,

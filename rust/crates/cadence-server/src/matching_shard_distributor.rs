@@ -711,6 +711,13 @@ impl ShardDistributorExecutor {
             .ok_or_else(|| GetShardProcessError::NotFound(shard_key.to_string()))
     }
 
+    /// Return the current local processor snapshot without heartbeat I/O.
+    /// QueueRegistry uses this only to recheck assignment while publishing or
+    /// unloading managers after the async RPC path already refreshed it.
+    pub(crate) fn has_local_shard_process(&self, shard_key: &str) -> bool {
+        self.processor(shard_key).is_some()
+    }
+
     fn processor(&self, shard_key: &str) -> Option<Arc<dyn ShardProcessor>> {
         self.state
             .processors
