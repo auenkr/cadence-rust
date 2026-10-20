@@ -25,8 +25,8 @@ var observationLock sync.Mutex
 func observe(ctx context.Context, method string, fields map[string]string) string {
 	call := yarpc.CallFromContext(ctx)
 	deadline, hasDeadline := ctx.Deadline()
-	result := fmt.Sprintf("%s|%s|%s|%s|%t", call.Service(), call.Caller(), call.Header("rpc-service"), call.Header("rpc-caller"), hasDeadline)
-	result += "|" + call.Header("rpc-encoding")
+	encoding := string(call.Encoding())
+	result := fmt.Sprintf("%s|%s|%t|%s", call.Service(), call.Caller(), hasDeadline, encoding)
 	if path := os.Getenv("CADENCE_MATCHING_GO_PEER_LOG"); path != "" {
 		observationLock.Lock()
 		defer observationLock.Unlock()
@@ -34,9 +34,9 @@ func observe(ctx context.Context, method string, fields map[string]string) strin
 		if err == nil {
 			_ = json.NewEncoder(file).Encode(map[string]interface{}{
 				"method":      method,
-				"rpcService":  call.Header("rpc-service"),
-				"rpcCaller":   call.Header("rpc-caller"),
-				"rpcEncoding": call.Header("rpc-encoding"),
+				"rpcService":  call.Service(),
+				"rpcCaller":   call.Caller(),
+				"rpcEncoding": encoding,
 				"deadline":    hasDeadline,
 				"fields":      fields,
 			})
@@ -47,9 +47,9 @@ func observe(ctx context.Context, method string, fields map[string]string) strin
 		"observed-service":      call.Service(),
 		"observed-caller":       call.Caller(),
 		"observed-encoding":     string(call.Encoding()),
-		"observed-rpc-service":  call.Header("rpc-service"),
-		"observed-rpc-caller":   call.Header("rpc-caller"),
-		"observed-rpc-encoding": call.Header("rpc-encoding"),
+		"observed-rpc-service":  call.Service(),
+		"observed-rpc-caller":   call.Caller(),
+		"observed-rpc-encoding": encoding,
 	} {
 		_ = call.WriteResponseHeader(key, value)
 	}
