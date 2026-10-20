@@ -27,6 +27,7 @@ parser.add_argument('--go-mixed-server-bin', type=Path, help='reuse a Go test bi
 parser.add_argument('--rust-production-binary', type=Path, help='run an already built Rust server binary with the original Go Ringpop provider (requires production Matching Ringpop assembly)')
 parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
     help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
+parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
@@ -41,6 +42,16 @@ if production_matching and (not args.rust_production_binary.is_file() or not os.
     parser.error(f'--rust-production-binary must name an existing executable: {args.rust_production_binary}')
 if args.history_transport != 'grpc' and not production_matching:
     parser.error('--history-transport applies only with --rust-production-binary')
+if args.mysql and not production_matching:
+    parser.error('--mysql requires --rust-production-binary')
+mysql_addr = os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306')
+mysql_user = os.environ.get('CADENCE_MYSQL_USER', 'root')
+mysql_password = os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence')
+mysql_database = os.environ.get('CADENCE_MYSQL_DATABASE', 'cadence')
+mysql_visibility_database = os.environ.get('CADENCE_MYSQL_VISIBILITY_DATABASE', 'cadence_visibility')
+mysql_host, _, mysql_port = mysql_addr.rpartition(':')
+if not mysql_host or not mysql_port.isdigit():
+    parser.error('--mysql requires CADENCE_MYSQL_ADDR in host:port form')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
@@ -122,10 +133,19 @@ text = text.replace('/tmp/cadence_archival/development', str(work / 'history-arc
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 text = text.replace('/tmp/blobstore', str(work / 'blobstore'))
 (config / 'development.yaml').write_text(text)
-text = (root / 'go/config/development_sqlite.yaml').read_text()
-text = text.replace('"cadence.db"', json.dumps(str(work / 'cadence.db')))
-text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_visibility.db')))
-(config / 'development_sqlite.yaml').write_text(text)
+if args.mysql:
+    text = (root / 'go/config/development_mysql.yaml').read_text()
+    text = re.sub(r'(?m)^(\s*databaseName:)\s*"cadence"\s*$', r'\1 ' + json.dumps(mysql_database), text, count=1)
+    text = re.sub(r'(?m)^(\s*databaseName:)\s*"cadence_visibility"\s*$', r'\1 ' + json.dumps(mysql_visibility_database), text, count=1)
+    text = re.sub(r'(?m)^(\s*connectAddr:)\s*"127\.0\.0\.1:3306"\s*$', r'\1 ' + json.dumps(mysql_addr), text)
+    text = re.sub(r'(?m)^(\s*user:)\s*"root"\s*$', r'\1 ' + json.dumps(mysql_user), text)
+    text = re.sub(r'(?m)^(\s*password:)\s*"cadence"\s*$', r'\1 ' + json.dumps(mysql_password), text)
+    (config / 'development_mysql.yaml').write_text(text)
+else:
+    text = (root / 'go/config/development_sqlite.yaml').read_text()
+    text = text.replace('"cadence.db"', json.dumps(str(work / 'cadence.db')))
+    text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_visibility.db')))
+    (config / 'development_sqlite.yaml').write_text(text)
 if production_matching:
     rust_config = work / 'rust-matching.yaml'
     rust_dynamic_config = work / 'rust-dynamic-config.yaml'
@@ -136,7 +156,38 @@ if production_matching:
     rust_dynamic_config.write_text(rust_dynamic_text)
     rust_text = (root / 'rust/config/development.yaml').read_text()
     database_name = json.dumps(str(work / 'cadence.db'))
-    sqlite_persistence = (
+    if args.mysql:
+        persistence_config = (
+            'persistence:\n'
+            '  defaultStore: mysql-default\n'
+            '  visibilityStore: mysql-visibility\n'
+            '  numHistoryShards: 4\n'
+            '  datastores:\n'
+            '    mysql-default:\n'
+            '      sql:\n'
+            '        pluginName: mysql\n'
+            '        databaseName: ' + json.dumps(mysql_database) + '\n'
+            '        connectAddr: ' + json.dumps(mysql_addr) + '\n'
+            '        connectProtocol: tcp\n'
+            '        user: ' + json.dumps(mysql_user) + '\n'
+            '        password: ' + json.dumps(mysql_password) + '\n'
+            '        nShards: 1\n'
+            '        maxConns: 20\n'
+            '        maxIdleConns: 20\n'
+            '    mysql-visibility:\n'
+            '      sql:\n'
+            '        pluginName: mysql\n'
+            '        databaseName: ' + json.dumps(mysql_visibility_database) + '\n'
+            '        connectAddr: ' + json.dumps(mysql_addr) + '\n'
+            '        connectProtocol: tcp\n'
+            '        user: ' + json.dumps(mysql_user) + '\n'
+            '        password: ' + json.dumps(mysql_password) + '\n'
+            '        nShards: 1\n'
+            '        maxConns: 2\n'
+            '        maxIdleConns: 2\n'
+        )
+    else:
+        persistence_config = (
         'persistence:\n'
         '  defaultStore: sqlite-default\n'
         '  visibilityStore: sqlite-visibility\n'
@@ -151,8 +202,8 @@ if production_matching:
         '      sql:\n'
         '        pluginName: sqlite\n'
         '        databaseName: ' + json.dumps(str(work / 'cadence_visibility.db')) + '\n'
-    )
-    rust_text, replaced = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', sqlite_persistence, rust_text, count=1)
+        )
+    rust_text, replaced = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', persistence_config, rust_text, count=1)
     if replaced != 1:
         raise RuntimeError('could not replace Rust Matching persistence config')
     seeds = ', '.join(json.dumps(f'127.0.0.1:{ports[key]}') for key in
@@ -172,7 +223,7 @@ if production_matching:
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
         '--data-dir', str(work / 'rust-matching-data')], indent=2) + '\n')
-command = [str(binary), '--config', str(config), '--zone', 'sqlite', 'start',
+command = [str(binary), '--config', str(config), '--zone', 'mysql' if args.mysql else 'sqlite', 'start',
            '--auto-setup', '--services', 'frontend,history,worker' if production_matching else 'frontend,history,matching,worker']
 environment = None
 if (args.rust_matching or args.matching_restart) and not production_matching:
@@ -222,6 +273,17 @@ with (work / 'server.log').open('w') as log:
                     'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
                     'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
+                if args.mysql:
+                    probe_environment.update({
+                        'CADENCE_MATCHING_MYSQL': '1',
+                        'CADENCE_MYSQL_HOST': mysql_host,
+                        'CADENCE_MYSQL_PORT': mysql_port,
+                        'CADENCE_MYSQL_USER': mysql_user,
+                        'CADENCE_MYSQL_PASSWORD': mysql_password,
+                        'CADENCE_MYSQL_DATABASE': mysql_database,
+                    })
+                    if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
+                        probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
             result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
                 env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
