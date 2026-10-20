@@ -18,6 +18,7 @@ import (
 // the opt-in Python runner. Its Go TaskManager and DomainStore are the writer
 // and reader oracle around the Rust adapter process.
 func TestRustMatchingMySQLInterop(t *testing.T) {
+	assertGoDurationOracle(t)
 	dc := p.NewDefaultDynamicConfiguration()
 	encoding := "thriftrw"
 	dc.SerializationEncoding = func(...dynamicproperties.FilterOption) string { return encoding }
@@ -50,6 +51,37 @@ func TestRustMatchingMySQLInterop(t *testing.T) {
 	}
 	verifyRustTaskRows(t, ctx, factory)
 	verifyRustExpiryCollection(t, ctx, factory)
+}
+
+// assertGoDurationOracle keeps configuration edge cases next to the real Go
+// persistence oracle; the Rust unit tests cover the same positive forms.
+func assertGoDurationOracle(t *testing.T) {
+	t.Helper()
+	cases := []struct {
+		input string
+		want  time.Duration
+	}{
+		{"0", 0},
+		{"+1.5h", 90 * time.Minute},
+		{"1h30m", 90 * time.Minute},
+		{"1.000000001s", time.Second + time.Nanosecond},
+		{"500µs", 500 * time.Microsecond},
+		{"500μs", 500 * time.Microsecond},
+		{"1ns", time.Nanosecond},
+		{"0.0000000001s", 0},
+		{"-0s", 0},
+	}
+	for _, test := range cases {
+		got, err := time.ParseDuration(test.input)
+		if err != nil || got != test.want {
+			t.Fatalf("Go duration oracle %q = %v, %v; want %v", test.input, got, err, test.want)
+		}
+	}
+	for _, input := range []string{"", "1", " 1s", "-1s", "1s2", "1fortnight", "9223372037s"} {
+		if _, err := time.ParseDuration(input); err == nil {
+			t.Fatalf("Go duration oracle unexpectedly accepted %q", input)
+		}
+	}
 }
 
 func envOr(key, fallback string) string {

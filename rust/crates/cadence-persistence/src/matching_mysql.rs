@@ -13,8 +13,8 @@ use crate::{
     },
 };
 use mysql::{
-    consts::CapabilityFlags, prelude::Queryable, ClientIdentity, Conn, Error as MySqlError,
-    IsolationLevel, Opts, OptsBuilder, SslOpts, Transaction, TxOpts,
+    ClientIdentity, Conn, Error as MySqlError, IsolationLevel, Opts, OptsBuilder, SslOpts,
+    Transaction, TxOpts, consts::CapabilityFlags, prelude::Queryable,
 };
 use std::{
     ops::{Deref, DerefMut},
@@ -617,7 +617,7 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
         other => {
             return Err(StorageError::BackendConfiguration(format!(
                 "unsupported MySQL connectProtocol {other:?}"
-            )))
+            )));
         }
     }
 
@@ -641,7 +641,7 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
             unsupported => {
                 return Err(StorageError::BackendConfiguration(format!(
                     "unsupported MySQL connect attribute {unsupported:?}; refusing to ignore it"
-                )))
+                )));
             }
         }
     }
@@ -670,7 +670,7 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
                 return Err(StorageError::BackendConfiguration(
                     "MySQL tls=preferred fallback semantics are unsupported; use required TLS"
                         .into(),
-                ))
+                ));
             }
             "skip-verify" => {
                 ssl = ssl
@@ -680,7 +680,7 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
             other => {
                 return Err(StorageError::BackendConfiguration(format!(
                     "unsupported MySQL tls connect attribute {other:?}"
-                )))
+                )));
             }
         }
         if tls_mode == "tls-custom" {
@@ -692,8 +692,8 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
                 // either path alone is ignored.
                 if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
                     ssl = ssl.with_client_identity(Some(ClientIdentity::new(
-                        tls.cert_file.clone(),
-                        tls.key_file.clone(),
+                        std::path::PathBuf::from(&tls.cert_file),
+                        std::path::PathBuf::from(&tls.key_file),
                     )));
                 }
                 if !tls.enable_host_verification {
@@ -747,24 +747,48 @@ fn parse_isolation(value: &str) -> Result<IsolationLevel> {
 
 fn split_host_port(address: &str) -> Result<(String, u16)> {
     if let Some(rest) = address.strip_prefix('[') {
-        let Some((host, port)) = rest.split_once("]:") else {
+        let Some((host, suffix)) = rest.split_once(']') else {
             return Err(StorageError::BackendConfiguration(format!(
                 "invalid MySQL TCP connectAddr {address:?}"
             )));
         };
-        let port = port.parse::<u16>().map_err(|_| {
-            StorageError::BackendConfiguration(format!("invalid MySQL TCP port in {address:?}"))
-        })?;
+        if host.is_empty() || host.contains('[') || host.contains(']') {
+            return Err(StorageError::BackendConfiguration(format!(
+                "invalid MySQL TCP connectAddr {address:?}"
+            )));
+        }
+        let port = match suffix {
+            "" => 3306,
+            suffix if suffix.starts_with(':') => suffix[1..].parse::<u16>().map_err(|_| {
+                StorageError::BackendConfiguration(format!("invalid MySQL TCP port in {address:?}"))
+            })?,
+            _ => {
+                return Err(StorageError::BackendConfiguration(format!(
+                    "invalid MySQL TCP connectAddr {address:?}"
+                )));
+            }
+        };
         return Ok((host.to_owned(), port));
     }
+    if !address.contains(':') {
+        if address.is_empty() || address.contains('[') || address.contains(']') {
+            return Err(StorageError::BackendConfiguration(format!(
+                "invalid MySQL TCP connectAddr {address:?}"
+            )));
+        }
+        return Ok((address.to_owned(), 3306));
+    }
+    if address.bytes().filter(|byte| *byte == b':').count() > 1 {
+        // Go's ensureHavePort treats an unbracketed IPv6 literal as a host
+        // with no parseable port and applies 3306.
+        return Ok((address.to_owned(), 3306));
+    }
     let Some((host, port)) = address.rsplit_once(':') else {
-        return Err(StorageError::BackendConfiguration(format!(
-            "MySQL TCP connectAddr must contain host:port: {address:?}"
-        )));
+        unreachable!("checked for a colon")
     };
-    if host.is_empty() {
+    if host.is_empty() || host.contains('[') || host.contains(']') {
         return Err(StorageError::BackendConfiguration(format!(
-            "MySQL TCP connectAddr has an empty host: {address:?}"
+            "invalid MySQL TCP connectAddr {address:?}"
         )));
     }
     let port = port.parse::<u16>().map_err(|_| {
@@ -774,34 +798,103 @@ fn split_host_port(address: &str) -> Result<(String, u16)> {
 }
 
 fn parse_go_duration(value: &str) -> Result<Duration> {
-    let (number, unit) = value.trim().split_at(
-        value
-            .find(|character: char| !character.is_ascii_digit() && character != '.')
-            .unwrap_or(value.len()),
-    );
-    let amount = number.parse::<f64>().map_err(|_| {
-        StorageError::BackendConfiguration(format!("invalid MySQL timeout duration {value:?}"))
-    })?;
-    let multiplier = match unit {
-        "ns" => 1e-9,
-        "us" | "µs" => 1e-6,
-        "ms" => 1e-3,
-        "s" => 1.0,
-        "m" => 60.0,
-        "h" => 3600.0,
-        _ => {
-            return Err(StorageError::BackendConfiguration(format!(
-                "unsupported MySQL timeout duration unit in {value:?}"
-            )))
-        }
-    };
-    let seconds = amount * multiplier;
-    if !seconds.is_finite() || seconds < 0.0 {
-        return Err(StorageError::BackendConfiguration(format!(
-            "invalid MySQL timeout duration {value:?}"
-        )));
+    // Match Go time.ParseDuration's signed sequence of decimal components.
+    // Keep the total in nanoseconds so conversion cannot panic or silently
+    // saturate at Duration's range boundary.
+    let input = value;
+    let invalid =
+        || StorageError::BackendConfiguration(format!("invalid MySQL timeout duration {value:?}"));
+    if input.is_empty() {
+        return Err(invalid());
     }
-    Ok(Duration::from_secs_f64(seconds))
+    let (negative, rest) = match input.as_bytes()[0] {
+        b'+' => (false, &input[1..]),
+        b'-' => (true, &input[1..]),
+        _ => (false, input),
+    };
+    if rest == "0" {
+        return Ok(Duration::ZERO);
+    }
+    let bytes = rest.as_bytes();
+    let mut index = 0;
+    let mut total_nanos = 0u128;
+    let mut components = 0;
+    while index < bytes.len() {
+        let number_start = index;
+        let mut integer_digits = 0;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+            integer_digits += 1;
+        }
+        let mut fractional_start = index;
+        let mut fractional_digits = 0;
+        if index < bytes.len() && bytes[index] == b'.' {
+            index += 1;
+            fractional_start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+                fractional_digits += 1;
+            }
+        }
+        if integer_digits + fractional_digits == 0 {
+            return Err(invalid());
+        }
+        let integer = if integer_digits == 0 {
+            0
+        } else {
+            rest[number_start..number_start + integer_digits]
+                .parse::<u128>()
+                .map_err(|_| invalid())?
+        };
+        let mut unit_end = index;
+        while unit_end < bytes.len()
+            && (bytes[unit_end].is_ascii_alphabetic() || bytes[unit_end] >= 0x80)
+        {
+            unit_end += 1;
+        }
+        let unit = &rest[index..unit_end];
+        let unit_nanos = match unit {
+            "ns" => 1u128,
+            "us" | "µs" => 1_000,
+            "ms" => 1_000_000,
+            "s" => 1_000_000_000,
+            "m" => 60_000_000_000,
+            "h" => 3_600_000_000_000,
+            _ => return Err(invalid()),
+        };
+        let whole_nanos = integer.checked_mul(unit_nanos).ok_or_else(invalid)?;
+        let fractional_nanos = if fractional_digits == 0 {
+            0
+        } else {
+            // Go uses float64 for the fractional component and truncates the
+            // resulting nanoseconds. This also naturally accepts arbitrarily
+            // long fractional tails, which contribute no extra precision.
+            let fractional_text = &rest[fractional_start..index];
+            let retained = &fractional_text[..fractional_text.len().min(18)];
+            let fraction = retained.parse::<f64>().map_err(|_| invalid())?;
+            let scale = 10_f64.powi(retained.len() as i32);
+            let nanos = fraction * (unit_nanos as f64 / scale);
+            if !nanos.is_finite() || nanos < 0.0 || nanos > i64::MAX as f64 {
+                return Err(invalid());
+            }
+            nanos as u128
+        };
+        total_nanos = total_nanos
+            .checked_add(whole_nanos)
+            .and_then(|n| n.checked_add(fractional_nanos))
+            .ok_or_else(invalid)?;
+        if total_nanos > i64::MAX as u128 {
+            return Err(invalid());
+        }
+        index = unit_end;
+        components += 1;
+    }
+    if components == 0 || (negative && total_nanos != 0) {
+        return Err(invalid());
+    }
+    let seconds = u64::try_from(total_nanos / 1_000_000_000).map_err(|_| invalid())?;
+    let nanos = (total_nanos % 1_000_000_000) as u32;
+    Ok(Duration::new(seconds, nanos))
 }
 
 fn normalize_mysql_error(error: MySqlError) -> StorageError {
@@ -867,6 +960,65 @@ mod tests {
         // The Go and Rust implementations both use FarmHash32; this published
         // vector guards against accidentally switching hash families.
         assert_eq!(farmhash::hash32(b"hello world"), 430_397_466);
+    }
+
+    #[test]
+    fn go_tcp_connect_addresses_default_missing_port_to_3306() {
+        assert_eq!(
+            split_host_port("db.example").unwrap(),
+            ("db.example".into(), 3306)
+        );
+        assert_eq!(
+            split_host_port("2001:db8::1").unwrap(),
+            ("2001:db8::1".into(), 3306)
+        );
+        assert_eq!(
+            split_host_port("[2001:db8::1]").unwrap(),
+            ("2001:db8::1".into(), 3306)
+        );
+        assert_eq!(
+            split_host_port("[2001:db8::1]:3307").unwrap(),
+            ("2001:db8::1".into(), 3307)
+        );
+        assert!(split_host_port("[2001:db8::1]junk").is_err());
+        assert!(split_host_port("db.example:not-a-port").is_err());
+    }
+
+    #[test]
+    fn mysql_timeout_duration_matches_go_composite_and_boundary_forms() {
+        let cases = [
+            ("0", Duration::ZERO),
+            ("+1.5h", Duration::from_secs(5_400)),
+            ("1h30m", Duration::from_secs(5_400)),
+            ("1.000000001s", Duration::new(1, 1)),
+            ("500µs", Duration::from_micros(500)),
+            ("500μs", Duration::from_micros(500)),
+            ("1ns", Duration::from_nanos(1)),
+            ("0.0000000001s", Duration::ZERO),
+            (
+                "9223372036.854775807s",
+                Duration::new(9_223_372_036, 854_775_807),
+            ),
+            (
+                "0.00000000000000000000000000000000000000000000000001s",
+                Duration::ZERO,
+            ),
+            ("-0s", Duration::ZERO),
+        ];
+        for (source, expected) in cases {
+            assert_eq!(parse_go_duration(source).unwrap(), expected, "{source}");
+        }
+        for source in [
+            "",
+            "1",
+            " 1s",
+            "-1s",
+            "1s2",
+            "1fortnight",
+            "9223372036.854775808s",
+        ] {
+            assert!(parse_go_duration(source).is_err(), "{source}");
+        }
     }
 
     #[test]
