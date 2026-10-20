@@ -729,7 +729,7 @@ async function run() {
             selectedOwner = peers.find(peer => peer.address === owners[0]);
             if (selectedOwner) {
               isolatedListName = candidate;
-              isolatedMatchingGrpc = selectedOwner.grpc;
+              isolatedMatchingGrpc = `127.0.0.1:${selectedOwner.grpc}`;
               break;
             }
             lastObservation = `owner ${owners[0]} did not match either configured member`;
@@ -744,6 +744,7 @@ async function run() {
       membershipPeers.forEach(client => client.close());
     }
   }
+  assert.match(isolatedMatchingGrpc, /^127\.0\.0\.1:\d+$/, 'direct isolation Matching client must receive a host:port address');
   clients.Matching = new schema.matching.v1.MatchingAPI(isolatedMatchingGrpc, grpc.credentials.createInsecure());
   const isolatedList = { name: isolatedListName };
   const isoStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
