@@ -70,7 +70,7 @@ async function registerShardWithGoManager(shardName, force = false) {
       const reports = current?.ReportedShards || current?.reportedShards || {};
       if ([...managedShardNames].every(name => {
         const status = reports[name]?.Status ?? reports[name]?.status;
-        return status === 1 || status === 'READY' || status === 'ready';
+        return status === 1 || status === 'READY' || status === 'ready' || status === 'ShardStatusREADY';
       })) return;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -163,8 +163,18 @@ async function run() {
       },
     }, metadata, { deadline: Date.now() + 10000 }, (error, response) => error ? reject(error) : resolve(response)));
   }
+  function directPartitionOwner(client, domainName, taskListName) {
+    return new Promise((resolve, reject) => client.ListTaskListPartitions({
+      domain: domainName, taskList: { name: taskListName },
+    }, new grpc.Metadata(), { deadline: Date.now() + 10000 }, (error, response) => {
+      if (error) return reject(error);
+      const partitions = response.decisionTaskListPartitions || [];
+      resolve(partitions.find(partition => partition.key === taskListName)?.ownerHostName || '');
+    }));
+  }
   async function waitForRustReady(label) {
     const deadline = Date.now() + 180000;
+    let lastReadinessError;
     while (Date.now() < deadline) {
       if (productionMode) {
         try {
@@ -175,7 +185,8 @@ async function run() {
             taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
           });
           return;
-        } catch (_) {
+        } catch (error) {
+          lastReadinessError = error;
           // JOIN, SWIM, label publication, or Go membership propagation may
           // still be in progress. The timeout below leaves the cause in logs.
         }
@@ -185,7 +196,7 @@ async function run() {
       if (rust.exitCode !== null || rust.signalCode !== null) throw new Error(`Rust Matching ${label} exited before readiness; see ${work}/rust-server-${label}.log`);
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    throw new Error(`Rust Matching ${label} did not become discoverable through Go Frontend; see ${work}/rust-server-${label}.log`);
+    throw new Error(`Rust Matching ${label} did not become discoverable through Go Frontend; last readiness error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; see ${work}/rust-server-${label}.log`);
   }
   let exited;
   let rust = startRust('before-restart');
@@ -213,6 +224,33 @@ async function run() {
       }
     }
     if (Date.now() >= convergenceDeadline) throw new Error('second Rust Matching instance did not join the original Ringpop cluster');
+    const primaryMembershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    const secondaryPeer = directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
+    const primaryAddress = `127.0.0.1:${rustTChannel}`;
+    const secondaryAddress = `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`;
+    const ownerProbeNames = Array.from({ length: 64 }, (_, index) => `ringpop-convergence-${id}-${index}`);
+    const ringpopDeadline = Date.now() + 30000;
+    let observedOwners = new Map();
+    while (Date.now() < ringpopDeadline) {
+      const observations = await Promise.all(ownerProbeNames.map(async name => {
+        const [primaryOwner, secondaryOwner] = await Promise.all([
+          directPartitionOwner(primaryMembershipPeer, domain, name),
+          directPartitionOwner(secondaryPeer, domain, name),
+        ]);
+        return [name, primaryOwner, secondaryOwner];
+      }));
+      observedOwners = new Map(observations.map(([name, primaryOwner, secondaryOwner]) => [name, { primaryOwner, secondaryOwner }]));
+      const owners = new Set(observations.flatMap(([, primaryOwner, secondaryOwner]) => [primaryOwner, secondaryOwner]));
+      if (observations.every(([, primaryOwner, secondaryOwner]) => primaryOwner === secondaryOwner)
+          && owners.has(primaryAddress) && owners.has(secondaryAddress)) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    const convergedOwnership = [...observedOwners.values()];
+    const convergedOwnerSet = new Set(convergedOwnership.map(owner => owner.primaryOwner));
+    assert(convergedOwnership.length === ownerProbeNames.length
+      && convergedOwnership.every(owner => owner.primaryOwner === owner.secondaryOwner)
+      && convergedOwnerSet.has(primaryAddress) && convergedOwnerSet.has(secondaryAddress),
+    'both Rust Matching members must expose the same Ringpop ownership map, including keys owned by each host');
     const idleList = { name: `production-idle-${id}` };
     const pendingIdlePoll = call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: idleList, identity: 'production-idle-probe' });
     const idleDeadline = Date.now() + 10000;
@@ -310,10 +348,11 @@ async function run() {
     else secondaryRust.kill('SIGKILL');
     const failedExit = ownerIndex === 0 ? await exited : await secondaryExited;
     assert.equal(failedExit.signal, 'SIGKILL', 'selected Rust Matching owner did not crash');
+    const survivor = ownerIndex === 0 ? secondaryRust : rust;
     const survivorDeadline = Date.now() + 45000;
     let survivorVisible = false;
     while (Date.now() < survivorDeadline) {
-      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) throw new Error(`surviving Rust Matching exited; see ${work}/rust-server-secondary.log`);
+      if (survivor.exitCode !== null || survivor.signalCode !== null) throw new Error(`surviving Rust Matching exited; see ${ownerIndex === 0 ? `${work}/rust-server-secondary.log` : `${work}/rust-server-before-restart.log`}`);
       try {
         await call('WorkflowAPI', 'DescribeTaskList', {
           domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
@@ -353,10 +392,14 @@ async function run() {
     const rangeAfter = Number(rangeAfterResult.stdout.trim());
     assert(rangeAfter > rangeBefore, 'surviving Rust Matching did not acquire a higher persisted task-list range');
     const emptyDeadline = Date.now() + 30000;
-    let afterCount = Number(queuedCount().stdout.trim());
+    let queuedAfter = queuedCount();
+    assert.equal(queuedAfter.status, 0, `could not read shared Matching task rows after recovery: ${queuedAfter.stderr}`);
+    let afterCount = Number(queuedAfter.stdout.trim());
     while (afterCount !== 0 && Date.now() < emptyDeadline) {
       await new Promise(resolve => setTimeout(resolve, 100));
-      afterCount = Number(queuedCount().stdout.trim());
+      queuedAfter = queuedCount();
+      assert.equal(queuedAfter.status, 0, `could not read shared Matching task rows after recovery: ${queuedAfter.stderr}`);
+      afterCount = Number(queuedAfter.stdout.trim());
     }
     assert.equal(afterCount, 0, 'recovered task remained queued after SDK completion');
     if (ownerIndex === 0) {
