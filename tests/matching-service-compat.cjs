@@ -702,19 +702,33 @@ async function run() {
     ];
     const membershipPeers = peers.map(peer => directMatchingClient(`127.0.0.1:${peer.grpc}`));
     let selectedOwner;
-    for (let index = 0; index < 128; index++) {
-      const candidate = `${isolatedListName}-${index}`;
-      const owners = await Promise.all(membershipPeers.map(client => directPartitionOwner(client, domain, candidate)));
-      assert(owners.every(owner => owner === owners[0]), `Matching members disagree on isolation task list owner: ${owners.join(', ')}`);
-      selectedOwner = peers.find(peer => peer.address === owners[0]);
-      if (selectedOwner) {
-        isolatedListName = candidate;
-        isolatedMatchingGrpc = selectedOwner.grpc;
-        break;
+    let lastObservation = 'no common owner observed';
+    const ownerDeadline = Date.now() + 30000;
+    try {
+      for (let index = 0; index < 128 && Date.now() < ownerDeadline; index++) {
+        const candidate = `${isolatedListName}-${index}`;
+        try {
+          const owners = await Promise.all(membershipPeers.map(client => directPartitionOwner(client, domain, candidate)));
+          if (owners[0] !== owners[1]) {
+            lastObservation = `members disagreed: ${owners.join(', ')}`;
+          } else {
+            selectedOwner = peers.find(peer => peer.address === owners[0]);
+            if (selectedOwner) {
+              isolatedListName = candidate;
+              isolatedMatchingGrpc = selectedOwner.grpc;
+              break;
+            }
+            lastObservation = `owner ${owners[0]} did not match either configured member`;
+          }
+        } catch (error) {
+          lastObservation = error.details || error.message;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
+      assert(selectedOwner, `could not find an isolation task list with a common live Ringpop owner: ${lastObservation}`);
+    } finally {
+      membershipPeers.forEach(client => client.close());
     }
-    assert(selectedOwner, 'could not find an isolation task list owned by either Rust Matching member');
-    membershipPeers.forEach(client => client.close());
   }
   clients.Matching = new schema.matching.v1.MatchingAPI(isolatedMatchingGrpc, grpc.credentials.createInsecure());
   const isolatedList = { name: isolatedListName };
