@@ -1005,22 +1005,40 @@ async fn main() -> anyhow::Result<()> {
                     lifecycle.start().await.map_err(anyhow::Error::new)
                 };
                 if let Err(start_error) = start_result {
+                    let mut cleanup_errors = Vec::new();
                     // Withdraw while the shared Ringpop listener is still
                     // accepting traffic, then drain and stop Matching.
                     if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
-                        let _ = lifecycle.withdraw().await;
+                        if let Err(error) = lifecycle.withdraw().await {
+                            cleanup_errors.push(format!("withdrawing membership: {error}"));
+                        }
                     }
                     if let Some(runtime) = matching_runtime.as_mut() {
-                        let _ = runtime.shutdown().await;
+                        if let Err(error) = runtime.shutdown().await {
+                            cleanup_errors.push(format!("stopping Matching runtime: {error:#}"));
+                        }
                     }
                     if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
-                        let _ = lifecycle.stop_after_drain().await;
+                        if let Err(error) = lifecycle.stop_after_drain().await {
+                            cleanup_errors.push(format!("stopping membership: {error}"));
+                        }
                     }
                     if let Some(task) = matching_tchannel_task.take() {
                         task.abort();
-                        let _ = task.await;
+                        if let Err(error) = task.await {
+                            if !error.is_cancelled() {
+                                cleanup_errors
+                                    .push(format!("joining shared TChannel listener: {error}"));
+                            }
+                        }
                     }
-                    return Err(start_error.context("starting Matching Ringpop membership"));
+                    if cleanup_errors.is_empty() {
+                        return Err(start_error.context("starting Matching Ringpop membership"));
+                    }
+                    anyhow::bail!(
+                        "starting Matching Ringpop membership failed: {start_error:#}; cleanup also failed: {}",
+                        cleanup_errors.join("; ")
+                    );
                 }
             }
             let app = if run_matching {
