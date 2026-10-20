@@ -491,9 +491,23 @@ impl TaskDispatcher {
                     let Some(response) = sender.as_mut() else {
                         return true;
                     };
+                    let forward_started = tokio::time::Instant::now();
                     let result = tokio::select! {
-                        result = poll.forward(target) => result,
-                        _ = response.closed() => return true,
+                        result = poll.forward(target) => Some(result),
+                        _ = response.closed() => None,
+                    };
+                    if let (Some(lifecycle), Some(context)) = (
+                        lifecycle.as_ref(),
+                        lifecycle
+                            .as_ref()
+                            .and_then(|poll| poll.metric_context.as_ref()),
+                    ) {
+                        lifecycle
+                            .metrics
+                            .forward_poll_latency(context, forward_started.elapsed());
+                    }
+                    let Some(result) = result else {
+                        return true;
                     };
                     return match result {
                         Ok(value) => {
@@ -522,6 +536,11 @@ impl TaskDispatcher {
             // The parent loop governs its own lifecycle chain; this poll keeps
             // its own waiter registration while forwarded, as in Go where the
             // child poller stays registered during `ForwardPoll`.
+            let forward_context = lifecycle
+                .as_ref()
+                .and_then(|poll| poll.metric_context.clone());
+            let forward_metrics = lifecycle.as_ref().map(|poll| poll.metrics.clone());
+            let forward_started = tokio::time::Instant::now();
             let lifecycle = lifecycle.and_then(|mut lifecycle| {
                 lifecycle.manager = parent.pollers.clone()?;
                 // ForwardPoll rebuilds the request without the worker's rate.
@@ -542,6 +561,9 @@ impl TaskDispatcher {
                     poll_started,
                 )
                 .await;
+            if let (Some(metrics), Some(context)) = (forward_metrics, forward_context.as_ref()) {
+                metrics.forward_poll_latency(context, forward_started.elapsed());
+            }
             true
         })
     }
@@ -737,6 +759,15 @@ impl TaskDispatcher {
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
+        if let (Some(reader), Some(lifecycle)) = (self.reader.as_ref(), lifecycle.as_ref()) {
+            if !lifecycle.info.isolation_group.is_empty()
+                && !reader.has_isolation_group(&lifecycle.info.isolation_group)
+            {
+                if let Some(context) = lifecycle.metric_context.as_ref() {
+                    lifecycle.metrics.invalid_isolation_group(context);
+                }
+            }
+        }
         let mut sender = Some(sender);
         self.delivery_loop(
             poll,

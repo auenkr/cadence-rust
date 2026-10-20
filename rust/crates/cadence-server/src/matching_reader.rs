@@ -724,6 +724,9 @@ impl TaskReader {
     pub async fn poll(&self) -> Option<AllocatedTask> {
         self.inner.matcher.poll(self.inner.stop.subscribe()).await
     }
+    pub(crate) fn has_isolation_group(&self, group: &str) -> bool {
+        self.inner.isolated.contains_key(group)
+    }
     pub(crate) fn record_task_count(&self, task_count: i64) {
         if let Some(reader_metrics) = self
             .inner

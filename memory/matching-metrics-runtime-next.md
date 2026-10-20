@@ -65,7 +65,11 @@ now mapped to concrete gaps:
 * `matcher.go:444` emits invalid-isolation-group count.
 * `matcher.go:465-639` emits the local/forward/after-forward-failure poll
   timing pairs described above; Rust emits these from the claimed task or
-  successful direct forward.
+  successful direct forward. `forward_poll_latency_per_tl` and its `_ns`
+  histogram now wrap both direct remote forwarding (including RPC errors and
+  cancellation) and in-process parent-dispatch forwarding, tagged with the
+  child poll's task-list context as Go's forwarder does. Invalid nonempty
+  isolation groups are counted at poll entry; empty groups remain valid.
 * `task_reader.go:231,273,395` updates backlog, task-count, and task-lag
   gauges. The durable queue exposes `levels().2` for backlog, but Rust's
   acknowledgement manager's `levels().2` is the same outstanding unacked item

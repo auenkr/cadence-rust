@@ -102,6 +102,9 @@ pub const ISOLATION_SUCCESS: &str = "isolation_success_per_tl";
 pub const POLL_DECISION_ALREADY_STARTED: &str = "poll_decision_task_already_started_per_tl";
 pub const POLL_ACTIVITY_ALREADY_STARTED: &str = "poll_activity_task_already_started_per_tl";
 pub const POLLER_PER_TASK_LIST: &str = "poller_count_per_tl";
+pub const POLLER_INVALID_ISOLATION_GROUP: &str = "poller_invalid_isolation_group_per_tl";
+pub const FORWARD_POLL_LATENCY: &str = "forward_poll_latency_per_tl";
+pub const FORWARD_POLL_LATENCY_NS: &str = "forward_poll_latency_per_tl_ns";
 pub const TASK_BACKLOG_PER_TASK_LIST: &str = "task_backlog_per_tl";
 pub const TASK_LAG_PER_TASK_LIST: &str = "task_lag_per_tl";
 pub const TASK_COUNT_PER_TASK_LIST: &str = "task_count_per_tl";
@@ -422,6 +425,10 @@ impl MatchingMetrics {
         self.task_list_counter(POLL_TIMEOUT, context, BTreeMap::new());
     }
 
+    pub fn invalid_isolation_group(&self, context: &PollMetricContext) {
+        self.task_list_counter(POLLER_INVALID_ISOLATION_GROUP, context, BTreeMap::new());
+    }
+
     pub fn poll_match(
         &self,
         context: &PollMetricContext,
@@ -538,6 +545,25 @@ impl MatchingMetrics {
             (ASYNC_MATCH_LATENCY, MetricKind::Timer, None),
             (
                 ASYNC_MATCH_LATENCY_NS,
+                MetricKind::Histogram,
+                Some(HistogramSpec::GoLow1ms100s),
+            ),
+        ] {
+            self.0.record(MetricEvent {
+                name,
+                kind,
+                value: MetricValue::Duration(elapsed),
+                tags: self.task_list_tags(context),
+                histogram,
+            });
+        }
+    }
+
+    pub fn forward_poll_latency(&self, context: &PollMetricContext, elapsed: Duration) {
+        for (name, kind, histogram) in [
+            (FORWARD_POLL_LATENCY, MetricKind::Timer, None),
+            (
+                FORWARD_POLL_LATENCY_NS,
                 MetricKind::Histogram,
                 Some(HistogramSpec::GoLow1ms100s),
             ),
