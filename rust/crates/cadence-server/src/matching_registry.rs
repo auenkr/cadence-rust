@@ -909,7 +909,7 @@ impl QueueRegistry {
                             .map(|provider| Arc::new(provider(&domain, &lookup.1, lookup.2))),
                         ..crate::matching_reader::ReaderConfig::default()
                     };
-                    let reader = crate::matching_reader::TaskReader::with_dispatch_check(
+                    let reader = crate::matching_reader::TaskReader::with_dispatch_check_metrics(
                         queue.clone(),
                         dispatcher.task_notification(),
                         reader_config,
@@ -925,6 +925,20 @@ impl QueueRegistry {
                                     registry.standby_enabled.clone(),
                                 )
                             }),
+                        Some((
+                            registry.metrics.clone(),
+                            crate::matching_metrics::PollMetricContext {
+                                domain: domain.clone(),
+                                task_list: lookup.1.clone(),
+                                task_list_kind: i32::from(kind),
+                                task_type: if lookup.2 == 1 {
+                                    "activity_task"
+                                } else {
+                                    "decision_task"
+                                },
+                                poller_isolation_group: String::new(),
+                            },
+                        )),
                     );
                     let read_stop = reader.stop_signal();
                         let sync_matcher = Arc::new(crate::matching_sync::SyncMatcher::new(

@@ -67,11 +67,19 @@ now mapped to concrete gaps:
   open.
 * `task_reader.go:231,273,395` updates backlog, task-count, and task-lag
   gauges. The durable queue exposes `levels().2` for backlog, but Rust's
-  `matching_reader.rs` currently has no metrics context or gauge emissions.
+  acknowledgement manager's `levels().2` is the same outstanding unacked item
+  count as Go `AckManager.GetBacklogCount`. Rust now emits this gauge at reader
+  pump turns and wires a service metrics/context through queue creation.
+  Task-count still needs a periodic task-store size query; task-lag needs a
+  corresponding max-read minus ack update at acknowledgement persistence.
 * `task_reader.go:365,490` emits expired-task counters; `:503-506` emits async
   match latency timer/histogram; `:537` emits async dispatch timeout; `:544`
-  emits buffer throttle; and `:568` emits unknown dispatch error. None are yet
-  emitted by Rust's `matching_reader.rs`.
+  emits buffer throttle; and `:568` emits unknown dispatch error. Rust now
+  emits expiry at the dispatch-time expiry branch, async-match timing around
+  each limiter/offer attempt, and timeout/throttle counters at the matching
+  retry outcomes. Initial read-time expiry is handled inside the durable queue,
+  so it still needs a count surfaced to the reader; unknown dispatch errors
+  need classification at the future corresponding terminal dispatch path.
 
 Metric definitions and rollups are in `go/common/metrics/defs.go` around
 3060-3134. Rust source formatting and `git diff --check` pass; no build or

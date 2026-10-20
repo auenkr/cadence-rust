@@ -102,6 +102,15 @@ pub const ISOLATION_SUCCESS: &str = "isolation_success_per_tl";
 pub const POLL_DECISION_ALREADY_STARTED: &str = "poll_decision_task_already_started_per_tl";
 pub const POLL_ACTIVITY_ALREADY_STARTED: &str = "poll_activity_task_already_started_per_tl";
 pub const POLLER_PER_TASK_LIST: &str = "poller_count_per_tl";
+pub const TASK_BACKLOG_PER_TASK_LIST: &str = "task_backlog_per_tl";
+pub const TASK_LAG_PER_TASK_LIST: &str = "task_lag_per_tl";
+pub const TASK_COUNT_PER_TASK_LIST: &str = "task_count_per_tl";
+pub const EXPIRED_TASKS_PER_TASK_LIST: &str = "tasks_expired_per_tl";
+pub const ASYNC_MATCH_LATENCY: &str = "asyncmatch_latency_per_tl";
+pub const ASYNC_MATCH_LATENCY_NS: &str = "asyncmatch_latency_per_tl_ns";
+pub const ASYNC_MATCH_DISPATCH_TIMEOUTS: &str = "asyncmatch_dispatch_timeouts_per_tl";
+pub const BUFFER_THROTTLE_COUNT: &str = "buffer_throttle_count_per_tl";
+pub const BUFFER_UNKNOWN_DISPATCH_ERROR: &str = "buffer_unknown_task_dispatch_error_per_tl";
 pub const POLL_LOCAL_MATCH_LATENCY: &str = "poll_local_match_latency_per_tl";
 pub const POLL_LOCAL_MATCH_LATENCY_NS: &str = "poll_local_match_latency_per_tl_ns";
 pub const POLL_FORWARD_MATCH_LATENCY: &str = "poll_forward_match_latency_per_tl";
@@ -474,6 +483,10 @@ impl MatchingMetrics {
     }
 
     pub fn poller_count(&self, context: &PollMetricContext, count: usize) {
+        self.task_list_gauge(POLLER_PER_TASK_LIST, context, count as f64);
+    }
+
+    pub fn task_list_gauge(&self, name: &'static str, context: &PollMetricContext, value: f64) {
         let list = match context.task_list_kind {
             1 => "__sticky__",
             2 => "__ephemeral__",
@@ -481,9 +494,9 @@ impl MatchingMetrics {
             _ => "_unknown_",
         };
         self.0.record(MetricEvent {
-            name: POLLER_PER_TASK_LIST,
+            name,
             kind: MetricKind::Gauge,
-            value: MetricValue::Number(count as f64),
+            value: MetricValue::Number(value),
             tags: BTreeMap::from([
                 (
                     DOMAIN_TAG.to_owned(),
@@ -497,6 +510,53 @@ impl MatchingMetrics {
             ]),
             histogram: None,
         });
+    }
+
+    pub fn expired_task(&self, context: &PollMetricContext) {
+        self.task_list_counter(EXPIRED_TASKS_PER_TASK_LIST, context, BTreeMap::new());
+    }
+
+    pub fn task_list_counter_event(&self, name: &'static str, context: &PollMetricContext) {
+        self.task_list_counter(name, context, BTreeMap::new());
+    }
+
+    pub fn async_match_latency(&self, context: &PollMetricContext, elapsed: Duration) {
+        for (name, kind, histogram) in [
+            (ASYNC_MATCH_LATENCY, MetricKind::Timer, None),
+            (
+                ASYNC_MATCH_LATENCY_NS,
+                MetricKind::Histogram,
+                Some(HistogramSpec::GoLow1ms100s),
+            ),
+        ] {
+            self.0.record(MetricEvent {
+                name,
+                kind,
+                value: MetricValue::Duration(elapsed),
+                tags: self.task_list_tags(context),
+                histogram,
+            });
+        }
+    }
+
+    fn task_list_tags(&self, context: &PollMetricContext) -> BTreeMap<String, String> {
+        let list = match context.task_list_kind {
+            1 => "__sticky__",
+            2 => "__ephemeral__",
+            0 if !context.task_list.is_empty() => context.task_list.as_str(),
+            _ => "_unknown_",
+        };
+        BTreeMap::from([
+            (
+                DOMAIN_TAG.to_owned(),
+                if context.domain.is_empty() {
+                    "_unknown_".to_owned()
+                } else {
+                    context.domain.clone()
+                },
+            ),
+            (TASK_LIST_TAG.to_owned(), go_sanitize_metric_value(list)),
+        ])
     }
 
     pub fn poll_match_latency(
@@ -972,5 +1032,22 @@ mod matcher_metric_tests {
             events[0].tags.get(TASK_LIST_TAG).map(String::as_str),
             Some("queue_a")
         );
+    }
+
+    #[test]
+    fn async_match_latency_emits_timer_and_histogram() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let elapsed = Duration::from_millis(7);
+        MatchingMetrics::new(sink.clone()).async_match_latency(&context(), elapsed);
+        let events = sink.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name, ASYNC_MATCH_LATENCY);
+        assert_eq!(events[0].kind, MetricKind::Timer);
+        assert_eq!(events[1].name, ASYNC_MATCH_LATENCY_NS);
+        assert_eq!(events[1].kind, MetricKind::Histogram);
+        assert!(events
+            .iter()
+            .all(|event| event.value == MetricValue::Duration(elapsed)));
+        assert_eq!(events[1].histogram, Some(HistogramSpec::GoLow1ms100s));
     }
 }
