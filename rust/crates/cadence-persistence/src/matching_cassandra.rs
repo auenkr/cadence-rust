@@ -15,6 +15,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use scylla::{
     client::session::Session,
+    errors::{DbError, ExecutionError, RequestAttemptError},
     response::query_result::QueryResult,
     statement::{
         batch::{Batch, BatchType},
@@ -52,6 +53,16 @@ fn task_list_lwt_applied(result: QueryResult) -> Result<bool> {
             "Cassandra LWT result row has no [applied] column",
         )),
     }
+}
+
+fn is_unavailable(error: &ExecutionError) -> bool {
+    matches!(
+        error,
+        ExecutionError::LastAttemptError(RequestAttemptError::DbError(
+            DbError::Unavailable { .. },
+            _
+        ))
+    )
 }
 
 pub struct CassandraMatchingTaskStore {
@@ -728,20 +739,39 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
 
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
         let session = self.session();
-        let result = self
-            .driver
-            .run(session.query_unpaged(
-                DELETE_LIST,
-                (
-                    key.domain_id,
-                    &key.name,
-                    key.task_type,
-                    LIST_ROW,
-                    LIST_SENTINEL,
-                    range,
-                ),
-            ))
-            .map_err(Self::internal)?;
+        let mut all_consistency = Statement::new(DELETE_LIST);
+        all_consistency.set_consistency(scylla::frame::types::Consistency::All);
+        let result = match self.driver.run(session.query_unpaged(
+            all_consistency,
+            (
+                key.domain_id,
+                &key.name,
+                key.task_type,
+                LIST_ROW,
+                LIST_SENTINEL,
+                range,
+            ),
+        )) {
+            Ok(result) => result,
+            Err(error) if is_unavailable(&error) => {
+                let mut fallback = Statement::new(DELETE_LIST);
+                fallback.set_consistency(self.driver.default_consistency());
+                self.driver
+                    .run(session.query_unpaged(
+                        fallback,
+                        (
+                            key.domain_id,
+                            &key.name,
+                            key.task_type,
+                            LIST_ROW,
+                            LIST_SENTINEL,
+                            range,
+                        ),
+                    ))
+                    .map_err(Self::internal)?
+            }
+            Err(error) => return Err(Self::internal(error)),
+        };
         if task_list_lwt_applied(result)? {
             Ok(())
         } else {

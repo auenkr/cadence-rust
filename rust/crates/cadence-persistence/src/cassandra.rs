@@ -11,11 +11,20 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use scylla::{
+    client::execution_profile::ExecutionProfile,
     client::{session::Session, session_builder::SessionBuilder},
+    frame::types::{Consistency, SerialConsistency},
     statement::batch::{Batch, BatchType},
     DeserializeValue, SerializeValue,
 };
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    fmt,
+    num::NonZeroUsize,
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use uuid::Uuid;
 
 const TOKEN_ROW: i32 = 1;
@@ -24,7 +33,8 @@ const OWNER_TOKEN_SENTINEL: i32 = -1;
 const OWNER_NONE_SENTINEL: &str = "0::30000000-0000-f000-f000-000000000000:-1";
 const FREE_SENTINEL: &str = "0::30000000-0000-f000-f000-000000000000:-2";
 const INSERT_METADATA: &str = "INSERT INTO semaphore_metadata (domain_id, semaphore_name, size, bucket_size, created_time) VALUES (?, ?, ?, ?, ?) IF NOT EXISTS";
-const SELECT_METADATA: &str = "SELECT size, bucket_size FROM semaphore_metadata WHERE domain_id = ? AND semaphore_name = ?";
+const SELECT_METADATA: &str =
+    "SELECT size, bucket_size FROM semaphore_metadata WHERE domain_id = ? AND semaphore_name = ?";
 const SELECT_BUCKET: &str = "SELECT type, token_id, owner_id, holder, held_token FROM semaphore_tokens WHERE domain_id = ? AND semaphore_name = ? AND bucket = ?";
 const SELECT_TOKEN: &str = "SELECT holder FROM semaphore_tokens WHERE domain_id = ? AND semaphore_name = ? AND bucket = ? AND type = ? AND token_id = ?";
 const SELECT_OWNER: &str = "SELECT held_token FROM semaphore_tokens WHERE domain_id = ? AND semaphore_name = ? AND bucket = ? AND type = ? AND token_id = ? AND owner_id = ?";
@@ -122,149 +132,340 @@ pub struct CassandraSemaphorePersistence {
 
 impl fmt::Debug for CassandraSemaphorePersistence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CassandraSemaphorePersistence").finish_non_exhaustive()
+        f.debug_struct("CassandraSemaphorePersistence")
+            .finish_non_exhaustive()
     }
 }
 
 impl CassandraSemaphorePersistence {
-    pub fn new(session: Arc<Session>) -> Self { Self { session } }
+    pub fn new(session: Arc<Session>) -> Self {
+        Self { session }
+    }
 
     fn domain_id(value: &str) -> Result<Uuid, AcquireError> {
-        Uuid::parse_str(value).map_err(|error| AcquireError::Invalid(format!("invalid domainID {value:?}: {error}")))
+        Uuid::parse_str(value)
+            .map_err(|error| AcquireError::Invalid(format!("invalid domainID {value:?}: {error}")))
     }
 
     fn internal(error: impl fmt::Display) -> AcquireError {
         AcquireError::Internal(error.to_string())
     }
 
-    async fn owner_token(&self, domain_id: Uuid, name: &str, bucket: i32, owner: &str) -> Result<i32, AcquireError> {
-        let result = self.session.query_unpaged(
-            SELECT_OWNER,
-            (domain_id, name, bucket, OWNER_ROW, OWNER_TOKEN_SENTINEL, owner),
-        ).await.map_err(Self::internal)?;
+    async fn owner_token(
+        &self,
+        domain_id: Uuid,
+        name: &str,
+        bucket: i32,
+        owner: &str,
+    ) -> Result<i32, AcquireError> {
+        let result = self
+            .session
+            .query_unpaged(
+                SELECT_OWNER,
+                (
+                    domain_id,
+                    name,
+                    bucket,
+                    OWNER_ROW,
+                    OWNER_TOKEN_SENTINEL,
+                    owner,
+                ),
+            )
+            .await
+            .map_err(Self::internal)?;
         let rows = result.into_rows_result().map_err(Self::internal)?;
-        rows.maybe_first_row::<(i32,)>().map_err(Self::internal)?
+        rows.maybe_first_row::<(i32,)>()
+            .map_err(Self::internal)?
             .map(|(token,)| token)
-            .ok_or_else(|| AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!("semaphore owner {owner:?} does not hold a token in bucket {bucket}"),
-            )))
+            .ok_or_else(|| {
+                AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(format!(
+                    "semaphore owner {owner:?} does not hold a token in bucket {bucket}"
+                )))
+            })
     }
 
-    async fn token_holder(&self, domain_id: Uuid, name: &str, bucket: i32, token_id: i32) -> Result<String, AcquireError> {
-        let result = self.session.query_unpaged(
-            SELECT_TOKEN,
-            (domain_id, name, bucket, TOKEN_ROW, token_id),
-        ).await.map_err(Self::internal)?;
+    async fn token_holder(
+        &self,
+        domain_id: Uuid,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+    ) -> Result<String, AcquireError> {
+        let result = self
+            .session
+            .query_unpaged(SELECT_TOKEN, (domain_id, name, bucket, TOKEN_ROW, token_id))
+            .await
+            .map_err(Self::internal)?;
         let rows = result.into_rows_result().map_err(Self::internal)?;
-        let holder = rows.maybe_first_row::<(Option<String>,)>().map_err(Self::internal)?
+        let holder = rows
+            .maybe_first_row::<(Option<String>,)>()
+            .map_err(Self::internal)?
             .map(|(holder,)| holder)
-            .ok_or_else(|| AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!("semaphore token {token_id} does not exist in bucket {bucket}"),
-            )))?;
-        Ok(holder.filter(|holder| holder != FREE_SENTINEL).unwrap_or_default())
+            .ok_or_else(|| {
+                AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(format!(
+                    "semaphore token {token_id} does not exist in bucket {bucket}"
+                )))
+            })?;
+        Ok(holder
+            .filter(|holder| holder != FREE_SENTINEL)
+            .unwrap_or_default())
     }
 }
 
 #[async_trait]
 impl SemaphorePersistence for CassandraSemaphorePersistence {
-    async fn create_semaphore(&self, domain_id: &str, name: &str, size: i32, bucket_size: i32) -> Result<SemaphoreMetadata, SemaphoreError> {
-        if size <= 0 { return Err(SemaphoreError::Invalid(format!("Size must be positive, got {size}"))); }
-        if !(0..=crate::semaphores::MAX_BUCKET_SIZE).contains(&bucket_size) {
-            return Err(SemaphoreError::Invalid(format!("BucketSize must not exceed {}, got {bucket_size}", crate::semaphores::MAX_BUCKET_SIZE)));
+    async fn create_semaphore(
+        &self,
+        domain_id: &str,
+        name: &str,
+        size: i32,
+        bucket_size: i32,
+    ) -> Result<SemaphoreMetadata, SemaphoreError> {
+        if size <= 0 {
+            return Err(SemaphoreError::Invalid(format!(
+                "Size must be positive, got {size}"
+            )));
         }
-        let domain_id = Uuid::parse_str(domain_id).map_err(|error| SemaphoreError::Invalid(format!("invalid domainID: {error}")))?;
-        let bucket_size = if bucket_size == 0 { crate::semaphores::DEFAULT_BUCKET_SIZE } else { bucket_size };
+        if !(0..=crate::semaphores::MAX_BUCKET_SIZE).contains(&bucket_size) {
+            return Err(SemaphoreError::Invalid(format!(
+                "BucketSize must not exceed {}, got {bucket_size}",
+                crate::semaphores::MAX_BUCKET_SIZE
+            )));
+        }
+        let domain_id = Uuid::parse_str(domain_id)
+            .map_err(|error| SemaphoreError::Invalid(format!("invalid domainID: {error}")))?;
+        let bucket_size = if bucket_size == 0 {
+            crate::semaphores::DEFAULT_BUCKET_SIZE
+        } else {
+            bucket_size
+        };
         let created_time: DateTime<Utc> = Utc::now();
-        let result = self.session.query_unpaged(INSERT_METADATA, (domain_id, name, size, bucket_size, created_time))
-            .await.map_err(|error| SemaphoreError::Internal(error.to_string()))?;
+        let result = self
+            .session
+            .query_unpaged(
+                INSERT_METADATA,
+                (domain_id, name, size, bucket_size, created_time),
+            )
+            .await
+            .map_err(|error| SemaphoreError::Internal(error.to_string()))?;
         // Cassandra returns `[applied]` plus the previous metadata on a
         // conditional conflict. Both shapes use the same typed columns.
-        let rows = result.into_rows_result().map_err(|error| SemaphoreError::Internal(error.to_string()))?;
-        let applied = rows.maybe_first_row::<(bool, Option<Uuid>, Option<String>, Option<i32>, Option<i32>, Option<DateTime<Utc>>)>()
+        let rows = result
+            .into_rows_result()
+            .map_err(|error| SemaphoreError::Internal(error.to_string()))?;
+        let applied = rows
+            .maybe_first_row::<(
+                bool,
+                Option<Uuid>,
+                Option<String>,
+                Option<i32>,
+                Option<i32>,
+                Option<DateTime<Utc>>,
+            )>()
             .map_err(|error| SemaphoreError::Internal(error.to_string()))?
-            .map(|(applied, ..)| applied).unwrap_or(false);
-        if !applied { return Err(SemaphoreError::Exists(format!("semaphore {name:?} already exists"))); }
+            .map(|(applied, ..)| applied)
+            .unwrap_or(false);
+        if !applied {
+            return Err(SemaphoreError::Exists(format!(
+                "semaphore {name:?} already exists"
+            )));
+        }
         Ok(SemaphoreMetadata { size, bucket_size })
     }
 
-    async fn get_semaphore_metadata(&self, domain_id: &str, name: &str) -> Result<SemaphoreMetadata, AcquireError> {
+    async fn get_semaphore_metadata(
+        &self,
+        domain_id: &str,
+        name: &str,
+    ) -> Result<SemaphoreMetadata, AcquireError> {
         let domain_id = Self::domain_id(domain_id)?;
-        let result = self.session.query_unpaged(SELECT_METADATA, (domain_id, name)).await.map_err(Self::internal)?;
+        let result = self
+            .session
+            .query_unpaged(SELECT_METADATA, (domain_id, name))
+            .await
+            .map_err(Self::internal)?;
         let rows = result.into_rows_result().map_err(Self::internal)?;
-        rows.maybe_first_row::<(i32, i32)>().map_err(Self::internal)?
+        rows.maybe_first_row::<(i32, i32)>()
+            .map_err(Self::internal)?
             .map(|(size, bucket_size)| SemaphoreMetadata { size, bucket_size })
-            .ok_or_else(|| AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!("semaphore {name:?} does not exist in domain {domain_id}"),
-            )))
+            .ok_or_else(|| {
+                AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(format!(
+                    "semaphore {name:?} does not exist in domain {domain_id}"
+                )))
+            })
     }
 
-    async fn scan_semaphore_bucket(&self, domain_id: &str, name: &str, bucket: i32) -> Result<Vec<SemaphoreRow>, AcquireError> {
+    async fn scan_semaphore_bucket(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
         let domain_id = Self::domain_id(domain_id)?;
-        let result = self.session.query_unpaged(SELECT_BUCKET, (domain_id, name, bucket)).await.map_err(Self::internal)?;
+        let result = self
+            .session
+            .query_unpaged(SELECT_BUCKET, (domain_id, name, bucket))
+            .await
+            .map_err(Self::internal)?;
         let rows = result.into_rows_result().map_err(Self::internal)?;
         let mut output = Vec::new();
-        for row in rows.rows::<(i32, i32, Option<String>, Option<String>, Option<i32>)>().map_err(Self::internal)? {
+        for row in rows
+            .rows::<(i32, i32, Option<String>, Option<String>, Option<i32>)>()
+            .map_err(Self::internal)?
+        {
             let (row_type, token_id, owner_id, holder, held_token) = row.map_err(Self::internal)?;
             match row_type {
                 TOKEN_ROW => output.push(SemaphoreRow::Token {
                     token_id,
-                    holder: holder.filter(|holder| holder != FREE_SENTINEL).unwrap_or_default(),
+                    holder: holder
+                        .filter(|holder| holder != FREE_SENTINEL)
+                        .unwrap_or_default(),
                 }),
-                OWNER_ROW => if let (Some(owner_id), Some(held_token)) = (owner_id, held_token) {
-                    output.push(SemaphoreRow::Owner { owner_id, held_token });
-                },
-                _ => return Err(AcquireError::Internal(format!("unknown semaphore row type {row_type}"))),
+                OWNER_ROW => {
+                    if let (Some(owner_id), Some(held_token)) = (owner_id, held_token) {
+                        output.push(SemaphoreRow::Owner {
+                            owner_id,
+                            held_token,
+                        });
+                    }
+                }
+                _ => {
+                    return Err(AcquireError::Internal(format!(
+                        "unknown semaphore row type {row_type}"
+                    )))
+                }
             }
         }
         Ok(output)
     }
 
-    async fn get_semaphore_ownership_by_token(&self, domain_id: &str, name: &str, bucket: i32, token_id: i32) -> Result<String, AcquireError> {
-        self.token_holder(Self::domain_id(domain_id)?, name, bucket, token_id).await
+    async fn get_semaphore_ownership_by_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+    ) -> Result<String, AcquireError> {
+        self.token_holder(Self::domain_id(domain_id)?, name, bucket, token_id)
+            .await
     }
 
-    async fn get_semaphore_ownership_by_owner(&self, domain_id: &str, name: &str, bucket: i32, owner_id: &str) -> Result<i32, AcquireError> {
-        self.owner_token(Self::domain_id(domain_id)?, name, bucket, owner_id).await
+    async fn get_semaphore_ownership_by_owner(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        owner_id: &str,
+    ) -> Result<i32, AcquireError> {
+        self.owner_token(Self::domain_id(domain_id)?, name, bucket, owner_id)
+            .await
     }
 
-    async fn grant_semaphore_token(&self, domain_id: &str, name: &str, bucket: i32, token_id: i32, owner_id: &str) -> Result<GrantOutcome, AcquireError> {
+    async fn grant_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> Result<GrantOutcome, AcquireError> {
         let domain_id = Self::domain_id(domain_id)?;
         match self.owner_token(domain_id, name, bucket, owner_id).await {
             Ok(existing) => return Ok(GrantOutcome::AlreadyHeld(existing)),
-            Err(AcquireError::NotFound(_)) => {},
+            Err(AcquireError::NotFound(_)) => {}
             Err(error) => return Err(error),
         }
         let mut batch = Batch::new(BatchType::Logged);
         batch.append_statement(GRANT_TOKEN);
         batch.append_statement(INSERT_OWNER);
         let now: DateTime<Utc> = Utc::now();
-        self.session.batch(&batch, (
-            (owner_id, now, domain_id, name, bucket, TOKEN_ROW, token_id, OWNER_NONE_SENTINEL, FREE_SENTINEL),
-            (domain_id, name, bucket, OWNER_ROW, OWNER_TOKEN_SENTINEL, owner_id, None::<String>, token_id, now),
-        )).await.map_err(Self::internal)?;
+        self.session
+            .batch(
+                &batch,
+                (
+                    (
+                        owner_id,
+                        now,
+                        domain_id,
+                        name,
+                        bucket,
+                        TOKEN_ROW,
+                        token_id,
+                        OWNER_NONE_SENTINEL,
+                        FREE_SENTINEL,
+                    ),
+                    (
+                        domain_id,
+                        name,
+                        bucket,
+                        OWNER_ROW,
+                        OWNER_TOKEN_SENTINEL,
+                        owner_id,
+                        None::<String>,
+                        token_id,
+                        now,
+                    ),
+                ),
+            )
+            .await
+            .map_err(Self::internal)?;
         match self.owner_token(domain_id, name, bucket, owner_id).await {
             Ok(held) if held == token_id => Ok(GrantOutcome::Applied),
             Ok(held) => Ok(GrantOutcome::AlreadyHeld(held)),
-            Err(AcquireError::NotFound(_)) => match self.token_holder(domain_id, name, bucket, token_id).await {
-                Ok(holder) if !holder.is_empty() => Ok(GrantOutcome::SlotTaken),
-                Ok(_) | Err(AcquireError::NotFound(_)) => Ok(GrantOutcome::SlotTaken),
-                Err(error) => Err(error),
-            },
+            Err(AcquireError::NotFound(_)) => {
+                match self.token_holder(domain_id, name, bucket, token_id).await {
+                    Ok(holder) if !holder.is_empty() => Ok(GrantOutcome::SlotTaken),
+                    Ok(_) | Err(AcquireError::NotFound(_)) => Ok(GrantOutcome::SlotTaken),
+                    Err(error) => Err(error),
+                }
+            }
             Err(error) => Err(error),
         }
     }
 
-    async fn release_semaphore_token(&self, domain_id: &str, name: &str, bucket: i32, token_id: i32, owner_id: &str) -> Result<bool, AcquireError> {
+    async fn release_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> Result<bool, AcquireError> {
         let domain_id = Self::domain_id(domain_id)?;
-        if self.token_holder(domain_id, name, bucket, token_id).await? != owner_id { return Ok(false); }
+        if self.token_holder(domain_id, name, bucket, token_id).await? != owner_id {
+            return Ok(false);
+        }
         let mut batch = Batch::new(BatchType::Logged);
         batch.append_statement(RELEASE_TOKEN);
         batch.append_statement(DELETE_OWNER);
         let now: DateTime<Utc> = Utc::now();
-        self.session.batch(&batch, (
-            (FREE_SENTINEL, now, domain_id, name, bucket, TOKEN_ROW, token_id, OWNER_NONE_SENTINEL, owner_id),
-            (domain_id, name, bucket, OWNER_ROW, OWNER_TOKEN_SENTINEL, owner_id),
-        )).await.map_err(Self::internal)?;
+        self.session
+            .batch(
+                &batch,
+                (
+                    (
+                        FREE_SENTINEL,
+                        now,
+                        domain_id,
+                        name,
+                        bucket,
+                        TOKEN_ROW,
+                        token_id,
+                        OWNER_NONE_SENTINEL,
+                        owner_id,
+                    ),
+                    (
+                        domain_id,
+                        name,
+                        bucket,
+                        OWNER_ROW,
+                        OWNER_TOKEN_SENTINEL,
+                        owner_id,
+                    ),
+                ),
+            )
+            .await
+            .map_err(Self::internal)?;
         match self.owner_token(domain_id, name, bucket, owner_id).await {
             Err(AcquireError::NotFound(_)) => Ok(true),
             Ok(_) => Ok(false),
@@ -280,6 +481,39 @@ pub struct CassandraSessionConfig {
     pub user: String,
     pub password: String,
     pub keyspace: String,
+    pub request_timeout: Duration,
+    pub connect_timeout: Duration,
+    pub consistency: Consistency,
+    pub serial_consistency: Option<SerialConsistency>,
+    pub max_connections_per_host: Option<NonZeroUsize>,
+    pub datacenter: String,
+    pub region: String,
+    pub tls: Option<CassandraTlsConfig>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CassandraTlsConfig {
+    pub ca_files: Vec<PathBuf>,
+    pub cert_file: Option<PathBuf>,
+    pub key_file: Option<PathBuf>,
+    pub verify_hostname: bool,
+    pub server_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CassandraSessionOptions {
+    pub timeout_nanos: i64,
+    pub connect_timeout_nanos: i64,
+    pub consistency: String,
+    pub serial_consistency: String,
+    pub max_conns: i32,
+    pub datacenter: String,
+    pub region: String,
+    pub tls: Option<CassandraTlsConfig>,
+    pub allowed_authenticators: Vec<String>,
+    pub proto_version: i32,
+    pub connect_attributes: HashMap<String, String>,
+    pub host_selection_policy: String,
 }
 
 /// Session and dedicated async driver runtime for Matching's synchronous
@@ -288,11 +522,13 @@ pub struct CassandraSessionConfig {
 pub struct CassandraBlockingSession {
     session: Option<Arc<Session>>,
     runtime: Option<Arc<tokio::runtime::Runtime>>,
+    default_consistency: Consistency,
 }
 
 impl fmt::Debug for CassandraBlockingSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CassandraBlockingSession").finish_non_exhaustive()
+        f.debug_struct("CassandraBlockingSession")
+            .finish_non_exhaustive()
     }
 }
 
@@ -300,19 +536,37 @@ impl CassandraBlockingSession {
     /// Build a private multi-thread runtime and connect on it. Invoke this
     /// constructor from a blocking worker during service startup.
     pub fn connect(config: &CassandraSessionConfig) -> anyhow::Result<Self> {
-        let runtime = Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build()?);
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?,
+        );
         let session = runtime.block_on(config.connect())?;
-        Ok(Self { session: Some(Arc::new(session)), runtime: Some(runtime) })
+        Ok(Self {
+            session: Some(Arc::new(session)),
+            runtime: Some(runtime),
+            default_consistency: config.consistency,
+        })
     }
 
     pub(crate) fn session(&self) -> Arc<Session> {
-        self.session.as_ref().expect("live Cassandra session").clone()
+        self.session
+            .as_ref()
+            .expect("live Cassandra session")
+            .clone()
     }
 
     /// Drive one Scylla operation from a Tokio blocking-pool worker. Calling
     /// this on an async worker is forbidden because it blocks that worker.
     pub fn run<F: std::future::Future>(&self, future: F) -> F::Output {
-        self.runtime.as_ref().expect("live Cassandra runtime").block_on(future)
+        self.runtime
+            .as_ref()
+            .expect("live Cassandra runtime")
+            .block_on(future)
+    }
+
+    pub fn default_consistency(&self) -> Consistency {
+        self.default_consistency
     }
 }
 
@@ -321,7 +575,9 @@ impl Drop for CassandraBlockingSession {
         // Drop the driver session before runtime shutdown. Runtime::drop may
         // block, so transfer it to a plain thread even if we're on Tokio.
         drop(self.session.take());
-        if let Some(runtime) = self.runtime.take() { shutdown_runtime(runtime); }
+        if let Some(runtime) = self.runtime.take() {
+            shutdown_runtime(runtime);
+        }
     }
 }
 
@@ -338,15 +594,26 @@ mod blocking_session_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn dedicated_runtime_shutdown_does_not_block_rpc_runtime() {
-        let runtime = Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap());
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
         let (finished_tx, finished_rx) = std::sync::mpsc::channel();
         tokio::spawn(async move {
             shutdown_runtime(runtime);
             finished_tx.send(()).unwrap();
         });
-        tokio::time::timeout(Duration::from_millis(200), tokio::time::sleep(Duration::from_millis(5)))
-            .await.expect("runtime shutdown blocked the RPC timer worker");
-        finished_rx.recv_timeout(Duration::from_secs(1)).expect("shutdown dispatch completes");
+        tokio::time::timeout(
+            Duration::from_millis(200),
+            tokio::time::sleep(Duration::from_millis(5)),
+        )
+        .await
+        .expect("runtime shutdown blocked the RPC timer worker");
+        finished_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("shutdown dispatch completes");
     }
 }
 
@@ -358,39 +625,357 @@ impl CassandraSessionConfig {
         password: impl Into<String>,
         keyspace: impl Into<String>,
     ) -> anyhow::Result<Self> {
-        let hosts: Vec<String> = hosts.into_iter().filter(|host| !host.trim().is_empty()).collect();
+        let mut hosts: Vec<String> = hosts
+            .into_iter()
+            .filter(|host| !host.trim().is_empty())
+            .collect();
+        if hosts.is_empty() {
+            hosts = std::env::var("CASSANDRA_SEEDS")
+                .unwrap_or_else(|_| "127.0.0.1".into())
+                .split(',')
+                .map(str::trim)
+                .filter(|host| !host.is_empty())
+                .map(str::to_owned)
+                .collect();
+        }
         if hosts.is_empty() {
             anyhow::bail!("Cassandra hosts must not be empty");
         }
-        let port = if port == 0 { 9042 } else { port };
+        let port = if port == 0 {
+            std::env::var("CASSANDRA_DB_PORT")
+                .ok()
+                .map(|port| port.parse::<i32>())
+                .transpose()?
+                .unwrap_or(9042)
+        } else {
+            port
+        };
         let port = u16::try_from(port)
             .map_err(|_| anyhow::anyhow!("Cassandra port must be between 1 and 65535"))?;
         let keyspace = keyspace.into();
         if keyspace.is_empty() {
             anyhow::bail!("Cassandra keyspace must not be empty");
         }
-        Ok(Self { hosts, port, user: user.into(), password: password.into(), keyspace })
+        Ok(Self {
+            hosts,
+            port,
+            user: user.into(),
+            password: password.into(),
+            keyspace,
+            request_timeout: Duration::from_secs(10),
+            connect_timeout: Duration::from_secs(2),
+            consistency: Consistency::LocalQuorum,
+            serial_consistency: Some(SerialConsistency::LocalSerial),
+            max_connections_per_host: NonZeroUsize::new(2),
+            datacenter: String::new(),
+            region: String::new(),
+            tls: None,
+        })
+    }
+
+    pub fn with_go_options(mut self, options: CassandraSessionOptions) -> anyhow::Result<Self> {
+        self.request_timeout =
+            duration_option(options.timeout_nanos, Duration::from_secs(10), "timeout")?;
+        self.connect_timeout = duration_option(
+            options.connect_timeout_nanos,
+            Duration::from_secs(2),
+            "connectTimeout",
+        )?;
+        if !options.consistency.is_empty() {
+            self.consistency = parse_consistency(&options.consistency)?;
+        }
+        if !options.serial_consistency.is_empty() {
+            self.serial_consistency = Some(parse_serial_consistency(&options.serial_consistency)?);
+        }
+        self.max_connections_per_host = if options.max_conns > 0 {
+            NonZeroUsize::new(options.max_conns as usize)
+        } else {
+            NonZeroUsize::new(2)
+        };
+        self.datacenter = options.datacenter;
+        self.region = options.region;
+        self.tls = options.tls;
+        if !self.user.is_empty()
+            && !self.password.is_empty()
+            && !options.allowed_authenticators.is_empty()
+        {
+            anyhow::bail!("Cassandra allowedAuthenticators is not supported by the Scylla Rust driver; custom authenticator configuration cannot be honored");
+        }
+        if options.proto_version != 0 && options.proto_version != 4 {
+            anyhow::bail!("Cassandra protoVersion {} cannot be selected by the Scylla Rust driver (only negotiated protocol is supported)", options.proto_version);
+        }
+        // Go carries connectAttributes in NoSQL config but does not forward them
+        // into gocql ClusterConfig, so intentionally leave them unused here too.
+        if !matches!(
+            options.host_selection_policy.as_str(),
+            "" | "tokenaware,roundrobin"
+        ) {
+            anyhow::bail!("Cassandra hostSelectionPolicy {:?} has no equivalent in the Scylla Rust driver; supported policy is tokenaware,roundrobin", options.host_selection_policy);
+        }
+        Ok(self)
     }
 
     /// Connect to all configured contact points and select Cadence's existing
     /// keyspace. This never creates a keyspace or applies schema migrations.
     pub async fn connect(&self) -> anyhow::Result<Session> {
-        let nodes: Vec<String> = self.hosts.iter().map(|host| {
-            let host = host.trim();
-            if host.starts_with('[') {
-                format!("{host}:{}", self.port)
-            } else if host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_ipv6()) {
-                format!("[{host}]:{}", self.port)
-            } else {
-                format!("{host}:{}", self.port)
-            }
-        }).collect();
+        let nodes: Vec<String> = self
+            .hosts
+            .iter()
+            .map(|host| {
+                let host = host.trim();
+                if host.starts_with('[') {
+                    format!("{host}:{}", self.port)
+                } else if host
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_ipv6())
+                {
+                    format!("[{host}]:{}", self.port)
+                } else {
+                    format!("{host}:{}", self.port)
+                }
+            })
+            .collect();
+        let profile = ExecutionProfile::builder()
+            .consistency(self.consistency)
+            .serial_consistency(self.serial_consistency)
+            .request_timeout(Some(self.request_timeout))
+            .build()
+            .into_handle();
         let mut builder = SessionBuilder::new()
             .known_nodes(nodes)
+            .default_execution_profile_handle(profile)
+            .connection_timeout(self.connect_timeout)
             .use_keyspace(self.keyspace.clone(), true);
-        if !self.user.is_empty() {
+        if let Some(size) = self.max_connections_per_host {
+            builder = builder.pool_size(scylla::client::PoolSize::PerHost(size));
+        }
+        if !self.region.is_empty() {
+            builder = builder.host_filter(Arc::new(CassandraRegionHostFilter(self.region.clone())));
+        } else if !self.datacenter.is_empty() {
+            builder = builder.host_filter(Arc::new(
+                scylla::policies::host_filter::DcHostFilter::new(self.datacenter.clone()),
+            ));
+        }
+        if let Some(tls) = &self.tls {
+            builder = builder.tls_context(Some(build_rustls_client_config(tls)?));
+        }
+        if !self.user.is_empty() && !self.password.is_empty() {
             builder = builder.user(self.user.clone(), self.password.clone());
         }
         Ok(builder.build().await?)
+    }
+}
+
+fn duration_option(nanos: i64, default: Duration, name: &str) -> anyhow::Result<Duration> {
+    if nanos == 0 {
+        return Ok(default);
+    }
+    let nanos = u64::try_from(nanos)
+        .map_err(|_| anyhow::anyhow!("Cassandra {name} must not be negative"))?;
+    Ok(Duration::from_nanos(nanos))
+}
+
+fn parse_consistency(value: &str) -> anyhow::Result<Consistency> {
+    match value.to_ascii_uppercase().as_str() {
+        "ANY" => Ok(Consistency::Any),
+        "ONE" => Ok(Consistency::One),
+        "TWO" => Ok(Consistency::Two),
+        "THREE" => Ok(Consistency::Three),
+        "QUORUM" => Ok(Consistency::Quorum),
+        "ALL" => Ok(Consistency::All),
+        "LOCAL_QUORUM" => Ok(Consistency::LocalQuorum),
+        "EACH_QUORUM" => Ok(Consistency::EachQuorum),
+        "SERIAL" => Ok(Consistency::Serial),
+        "LOCAL_SERIAL" => Ok(Consistency::LocalSerial),
+        "LOCAL_ONE" => Ok(Consistency::LocalOne),
+        _ => anyhow::bail!("invalid Cassandra consistency {value:?}"),
+    }
+}
+
+fn parse_serial_consistency(value: &str) -> anyhow::Result<SerialConsistency> {
+    match value.to_ascii_uppercase().as_str() {
+        "SERIAL" => Ok(SerialConsistency::Serial),
+        "LOCAL_SERIAL" => Ok(SerialConsistency::LocalSerial),
+        _ => anyhow::bail!("invalid Cassandra serialConsistency {value:?}"),
+    }
+}
+
+struct CassandraRegionHostFilter(String);
+
+impl scylla::policies::host_filter::HostFilter for CassandraRegionHostFilter {
+    fn accept(&self, peer: &scylla::cluster::metadata::Peer) -> bool {
+        peer.datacenter
+            .as_deref()
+            .and_then(|dc| dc.get(..3))
+            .is_some_and(|dc| dc == self.0)
+    }
+}
+
+fn build_rustls_client_config(
+    tls: &CassandraTlsConfig,
+) -> anyhow::Result<Arc<rustls::ClientConfig>> {
+    if tls
+        .server_name
+        .as_ref()
+        .is_some_and(|name| !name.is_empty())
+    {
+        anyhow::bail!(
+            "Cassandra TLS serverName override is not supported by the Scylla Rust driver"
+        );
+    }
+    if tls.cert_file.is_some() != tls.key_file.is_some() {
+        anyhow::bail!("Cassandra TLS client certFile and keyFile must be configured together");
+    }
+    let builder = if tls.verify_hostname {
+        let mut roots = rustls::RootCertStore::empty();
+        if tls.ca_files.is_empty() {
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        } else {
+            for path in &tls.ca_files {
+                let file = std::fs::File::open(path)?;
+                let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(file))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                if certs.is_empty() {
+                    anyhow::bail!(
+                        "Cassandra TLS CA file {} contains no certificates",
+                        path.display()
+                    );
+                }
+                for cert in certs {
+                    roots.add(cert)?;
+                }
+            }
+        }
+        rustls::ClientConfig::builder().with_root_certificates(roots)
+    } else {
+        let algorithms = rustls::crypto::ring::default_provider().signature_verification_algorithms;
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification { algorithms }))
+    };
+    let client = match (&tls.cert_file, &tls.key_file) {
+        (Some(cert), Some(key)) => {
+            let cert_file = std::fs::File::open(cert)?;
+            let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(cert_file))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let key_file = std::fs::File::open(key)?;
+            let private_key = rustls_pemfile::private_key(&mut std::io::BufReader::new(key_file))?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Cassandra TLS key file {} contains no private key",
+                        key.display()
+                    )
+                })?;
+            builder.with_client_auth_cert(certs, private_key)?
+        }
+        _ => builder.with_no_client_auth(),
+    };
+    Ok(Arc::new(client))
+}
+
+#[cfg(test)]
+mod session_config_tests {
+    use super::*;
+
+    #[test]
+    fn cassandra_defaults_and_explicit_options_match_go() {
+        let config = CassandraSessionConfig::from_parts(
+            ["127.0.0.1".to_string()],
+            9042,
+            "".to_string(),
+            "".to_string(),
+            "cadence".to_string(),
+        )
+        .unwrap();
+        assert_eq!(config.request_timeout, Duration::from_secs(10));
+        assert_eq!(config.connect_timeout, Duration::from_secs(2));
+        assert_eq!(config.consistency, Consistency::LocalQuorum);
+        assert_eq!(
+            config.serial_consistency,
+            Some(SerialConsistency::LocalSerial)
+        );
+        assert_eq!(config.max_connections_per_host.unwrap().get(), 2);
+
+        let configured = config
+            .with_go_options(CassandraSessionOptions {
+                timeout_nanos: 3_000_000_000,
+                connect_timeout_nanos: 1_000_000_000,
+                consistency: "QUORUM".into(),
+                serial_consistency: "SERIAL".into(),
+                max_conns: 8,
+                datacenter: "dc1".into(),
+                proto_version: 4,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(configured.request_timeout, Duration::from_secs(3));
+        assert_eq!(configured.connect_timeout, Duration::from_secs(1));
+        assert_eq!(configured.consistency, Consistency::Quorum);
+        assert_eq!(
+            configured.serial_consistency,
+            Some(SerialConsistency::Serial)
+        );
+        assert_eq!(configured.max_connections_per_host.unwrap().get(), 8);
+        assert_eq!(configured.datacenter, "dc1");
+    }
+
+    #[test]
+    fn unsupported_cassandra_driver_options_fail_explicitly() {
+        let config = CassandraSessionConfig::from_parts(
+            ["127.0.0.1".to_string()],
+            9042,
+            "cadence".to_string(),
+            "secret".to_string(),
+            "cadence".to_string(),
+        )
+        .unwrap();
+        assert!(config
+            .with_go_options(CassandraSessionOptions {
+                allowed_authenticators: vec!["custom".into()],
+                ..Default::default()
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("allowedAuthenticators"));
+    }
+}
+
+#[derive(Debug)]
+struct NoCertificateVerification {
+    algorithms: rustls::crypto::WebPkiSupportedAlgorithms,
+}
+
+impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.algorithms.supported_schemes()
     }
 }

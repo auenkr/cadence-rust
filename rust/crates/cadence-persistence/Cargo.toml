@@ -7,7 +7,10 @@ license.workspace = true
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-scylla = { version = "=1.9.0", features = ["chrono-04"] }
+scylla = { version = "=1.9.0", features = ["chrono-04", "rustls-023"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+webpki-roots = "1"
 cadence-thrift = { path = "../cadence-thrift" }
 cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
