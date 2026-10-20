@@ -424,7 +424,14 @@ impl DurableTaskQueue {
             .expect("matching queue lock")
             .max_read_level;
         let (initial_read, _, _) = self.ack.levels();
-        let scanned = scan_batch(&self.store, &self.key, initial_read, max, range, batch)?;
+        let scanned = scan_batch(
+            self.store.as_ref(),
+            &self.key,
+            initial_read,
+            max,
+            range,
+            batch,
+        )?;
         let _state = self.state.lock().expect("matching queue lock");
         self.active()?;
         if scanned.tasks.is_empty() {

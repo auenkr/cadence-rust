@@ -159,7 +159,7 @@ impl IoDeadline {
         let sleep = self.sleep.get_or_insert_with(|| {
             let deadline = Instant::now() + timeout;
             self.last_deadline = Some(deadline);
-            Box::pin(tokio::time::sleep_until(deadline))
+            Box::pin(tokio::time::sleep_until(deadline.into()))
         });
         sleep.as_mut().poll(cx).is_ready()
     }
@@ -191,8 +191,8 @@ impl<S> TlsHandshakeStream<S> {
     ) -> Self {
         Self {
             stream,
-            read_deadline: read_deadline.map(|d| Box::pin(tokio::time::sleep_until(d))),
-            write_deadline: write_deadline.map(|d| Box::pin(tokio::time::sleep_until(d))),
+            read_deadline: read_deadline.map(|d| Box::pin(tokio::time::sleep_until(d.into()))),
+            write_deadline: write_deadline.map(|d| Box::pin(tokio::time::sleep_until(d.into()))),
         }
     }
 

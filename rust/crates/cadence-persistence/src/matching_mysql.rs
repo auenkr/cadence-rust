@@ -79,7 +79,7 @@ struct PoolState {
 pub(crate) struct SyncConnectionPool {
     options: Opts,
     async_options: mysql_async::Opts,
-    query_runtime: tokio::runtime::Runtime,
+    query_runtime: QueryRuntimeOwner,
     max_open: usize,
     max_idle: usize,
     max_lifetime: Option<Duration>,
@@ -87,6 +87,101 @@ pub(crate) struct SyncConnectionPool {
     available: Condvar,
 }
 
+/// Owns the asynchronous query runtime from a non-worker thread. Timed query
+/// tasks retain the pool while they clean up, so the final pool reference can
+/// be dropped by a Tokio worker. Dropping `Runtime` there would self-join (and
+/// panic); the owner thread accepts a shutdown signal and drops it safely.
+struct QueryRuntimeOwner {
+    handle: tokio::runtime::Handle,
+    shutdown: Option<mpsc::Sender<()>>,
+    owner_thread: Option<thread::JoinHandle<()>>,
+    #[cfg(test)]
+    stopped: Arc<AtomicBool>,
+}
+
+impl QueryRuntimeOwner {
+    fn new() -> std::result::Result<Self, String> {
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let (shutdown_tx, shutdown_rx) = mpsc::channel();
+        #[cfg(test)]
+        let stopped = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let thread_stopped = stopped.clone();
+        let owner_thread = thread::Builder::new()
+            .name("cadence-mysql-domain-runtime-owner".into())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(1)
+                    .thread_name("cadence-mysql-domain-query")
+                    .enable_all()
+                    .build();
+                match runtime {
+                    Ok(runtime) => {
+                        let _ = ready_tx.send(Ok(runtime.handle().clone()));
+                        let _ = shutdown_rx.recv();
+                        // This thread is outside every Tokio runtime context.
+                        drop(runtime);
+                    }
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error.to_string()));
+                    }
+                }
+                #[cfg(test)]
+                thread_stopped.store(true, Ordering::Release);
+            })
+            .map_err(|error| {
+                format!("could not start MySQL domain-query runtime owner: {error}")
+            })?;
+        let handle = match ready_rx.recv() {
+            Ok(Ok(handle)) => handle,
+            Ok(Err(error)) => {
+                let _ = owner_thread.join();
+                return Err(format!(
+                    "could not start MySQL domain-query runtime: {error}"
+                ));
+            }
+            Err(error) => {
+                let _ = owner_thread.join();
+                return Err(format!(
+                    "MySQL domain-query runtime owner stopped during startup: {error}"
+                ));
+            }
+        };
+        Ok(Self {
+            handle,
+            shutdown: Some(shutdown_tx),
+            owner_thread: Some(owner_thread),
+            #[cfg(test)]
+            stopped,
+        })
+    }
+
+    fn spawn<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.handle.spawn(future)
+    }
+}
+
+impl Drop for QueryRuntimeOwner {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        let Some(owner_thread) = self.owner_thread.take() else {
+            return;
+        };
+        if tokio::runtime::Handle::try_current().is_err() {
+            let _ = owner_thread.join();
+        }
+        // In an async context the JoinHandle is detached. The owner thread
+        // still receives shutdown, drops Runtime, and exits without self-join.
+    }
+}
+
+#[derive(Debug)]
 pub(crate) enum TimedQueryError {
     Timeout,
     MySql(mysql_async::Error),
@@ -177,7 +272,7 @@ impl SyncConnectionPool {
         }
         let slot = ReservedConnectionSlot(self.clone());
         let options = self.async_options.clone();
-        let task = self.query_runtime.handle().spawn(async move {
+        let task = self.query_runtime.spawn(async move {
             let _slot = slot;
             let result = tokio::time::timeout(remaining, async move {
                 let mut connection = mysql_async::Conn::new(options).await?;
@@ -270,12 +365,6 @@ pub(crate) struct ConnectionLease {
     /// mark it before `Transaction::drop` performs its implicit rollback.
     discard: Arc<AtomicBool>,
 }
-impl ConnectionLease {
-    pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
-        self.discard.clone()
-    }
-}
-
 pub(crate) fn normalize_mysql_error_on_lease(
     error: MySqlError,
     discard: &AtomicBool,
@@ -377,16 +466,7 @@ impl MySqlTaskStore {
         let max_idle = max_idle.min(max_open);
         let options = mysql_options(config)?;
         let async_options = mysql_async_options(config)?;
-        let query_runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .thread_name("cadence-mysql-domain-query")
-            .enable_all()
-            .build()
-            .map_err(|error| {
-                StorageError::BackendConfiguration(format!(
-                    "could not start MySQL domain-query runtime: {error}"
-                ))
-            })?;
+        let query_runtime = QueryRuntimeOwner::new().map_err(StorageError::BackendConfiguration)?;
         Ok(Arc::new(SyncConnectionPool {
             options,
             async_options,
@@ -1222,7 +1302,7 @@ fn parse_go_duration(value: &str) -> Result<GoTimeout> {
     let seconds = u64::try_from(total_nanos / 1_000_000_000).map_err(|_| invalid())?;
     let nanos = (total_nanos % 1_000_000_000) as u32;
     Ok(GoTimeout {
-        negative,
+        negative: negative && total_nanos != 0,
         magnitude: Duration::new(seconds, nanos),
     })
 }
@@ -1287,7 +1367,7 @@ mod tests {
     fn mysql_matching_schema_contract_matches_go_v8_primary_keys() {
         let schema = include_str!("../../../../go/schema/mysql/v8/cadence/schema.sql");
         let task_lists = schema
-            .split_once("CREATE TABLE task_lists(")
+            .split_once("CREATE TABLE task_lists (")
             .unwrap()
             .1
             .split_once(");")
@@ -1295,7 +1375,7 @@ mod tests {
             .0;
         assert!(task_lists.contains("PRIMARY KEY (shard_id, domain_id, name, task_type)"));
         let tasks = schema
-            .split_once("CREATE TABLE tasks(")
+            .split_once("CREATE TABLE tasks (")
             .unwrap()
             .1
             .split_once(");")
@@ -1484,7 +1564,7 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(pool.state.lock().unwrap().open <= 2);
-        let value: Option<u8> = transaction.query_first("SELECT 7", ()).unwrap();
+        let value: Option<u8> = transaction.query_first("SELECT 7").unwrap();
         assert_eq!(value, Some(7));
         transaction.commit().unwrap();
     }
@@ -1587,6 +1667,8 @@ mod tests {
         let mut config = timed_mysql_test_config(1);
         config.connect_addr = address;
         let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let runtime_stopped = pool.query_runtime.stopped.clone();
+        let weak_pool = Arc::downgrade(&pool);
         let started = Instant::now();
         let query_pool = pool.clone();
         let query_thread = thread::spawn(move || {
@@ -1600,19 +1682,83 @@ mod tests {
         let result = query_thread.join().unwrap();
         assert!(matches!(result, Err(TimedQueryError::Timeout)));
         assert!(started.elapsed() < Duration::from_secs(2));
+        // The worker's cancelled task may still own the last pool reference.
+        // Dropping the store-side reference immediately exercises that path.
+        drop(pool);
         match peer_thread.join().unwrap() {
             Ok(0) => {}
             Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
             result => panic!("client did not close stalled handshake: {result:?}"),
         }
         let cleanup_deadline = Instant::now() + Duration::from_secs(2);
-        while pool.state.lock().unwrap().open != 0 {
+        while !runtime_stopped.load(Ordering::Acquire) {
             assert!(
                 Instant::now() < cleanup_deadline,
-                "stalled handshake leaked its slot"
+                "query runtime did not shut down after its final pool reference dropped"
             );
             thread::sleep(Duration::from_millis(10));
         }
+        assert!(
+            weak_pool.upgrade().is_none(),
+            "timed query retained its pool"
+        );
+    }
+
+    #[test]
+    fn query_runtime_can_be_dropped_from_a_tokio_context() {
+        let pool = MySqlTaskStore::create_mysql_pool(&timed_mysql_test_config(1)).unwrap();
+        let runtime_stopped = pool.query_runtime.stopped.clone();
+        let weak_pool = Arc::downgrade(&pool);
+        let caller_runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        caller_runtime.block_on(async move {
+            drop(pool);
+        });
+
+        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+        while !runtime_stopped.load(Ordering::Acquire) {
+            assert!(
+                Instant::now() < cleanup_deadline,
+                "query runtime owner did not finish shutdown after async-context drop"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(weak_pool.upgrade().is_none(), "runtime retained the pool");
+    }
+
+    #[test]
+    fn query_runtime_final_owner_can_drop_on_its_worker() {
+        let pool = MySqlTaskStore::create_mysql_pool(&timed_mysql_test_config(1)).unwrap();
+        let runtime_stopped = pool.query_runtime.stopped.clone();
+        let weak_pool = Arc::downgrade(&pool);
+        let handle = pool.query_runtime.handle.clone();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (drop_tx, drop_rx) = mpsc::channel();
+        handle.spawn(async move {
+            let _ = ready_tx.send(());
+            let _ = drop_rx.recv();
+            // The caller drops its reference before releasing this task, so
+            // QueryRuntimeOwner::drop runs on its own Tokio worker thread.
+            drop(pool);
+        });
+
+        ready_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("runtime worker did not start the final-owner test");
+        drop(pool);
+        drop_tx.send(()).unwrap();
+
+        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+        while !runtime_stopped.load(Ordering::Acquire) {
+            assert!(
+                Instant::now() < cleanup_deadline,
+                "query runtime owner did not finish worker-context shutdown"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(weak_pool.upgrade().is_none(), "runtime retained the pool");
     }
 
     #[test]
@@ -1632,6 +1778,63 @@ mod tests {
             .unwrap();
         assert_eq!(value, Some(11));
         assert_eq!(pool.state.lock().unwrap().open, 0);
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server"]
+    fn timed_domain_query_resets_read_timeout_for_each_socket_operation() {
+        use mysql_async::prelude::Queryable as _;
+
+        let mut config = timed_mysql_test_config(1);
+        config.connect_attributes = [("readTimeout".into(), "200ms".into())]
+            .into_iter()
+            .collect();
+        let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let started = Instant::now();
+        let values = pool
+            .query_until(Instant::now() + Duration::from_secs(3), |connection| {
+                Box::pin(async move {
+                    let first = connection
+                        .query_first::<u8, _>("SELECT IF(SLEEP(0.12) = 0, 1, 0)")
+                        .await?;
+                    let second = connection
+                        .query_first::<u8, _>("SELECT IF(SLEEP(0.12) = 0, 2, 0)")
+                        .await?;
+                    Ok((first, second))
+                })
+            })
+            .unwrap();
+        assert_eq!(values, (Some(1), Some(2)));
+        assert!(
+            started.elapsed() > Duration::from_millis(200),
+            "combined operation completed before the configured per-read timeout"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server"]
+    fn timed_domain_query_bounds_a_stalled_socket_read() {
+        use mysql_async::prelude::Queryable as _;
+
+        let mut config = timed_mysql_test_config(1);
+        config.connect_attributes = [("readTimeout".into(), "150ms".into())]
+            .into_iter()
+            .collect();
+        let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let started = Instant::now();
+        let result = pool.query_until(Instant::now() + Duration::from_secs(2), |connection| {
+            Box::pin(async move { connection.query_first::<u8, _>("SELECT SLEEP(5)").await })
+        });
+        assert!(matches!(result, Err(TimedQueryError::MySql(_))));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+        while pool.state.lock().unwrap().open != 0 {
+            assert!(
+                Instant::now() < cleanup_deadline,
+                "socket read timeout did not release its dedicated pool slot"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]

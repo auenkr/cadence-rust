@@ -46,18 +46,27 @@ def main():
     ])
     try:
         deadline = time.monotonic() + 120
+        readiness_error = ""
         while time.monotonic() < deadline:
             ping = run(
-                ["docker", "exec", CONTAINER, "mysqladmin", "ping", "--silent", "-uroot", f"-p{password}"],
+                [
+                    "docker", "exec", CONTAINER, "mysql", "--batch",
+                    "--skip-column-names", "-uroot", f"-p{password}",
+                    "cadence", "-e", "SELECT 1",
+                ],
                 check=False,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
             )
             if ping.returncode == 0:
                 break
+            readiness_error = ping.stderr.strip()
             time.sleep(1)
         else:
-            raise RuntimeError("pinned MySQL container did not become ready within 120 seconds")
+            raise RuntimeError(
+                "pinned MySQL container did not accept authenticated SQL within 120 seconds; "
+                f"last check exited {ping.returncode}: {readiness_error}"
+            )
 
         schema = ROOT / "go/schema/mysql/v8/cadence/schema.sql"
         with schema.open("r", encoding="utf-8") as source:
