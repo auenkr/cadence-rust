@@ -38,7 +38,17 @@ function countTaskRows(query, domainHex, taskListName) {
 }
 
 // Bounded production GC verification against Go's real MySQL schema.
-async function verifyProductionMySqlTaskGc({ query, domainId, taskListName, pendingListName, observedMaxTaskIds, liveBlocks, rangeSize, deadlineMs = 90000, sleep }) {
+//
+// The acknowledgement of a Matching queue is the highest continuously
+// completed task id, so it may skip task ids that were allocated but never
+// used. The gate therefore requires the persisted acknowledgement to cover
+// the removed rows and never assumes an upper bound.
+//
+// The persisted range and the live task-list block are read as one snapshot.
+// A lease renewal between the two reads moves the range by one, so the gate
+// retries the snapshot until it is stable instead of tolerating a
+// difference, and it records the temporal history of every snapshot.
+async function verifyProductionMySqlTaskGc({ query, domainId, taskListName, pendingListName, observedMaxTaskIds, liveBlockProvider, rangeSize, deadlineMs = 90000, sleep }) {
   const domainHex = domainId.replace(/-/g, '').toLowerCase();
   assert(observedMaxTaskIds.length > 0, "no Matching task ids were observed in Go's tasks table");
   for (const taskType of [0, 1]) {
@@ -46,17 +56,41 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskListName, pend
     assert(observed, `no ${taskType === 0 ? 'decision' : 'activity'} task id was observed in Go's tasks table`);
   }
   const deadline = Date.now() + deadlineMs;
+  const snapshots = [];
   let observation = null;
   for (;;) {
     const lists = readTaskListRows(query, domainHex, taskListName);
     const remainingTasks = countTaskRows(query, domainHex, taskListName);
     const pendingTasks = countTaskRows(query, domainHex, pendingListName);
-    observation = { remainingTasks, pendingTasks, lists, observedMaxTaskIds };
+    const liveBlocks = {};
+    for (const [taskType] of observedMaxTaskIds) {
+      liveBlocks[taskType] = await liveBlockProvider(taskType);
+    }
+    const persistedRanges = lists.map(row => ({ taskType: row.taskType, rangeId: row.rangeId }));
+    const liveRanges = Object.fromEntries(Object.entries(liveBlocks).map(([taskType, block]) => [
+      taskType, Math.floor((block.startId - 1) / rangeSize) + 1,
+    ]));
+    // The persisted row and the live block must describe the same range. A
+    // lease renewal between the two reads is resolved by reading both again.
+    const rangeConsistent = observedMaxTaskIds.every(([taskType]) => {
+      const row = lists.find(entry => entry.taskType === taskType);
+      if (!row || !liveBlocks[taskType]) return false;
+      return liveRanges[taskType] === row.rangeId;
+    });
+    snapshots.push({
+      at: new Date().toISOString(),
+      remainingTasks,
+      pendingTasks,
+      persistedRanges,
+      liveRanges,
+      rangeConsistent,
+    });
+    observation = { remainingTasks, pendingTasks, lists, liveBlocks, snapshots };
     const ackCoversRemovedRows = observedMaxTaskIds.every(([taskType, observed]) => {
       const row = lists.find(entry => entry.taskType === taskType);
       return Boolean(row) && row.ackLevel !== null && row.ackLevel >= observed.maxTaskId;
     });
-    if (remainingTasks === 0 && ackCoversRemovedRows) break;
+    if (remainingTasks === 0 && ackCoversRemovedRows && rangeConsistent) break;
     if (Date.now() > deadline) {
       throw new Error(`Matching task garbage collection did not converge for ${taskListName}: ${JSON.stringify(observation)}`);
     }
@@ -68,15 +102,15 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskListName, pend
     const row = observation.lists.find(entry => entry.taskType === taskType);
     assert(row, `Go's task_lists table is missing the ${taskType} row for ${taskListName}`);
     assert(row.dataEncoding === 'thriftrw', `unexpected task-list blob encoding ${row.dataEncoding}`);
+    // The acknowledgement covers the removed rows. It may be higher than the
+    // highest observed id, because a Matching queue skips task ids that were
+    // allocated but never completed.
     assert(row.ackLevel >= observed.maxTaskId, `persisted ack level ${row.ackLevel} does not cover removed task ${observed.maxTaskId}`);
-    assert(row.ackLevel <= observed.maxTaskId + 1, `persisted ack level ${row.ackLevel} is ahead of the removed task ${observed.maxTaskId}`);
     assert(row.rangeId >= 1, `persisted range id ${row.rangeId} is not a leased range`);
-    const liveBlock = liveBlocks[row.taskType];
-    if (!liveBlock) continue;
-    // A lease renewal may move the range by one between the persisted row and
-    // the live task-list block, so both must describe the same range block.
+    const liveBlock = observation.liveBlocks[row.taskType];
+    assert(liveBlock, `no live task-list block was read for task type ${taskType}`);
     const liveRange = Math.floor((liveBlock.startId - 1) / rangeSize) + 1;
-    assert(Math.abs(liveRange - row.rangeId) <= 1,
+    assert(liveRange === row.rangeId,
       `persisted range ${row.rangeId} does not match the live task-list block ${JSON.stringify(liveBlock)}`);
     assert(liveBlock.endId === liveRange * rangeSize,
       `the live task-list block ${JSON.stringify(liveBlock)} does not describe a complete range block`);
@@ -87,7 +121,8 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskListName, pend
     pendingTaskRows: observation.pendingTasks,
     taskLists: observation.lists,
     observedMaxTaskIds: observedMaxTaskIds.map(([taskType, observed]) => ({ taskType, ...observed })),
-    liveBlocks,
+    liveBlocks: observation.liveBlocks,
+    snapshots: observation.snapshots,
     rangeSize,
   };
 }

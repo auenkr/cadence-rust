@@ -60,10 +60,14 @@ SDK scenarios complete, the probe waits (bounded, 90 seconds) until:
 2. the control task, which was never acknowledged, is still present;
 3. the persisted acknowledgement in Go's `task_lists` blob (decoded with the
    ThriftRW decoder) covers the removed task id of every queue
-   (`ack >= max observed task id` and `ack <= max observed task id + 1`);
-4. the persisted range is a leased range (`range_id >= 1`) and describes the
-   same range block as the live `DescribeTaskList` block (a concurrent lease
-   renewal may move it by one);
+   (`ack >= max observed task id`). A Matching queue skips task ids that were
+   allocated but never completed, so the gate does not assume an upper bound
+   for the acknowledgement;
+4. the persisted range and the live task-list block are read as one
+   snapshot and must describe the same range. A lease renewal between the two
+   reads is resolved by reading both again inside the bounded retry, not by
+   tolerating a difference. The gate records the temporal history of every
+   snapshot, so the range movement is visible in the evidence;
 5. Go's `domains` table holds exactly one row for the probed domain, with
    the UUID Go Frontend reported, Go's own `thriftrw` encoding and a non-empty
    metadata payload, and Go's `domain_metadata` row holds a positive
@@ -74,21 +78,36 @@ only: every table must exist in `go/schema/mysql/v8/cadence/schema.sql` or
 be one of Go's own admin tables (`schema_version`, `schema_update_history`).
 A private Rust table fails the gate.
 
-The full observation document is kept in `db-observations.json` and copied
-into the evidence directory.
+The full observation document, including the snapshot history, is kept in
+`db-observations.json` and copied into the evidence directory.
 
 ## Frozen binaries
 
+The harness source is frozen before the gate runs, so the evidence records an
+exact harness revision:
+
+- harness HEAD for the recorded gate run: see the evidence directory's
+  `source.json`
 - Rust: `artifacts/frozen-production/cadence-server-task-store-abstraction`
-  SHA256 `35e25467dfb6961d41d30565260c6e4afd9ed80b54857a403445cac57131817d`
-  (source `df3466479`). Unchanged.
-- Original Go: `artifacts/frozen-production/cadence-server-go-original`
+  SHA256 `35e25467dfb6961d41d30565260c6e4afd9ed80b54857a403445cac57131817d`,
+  built from source `df3466479`. Unchanged by this work; no Rust source
+  change and no Cargo build is part of this gate.
+- original Go: `artifacts/frozen-production/cadence-server-go-original`
   SHA256 `0ed004a0f68aee07f132d6e9e8b7faa8e71c992ebdecb11eb30d7c9a257b9bb5`,
   copied off the tmpfs from `/tmp/cadence-go-baseline-1r0mq_xe/cadence-server`
-  so a tmpfs cleanup cannot lose it.
+  so a tmpfs cleanup cannot lose it. It is the original Go build of `go/`
+  and is passed with `--binary` only; `--go-mixed-server-bin` is forbidden
+  because it enables the test-only discovery overlay.
 
 Neither binary is committed; both stay in the untracked `artifacts/`
 directory.
+
+The dirty files in the root checkout (`AGENTS.md`,
+`rust/crates/cadence-server/src/matching_registry.rs`,
+`rust/crates/cadence-server/src/matching_runtime.rs` and the untracked
+`rust/crates/cadence-server/src/matching_shard_processor.rs`) are user
+edits and are preserved untouched. This work only changes `tests/` and
+`memory/` in the isolated worktree.
 
 ## Next command (needs the lane)
 

@@ -444,18 +444,18 @@ async function run() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert(pendingRows > 0, 'Go History did not persist the unacknowledged control task');
-    const liveBlocks = {};
-    for (const [taskType, taskListType] of [[0, 'TASK_LIST_TYPE_DECISION'], [1, 'TASK_LIST_TYPE_ACTIVITY']]) {
+    const liveBlockProvider = async taskType => {
+      const taskListType = taskType === 0 ? 'TASK_LIST_TYPE_DECISION' : 'TASK_LIST_TYPE_ACTIVITY';
       const status = (await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType, includeTaskListStatus: true })).taskListStatus;
-      liveBlocks[taskType] = { startId: Number(status.taskIdBlock.startId), endId: Number(status.taskIdBlock.endId) };
-    }
+      return { startId: Number(status.taskIdBlock.startId), endId: Number(status.taskIdBlock.endId) };
+    };
     const taskGarbageCollection = await verifyProductionMySqlTaskGc({
       query: mysqlRows,
       domainId,
       taskListName: taskList.name,
       pendingListName: pendingList.name,
       observedMaxTaskIds: [...observedMaxTaskIds.entries()].sort((left, right) => left[0] - right[0]),
-      liveBlocks,
+      liveBlockProvider,
       rangeSize: 100000,
       sleep: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
     });

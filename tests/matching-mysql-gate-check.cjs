@@ -4,7 +4,6 @@
 // logic is exercised here against a fake database: a converged run must pass,
 // and every missing guarantee must fail.
 const assert = require('node:assert/strict');
-const path = require('node:path');
 const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder } = require('./matching-mysql-gate.cjs');
 
 const fixtures = require('./fixtures/matching-blobs.json');
@@ -29,6 +28,7 @@ const DOMAIN_ID = '2f8b2c1d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
 const DOMAIN_HEX = DOMAIN_ID.replace(/-/g, '').toLowerCase();
 const TASK_LIST = 'gate-tasks';
 const PENDING_LIST = 'gate-pending';
+const RANGE_SIZE = 100000;
 
 function fakeQuery(state) {
   return sql => {
@@ -63,7 +63,9 @@ function convergedState() {
 }
 
 const observedMaxTaskIds = [[0, { maxTaskId: 2, rows: 2 }], [1, { maxTaskId: 1, rows: 1 }]];
-const liveBlocks = { 0: { startId: 1, endId: 100000 }, 1: { startId: 1, endId: 100000 } };
+const liveBlockProvider = async taskType => (taskType === 0
+  ? { startId: 1, endId: RANGE_SIZE }
+  : { startId: 1, endId: RANGE_SIZE });
 const sleep = () => Promise.resolve();
 
 async function expectFailure(label, state, expected) {
@@ -71,7 +73,7 @@ async function expectFailure(label, state, expected) {
   try {
     await verifyProductionMySqlTaskGc({
       query: fakeQuery(state), domainId: DOMAIN_ID, taskListName: TASK_LIST, pendingListName: PENDING_LIST,
-      observedMaxTaskIds, liveBlocks, rangeSize: 100000, deadlineMs: 0, sleep,
+      observedMaxTaskIds, liveBlockProvider, rangeSize: RANGE_SIZE, deadlineMs: 0, sleep,
     });
   } catch (error) {
     failed = true;
@@ -86,11 +88,13 @@ async function main() {
 
   const evidence = await verifyProductionMySqlTaskGc({
     query: fakeQuery(convergedState()), domainId: DOMAIN_ID, taskListName: TASK_LIST, pendingListName: PENDING_LIST,
-    observedMaxTaskIds, liveBlocks, rangeSize: 100000, deadlineMs: 0, sleep,
+    observedMaxTaskIds, liveBlockProvider, rangeSize: RANGE_SIZE, deadlineMs: 0, sleep,
   });
   assert.equal(evidence.remainingTaskRows, 0, 'a converged run must report no remaining task rows');
   assert.equal(evidence.pendingTaskRows, 1, 'a converged run must report the surviving control task');
   assert.equal(evidence.taskLists.length, 2, 'a converged run must report both task-list rows');
+  assert.equal(evidence.snapshots.length, 1, 'a converged run must report its snapshot history');
+  assert.equal(evidence.snapshots[0].rangeConsistent, true, 'a converged run must report a consistent range snapshot');
 
   const domain = observeProductionMySqlDomain({ query: fakeQuery(convergedState()), domain: 'gate-domain', domainId: DOMAIN_ID });
   assert.equal(domain.domainId, DOMAIN_HEX, 'the domain observation must report Go\'s domain row');
@@ -115,23 +119,27 @@ async function main() {
     { taskType: 0, rangeId: 3, hex: blobFor(2), encoding: 'thriftrw' },
     { taskType: 1, rangeId: 3, hex: blobFor(1), encoding: 'thriftrw' },
   ]);
-  await expectFailure('a mismatched range', wrongRange, /does not match the live task-list block/);
+  await expectFailure('a mismatched range', wrongRange, /did not converge/);
 
   // The task-list row disappeared instead of being collected.
   const missingRow = convergedState();
   missingRow.taskLists.set(TASK_LIST, []);
   await expectFailure('a missing task-list row', missingRow, /did not converge/);
 
-  // The acknowledgement ran ahead of the removed task.
+  // The acknowledgement is ahead of the removed task. A Matching queue may
+  // skip task ids that were allocated but never completed, so this must pass.
   const aheadAck = convergedState();
   aheadAck.taskLists.set(TASK_LIST, [
-    { taskType: 0, rangeId: 1, hex: blobFor(2), encoding: 'thriftrw' },
-    { taskType: 1, rangeId: 1, hex: blobFor(1), encoding: 'thriftrw' },
+    { taskType: 0, rangeId: 1, hex: blobWithAck(9), encoding: 'thriftrw' },
+    { taskType: 1, rangeId: 1, hex: blobWithAck(9), encoding: 'thriftrw' },
   ]);
-  aheadAck.taskLists.get(TASK_LIST)[1].hex = blobWithAck(3);
-  await expectFailure('an acknowledgement ahead of the removed task', aheadAck, /is ahead of the removed task/);
+  const aheadEvidence = await verifyProductionMySqlTaskGc({
+    query: fakeQuery(aheadAck), domainId: DOMAIN_ID, taskListName: TASK_LIST, pendingListName: PENDING_LIST,
+    observedMaxTaskIds, liveBlockProvider, rangeSize: RANGE_SIZE, deadlineMs: 0, sleep,
+  });
+  assert.equal(aheadEvidence.taskLists[0].ackLevel, 9, 'an acknowledgement ahead of the removed task is allowed');
 
-  console.log(`Matching MySQL gate self-check passed (${fixtureCases} blob fixtures, 5 failure cases)`);
+  console.log(`Matching MySQL gate self-check passed (${fixtureCases} blob fixtures, 4 failure cases, 1 allowed high acknowledgement)`);
 }
 
 main().catch(error => {
