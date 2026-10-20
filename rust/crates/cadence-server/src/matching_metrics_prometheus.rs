@@ -14,7 +14,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     io,
     sync::{Arc, Mutex},
     time::Duration,
@@ -27,6 +27,7 @@ use tokio::{
 
 const CADENCE_SERVICE_TAG: &str = "cadence_service";
 const MATCHING_SERVICE: &str = "cadence_matching";
+const SUMMARY_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 
 /// Field names and defaults correspond to Tally's Go Prometheus `Configuration`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,10 +86,9 @@ pub enum PrometheusConfigError {
 impl std::fmt::Display for PrometheusConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnsupportedTimerType(value) => write!(
-                f,
-                "Prometheus timer type {value:?} is not supported yet; set timerType to histogram"
-            ),
+            Self::UnsupportedTimerType(value) => {
+                write!(f, "unsupported Prometheus timer type {value:?}")
+            }
             Self::InvalidHandlerPath(value) => {
                 write!(f, "Prometheus handlerPath must begin with '/': {value:?}")
             }
@@ -124,6 +124,7 @@ enum Aggregate {
     Counter(i64),
     Gauge(f64),
     Histogram(HistogramAggregate),
+    Summary(SummaryAggregate),
 }
 
 struct HistogramAggregate {
@@ -132,6 +133,52 @@ struct HistogramAggregate {
     bucket_counts: Vec<u64>,
     count: u64,
     sum_seconds: f64,
+}
+
+struct SummaryAggregate {
+    objectives: Vec<SummaryObjective>,
+    observations: VecDeque<(std::time::Instant, f64)>,
+    count: u64,
+    sum_seconds: f64,
+}
+
+impl SummaryAggregate {
+    fn new(objectives: Vec<SummaryObjective>) -> Self {
+        Self {
+            objectives,
+            observations: VecDeque::new(),
+            count: 0,
+            sum_seconds: 0.0,
+        }
+    }
+
+    fn observe(&mut self, duration: Duration) {
+        let value = duration.as_secs_f64();
+        let now = std::time::Instant::now();
+        self.observations.push_back((now, value));
+        self.count += 1;
+        self.sum_seconds += value;
+        self.expire(now);
+    }
+
+    fn expire(&mut self, now: std::time::Instant) {
+        while self
+            .observations
+            .front()
+            .is_some_and(|(observed, _)| now.duration_since(*observed) > SUMMARY_MAX_AGE)
+        {
+            self.observations.pop_front();
+        }
+    }
+
+    fn live_samples(&self) -> Vec<f64> {
+        let now = std::time::Instant::now();
+        self.observations
+            .iter()
+            .filter(|(observed, _)| now.duration_since(*observed) <= SUMMARY_MAX_AGE)
+            .map(|(_, value)| *value)
+            .collect()
+    }
 }
 
 impl PrometheusMetricSink {
@@ -151,13 +198,9 @@ impl PrometheusMetricSink {
                 config.handler_path.clone(),
             ));
         }
-        if config.timer_type != "histogram" {
+        if !matches!(config.timer_type.as_str(), "" | "histogram" | "summary") {
             return Err(PrometheusConfigError::UnsupportedTimerType(
-                if config.timer_type.is_empty() {
-                    "summary (Go default when omitted)".to_owned()
-                } else {
-                    config.timer_type.clone()
-                },
+                config.timer_type.clone(),
             ));
         }
         let network = config.listen_network.trim();
@@ -243,6 +286,7 @@ impl PrometheusMetricSink {
                 Some(Aggregate::Counter(_)) => ("counter", format!("{name} counter")),
                 Some(Aggregate::Gauge(_)) => ("gauge", format!("{name} gauge")),
                 Some(Aggregate::Histogram(_)) => ("histogram", format!("{name} histogram")),
+                Some(Aggregate::Summary(_)) => ("summary", format!("{name} summary")),
                 None => continue,
             };
             output.push_str(&format!(
@@ -293,6 +337,37 @@ impl PrometheusMetricSink {
                             histogram.count as f64,
                         );
                     }
+                    Aggregate::Summary(summary) => {
+                        let samples = summary.live_samples();
+                        for objective in &summary.objectives {
+                            let value = summary_quantile(
+                                &samples,
+                                objective.percentile,
+                                &summary.objectives,
+                            );
+                            write_sample(
+                                &mut output,
+                                &name,
+                                &key.tags,
+                                Some(("quantile", format_float(objective.percentile))),
+                                value,
+                            );
+                        }
+                        write_sample(
+                            &mut output,
+                            &format!("{name}_sum"),
+                            &key.tags,
+                            None,
+                            summary.sum_seconds,
+                        );
+                        write_sample(
+                            &mut output,
+                            &format!("{name}_count"),
+                            &key.tags,
+                            None,
+                            summary.count as f64,
+                        );
+                    }
                 }
             }
         }
@@ -326,9 +401,18 @@ impl MetricSink for PrometheusMetricSink {
         let aggregate = series.entry(key).or_insert_with(|| match event.kind {
             MetricKind::Counter => Aggregate::Counter(0),
             MetricKind::Gauge => Aggregate::Gauge(0.0),
-            MetricKind::Timer => Aggregate::Histogram(HistogramAggregate::new(
-                self.inner.timer_buckets_seconds.clone(),
-                None,
+            MetricKind::Timer if self.inner.config.timer_type == "histogram" => {
+                Aggregate::Histogram(HistogramAggregate::new(
+                    self.inner.timer_buckets_seconds.clone(),
+                    None,
+                ))
+            }
+            MetricKind::Timer => Aggregate::Summary(SummaryAggregate::new(
+                if self.inner.config.default_summary_objectives.is_empty() {
+                    go_default_summary_objectives()
+                } else {
+                    self.inner.config.default_summary_objectives.clone()
+                },
             )),
             MetricKind::Histogram => match event.histogram {
                 Some(HistogramSpec::GoLow1ms100s) => Aggregate::Histogram(HistogramAggregate::new(
@@ -355,9 +439,162 @@ impl MetricSink for PrometheusMetricSink {
             ) => {
                 histogram.observe(duration);
             }
+            (Aggregate::Summary(summary), MetricKind::Timer, MetricValue::Duration(duration)) => {
+                summary.observe(duration);
+            }
             _ => {}
         }
     }
+}
+
+fn summary_quantile(samples: &[f64], percentile: f64, objectives: &[SummaryObjective]) -> f64 {
+    if samples.is_empty() {
+        return f64::NAN;
+    }
+    // Before its 500-observation flush, the pinned Go stream returns the exact
+    // nearest rank. Larger windows use its targeted CKMS stream below.
+    if samples.len() < 500 {
+        let mut sorted = samples.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        let index = ((percentile * sorted.len() as f64).ceil() as usize).saturating_sub(1);
+        return sorted[index.min(sorted.len() - 1)];
+    }
+    let mut stream = CkmsStream::new(objectives);
+    for chunk in samples.chunks(500) {
+        let mut sorted = chunk.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        stream.merge_sorted(&sorted);
+    }
+    stream.query(percentile)
+}
+
+#[derive(Clone, Copy)]
+struct CkmsSample {
+    value: f64,
+    width: f64,
+    delta: f64,
+}
+
+struct CkmsStream {
+    count: f64,
+    samples: Vec<CkmsSample>,
+    objectives: Vec<(f64, f64)>,
+}
+
+impl CkmsStream {
+    fn new(objectives: &[SummaryObjective]) -> Self {
+        Self {
+            count: 0.0,
+            samples: Vec::new(),
+            objectives: objectives
+                .iter()
+                .map(|o| (o.percentile, o.allowed_error))
+                .collect(),
+        }
+    }
+
+    fn invariant(&self, rank: f64) -> f64 {
+        self.objectives
+            .iter()
+            .map(|(q, epsilon)| {
+                if *q * self.count <= rank {
+                    (2.0 * *epsilon * rank) / *q
+                } else {
+                    (2.0 * *epsilon * (self.count - rank)) / (1.0 - *q)
+                }
+            })
+            .fold(f64::MAX, f64::min)
+    }
+
+    fn merge_sorted(&mut self, values: &[f64]) {
+        let mut rank = 0.0;
+        let mut index = 0;
+        for value in values {
+            while index < self.samples.len() && self.samples[index].value <= *value {
+                rank += self.samples[index].width;
+                index += 1;
+            }
+            let delta = if index == 0 || index == self.samples.len() {
+                0.0
+            } else {
+                (self.invariant(rank).floor() - 1.0).max(0.0)
+            };
+            self.samples.insert(
+                index,
+                CkmsSample {
+                    value: *value,
+                    width: 1.0,
+                    delta,
+                },
+            );
+            index += 1;
+            self.count += 1.0;
+            rank += 1.0;
+        }
+        self.compress();
+    }
+
+    fn compress(&mut self) {
+        if self.samples.len() < 2 {
+            return;
+        }
+        let mut candidate = *self.samples.last().unwrap();
+        let mut candidate_index = self.samples.len() - 1;
+        let mut rank = self.count - 1.0 - candidate.width;
+        for index in (0..self.samples.len() - 1).rev() {
+            let current = self.samples[index];
+            if current.width + candidate.width + candidate.delta <= self.invariant(rank) {
+                candidate.width += current.width;
+                self.samples[candidate_index] = candidate;
+                self.samples.remove(index);
+                candidate_index -= 1;
+            } else {
+                candidate = current;
+                candidate_index = index;
+            }
+            rank -= current.width;
+        }
+    }
+
+    fn query(&self, percentile: f64) -> f64 {
+        let target_rank = (percentile * self.count).ceil();
+        let threshold = target_rank + (self.invariant(target_rank) / 2.0).ceil();
+        let mut previous = self.samples[0];
+        let mut rank = 0.0;
+        for current in self.samples.iter().skip(1) {
+            rank += previous.width;
+            if rank + current.width + current.delta > threshold {
+                return previous.value;
+            }
+            previous = *current;
+        }
+        previous.value
+    }
+}
+
+fn go_default_summary_objectives() -> Vec<SummaryObjective> {
+    vec![
+        SummaryObjective {
+            percentile: 0.5,
+            allowed_error: 0.01,
+        },
+        SummaryObjective {
+            percentile: 0.75,
+            allowed_error: 0.001,
+        },
+        SummaryObjective {
+            percentile: 0.95,
+            allowed_error: 0.001,
+        },
+        SummaryObjective {
+            percentile: 0.99,
+            allowed_error: 0.001,
+        },
+        SummaryObjective {
+            percentile: 0.999,
+            allowed_error: 0.0001,
+        },
+    ]
 }
 
 impl HistogramAggregate {
@@ -459,7 +696,11 @@ fn write_sample(
     if !tags.is_empty() || extra.is_some() {
         output.push('{');
         let mut first = true;
-        for (key, value) in tags {
+        let mut labels = tags.clone();
+        if let Some((key, value)) = extra {
+            labels.insert(key.to_owned(), value);
+        }
+        for (key, value) in &labels {
             if !first {
                 output.push(',');
             }
@@ -467,15 +708,6 @@ fn write_sample(
             output.push_str(key);
             output.push_str("=\"");
             output.push_str(&escape_label(value));
-            output.push('"');
-        }
-        if let Some((key, value)) = extra {
-            if !first {
-                output.push(',');
-            }
-            output.push_str(key);
-            output.push_str("=\"");
-            output.push_str(&escape_label(&value));
             output.push('"');
         }
         output.push('}');
@@ -638,18 +870,67 @@ mod tests {
     }
 
     #[test]
-    fn summary_configuration_is_rejected_instead_of_silently_becoming_histogram() {
-        let config = PrometheusMetricsConfig {
-            timer_type: "summary".to_owned(),
-            ..Default::default()
-        };
-        assert!(matches!(
-            PrometheusMetricSink::new(config, "", BTreeMap::new()),
-            Err(PrometheusConfigError::UnsupportedTimerType(_))
-        ));
-        assert!(matches!(
-            PrometheusMetricSink::new(PrometheusMetricsConfig::default(), "", BTreeMap::new()),
-            Err(PrometheusConfigError::UnsupportedTimerType(_))
-        ));
+    fn omitted_timer_type_uses_go_default_summary() {
+        let sink =
+            PrometheusMetricSink::new(PrometheusMetricsConfig::default(), "", BTreeMap::new())
+                .unwrap();
+        sink.record(MetricEvent {
+            name: "latency",
+            kind: MetricKind::Timer,
+            value: MetricValue::Duration(Duration::from_millis(2)),
+            tags: BTreeMap::new(),
+            histogram: None,
+        });
+        let text = sink.render();
+        assert!(text.contains("# TYPE latency summary"));
+        assert!(text.contains("quantile=\"0.5\""));
+        assert!(text.contains("latency_sum{cadence_service=\"cadence_matching\"} 0.002"));
+        assert!(text.contains("latency_count{cadence_service=\"cadence_matching\"} 1"));
+    }
+
+    #[test]
+    fn explicit_histogram_timer_type_is_preserved() {
+        let sink = PrometheusMetricSink::new(
+            PrometheusMetricsConfig {
+                timer_type: "histogram".to_owned(),
+                ..Default::default()
+            },
+            "",
+            BTreeMap::new(),
+        )
+        .unwrap();
+        sink.record(MetricEvent {
+            name: "latency",
+            kind: MetricKind::Timer,
+            value: MetricValue::Duration(Duration::from_millis(2)),
+            tags: BTreeMap::new(),
+            histogram: None,
+        });
+        assert!(sink.render().contains("# TYPE latency histogram"));
+    }
+
+    #[test]
+    fn custom_summary_objective_is_emitted() {
+        let sink = PrometheusMetricSink::new(
+            PrometheusMetricsConfig {
+                timer_type: "summary".to_owned(),
+                default_summary_objectives: vec![SummaryObjective {
+                    percentile: 0.9,
+                    allowed_error: 0.01,
+                }],
+                ..Default::default()
+            },
+            "",
+            BTreeMap::new(),
+        )
+        .unwrap();
+        sink.record(MetricEvent {
+            name: "latency",
+            kind: MetricKind::Timer,
+            value: MetricValue::Duration(Duration::from_millis(2)),
+            tags: BTreeMap::new(),
+            histogram: None,
+        });
+        assert!(sink.render().contains("quantile=\"0.9\""));
     }
 }
