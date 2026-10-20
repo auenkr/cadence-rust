@@ -273,7 +273,8 @@ impl MatchingDomainCache {
         persistence: &crate::config::PersistenceConfig,
         current_cluster: &str,
     ) -> anyhow::Result<Arc<Self>> {
-        let name = persistence.default_store.trim();
+        // Go indexes persistence.datastores by the literal defaultStore value.
+        let name = persistence.default_store.as_str();
         if name.is_empty() {
             anyhow::bail!("Matching domain cache requires persistence.defaultStore");
         }
@@ -750,6 +751,22 @@ mod tests {
             .to_string()
             .contains("persistence.defaultStore"));
 
+        let padded_name = crate::config::PersistenceConfig {
+            default_store: " sqlite ".into(),
+            datastores: HashMap::from([(
+                "sqlite".into(),
+                crate::config::DatastoreConfig::default(),
+            )]),
+            ..Default::default()
+        };
+        assert!(
+            MatchingDomainCache::from_default_store(&padded_name, "active")
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("defaultStore \" sqlite \" is not present")
+        );
+
         let unsupported = crate::config::PersistenceConfig {
             default_store: "no-sql".into(),
             datastores: HashMap::from([(
@@ -937,7 +954,8 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("get:{}", name.or(id).unwrap_or("")));
-            let domain = self.records
+            let domain = self
+                .records
                 .lock()
                 .unwrap()
                 .iter()

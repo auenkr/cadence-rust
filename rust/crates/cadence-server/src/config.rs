@@ -13,6 +13,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
+    /// Go's dynamicconfig.client provider stanza (filebased is supported for
+    /// Matching; other providers are rejected explicitly by the runtime).
+    #[serde(default, rename = "dynamicconfig")]
+    pub dynamic_config: DynamicConfigConfig,
+    /// Legacy spelling retained by Go config files.
+    #[serde(default, rename = "dynamicConfigClient")]
+    pub legacy_dynamic_config_client: Option<DynamicConfigClientConfig>,
     /// Mirrors Go dynamic config `worker.enableScheduler` (default false):
     /// schedule APIs are rejected until the operator enables them.
     #[serde(default, rename = "enableScheduler")]
@@ -35,6 +42,36 @@ pub struct Config {
     /// for Go-compatible configuration; runtime wiring is intentionally separate.
     #[serde(default)]
     pub ringpop: RingpopConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicConfigConfig {
+    #[serde(default)]
+    pub client: String,
+    #[serde(default, rename = "filebased")]
+    pub file_based: DynamicConfigClientConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicConfigClientConfig {
+    #[serde(default)]
+    pub filepath: String,
+    #[serde(default, rename = "pollInterval")]
+    pub poll_interval: String,
+}
+
+impl Config {
+    /// Resolve Go's modern/legacy client selection. Empty modern clients defer
+    /// to the legacy stanza; nonempty modern clients take precedence.
+    pub fn selected_dynamic_config_client(&self) -> Option<(&str, &DynamicConfigClientConfig)> {
+        if !self.dynamic_config.client.is_empty() {
+            Some((&self.dynamic_config.client, &self.dynamic_config.file_based))
+        } else {
+            self.legacy_dynamic_config_client
+                .as_ref()
+                .map(|config| ("filebased", config))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,7 +165,7 @@ fn de_go_duration<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
     }
 }
 
-fn parse_go_duration(input: &str) -> Result<i64, String> {
+pub fn parse_go_duration(input: &str) -> Result<i64, String> {
     let (negative, mut rest) = if let Some(r) = input.strip_prefix('-') {
         (true, r)
     } else if let Some(r) = input.strip_prefix('+') {
@@ -510,6 +547,18 @@ fn expand_env(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dynamic_config_modern_client_takes_precedence_and_legacy_is_supported() {
+        let modern = Config::from_yaml("dynamicconfig:\n  client: filebased\n  filebased:\n    filepath: modern.yaml\n    pollInterval: 7s\ndynamicConfigClient:\n  filepath: legacy.yaml\n").unwrap();
+        let (client, provider) = modern.selected_dynamic_config_client().unwrap();
+        assert_eq!(client, "filebased");
+        assert_eq!(provider.filepath, "modern.yaml");
+        assert_eq!(provider.poll_interval, "7s");
+        let legacy = Config::from_yaml("dynamicConfigClient:\n  filepath: legacy.yaml\n").unwrap();
+        assert_eq!(legacy.selected_dynamic_config_client().unwrap().1.filepath, "legacy.yaml");
+        assert_eq!(parse_go_duration("2s").unwrap(), 2_000_000_000);
+    }
 
     const SAMPLE: &str = r#"
 persistence:

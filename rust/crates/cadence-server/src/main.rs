@@ -477,6 +477,9 @@ enum Command {
         /// YAML config file with Cadence keys; defaults to embedded development settings.
         #[arg(long)]
         config: Option<String>,
+        /// Process root used to resolve relative dynamic-config paths (Go --root semantics).
+        #[arg(long)]
+        root: Option<String>,
         /// Services to run. Empty means all.
         #[arg(long, value_delimiter = ',')]
         services: Vec<String>,
@@ -518,6 +521,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Start {
             config,
+            root,
             services,
             port,
             grpc_port,
@@ -537,6 +541,36 @@ async fn main() -> anyhow::Result<()> {
                 None => config::Config::development()?,
             };
             cfg.validate()?;
+            let process_root = root
+                .map(std::path::PathBuf::from)
+                .unwrap_or(std::env::current_dir()?);
+            let dynamic_config_provider = cfg.selected_dynamic_config_client();
+            let dynamic_config_poll = match dynamic_config_provider {
+                Some((_, provider)) if !provider.poll_interval.is_empty() => {
+                    let nanos = cadence_server::config::parse_go_duration(&provider.poll_interval)?;
+                    std::time::Duration::from_nanos(nanos.max(5_000_000_000) as u64)
+                }
+                _ => std::time::Duration::from_secs(5),
+            };
+            let dynamic_config_path = if let Some((client, provider)) = dynamic_config_provider {
+                if !client.eq_ignore_ascii_case("filebased") {
+                    anyhow::bail!("dynamic config client {client:?} is not supported by Rust Matching; only filebased is currently ported");
+                }
+                if provider.filepath.is_empty() {
+                    eprintln!("warning: filebased dynamic config has no filepath; using no-op configuration");
+                    None
+                } else {
+                    let path = std::path::PathBuf::from(&provider.filepath);
+                    let path = if path.is_absolute() {
+                        path
+                    } else {
+                        process_root.join(path)
+                    };
+                    Some(path)
+                }
+            } else {
+                None
+            };
             let wanted: Vec<service::ServiceName> = if services.is_empty() {
                 service::ServiceName::all().to_vec()
             } else {
@@ -571,6 +605,24 @@ async fn main() -> anyhow::Result<()> {
                 semaphore_enabled,
                 num_history_shards,
                 ..Default::default()
+            };
+            let dynamic_config_loaded = if let Some(path) = dynamic_config_path.as_ref() {
+                match cadence_server::admin::DynamicConfigOverlay::from_file(path) {
+                    Ok(snapshot) => {
+                        *state
+                            .admin
+                            .dynamic_config
+                            .lock()
+                            .expect("dynamic config lock") = snapshot;
+                        true
+                    }
+                    Err(error) => {
+                        eprintln!("warning: loading dynamic config {path:?}: {error}; using no-op configuration");
+                        false
+                    }
+                }
+            } else {
+                false
             };
             state.matching_http_isolated = wanted.contains(&service::ServiceName::Matching)
                 && cfg
@@ -970,6 +1022,14 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
+            if dynamic_config_loaded {
+                if let (Some(runtime), Some(path)) =
+                    (matching_runtime.take(), dynamic_config_path.clone())
+                {
+                    matching_runtime =
+                        Some(runtime.with_dynamic_config_file(path, dynamic_config_poll));
+                }
+            }
             if let Some(membership) = matching_membership.clone() {
                 if let Some(runtime) = matching_runtime.take() {
                     matching_runtime = Some(runtime.with_membership(membership));

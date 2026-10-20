@@ -46,6 +46,7 @@ pub struct MatchingRuntime {
     membership_maintenance_stop: Option<oneshot::Sender<()>>,
     membership_maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
+    dynamic_config_watch: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
     drain_duration: DrainDuration,
     evict_self: Option<EvictSelf>,
     drained: bool,
@@ -61,6 +62,7 @@ impl MatchingRuntime {
             membership_maintenance_stop: None,
             membership_maintenance: None,
             domain_cache: None,
+            dynamic_config_watch: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -96,6 +98,7 @@ impl MatchingRuntime {
             membership_maintenance_stop: None,
             membership_maintenance: None,
             domain_cache: None,
+            dynamic_config_watch: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -104,6 +107,48 @@ impl MatchingRuntime {
 
     pub fn matching(&self) -> &Matching {
         &self.matching
+    }
+
+    /// Own Go file-based dynamic-config polling for the lifetime of Matching.
+    /// The caller loads the initial snapshot synchronously before exposure.
+    pub fn with_dynamic_config_file(
+        mut self,
+        path: std::path::PathBuf,
+        poll_interval: Duration,
+    ) -> Self {
+        let overlay = self.matching.state.admin.dynamic_config.clone();
+        let (stop, mut stopped) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let mut last_poll = std::time::SystemTime::now();
+            let poll_interval = poll_interval.max(Duration::from_secs(5));
+            let mut interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + poll_interval,
+                poll_interval,
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = &mut stopped => break,
+                    _ = interval.tick() => {
+                        match std::fs::metadata(&path).and_then(|metadata| metadata.modified()) {
+                            Ok(modified) if modified > last_poll => {
+                                match crate::admin::DynamicConfigOverlay::from_file(&path) {
+                                    Ok(snapshot) => if let Ok(mut current) = overlay.lock() { *current = snapshot; },
+                                    Err(error) => eprintln!("warning: reloading dynamic config {:?}: {error}", path),
+                                }
+                            }
+                            Err(error) => eprintln!("warning: checking dynamic config {:?}: {error}", path),
+                            Ok(_) => {}
+                        }
+                        // Go records the wall time at the end of every update
+                        // attempt (including an unsuccessful one).
+                        last_poll = std::time::SystemTime::now();
+                    }
+                }
+            }
+        });
+        self.dynamic_config_watch = Some((stop, task));
+        self
     }
 
     /// Attach the service membership ring before this runtime is exposed to
@@ -204,6 +249,14 @@ impl MatchingRuntime {
     /// maintenance so final acknowledgements and cleanup complete.
     pub async fn shutdown(&mut self) -> anyhow::Result<()> {
         let drain_result = self.drain().await;
+        let dynamic_config_result = if let Some((stop, task)) = self.dynamic_config_watch.take() {
+            let _ = stop.send(());
+            task.await.map_err(|error| {
+                anyhow::anyhow!("joining Matching dynamic-config watcher: {error}")
+            })
+        } else {
+            Ok(())
+        };
         if let Some(stop) = self.membership_maintenance_stop.take() {
             let _ = stop.send(());
         }
@@ -246,6 +299,7 @@ impl MatchingRuntime {
         }
         maintenance_result?;
         membership_result?;
+        dynamic_config_result?;
         drain_result?;
         Ok(())
     }
@@ -265,6 +319,10 @@ impl Drop for MatchingRuntime {
             let _ = stop.send(());
         }
         if let Some(task) = self.membership_maintenance.take() {
+            task.abort();
+        }
+        if let Some((stop, task)) = self.dynamic_config_watch.take() {
+            let _ = stop.send(());
             task.abort();
         }
     }
