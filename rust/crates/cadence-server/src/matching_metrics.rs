@@ -486,15 +486,29 @@ mod inbound_tests {
         let sink = Arc::new(RecordingMetricSink::default());
         let metrics = MatchingMetrics::new(sink.clone());
         metrics.add_task_request(
-            "domain-a",
-            "root/child",
+            "matching-test",
+            "metric-task",
             0,
             false,
             "decision_task",
-            "host-a",
+            "oracle-host",
         );
-        metrics.add_task_request("domain-a", "sticky", 1, false, "activity_task", "host-a");
-        metrics.add_task_request("domain-a", "forwarded", 0, true, "activity_task", "host-a");
+        metrics.add_task_request(
+            "matching-test",
+            "sticky",
+            1,
+            false,
+            "activity_task",
+            "oracle-host",
+        );
+        metrics.add_task_request(
+            "matching-test",
+            "forwarded",
+            0,
+            true,
+            "activity_task",
+            "oracle-host",
+        );
 
         let events = sink.events();
         assert_eq!(events.len(), 1);
@@ -503,10 +517,10 @@ mod inbound_tests {
         assert_eq!(event.kind, MetricKind::Counter);
         assert_eq!(event.value, MetricValue::Count(1));
         assert_eq!(event.tags[OPERATION_TAG], "AddTask");
-        assert_eq!(event.tags[DOMAIN_TAG], "domain-a");
-        assert_eq!(event.tags[GO_TASK_LIST_TAG], "root_child");
+        assert_eq!(event.tags[DOMAIN_TAG], "matching-test");
+        assert_eq!(event.tags[GO_TASK_LIST_TAG], "metric-task");
         assert_eq!(event.tags[TASK_LIST_TYPE_TAG], "decision_task");
-        assert_eq!(event.tags[MATCHING_HOST_TAG], "host-a");
+        assert_eq!(event.tags[MATCHING_HOST_TAG], "oracle-host");
     }
 
     #[tokio::test]

@@ -545,6 +545,50 @@ func (s *matchingEngineSuite) TestAddDecisionTasksForwarded() {
 	s.AddTasksTest(persistence.TaskListTypeDecision, true)
 }
 
+// This is the Go metrics oracle for Rust Matching's AddTask counter. Keep the
+// serialized tally names/tags pinned here so exporter parity can compare the
+// same logical decision and activity requests.
+func (s *matchingEngineSuite) TestAddTaskTrafficMetricOracle() {
+	scope := tally.NewTestScope("oracle", nil)
+	s.matchingEngine.metricsClient = metrics.NewClient(scope, metrics.Matching, metrics.MigrationConfig{})
+	s.matchingEngine.config.HostName = "oracle-host"
+
+	normal := types.TaskListKindNormal
+	execution := &types.WorkflowExecution{WorkflowID: "workflow", RunID: "run"}
+	makeRequest := func(taskType int, taskList *types.TaskList, forwardedFrom string) *addTaskRequest {
+		return &addTaskRequest{
+			TaskType:      taskType,
+			DomainUUID:    "domainId",
+			Execution:     execution,
+			TaskList:      taskList,
+			ForwardedFrom: forwardedFrom,
+		}
+	}
+	_, err := addTask(s.matchingEngine, s.handlerContext, makeRequest(
+		persistence.TaskListTypeDecision,
+		&types.TaskList{Name: "metric-task", Kind: &normal},
+		"",
+	))
+	s.NoError(err)
+	_, err = addTask(s.matchingEngine, s.handlerContext, makeRequest(
+		persistence.TaskListTypeActivity,
+		&types.TaskList{Name: "metric-task", Kind: &normal},
+		"",
+	))
+	s.NoError(err)
+	_, err = addTask(s.matchingEngine, s.handlerContext, makeRequest(
+		persistence.TaskListTypeDecision,
+		&types.TaskList{Name: "metric-task", Kind: &normal},
+		"/child/metric-task",
+	))
+	s.Equal(errRemoteSyncMatchFailed, err)
+
+	counters := scope.Snapshot().Counters()
+	s.EqualValues(1, counters["oracle.cadence_tasklist_request+domain=matching-test,matching_host=oracle-host,operation=AddTask,tasklist=metric-task,tasklistType=decision_task"])
+	s.EqualValues(1, counters["oracle.cadence_tasklist_request+domain=matching-test,matching_host=oracle-host,operation=AddTask,tasklist=metric-task,tasklistType=activity_task"])
+	s.Len(counters, 2, "forwarded traffic is excluded from the AddTask counter")
+}
+
 func (s *matchingEngineSuite) AddTasksTest(taskType int, isForwarded bool) {
 	s.matchingEngine.config.RangeSize = 300 // override to low number for the test
 	s.matchingEngine.config.ReadRangeSize = dynamicproperties.GetIntPropertyFn(150)
