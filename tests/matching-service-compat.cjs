@@ -690,8 +690,34 @@ async function run() {
   // Real Go History start through an isolated Rust queue. Create a scheduled
   // activity normally, then reference that schedule from a second task list to
   // control its isolation metadata without changing Go History configuration.
-  clients.Matching = new schema.matching.v1.MatchingAPI(process.argv[4], grpc.credentials.createInsecure());
-  const isolatedList = { name: `isolated-${id}` };
+  let isolatedListName = `isolated-${id}`;
+  let isolatedMatchingGrpc = process.argv[4];
+  if (productionMode && failureRecoveryMode) {
+    // The direct Matching client used by the isolation probe must target the
+    // Ringpop owner. A random task list can hash to either member, and this
+    // probe intentionally bypasses Frontend routing to set isolation groups.
+    const peers = [
+      { address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const membershipPeers = peers.map(peer => directMatchingClient(`127.0.0.1:${peer.grpc}`));
+    let selectedOwner;
+    for (let index = 0; index < 128; index++) {
+      const candidate = `${isolatedListName}-${index}`;
+      const owners = await Promise.all(membershipPeers.map(client => directPartitionOwner(client, domain, candidate)));
+      assert(owners.every(owner => owner === owners[0]), `Matching members disagree on isolation task list owner: ${owners.join(', ')}`);
+      selectedOwner = peers.find(peer => peer.address === owners[0]);
+      if (selectedOwner) {
+        isolatedListName = candidate;
+        isolatedMatchingGrpc = selectedOwner.grpc;
+        break;
+      }
+    }
+    assert(selectedOwner, 'could not find an isolation task list owned by either Rust Matching member');
+    membershipPeers.forEach(client => client.close());
+  }
+  clients.Matching = new schema.matching.v1.MatchingAPI(isolatedMatchingGrpc, grpc.credentials.createInsecure());
+  const isolatedList = { name: isolatedListName };
   const isoStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
     ...startRequest, workflowId: `isolated-${id}`, taskList: isolatedList, requestId: randomUUID(),
   });

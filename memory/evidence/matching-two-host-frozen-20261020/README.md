@@ -11,7 +11,9 @@ python3 tests/run-matching-production-failure-recovery.py \
 
 The frozen binary SHA-256 is `679e0b0380da6dde7ee2291e3a0596bc26730d4af1ee950c24e185778b4254aa`. The Go Frontend, History and Worker ran with two Rust Matching members; no Go Matching process was started. The runner used gRPC for Matching-to-History and an idle check interval of three seconds. It compiled only the Go baseline server.
 
-The run exited 1 in the later public isolation compatibility section. After successful recovery and restart assertions, the generic compatibility workflow received `ABORTED` for task list `isolated-4752eac5-8b3f-40e8-ae93-9f4abc6b88e7`, with owner `127.0.0.1:60123` and responding host `127.0.0.1:33281`. The failing public RPC is still unresolved; see `run/rust-matching/production-failure-recovery-checkpoints.json` and `run/rust-matching/production-typed-ownership-go.log`.
+The run exited 1 in the later isolation compatibility section. After successful recovery and restart assertions, its direct Matching `AddActivityTask` call received `ABORTED` for task list `isolated-4752eac5-8b3f-40e8-ae93-9f4abc6b88e7`, with owner `127.0.0.1:60123` and responding host `127.0.0.1:33281`. See `run/rust-matching/production-failure-recovery-checkpoints.json` and `run/rust-matching/production-typed-ownership-go.log`.
+
+The failure was initially mistaken for Go Frontend retry exhaustion. Inspection of the stack and harness showed it was instead a direct test call: the isolation section replaces its client with a direct primary Matching gRPC client, then sends `AddActivityTask` for an arbitrary task-list name which Ringpop assigned to the secondary. This path bypasses Go Frontend routing. The dedicated public non-owner and Go typed-error checks had already passed. The harness now selects a task-list name whose owner agrees across both Rust Ringpop views and targets that owner for its direct isolation-only calls; the SDK and workflow calls remain through Go Frontend. This correction is pending rerun evidence.
 
 Passed checkpoints before that later failure:
 
