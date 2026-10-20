@@ -294,7 +294,11 @@ with (work / 'server.log').open('w') as log:
                     'CADENCE_POSTGRES_PORT': pg_port if args.postgres else '',
                     'CADENCE_POSTGRES_USER': postgres_user if args.postgres else '',
                     'CADENCE_POSTGRES_PASSWORD': postgres_password if args.postgres else '',
-                    'CADENCE_POSTGRES_DATABASE': postgres_database if args.postgres else ''}
+                    'CADENCE_POSTGRES_DATABASE': postgres_database if args.postgres else '',
+                    'CADENCE_POSTGRES_SSLMODE': postgres_sslmode,
+                    'CADENCE_POSTGRES_CA_FILE': postgres_ca,
+                    'CADENCE_POSTGRES_CERT_FILE': postgres_cert,
+                    'CADENCE_POSTGRES_KEY_FILE': postgres_key}
             result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
                 env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
@@ -381,16 +385,33 @@ if args.postgres:
                     if time.monotonic() >= deadline:
                         raise RuntimeError(f'Go verification startup timed out; see {verify_log}')
                     time.sleep(0.1)
+            pending = rust_evidence.get('goMatchingPendingTask')
+            if not pending:
+                raise RuntimeError('Rust PostgreSQL probe did not leave a pending task for Go Matching consumption')
+            consume_environment = {**os.environ,
+                'CADENCE_MIXED_MATCHING_DOMAIN': rust_evidence['domain'],
+                'CADENCE_TCHANNEL_PEER': f'127.0.0.1:{ports["FRONTEND_PORT"]}',
+                'CADENCE_MIXED_RESTART_WORKFLOW_ID': pending['workflowId'],
+                'CADENCE_MIXED_RESTART_TASK_LIST': pending['taskList']}
+            with (work / 'go-matching-consume-sdk.log').open('w') as output:
+                consume = subprocess.run(['go', 'run', '.'], cwd=root / 'tests/go-sdk',
+                    env=consume_environment, stdout=output, stderr=subprocess.STDOUT,
+                    timeout=180)
+            if consume.returncode:
+                raise RuntimeError(f'Go Matching could not consume the Rust-produced PostgreSQL task; see {work / "go-matching-consume-sdk.log"}')
             with (work / 'go-verification-probe.log').open('w') as output:
                 verification = subprocess.run(['node', str(root / 'tests/matching-postgres-go-verify.cjs'),
                     f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', rust_evidence['domain'],
-                    rust_evidence['workflowId'], rust_evidence['runId'], rust_evidence['taskList']],
+                    rust_evidence['workflowId'], rust_evidence['runId'], rust_evidence['taskList'],
+                    pending['workflowId'], pending['runId'], pending['taskList']],
                     cwd=root, stdout=output, stderr=subprocess.STDOUT, timeout=300)
             (work / 'go-verification-results.json').write_text(json.dumps({
                 'exitCode': verification.returncode,
                 'topology': 'original Go Frontend/History/Matching/Worker reopened PostgreSQL after Rust Matching mixed-service run',
                 'serverCommand': verify_command,
                 'schemaWasSeededByGoAutoSetup': True,
+                'goMatchingConsumedRustProducedPendingTask': True,
+                'goMatchingConsumeSDKLog': str(work / 'go-matching-consume-sdk.log'),
                 'evidenceLog': str(work / 'go-verification-probe.log'),
             }, indent=2) + '\n')
             if verification.returncode:

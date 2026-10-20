@@ -837,9 +837,13 @@ fn postgres_options(
                 mode
             },
             allow_plaintext_first,
-            root_cert: (!allow_plaintext_first && !root_cert.is_empty()).then_some(root_cert),
-            cert: (!allow_plaintext_first && !cert.is_empty()).then_some(cert),
-            key: (!allow_plaintext_first && !key_file.is_empty()).then_some(key_file),
+            // lib/pq keeps certificate parameters when sslmode=allow is
+            // selected, including when ConnectAttributes overrides a TLS
+            // block's sslmode. The fallback remains `require` semantics, so
+            // CA material is loaded but does not enable peer verification.
+            root_cert: (!root_cert.is_empty()).then_some(root_cert),
+            cert: (!cert.is_empty()).then_some(cert),
+            key: (!key_file.is_empty()).then_some(key_file),
         })
     };
     Ok((options, tls))
@@ -1059,6 +1063,39 @@ mod tests {
         assert!(postgres_options(&shard(&[("sslmode", "require")])).is_ok());
         assert!(postgres_options(&shard(&[("sslrootcert", "/tmp/ca.pem")])).is_ok());
         assert!(postgres_options(&shard(&[("mystery", "ignored")])).is_err());
+    }
+
+    #[test]
+    fn postgres_sslmode_allow_is_plaintext_first_with_require_tls_fallback() {
+        let (options, tls) = postgres_options(&shard(&[("sslmode", "allow")])).unwrap();
+        assert_eq!(options.get_ssl_mode(), SslMode::Disable);
+        let tls = tls.expect("allow mode needs a TLS retry configuration");
+        assert!(tls.allow_plaintext_first);
+        assert_eq!(tls.mode, SslMode::Require);
+        assert!(tls.root_cert.is_none());
+        assert!(tls.cert.is_none());
+        assert!(tls.key.is_none());
+
+        // Go applies ConnectAttributes after TLS-derived parameters. Explicit
+        // sslmode therefore overrides tls.sslmode, including `allow`.
+        let mut config = shard(&[]);
+        config.tls = Some(PostgresTlsConfig {
+            enabled: true,
+            ssl_mode: "require".into(),
+            ca_file: "/configured/ca.pem".into(),
+            cert_file: "/configured/client.pem".into(),
+            key_file: "/configured/client.key".into(),
+        });
+        config
+            .connect_attributes
+            .insert("sslmode".into(), "allow".into());
+        let (options, tls) = postgres_options(&config).unwrap();
+        assert_eq!(options.get_ssl_mode(), SslMode::Disable);
+        let tls = tls.expect("ConnectAttributes allow override needs TLS retry");
+        assert!(tls.allow_plaintext_first);
+        assert_eq!(tls.root_cert.as_deref(), Some("/configured/ca.pem"));
+        assert_eq!(tls.cert.as_deref(), Some("/configured/client.pem"));
+        assert_eq!(tls.key.as_deref(), Some("/configured/client.key"));
     }
 
     #[test]

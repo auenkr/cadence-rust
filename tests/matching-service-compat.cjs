@@ -30,14 +30,21 @@ function call(service, method, request) {
     { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
 }
 const payload = data => ({ data: Buffer.from(data) });
-function taskCount(taskList, fallbackDatabase) {
+function taskCount(taskList, fallbackDatabase, domainId) {
   if (process.env.CADENCE_MATCHING_POSTGRES) {
-    const result = spawnSync('psql', ['-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-v', `task_list=${taskList}`,
-      '-c', "SELECT count(*) FROM tasks WHERE task_list_name = :'task_list' AND task_type = 0"], {
-      encoding: 'utf8', env: { ...process.env,
-        PGHOST: process.env.CADENCE_POSTGRES_HOST, PGPORT: process.env.CADENCE_POSTGRES_PORT,
-        PGUSER: process.env.CADENCE_POSTGRES_USER, PGDATABASE: process.env.CADENCE_POSTGRES_DATABASE,
-        PGPASSWORD: process.env.CADENCE_POSTGRES_PASSWORD || '' },
+    const pgEnv = { ...process.env, PGHOST: process.env.CADENCE_POSTGRES_HOST,
+      PGPORT: process.env.CADENCE_POSTGRES_PORT, PGUSER: process.env.CADENCE_POSTGRES_USER,
+      PGDATABASE: process.env.CADENCE_POSTGRES_DATABASE,
+      PGPASSWORD: process.env.CADENCE_POSTGRES_PASSWORD || '',
+      PGSSLMODE: process.env.CADENCE_POSTGRES_SSLMODE || 'disable' };
+    for (const [name, value] of [['PGSSLROOTCERT', process.env.CADENCE_POSTGRES_CA_FILE],
+      ['PGSSLCERT', process.env.CADENCE_POSTGRES_CERT_FILE], ['PGSSLKEY', process.env.CADENCE_POSTGRES_KEY_FILE]]) {
+      if (value) pgEnv[name] = value;
+    }
+    const result = spawnSync('psql', ['-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1', '-v', `task_list=${taskList}`,
+      '-v', `domain_id=${domainId}`,
+      '-c', "SELECT count(*) FROM tasks WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND task_list_name = :'task_list' AND task_type = 0"], {
+      encoding: 'utf8', env: pgEnv,
     });
     if (result.status === 0) result.stdout = result.stdout.trim();
     return result;
@@ -138,7 +145,7 @@ async function run() {
     const persistedDeadline = Date.now() + 20000;
     let persisted;
     while (Date.now() < persistedDeadline) {
-      persisted = taskCount(restartTaskList, path.join(work, 'matching.db'));
+      persisted = taskCount(restartTaskList, path.join(work, 'matching.db'), domainId);
       if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -210,7 +217,7 @@ async function run() {
     const taskDeadline = Date.now() + 20000;
     let queued;
     while (Date.now() < taskDeadline) {
-      queued = taskCount(drainTaskList);
+      queued = taskCount(drainTaskList, undefined, domainId);
       if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -383,9 +390,27 @@ async function run() {
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
   if (productionMode && process.env.CADENCE_MATCHING_POSTGRES) {
+    const goMatchingWorkflowId = `go-matching-consume-${id}`;
+    const goMatchingTaskList = `go-matching-consume-tasks-${id}`;
+    const pending = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: goMatchingWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: { name: goMatchingTaskList }, requestId: randomUUID(),
+      input: payload(JSON.stringify('restart-proof')),
+    });
+    const pendingDeadline = Date.now() + 20000;
+    let pendingRows;
+    while (Date.now() < pendingDeadline) {
+      pendingRows = taskCount(goMatchingTaskList, undefined, domainId);
+      if (pendingRows.status === 0 && Number(pendingRows.stdout) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(pendingRows?.status, 0, `could not inspect Rust-produced PostgreSQL task: ${pendingRows?.stderr}`);
+    assert(Number(pendingRows.stdout) > 0, 'Go History did not persist a pending PostgreSQL task through Rust Matching');
     fs.writeFileSync(path.join(work, 'rust-postgres-evidence.json'), JSON.stringify({
       domain, domainId, workflowId: execution.workflowId, runId: execution.runId,
       taskList: taskList.name, completedEvents: events.length,
+      goMatchingPendingTask: { workflowId: goMatchingWorkflowId, runId: pending.runId,
+        taskList: goMatchingTaskList, taskRowsBeforeGoConsume: Number(pendingRows.stdout) },
     }, null, 2) + '\n');
   }
   console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));

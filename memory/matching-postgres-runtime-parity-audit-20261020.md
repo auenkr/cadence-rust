@@ -116,3 +116,25 @@ For TLS validation, also set `CADENCE_POSTGRES_SSLMODE` and, as needed,
 `CADENCE_POSTGRES_CA_FILE`, `CADENCE_POSTGRES_CERT_FILE`, and
 `CADENCE_POSTGRES_KEY_FILE`. Adapter tests and the mixed Go/Rust run must pass
 before this audit can be treated as parity evidence.
+
+## Source checkpoint update (2026-10-20, still unexecuted)
+
+- Tightened the Rust PostgreSQL adapter's `sslmode=allow` unit coverage. It now
+  asserts that configuration selects plaintext first, keeps a TLS `require`
+  retry configuration, and that `connectAttributes.sslmode` overrides the TLS
+  block as Go applies it. The connection pool retries TLS only when the
+  plaintext attempt returns PostgreSQL's explicit `SSL off` authentication
+  rejection; all other errors are returned without a TLS retry.
+- Extended the PostgreSQL mixed-service source harness to leave a new decision
+  task pending after Rust Matching has persisted it through the real Go
+  History service. It records a domain-scoped PostgreSQL row count before
+  shutdown, starts original Go Frontend/History/Matching/Worker against that
+  schema, and has the existing Go SDK worker consume and complete that task.
+  The verifier then requires exactly one completion with the expected result.
+  This closes the prior *harness-source* gap; it is not runtime evidence.
+- `node --check` passed for both changed JavaScript probes, `python3 -m py_compile`
+  and `git diff --check` passed for the runner, and `rustfmt --check` passed for
+  the Rust adapter source. No Cargo, Go, Docker, PostgreSQL, or mixed-service
+  command was run in this source-only lane. The mixed PostgreSQL test remains
+  unexecuted and must be run in the shared validation lane before accepting
+  backend parity.

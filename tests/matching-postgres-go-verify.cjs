@@ -11,8 +11,10 @@ const files = ['domain', 'workflow'].map(name => path.join(root, `uber/cadence/a
 const api = grpc.loadPackageDefinition(loader.loadSync(files, {
   includeDirs: [root], enums: String, longs: String, bytes: Buffer, defaults: true, oneofs: true,
 })).uber.cadence.api.v1;
-const [peer, domain, workflowId, runId, taskList] = process.argv.slice(2);
-if (![peer, domain, workflowId, runId, taskList].every(Boolean)) {
+const [peer, domain, workflowId, runId, taskList, consumedWorkflowId, consumedRunId, consumedTaskList] = process.argv.slice(2);
+if (![peer, domain, workflowId, runId, taskList].every(Boolean)
+    || [consumedWorkflowId, consumedRunId, consumedTaskList].some(Boolean)
+      && ![consumedWorkflowId, consumedRunId, consumedTaskList].every(Boolean)) {
   throw new Error('usage: matching-postgres-go-verify.cjs FRONTEND_GRPC DOMAIN WORKFLOW_ID RUN_ID TASK_LIST');
 }
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI'].map(name => [name,
@@ -39,8 +41,25 @@ async function verify() {
   });
   const completed = history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes);
   assert.equal(completed.length, 1, 'Go History must see one completed workflow execution');
+  let goConsumedRustTask;
+  if (consumedWorkflowId) {
+    const consumed = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
+      domain, workflowExecution: { workflowId: consumedWorkflowId, runId: consumedRunId },
+    });
+    const completionEvents = consumed.history.events.filter(event => event.workflowExecutionCompletedEventAttributes);
+    assert.equal(completionEvents.length, 1, 'Go Matching must consume the Rust-produced task and complete it once');
+    assert.equal(completionEvents[0].workflowExecutionCompletedEventAttributes.result.data.toString(), 'restart-proof');
+    const consumedTaskList = await call('WorkflowAPI', 'DescribeTaskList', {
+      domain, taskList: { name: consumedTaskList }, taskListType: 'TASK_LIST_TYPE_DECISION',
+      includeTaskListStatus: true,
+    });
+    assert.equal(consumedTaskList.taskListStatus.taskIdBlock.startId, '1');
+    goConsumedRustTask = true;
+  }
   console.log(JSON.stringify({ result: 'passed', domain, domainId, workflowId, runId, taskList,
-    goReadTaskListMetadata: true, goReadCompletedWorkflowHistory: true }));
+    goReadTaskListMetadata: true, goReadCompletedWorkflowHistory: true,
+    goMatchingConsumedRustProducedPendingTask: goConsumedRustTask || false,
+    consumedWorkflowId: consumedWorkflowId || null }));
 }
 verify().catch(error => { console.error(error); process.exitCode = 1; })
   .finally(() => Object.values(clients).forEach(client => client.close()));
