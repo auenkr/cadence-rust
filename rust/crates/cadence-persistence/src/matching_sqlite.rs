@@ -1,54 +1,92 @@
 //! Matching-owned task persistence on Go's SQLite task_lists/tasks schema.
 //! This store is independent of the workflow execution engine. The standalone
 //! Matching RPC delivery loop is a separate consumer of this persistence API.
-use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskListData};
+#[cfg(test)]
+use crate::matching_blob::TaskData;
+use crate::matching_blob::{self as blob, BlobEncoding, TaskListData};
+pub use crate::matching_task_store::{
+    AllocatedTask, MatchingTaskStoreError as StorageError, Result, TaskListKey, TaskListRecord,
+};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::{path::Path, sync::Mutex, time::Duration};
 use uuid::Uuid;
-
-#[derive(Debug, thiserror::Error)]
-pub enum StorageError {
-    #[error("unsupported SQLite task-store configuration: {0}")]
-    UnsupportedConfiguration(String),
-    #[error("incompatible Go SQLite Matching schema: {0}")]
-    IncompatibleSchema(String),
-    #[error("{0}")]
-    ConditionFailed(String),
-    #[error("task list does not exist")]
-    NotFound,
-    #[error(transparent)]
-    Sql(#[from] rusqlite::Error),
-    #[error(transparent)]
-    Blob(#[from] cadence_thrift::Error),
-    #[error("missing limit parameter")]
-    MissingLimit,
-    #[error("delete failed: {0} rows affected instead of 1")]
-    DeleteCount(usize),
-}
-pub type Result<T> = std::result::Result<T, StorageError>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskListKey {
-    pub domain_id: Uuid,
-    pub name: String,
-    /// Go persistence types: 0 decision, 1 activity (not protobuf enum values).
-    pub task_type: i32,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskListRecord {
-    pub range_id: i64,
-    pub data: TaskListData,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AllocatedTask {
-    pub task_id: i64,
-    pub data: TaskData,
-}
 
 pub struct SqliteTaskStore {
     connection: Mutex<Connection>,
     encoding: BlobEncoding,
 }
+
+impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
+    fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
+        SqliteTaskStore::get_task_list(self, key)
+    }
+
+    fn lease(
+        &self,
+        key: &TaskListKey,
+        kind: i16,
+        previous_range: i64,
+        now_nanos: i64,
+    ) -> Result<TaskListRecord> {
+        SqliteTaskStore::lease(self, key, kind, previous_range, now_nanos)
+    }
+
+    fn update_task_list(
+        &self,
+        key: &TaskListKey,
+        range: i64,
+        data: TaskListData,
+        now_nanos: i64,
+    ) -> Result<()> {
+        SqliteTaskStore::update_task_list(self, key, range, data, now_nanos)
+    }
+
+    fn create_tasks_with_domains(
+        &self,
+        key: &TaskListKey,
+        range: i64,
+        tasks: &[(Uuid, &AllocatedTask)],
+    ) -> Result<()> {
+        SqliteTaskStore::create_tasks_with_domains(
+            self,
+            key,
+            range,
+            tasks.iter().map(|(domain, task)| (*domain, *task)),
+        )
+    }
+
+    fn get_tasks(
+        &self,
+        key: &TaskListKey,
+        read_level: i64,
+        max_read_level: i64,
+        batch_size: i64,
+    ) -> Result<Vec<AllocatedTask>> {
+        SqliteTaskStore::get_tasks(self, key, read_level, max_read_level, batch_size)
+    }
+
+    fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> Result<i64> {
+        SqliteTaskStore::task_list_size(self, key, ack_level)
+    }
+
+    fn complete_task(&self, key: &TaskListKey, task_id: i64) -> Result<()> {
+        SqliteTaskStore::complete_task(self, key, task_id)
+    }
+
+    fn complete_tasks_less_than(
+        &self,
+        key: &TaskListKey,
+        inclusive_task_id: i64,
+        limit: i64,
+    ) -> Result<usize> {
+        SqliteTaskStore::complete_tasks_less_than(self, key, inclusive_task_id, limit)
+    }
+
+    fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
+        SqliteTaskStore::delete_task_list(self, key, range)
+    }
+}
+
 impl SqliteTaskStore {
     fn validate_schema(connection: &Connection) -> Result<()> {
         // These SELECTs verify every column used by Matching queue operations.

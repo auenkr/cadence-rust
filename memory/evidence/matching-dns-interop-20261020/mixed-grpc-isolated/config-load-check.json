@@ -1,0 +1,9 @@
+{
+  "transport": "grpc",
+  "rustLogExists": true,
+  "rustConfigReferencesIsolatedDynamicFile": true,
+  "rustDynamicConfigTransportValue": true,
+  "goDynamicConfigKeepsDefaultOutboundSelection": true,
+  "rustDynamicConfigMissingWarning": false,
+  "matchingTasksThroughHistoryCompleted": true
+}

@@ -1,17 +1,37 @@
 //! Admin service state and JSON handlers, mirroring Go's frontend admin
 //! handler (`go/service/frontend/admin/handler.go`).
 //!
-//! The dynamic-config overlay stands in for Go's config-store client until
-//! file/DB-backed dynamic config is ported: two namespaces (normal and
-//! operational), each a map from config name to its ordered values. Gets
-//! match the request filters exactly like the config-store client; updates
-//! replace the value list; restores drop matching values (all values when
-//! no filters are given).
+//! Admin service state and the shared ordered snapshot used by runtime
+//! dynamic-config property readers.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use cadence_api::admin::{DynamicConfigFilter, DynamicConfigValue};
+
+fn yaml_value_to_json(value: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
+    Ok(match value {
+        serde_yaml::Value::Null => serde_json::Value::Null,
+        serde_yaml::Value::Bool(value) => serde_json::Value::Bool(*value),
+        serde_yaml::Value::Number(value) => serde_json::to_value(value)?,
+        serde_yaml::Value::String(value) => serde_json::Value::String(value.clone()),
+        serde_yaml::Value::Sequence(values) => serde_json::Value::Array(
+            values.iter().map(yaml_value_to_json).collect::<anyhow::Result<_>>()?,
+        ),
+        serde_yaml::Value::Mapping(values) => {
+            let mut output = serde_json::Map::new();
+            for (key, value) in values {
+                let key = key.as_str().ok_or_else(|| {
+                    anyhow::anyhow!("dynamic config map key {key:?} is not a string")
+                })?;
+                output.insert(key.to_string(), yaml_value_to_json(value)?);
+            }
+            serde_json::Value::Object(output)
+        }
+        serde_yaml::Value::Tagged(value) => yaml_value_to_json(&value.value)?,
+    })
+}
+
 
 #[derive(Debug, Clone, Default)]
 pub struct DynamicConfigOverlay {
@@ -36,6 +56,76 @@ fn filters_match(value: &DynamicConfigValue, filters: &[DynamicConfigFilter]) ->
 }
 
 impl DynamicConfigOverlay {
+    /// Parse the Go file-based client's YAML format (`key: [{value,
+    /// constraints}]`) into the ordered property snapshot consumed by Matching.
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
+        let text = std::fs::read_to_string(path.as_ref())?;
+        let root: serde_yaml::Value = serde_yaml::from_str(&text)?;
+        // Go's yaml.Unmarshal accepts an empty document or a root `null` as
+        // an empty/nil map.
+        let Some(mapping) = root.as_mapping() else {
+            if root.is_null() { return Ok(Self::default()); }
+            anyhow::bail!("dynamic config root must be a mapping");
+        };
+        let mut overlay = Self::default();
+        for (key, entries) in mapping {
+            let name = key
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("dynamic config keys must be strings"))?;
+            let Some(entries) = entries.as_sequence() else {
+                if entries.is_null() { overlay.normal.insert(name.to_string(), Vec::new()); continue; }
+                anyhow::bail!("dynamic config {name:?} must contain a list");
+            };
+            let mut values = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let fields = entry.as_mapping().ok_or_else(|| {
+                    anyhow::anyhow!("dynamic config entry for {name:?} must be a mapping")
+                })?;
+                let value_key = serde_yaml::Value::String("value".into());
+                // Go's YAML decoder leaves an omitted interface value nil, the
+                // same as an explicit YAML null.
+                let null_value = serde_yaml::Value::Null;
+                let raw_value = fields.get(&value_key).unwrap_or(&null_value);
+                let data = serde_json::to_vec(&yaml_value_to_json(raw_value)?)?;
+                let mut filters = Vec::new();
+                if let Some(constraints) = fields.get(serde_yaml::Value::String("constraints".into())) {
+                    if constraints.is_null() { /* Go treats YAML null as a nil map. */ }
+                    else {
+                    let constraints = constraints.as_mapping().ok_or_else(|| {
+                        anyhow::anyhow!("constraints for {name:?} must be a mapping")
+                    })?;
+                    for (filter_name, filter_value) in constraints {
+                        let filter_name = filter_name
+                            .as_str()
+                            .ok_or_else(|| anyhow::anyhow!("constraint names must be strings"))?;
+                        filters.push(DynamicConfigFilter {
+                            name: filter_name.to_string(),
+                            value: Some(cadence_api::types::DataBlob {
+                                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                                // Go does not recursively convert constraints.
+                                // A nested non-string map key therefore stays
+                                // an unusable constraint without invalidating
+                                // the whole file snapshot.
+                                data: serde_json::to_vec(&yaml_value_to_json(filter_value).unwrap_or(serde_json::Value::Null))?,
+                            }),
+                        });
+                    }
+                    }
+                }
+                values.push(DynamicConfigValue {
+                    value: Some(cadence_api::types::DataBlob {
+                        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                        data,
+                    }),
+                    filters,
+                });
+            }
+            overlay.normal.insert(name.to_string(), values);
+        }
+        Ok(overlay)
+    }
+
+
     fn map(&self, operational: bool) -> &HashMap<String, Vec<DynamicConfigValue>> {
         if operational {
             &self.operational
@@ -1013,5 +1103,73 @@ mod tests {
         overlay.update(false, "j", vec![value.clone()]);
         assert_eq!(overlay.list(false, "").len(), 2);
         assert_eq!(overlay.list(false, "k").len(), 1);
+    }
+
+    #[test]
+    fn file_based_yaml_preserves_order_and_constraints() {
+        let path = std::env::temp_dir().join(format!(
+            "cadence-dynamic-config-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(&path, "test.key:\n  - value: fallback\n  - value: constrained\n    constraints:\n      domainName: sample\n").unwrap();
+        let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
+        let values = overlay.property_values("test.key");
+        assert_eq!(values.len(), 2);
+        assert_eq!(
+            serde_json::from_slice::<String>(&values[0].value.as_ref().unwrap().data).unwrap(),
+            "fallback"
+        );
+        assert_eq!(
+            serde_json::from_slice::<String>(&values[1].value.as_ref().unwrap().data).unwrap(),
+            "constrained"
+        );
+        assert_eq!(values[1].filters[0].name, "domainName");
+        assert_eq!(
+            serde_json::from_slice::<String>(&values[1].filters[0].value.as_ref().unwrap().data)
+                .unwrap(),
+            "sample"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn file_based_yaml_matches_go_null_and_map_key_conversion() {
+        let path = std::env::temp_dir().join(format!("cadence-dynamic-config-null-{}.yaml", std::process::id()));
+        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-null.yaml")).unwrap();
+        let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
+        for key in ["missingValue", "explicitNull"] {
+            let value = overlay.property_values(key)[0].value.as_ref().unwrap();
+            assert_eq!(serde_json::from_slice::<serde_json::Value>(&value.data).unwrap(), serde_json::Value::Null);
+        }
+        assert!(overlay.property_values("nullConstraints")[0].filters.is_empty());
+        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-null-list.yaml")).unwrap();
+        let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
+        assert!(overlay.property_values("emptyValues").is_empty());
+        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-constraint-key.yaml")).unwrap();
+        assert!(DynamicConfigOverlay::from_file(&path).is_ok(), "Go does not recursively convert constraint values");
+        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-integer-key.yaml")).unwrap();
+        assert!(DynamicConfigOverlay::from_file(&path).unwrap_err().to_string().contains("not a string"));
+        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-boolean-key.yaml")).unwrap();
+        assert!(DynamicConfigOverlay::from_file(&path).unwrap_err().to_string().contains("not a string"));
+        std::fs::remove_file(path).unwrap();
+        let empty_path = std::env::temp_dir().join(format!("cadence-dynamic-config-empty-{}.yaml", std::process::id()));
+        std::fs::write(&empty_path, include_str!("../tests/fixtures/dynamic-config-go-empty.yaml")).unwrap();
+        assert!(DynamicConfigOverlay::from_file(&empty_path).unwrap().property_values("absent").is_empty());
+        std::fs::remove_file(empty_path).unwrap();
+    }
+
+    #[test]
+    fn parses_the_go_filebased_client_fixture() {
+        let path = std::env::temp_dir().join(format!("cadence-go-dynamic-config-{}.yaml", std::process::id()));
+        std::fs::write(&path, include_str!("../../../../go/common/dynamicconfig/config/testConfig.yaml")).unwrap();
+        let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
+        let values = overlay.property_values("testGetBoolPropertyKey");
+        assert_eq!(values.len(), 3);
+        assert!(!serde_json::from_slice::<bool>(&values[0].value.as_ref().unwrap().data).unwrap());
+        assert_eq!(values[1].filters[0].name, "domainName");
+        let attributes = overlay.property_values("frontend.validSearchAttributes");
+        let json: serde_json::Value = serde_json::from_slice(&attributes[0].value.as_ref().unwrap().data).unwrap();
+        assert_eq!(json["DomainID"], 1);
+        std::fs::remove_file(path).unwrap();
     }
 }

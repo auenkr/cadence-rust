@@ -78,3 +78,7 @@ pub mod matching_membership_lifecycle;
 pub mod matching_peer_provider;
 #[allow(clippy::result_large_err)]
 pub mod matching_shard_distributor;
+#[allow(clippy::result_large_err)]
+pub mod matching_shard_processor;
+#[allow(clippy::result_large_err)]
+pub mod matching_shard_routing;

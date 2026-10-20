@@ -1,0 +1,75 @@
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-persistence)
+warning: unused import: `TaskData`
+ --> crates/cadence-persistence/src/matching_sqlite.rs:4:56
+  |
+4 | use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskList...
+  |                                                        ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `StorageError`
+ --> crates/cadence-persistence/src/matching_retry.rs:3:38
+  |
+3 | use crate::matching_sqlite::{Result, StorageError};
+  |                                      ^^^^^^^^^^^^
+
+warning: method `discard_flag` is never used
+   --> crates/cadence-persistence/src/matching_mysql.rs:274:19
+    |
+273 | impl ConnectionLease {
+    | -------------------- method in this implementation
+274 |     pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
+    |                   ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-persistence` (lib) generated 3 warnings (run `cargo fix --lib -p cadence-persistence` to apply 2 suggestions)
+    Checking cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-proto)
+    Checking tonic-reflection v0.12.3
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 27.99s
+warning: unused import: `TaskData`
+ --> crates/cadence-persistence/src/matching_sqlite.rs:4:56
+  |
+4 | use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskList...
+  |                                                        ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `StorageError`
+ --> crates/cadence-persistence/src/matching_retry.rs:3:38
+  |
+3 | use crate::matching_sqlite::{Result, StorageError};
+  |                                      ^^^^^^^^^^^^
+
+warning: method `discard_flag` is never used
+   --> crates/cadence-persistence/src/matching_mysql.rs:274:19
+    |
+273 | impl ConnectionLease {
+    | -------------------- method in this implementation
+274 |     pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
+    |                   ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-persistence` (lib) generated 3 warnings (run `cargo fix --lib -p cadence-persistence` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.15s
+    Updating crates.io index
+     Locking 254 packages to highest compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding lru v0.18.5 (available: v0.19.0)
+      Adding mysql_common v0.37.3 (available: v0.38.2)
+      Adding pem v3.0.6 (available: v4.0.0)
+ Downloading crates ...
+  Downloaded cc v1.9.0
+  Downloaded find-msvc-tools v0.1.15
+  Downloaded waker-fn v1.2.0
+  Downloaded arc-swap v1.9.3
+  Downloaded rustls-webpki v0.103.16
+  Downloaded libc v0.2.191
+  Downloaded tokio v1.54.0
+error: can't find integration-test `exports` at path `/tmp/cadence-mysql-vendor-tests.TvP4wK/mysql_async-0.37.1/tests/exports.rs`
+ --> /tmp/cadence-mysql-vendor-tests.TvP4wK/mysql_async-0.37.1/Cargo.toml
+error: can't find integration-test `generic` at path `/tmp/cadence-mysql-vendor-tests.TvP4wK/mysql_async-0.37.1/tests/generic.rs`
+ --> /tmp/cadence-mysql-vendor-tests.TvP4wK/mysql_async-0.37.1/Cargo.toml
+error: could not compile due to 2 previous target resolution errors

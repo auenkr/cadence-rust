@@ -1,0 +1,10 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 49.35s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 2 tests
+test matching_runtime::tests::installed_shard_ownership_check_bypasses_ring_for_cached_excluded_and_wraps_negative_percent ... ok
+test matching_runtime::tests::installed_shard_ownership_check_matches_notfound_shutdown_and_transient_errors ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.12s
+

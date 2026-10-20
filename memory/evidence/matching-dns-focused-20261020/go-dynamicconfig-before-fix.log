@@ -1,0 +1,5 @@
+# github.com/uber/cadence/common/dynamicconfig [github.com/uber/cadence/common/dynamicconfig.test]
+common/dynamicconfig/file_based_oracle_test.go:64:15: cannot use client.GetValue(dynamicproperties.TestGetBoolPropertyKey) (value of type interface{}) as int value in assignment: need type assertion
+common/dynamicconfig/file_based_oracle_test.go:65:28: invalid operation: value != nil (mismatched types int and untyped nil)
+FAIL	github.com/uber/cadence/common/dynamicconfig [build failed]
+FAIL

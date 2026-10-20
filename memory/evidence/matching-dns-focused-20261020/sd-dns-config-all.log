@@ -1,0 +1,20 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.92s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 13 tests
+test config::tests::dynamic_config_modern_client_takes_precedence_and_legacy_is_supported ... ok
+test config::tests::canonical_and_legacy_cluster_keys_use_go_precedence ... ok
+test config::tests::parses_cassandra_csv_hosts ... ok
+test config::tests::parses_go_env_templated_ports ... ok
+test config::tests::embedded_defaults_match_go_development_config ... ok
+test config::tests::parses_go_style_config ... ok
+test config::tests::parses_real_go_base_config_subset ... ok
+test config::tests::rejects_negative_shards ... ok
+test config::tests::ringpop_configuration_maps_defaults_validation_and_signed_values ... ok
+test config::tests::shard_distributor_config_matches_go_names_and_duration_semantics ... ok
+test config::tests::parses_real_go_development_config ... ok
+test config::tests::shard_distributor_rejects_invalid_namespace_and_heartbeat_interval ... ok
+test config::tests::shard_distributor_matching_validation_handles_zero_one_and_multiple_namespaces ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 338 filtered out; finished in 0.01s
+

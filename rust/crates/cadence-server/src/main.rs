@@ -41,6 +41,77 @@ fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net
     Ok(Some(std::net::SocketAddr::new(ip, http.port)))
 }
 
+fn dynamic_bool_property(
+    overlay: std::sync::Arc<std::sync::Mutex<cadence_server::admin::DynamicConfigOverlay>>,
+    name: &str,
+    default: bool,
+) -> bool {
+    let Ok(overlay) = overlay.lock() else {
+        return default;
+    };
+    overlay
+        .property_values(name)
+        .iter()
+        .filter(|value| value.filters.is_empty())
+        .filter_map(|value| value.value.as_ref())
+        .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
+        .filter_map(|blob| serde_json::from_slice::<bool>(&blob.data).ok())
+        .next_back()
+        .unwrap_or(default)
+}
+
+fn dynamic_i64_property(
+    overlay: std::sync::Arc<std::sync::Mutex<cadence_server::admin::DynamicConfigOverlay>>,
+    name: &str,
+    default: i64,
+) -> i64 {
+    let Ok(overlay) = overlay.lock() else {
+        return default;
+    };
+    overlay
+        .property_values(name)
+        .iter()
+        .filter(|value| value.filters.is_empty())
+        .filter_map(|value| value.value.as_ref())
+        .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
+        .filter_map(|blob| serde_json::from_slice::<i64>(&blob.data).ok())
+        .next_back()
+        .unwrap_or(default)
+}
+
+fn matching_listen_ip(rpc: Option<&config::RpcConfig>) -> anyhow::Result<std::net::IpAddr> {
+    if let Some(rpc) = rpc {
+        if rpc.bind_on_local_host && !rpc.bind_on_ip.is_empty() {
+            anyhow::bail!("bindOnLocalHost and bindOnIP are mutually exclusive");
+        }
+        if rpc.bind_on_local_host {
+            return Ok(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        }
+        if !rpc.bind_on_ip.is_empty() {
+            return rpc.bind_on_ip.parse().map_err(|_| {
+                anyhow::anyhow!(
+                    "unable to parse bindOnIP value or it is not an IPv4 or IPv6 address: {}",
+                    rpc.bind_on_ip
+                )
+            });
+        }
+    }
+    let interfaces = if_addrs::get_if_addrs()?;
+    let mut best: Option<(i32, std::net::IpAddr)> = None;
+    for iface in interfaces {
+        let ip = iface.ip();
+        let mut score = if ip.is_ipv4() { 300 } else { 0 };
+        if !iface.is_loopback() && !ip.is_loopback() {
+            score += 200;
+        }
+        if best.as_ref().is_none_or(|(previous, _)| score > *previous) {
+            best = Some((score, ip));
+        }
+    }
+    best.map(|(_, ip)| ip)
+        .ok_or_else(|| anyhow::anyhow!("no addresses to listen on"))
+}
+
 async fn shutdown_signal() -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -75,7 +146,9 @@ async fn matching_http_tls(
         || !tls.server_name.is_empty()
         || !tls.ssl_mode.is_empty()
     {
-        anyhow::bail!("Matching HTTP TLS configured CA/client-auth/host-verification/serverName/sslmode options are unsupported");
+        anyhow::bail!(
+            "Matching HTTP TLS configured CA/client-auth/host-verification/serverName/sslmode options are unsupported"
+        );
     }
     if mode == "disabled" {
         if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
@@ -255,7 +328,7 @@ async fn serve_matching_http_permissive(
                         "TLS sniff timed out",
                     )),
                     peer,
-                )
+                );
             }
         };
         let stream = PrefixedStream {
@@ -359,10 +432,12 @@ mod matching_http_listener_tests {
     #[tokio::test]
     async fn rejects_invalid_configuration_and_detects_enabled_tls() {
         let rpc: config::RpcConfig = serde_yaml::from_str("http: {port: 0}").unwrap();
-        assert!(matching_http_addr(&rpc)
-            .unwrap_err()
-            .to_string()
-            .contains("HTTP port is not set"));
+        assert!(
+            matching_http_addr(&rpc)
+                .unwrap_err()
+                .to_string()
+                .contains("HTTP port is not set")
+        );
         let tls: config::HttpConfig = serde_yaml::from_str("tls: {enabled: true}").unwrap();
         assert!(matching_http_tls(&tls).await.unwrap().is_none());
     }
@@ -371,51 +446,63 @@ mod matching_http_listener_tests {
     async fn validates_tls_mode_and_certificate_configuration() {
         let enforced_without_tls: config::HttpConfig =
             serde_yaml::from_str("TLSMode: enforced").unwrap();
-        assert!(matching_http_tls(&enforced_without_tls)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            matching_http_tls(&enforced_without_tls)
+                .await
+                .unwrap()
+                .is_none()
+        );
         let enforced_with_tls_disabled: config::HttpConfig =
             serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: false}").unwrap();
-        assert!(matching_http_tls(&enforced_with_tls_disabled)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            matching_http_tls(&enforced_with_tls_disabled)
+                .await
+                .unwrap()
+                .is_none()
+        );
         let permissive_without_tls: config::HttpConfig =
             serde_yaml::from_str("TLSMode: permissive").unwrap();
-        assert!(matching_http_tls(&permissive_without_tls)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            matching_http_tls(&permissive_without_tls)
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         let uppercase: config::HttpConfig = serde_yaml::from_str(
             "TLSMode: Enforced\ntls: {enabled: true, certFile: cert, keyFile: key}",
         )
         .unwrap();
-        assert!(matching_http_tls(&uppercase)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("unknown TLSMode"));
+        assert!(
+            matching_http_tls(&uppercase)
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("unknown TLSMode")
+        );
         let empty: config::HttpConfig = serde_yaml::from_str("TLSMode: ''").unwrap();
-        assert!(matching_http_tls(&empty)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("unknown TLSMode"));
+        assert!(
+            matching_http_tls(&empty)
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("unknown TLSMode")
+        );
 
         let permissive: config::HttpConfig = serde_yaml::from_str(
             "TLSMode: permissive\ntls: {enabled: true, certFile: cert, keyFile: key}",
         )
         .unwrap();
-        assert!(matching_http_tls(&permissive)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("loading Matching HTTP TLS certificate/key"));
+        assert!(
+            matching_http_tls(&permissive)
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("loading Matching HTTP TLS certificate/key")
+        );
 
         let missing_cert: config::HttpConfig =
             serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: true, keyFile: key}").unwrap();
@@ -431,12 +518,14 @@ mod matching_http_listener_tests {
             invalid_key.path().to_string_lossy(),
         ))
         .unwrap();
-        assert!(matching_http_tls(&invalid_pair)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("loading Matching HTTP TLS certificate/key"));
+        assert!(
+            matching_http_tls(&invalid_pair)
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("loading Matching HTTP TLS certificate/key")
+        );
     }
 }
 
@@ -458,6 +547,9 @@ enum Command {
         /// YAML config file with Cadence keys; defaults to embedded development settings.
         #[arg(long)]
         config: Option<String>,
+        /// Process root used to resolve relative dynamic-config paths (Go --root semantics).
+        #[arg(long)]
+        root: Option<String>,
         /// Services to run. Empty means all.
         #[arg(long, value_delimiter = ',')]
         services: Vec<String>,
@@ -499,6 +591,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Start {
             config,
+            root,
             services,
             port,
             grpc_port,
@@ -518,6 +611,41 @@ async fn main() -> anyhow::Result<()> {
                 None => config::Config::development()?,
             };
             cfg.validate()?;
+            let process_root = root
+                .map(std::path::PathBuf::from)
+                .unwrap_or(std::env::current_dir()?);
+            let dynamic_config_provider = cfg.selected_dynamic_config_client();
+            let dynamic_config_poll = match dynamic_config_provider {
+                Some((_, provider)) if !provider.poll_interval.is_empty() => {
+                    let nanos = cadence_server::config::parse_go_duration(&provider.poll_interval)
+                        .map_err(anyhow::Error::msg)?;
+                    std::time::Duration::from_nanos(nanos.max(5_000_000_000) as u64)
+                }
+                _ => std::time::Duration::from_secs(5),
+            };
+            let dynamic_config_path = if let Some((client, provider)) = dynamic_config_provider {
+                if !client.eq_ignore_ascii_case("filebased") {
+                    anyhow::bail!(
+                        "dynamic config client {client:?} is not supported by Rust Matching; only filebased is currently ported"
+                    );
+                }
+                if provider.filepath.is_empty() {
+                    eprintln!(
+                        "warning: filebased dynamic config has no filepath; using no-op configuration"
+                    );
+                    None
+                } else {
+                    let path = std::path::PathBuf::from(&provider.filepath);
+                    let path = if path.is_absolute() {
+                        path
+                    } else {
+                        process_root.join(path)
+                    };
+                    Some(path)
+                }
+            } else {
+                None
+            };
             let wanted: Vec<service::ServiceName> = if services.is_empty() {
                 service::ServiceName::all().to_vec()
             } else {
@@ -552,6 +680,28 @@ async fn main() -> anyhow::Result<()> {
                 semaphore_enabled,
                 num_history_shards,
                 ..Default::default()
+            };
+            let mut dynamic_config_loaded_at = None;
+            let dynamic_config_loaded = if let Some(path) = dynamic_config_path.as_ref() {
+                match cadence_server::admin::DynamicConfigOverlay::from_file(path) {
+                    Ok(snapshot) => {
+                        *state
+                            .admin
+                            .dynamic_config
+                            .lock()
+                            .expect("dynamic config lock") = snapshot;
+                        dynamic_config_loaded_at = Some(std::time::SystemTime::now());
+                        true
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "warning: loading dynamic config {path:?}: {error}; using no-op configuration"
+                        );
+                        false
+                    }
+                }
+            } else {
+                false
             };
             state.matching_http_isolated = wanted.contains(&service::ServiceName::Matching)
                 && cfg
@@ -767,6 +917,50 @@ async fn main() -> anyhow::Result<()> {
             let matching_metric_sink = matching_metrics_runtime
                 .as_ref()
                 .map(|runtime| runtime.sink());
+            // Reserve production endpoints before Ringpop publishes them.
+            let mut matching_grpc_listener = if run_matching && !embedded_development {
+                Some(tokio::net::TcpListener::bind(matching_addr).await?)
+            } else {
+                None
+            };
+            let matching_addr = matching_grpc_listener
+                .as_ref()
+                .map(tokio::net::TcpListener::local_addr)
+                .transpose()?
+                .unwrap_or(matching_addr);
+            let mut matching_tchannel_listener = if run_matching && !embedded_development {
+                Some(tokio::net::TcpListener::bind(matching_tchannel_addr).await?)
+            } else {
+                None
+            };
+            let matching_ringpop_provider = if let Some(listener) = &matching_tchannel_listener {
+                Some(std::sync::Arc::new(
+                    cadence_server::matching_ringpop_provider::MatchingRingpopProvider::new(
+                        cfg.ringpop.clone(),
+                        "cadence-matching",
+                        listener.local_addr()?,
+                        matching_addr.port(),
+                    )?,
+                ))
+            } else {
+                None
+            };
+            let matching_membership = matching_ringpop_provider.as_ref().map(|provider| {
+                cadence_server::matching_membership::Membership::new(
+                    provider.local_identity().to_owned(),
+                    Vec::new(),
+                )
+            });
+            let mut matching_membership_lifecycle = matching_ringpop_provider
+                .as_ref()
+                .zip(matching_membership.clone())
+                .map(|(provider, membership)| {
+                    cadence_server::matching_membership_lifecycle::MatchingMembershipLifecycle::new(
+                        "cadence-matching",
+                        provider.clone(),
+                        membership,
+                    )
+                });
             let matching_http_addr = if run_matching {
                 matching_rpc
                     .as_ref()
@@ -791,15 +985,88 @@ async fn main() -> anyhow::Result<()> {
             }
             if run_matching {
                 println!("Cadence internal matching gRPC listening on {matching_addr}");
-                println!("Cadence internal matching Thrift/TChannel listening on {matching_tchannel_addr}");
+                println!(
+                    "Cadence internal matching Thrift/TChannel listening on {matching_tchannel_addr}"
+                );
             }
-            let matching_domain_cache = if run_matching && !embedded_development {
+            let matching_history = if run_matching {
+                let grpc_outbound = dynamic_bool_property(
+                    state.admin.dynamic_config.clone(),
+                    "system.enableGRPCOutbound",
+                    true,
+                );
+                let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
+                let history_channel =
+                    tonic::transport::Endpoint::from_shared(history_peer)?.connect_lazy();
+                let history = cadence_server::matching_history::MatchingHistoryClient::new(
+                    history_channel,
+                    std::time::Duration::from_secs(1),
+                    32 * 1024 * 1024,
+                );
+                if let Some(provider) = matching_ringpop_provider.as_ref() {
+                    let named_port = if grpc_outbound {
+                        cadence_server::matching_history_peer_resolver::NamedPort::Grpc
+                    } else {
+                        cadence_server::matching_history_peer_resolver::NamedPort::Tchannel
+                    };
+                    let history_membership = std::sync::Arc::new(
+                        cadence_server::matching_history_membership::RingpopHistoryMembership::new(
+                            std::sync::Arc::new(provider.node().clone()),
+                        ),
+                    );
+                    let history_resolver = std::sync::Arc::new(
+                        cadence_server::matching_history_peer_resolver::MatchingHistoryPeerResolver::new(
+                            num_history_shards as u32,
+                            named_port,
+                            history_membership,
+                        )?,
+                    );
+                    Some(if grpc_outbound {
+                        history.with_peer_resolver(history_resolver)
+                    } else {
+                        history.with_tchannel_outbound(history_resolver)
+                    })
+                } else if !grpc_outbound {
+                    anyhow::bail!(
+                        "system.enableGRPCOutbound=false requires live Ringpop membership for Matching History TChannel routing"
+                    );
+                } else {
+                    Some(history)
+                }
+            } else {
+                None
+            };
+            let configured_matching_stores = if run_matching && !embedded_development {
+                let persistence = cfg.persistence.clone();
+                let cluster_name = state.current_cluster_name.clone();
                 Some(
-                    cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store(
+                    tokio::task::spawn_blocking(move || {
+                        cadence_server::matching_task_store::open_configured_default_store(
+                            &persistence,
+                            &cluster_name,
+                        )
+                    })
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!("joining Matching store startup: {error}")
+                    })??,
+                )
+            } else {
+                None
+            };
+            let matching_domain_cache = if run_matching && !embedded_development {
+                let stores = configured_matching_stores
+                    .as_ref()
+                    .expect("configured Matching stores are opened for production");
+                Some(match stores.domain_metadata_source.clone() {
+                    Some(source) => std::sync::Arc::new(
+                        cadence_server::matching_domain_cache::MatchingDomainCache::new(source),
+                    ),
+                    None => cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store(
                         &cfg.persistence,
                         &state.current_cluster_name,
                     )?,
-                )
+                })
             } else {
                 None
             };
@@ -816,20 +1083,8 @@ async fn main() -> anyhow::Result<()> {
                 );
                 Some(match source {
                     cadence_server::matching_task_store::MatchingTaskStoreSource::ConfiguredDefaultStore => {
-                        let store = cadence_server::matching_task_store::SqliteTaskStoreConfig::from_default_store(&cfg.persistence)?.open_store()?;
-                        let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
-                        let history_channel = tonic::transport::Endpoint::from_shared(history_peer)?
-                            .connect_lazy();
-                        let history = cadence_server::matching_history::MatchingHistoryClient::new(
-                            history_channel,
-                            std::time::Duration::from_secs(1),
-                            32 * 1024 * 1024,
-                        );
-                        let history = if let Some(sink) = matching_metric_sink.as_ref() {
-                            history.with_metrics(sink.clone())
-                        } else {
-                            history
-                        };
+                        let store = configured_matching_stores.as_ref().expect("configured Matching stores are opened for production").task_store.clone();
+                        let history = matching_history.clone().expect("Matching history client is constructed when Matching runs");
                         let cache = matching_domain_cache.clone().ok_or_else(|| {
                             anyhow::anyhow!("configured Matching persistence requires its production domain cache")
                         })?;
@@ -856,21 +1111,8 @@ async fn main() -> anyhow::Result<()> {
                                 cadence_persistence::matching_blob::BlobEncoding::ThriftRWSnappy,
                             )
                         }?;
-                        // TODO: replace this loopback adapter with configured
-                        // History discovery when production discovery is wired.
-                        let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
-                        let history_channel = tonic::transport::Endpoint::from_shared(history_peer)?
-                            .connect_lazy();
-                        let history = cadence_server::matching_history::MatchingHistoryClient::new(
-                            history_channel,
-                            std::time::Duration::from_secs(1),
-                            32 * 1024 * 1024,
-                        );
-                        let history = if let Some(sink) = matching_metric_sink.as_ref() {
-                            history.with_metrics(sink.clone())
-                        } else {
-                            history
-                        };
+                        // Embedded development uses the prepared local History adapter.
+                        let history = matching_history.clone().expect("Matching history client is constructed when Matching runs");
                         match matching_domain_cache.clone() {
                             Some(cache) => cadence_server::matching_runtime::MatchingRuntime::with_durable_queues_and_domain_cache(
                                 state.clone(),
@@ -908,6 +1150,82 @@ async fn main() -> anyhow::Result<()> {
                     .take()
                     .map(|runtime| runtime.with_metrics(sink.clone()));
             }
+            if dynamic_config_loaded {
+                if let (Some(runtime), Some(path)) =
+                    (matching_runtime.take(), dynamic_config_path.clone())
+                {
+                    matching_runtime = Some(
+                        runtime.with_dynamic_config_file(
+                            path,
+                            dynamic_config_poll,
+                            dynamic_config_loaded_at
+                                .expect("successful initial dynamic-config load has timestamp"),
+                        ),
+                    );
+                }
+            }
+            if let Some(membership) = matching_membership.clone() {
+                if let Some(runtime) = matching_runtime.take() {
+                    matching_runtime = Some(runtime.with_membership(membership));
+                }
+            }
+            if run_matching && !cfg.shard_distributor_matching.namespaces.is_empty() {
+                let membership = matching_membership.clone().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Matching shard-distributor configuration requires Ringpop membership"
+                    )
+                })?;
+                let runtime = matching_runtime.take().ok_or_else(|| {
+                    anyhow::anyhow!("Matching runtime is unavailable for shard-distributor setup")
+                })?;
+                let target = if cfg.shard_distributor_client.host_port.contains("://") {
+                    cfg.shard_distributor_client.host_port.clone()
+                } else {
+                    format!("http://{}", cfg.shard_distributor_client.host_port)
+                };
+                let shard_distributor_channel =
+                    tonic::transport::Endpoint::from_shared(target)?.connect_lazy();
+                let mut metadata = std::collections::HashMap::new();
+                metadata.insert(
+                    "tchannel".to_string(),
+                    matching_tchannel_addr.port().to_string(),
+                );
+                metadata.insert("grpc".to_string(), matching_addr.port().to_string());
+                metadata.insert(
+                    "hostIP".to_string(),
+                    matching_listen_ip(matching_rpc.as_ref())?.to_string(),
+                );
+                let overlay = state.admin.dynamic_config.clone();
+                let percentage = std::sync::Arc::new(move || {
+                    dynamic_i64_property(
+                        overlay.clone(),
+                        "matching.percentageOnboardedToShardManager",
+                        0,
+                    )
+                })
+                    as std::sync::Arc<dyn Fn() -> i64 + Send + Sync>;
+                let overlay = state.admin.dynamic_config.clone();
+                let exclude_short_lived = std::sync::Arc::new(move || {
+                    dynamic_bool_property(
+                        overlay.clone(),
+                        "matching.excludeShortLivedTaskListsFromShardManager",
+                        true,
+                    )
+                })
+                    as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
+                matching_runtime = Some(
+                    runtime
+                        .with_shard_distributor(
+                            &cfg.shard_distributor_matching,
+                            shard_distributor_channel,
+                            membership,
+                            metadata,
+                            percentage,
+                            exclude_short_lived,
+                        )
+                        .await?,
+                );
+            }
             let matching_service = matching_runtime
                 .as_ref()
                 .map(|runtime| runtime.matching().clone())
@@ -917,6 +1235,79 @@ async fn main() -> anyhow::Result<()> {
                 .map_or(matching_service.clone(), |sink| {
                     matching_service.with_metrics(sink.clone())
                 });
+            let matching_tchannel_service = matching_service.clone();
+            // Start the shared listener before provider bootstrap so JOIN is reachable.
+            let (mut matching_tchannel_task, mut matching_tchannel_done) = if run_matching {
+                if let Some(listener) = matching_tchannel_listener.take() {
+                    let provider = matching_ringpop_provider
+                        .as_ref()
+                        .expect("prebound production listener has a Ringpop provider");
+                    let ringpop_handler = provider.handler();
+                    let matching = matching_tchannel_service.clone();
+                    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+                    let task = tokio::spawn(async move {
+                        let result =
+                            cadence_server::tchannel::serve_matching_with_ringpop_listener(
+                                listener,
+                                matching,
+                                ringpop_handler,
+                            )
+                            .await;
+                        let _ = done_tx.send(result);
+                    });
+                    (Some(task), Some(done_rx))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+            let mut shutdown_during_start = false;
+            if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                let start_result = tokio::select! {
+                    result = lifecycle.start() => result.map_err(anyhow::Error::new),
+                    signal = shutdown_signal() => { shutdown_during_start = signal.is_ok(); Err(signal.err().unwrap_or_else(|| anyhow::anyhow!("shutdown requested during Matching Ringpop bootstrap"))) },
+                    result = async { match matching_tchannel_done.as_mut() { Some(listener_done) => listener_done.await, None => std::future::pending().await } } => Err(anyhow::anyhow!("shared Matching TChannel/Ringpop listener stopped during Ringpop bootstrap: {result:?}")),
+                };
+                if let Err(start_error) = start_result {
+                    let mut cleanup_errors = Vec::new();
+                    if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                        if let Err(error) = lifecycle.withdraw().await {
+                            cleanup_errors.push(format!("withdrawing membership: {error}"));
+                        }
+                    }
+                    if let Some(runtime) = matching_runtime.as_mut() {
+                        if let Err(error) = runtime.shutdown().await {
+                            cleanup_errors.push(format!("stopping Matching runtime: {error:#}"));
+                        }
+                    }
+                    if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                        if let Err(error) = lifecycle.stop_after_drain().await {
+                            cleanup_errors.push(format!("stopping membership: {error}"));
+                        }
+                    }
+                    if let Some(task) = matching_tchannel_task.take() {
+                        task.abort();
+                        if let Err(error) = task.await {
+                            if !error.is_cancelled() {
+                                cleanup_errors
+                                    .push(format!("joining shared TChannel listener: {error}"));
+                            }
+                        }
+                    }
+                    if cleanup_errors.is_empty() {
+                        if shutdown_during_start {
+                            println!("shutting down");
+                            return Ok(());
+                        }
+                        return Err(start_error.context("starting Matching Ringpop membership"));
+                    }
+                    anyhow::bail!(
+                        "starting Matching Ringpop membership failed: {start_error:#}; cleanup also failed: {}",
+                        cleanup_errors.join("; ")
+                    );
+                }
+            }
             let app = if run_matching {
                 if matching_http_addr.is_some() {
                     app
@@ -935,9 +1326,8 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 app
             };
-            let matching_tchannel_service = matching_service.clone();
             let mut serving = tokio::spawn(async move {
-                let _ = tokio::try_join!(
+                tokio::try_join!(
                     async {
                         axum::serve(listener, app)
                             .await
@@ -966,22 +1356,37 @@ async fn main() -> anyhow::Result<()> {
                     },
                     async {
                         if run_matching {
-                            cadence_server::tchannel::serve_matching(
-                                matching_tchannel_addr,
-                                matching_tchannel_service,
-                            )
-                            .await
+                            if let Some(done) = matching_tchannel_done.as_mut() {
+                                match done.await {
+                                    Ok(result) => result,
+                                    Err(error) => Err(anyhow::Error::new(error)),
+                                }
+                            } else {
+                                cadence_server::tchannel::serve_matching(
+                                    matching_tchannel_addr,
+                                    matching_tchannel_service,
+                                )
+                                .await
+                            }
                         } else {
                             std::future::pending::<anyhow::Result<()>>().await
                         }
                     },
                     async {
                         if run_matching {
-                            cadence_server::grpc_matching::serve_with(
-                                matching_addr,
-                                matching_service.clone(),
-                            )
-                            .await
+                            if let Some(listener) = matching_grpc_listener.take() {
+                                cadence_server::grpc_matching::serve_with_listener(
+                                    listener,
+                                    matching_service.clone(),
+                                )
+                                .await
+                            } else {
+                                cadence_server::grpc_matching::serve_with(
+                                    matching_addr,
+                                    matching_service.clone(),
+                                )
+                                .await
+                            }
                         } else {
                             std::future::pending::<anyhow::Result<()>>().await
                         }
@@ -1043,11 +1448,28 @@ async fn main() -> anyhow::Result<()> {
             };
             // On a signal, the listener task remains active while shutdown
             // drains traffic. Listener errors have already ended that task.
+            let withdrawal = if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                lifecycle.withdraw().await.map_err(anyhow::Error::new)
+            } else {
+                Ok(())
+            };
             let shutdown = if let Some(runtime) = matching_runtime.as_mut() {
                 runtime.shutdown().await
             } else {
                 Ok(())
             };
+            // Runtime shutdown evicts before draining and stops Matching's
+            // handler/store after the drain. Only then remove the membership
+            // watcher and destroy the shared Ringpop node.
+            let membership_shutdown =
+                if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                    lifecycle
+                        .stop_after_drain()
+                        .await
+                        .map_err(anyhow::Error::new)
+                } else {
+                    Ok(())
+                };
             if serving_result.is_none() {
                 if serving.is_finished() {
                     serving_result = Some(
@@ -1061,11 +1483,28 @@ async fn main() -> anyhow::Result<()> {
                     let _ = serving.await;
                 }
             }
-            if let Some(result) = serving_result {
-                result?;
+            if let Some(task) = matching_tchannel_task.take() {
+                task.abort();
+                let _ = task.await;
             }
-            if let Some(result) = signal_result {
-                result?;
+            let mut shutdown_errors = Vec::new();
+            if let Some(Err(error)) = serving_result {
+                shutdown_errors.push(format!("serving Matching cluster: {error:#}"));
+            }
+            if let Some(Err(error)) = signal_result {
+                shutdown_errors.push(format!("waiting for shutdown signal: {error:#}"));
+            }
+            if let Err(error) = withdrawal {
+                shutdown_errors.push(format!("withdrawing Matching membership: {error:#}"));
+            }
+            if let Err(error) = shutdown {
+                shutdown_errors.push(format!("stopping Matching runtime: {error:#}"));
+            }
+            if let Err(error) = membership_shutdown {
+                shutdown_errors.push(format!("stopping Matching membership: {error:#}"));
+            }
+            if !shutdown_errors.is_empty() {
+                anyhow::bail!("Matching shutdown failed: {}", shutdown_errors.join("; "));
             }
             shutdown?;
             if let Some(metrics) = matching_metrics_runtime.as_mut() {

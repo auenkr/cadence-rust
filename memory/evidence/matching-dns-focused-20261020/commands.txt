@@ -1,0 +1,6 @@
+cargo test -p cadence-server --lib shard_distributor_config
+cargo test -p cadence-server --lib shard_distributor
+cargo test -p cadence-server --lib routing
+cargo test -p cadence-server --lib shard_policy
+cargo test -p cadence-server --lib assigned_eligible_owner
+cargo test -p cadence-server --lib shutdown_drain_runs_membership_evictor

@@ -13,3 +13,6 @@ members = [
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/auenkr/cadence-rust"
+
+[patch.crates-io]
+mysql_async = { path = "vendor/mysql_async-0.37.1" }

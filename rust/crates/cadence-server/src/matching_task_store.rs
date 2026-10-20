@@ -1,14 +1,114 @@
 //! Select Matching's queue persistence from Go's configured default store.
 //!
-//! This adapter intentionally supports the existing single-database SQLite
-//! task tables only. It opens Cadence's shared schema and never creates a
+//! This adapter supports the existing SQLite and single-database MySQL task
+//! tables. It opens Cadence's shared schema and never creates a
 //! parallel production database or installs a partial schema.
-use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
+use cadence_persistence::{
+    matching_blob::BlobEncoding,
+    matching_mysql::{MySqlTaskStore, MySqlTaskStoreConfig, MySqlTlsConfig},
+    matching_sqlite::SqliteTaskStore,
+    matching_task_store::MatchingTaskStore,
+};
 use std::{sync::Arc, time::Duration};
 
 const GO_DEFAULT_BUSY_TIMEOUT_MS: u64 = 60_000;
 const GO_DEFAULT_JOURNAL_MODE: &str = "wal";
 const GO_DEFAULT_TIME_FORMAT: &str = "2006-01-02T15:04:05.000000000Z07:00";
+
+pub struct ConfiguredMatchingStores {
+    pub task_store: Arc<dyn MatchingTaskStore>,
+    pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
+}
+
+/// Open Matching's configured default SQL store. MySQL task and domain reads
+/// share one pool so their combined connections obey Go's maxConns setting.
+pub fn open_configured_default_store(
+    persistence: &crate::config::PersistenceConfig,
+    active_cluster_name: &str,
+) -> anyhow::Result<ConfiguredMatchingStores> {
+    let name = persistence.default_store.as_str();
+    if name.is_empty() {
+        anyhow::bail!("Matching task persistence requires persistence.defaultStore");
+    }
+    let datastore = persistence.datastores.get(name).ok_or_else(|| {
+        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
+    })?;
+    if datastore.nosql.is_some() {
+        anyhow::bail!("Matching task persistence does not support NoSQL defaultStore {name:?}");
+    }
+    let sql = datastore.sql.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("Matching defaultStore {name:?} has no supported SQL configuration")
+    })?;
+    match sql.plugin_name.as_str() {
+        "sqlite" => {
+            if sql.use_multiple_databases || !sql.multiple_databases_config.is_empty() {
+                anyhow::bail!("Matching SQLite task persistence does not support multipleDatabasesConfig");
+            }
+            let task_store: Arc<dyn MatchingTaskStore> =
+                SqliteTaskStoreConfig::from_default_store(persistence)?.open_store()?;
+            Ok(ConfiguredMatchingStores {
+                task_store,
+                domain_metadata_source: None,
+            })
+        }
+        "mysql" => {
+            if sql.use_multiple_databases || !sql.multiple_databases_config.is_empty() {
+                anyhow::bail!("Matching MySQL task persistence does not support multipleDatabasesConfig");
+            }
+            if sql.database_name.is_empty() {
+                anyhow::bail!("Matching MySQL SQL persistence databaseName cannot be empty");
+            }
+            if sql.connect_addr.is_empty() {
+                anyhow::bail!("Matching MySQL SQL persistence connectAddr cannot be empty");
+            }
+            let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
+            if n_shards < 1 {
+                anyhow::bail!("Matching MySQL nShards must be positive, got {n_shards}");
+            }
+            let encoding = if sql.encoding_type.is_empty() {
+                BlobEncoding::ThriftRW
+            } else {
+                BlobEncoding::parse(&sql.encoding_type)?
+            };
+            let tls = sql.tls.as_ref().map(|tls| MySqlTlsConfig {
+                enabled: tls.enabled,
+                ssl_mode: tls.ssl_mode.clone(),
+                ca_file: tls.ca_file.clone(),
+                cert_file: tls.cert_file.clone(),
+                key_file: tls.key_file.clone(),
+                enable_host_verification: tls.enable_host_verification,
+                require_client_auth: tls.require_client_auth,
+            });
+            let config = MySqlTaskStoreConfig {
+                user: sql.user.clone(),
+                password: sql.password.clone(),
+                database_name: sql.database_name.clone(),
+                connect_protocol: sql.connect_protocol.clone(),
+                connect_addr: sql.connect_addr.clone(),
+                connect_attributes: sql.connect_attributes.clone(),
+                max_conns: sql.max_conns,
+                max_idle_conns: sql.max_idle_conns,
+                max_conn_lifetime: (sql.max_conn_lifetime_nanos > 0)
+                    .then(|| Duration::from_nanos(sql.max_conn_lifetime_nanos as u64)),
+                n_shards: n_shards as usize,
+                use_multiple_databases: false,
+                encoding,
+                tls,
+            };
+            let (store, metadata) = MySqlTaskStore::connect_with_domain_metadata(
+                config,
+                active_cluster_name,
+            )?;
+            Ok(ConfiguredMatchingStores {
+                task_store: Arc::new(store),
+                domain_metadata_source: Some(Arc::new(metadata)),
+            })
+        }
+        other => anyhow::bail!(
+            "Matching task persistence does not support SQL plugin {other:?}; supported plugins are sqlite and mysql"
+        ),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SqliteTaskStoreConfig {
@@ -23,7 +123,9 @@ impl SqliteTaskStoreConfig {
     pub fn from_default_store(
         persistence: &crate::config::PersistenceConfig,
     ) -> anyhow::Result<Self> {
-        let name = persistence.default_store.trim();
+        // Go indexes persistence.datastores with the configured name exactly;
+        // whitespace is part of the key and must not be normalized here.
+        let name = persistence.default_store.as_str();
         if name.is_empty() {
             anyhow::bail!("Matching task persistence requires persistence.defaultStore");
         }
@@ -209,6 +311,21 @@ mod tests {
     }
 
     #[test]
+    fn configured_mysql_rejects_multiple_database_routing_before_connecting() {
+        let config = persistence(Some(SqlConfig {
+            plugin_name: "mysql".into(),
+            use_multiple_databases: true,
+            ..Default::default()
+        }));
+        let error = open_configured_default_store(&config, "active")
+            .err()
+            .unwrap();
+        assert!(error
+            .to_string()
+            .contains("does not support multipleDatabasesConfig"));
+    }
+
+    #[test]
     fn rejects_unimplemented_persistence_shapes_and_attributes() {
         assert!(SqliteTaskStoreConfig::from_default_store(
             &crate::config::PersistenceConfig::default()
@@ -227,6 +344,19 @@ mod tests {
                 .to_string()
                 .contains("not present in persistence.datastores")
         );
+
+        let padded_name = crate::config::PersistenceConfig {
+            default_store: " primary ".into(),
+            ..persistence(Some(SqlConfig {
+                plugin_name: "sqlite".into(),
+                database_name: "cadence.sqlite".into(),
+                ..Default::default()
+            }))
+        };
+        assert!(SqliteTaskStoreConfig::from_default_store(&padded_name)
+            .unwrap_err()
+            .to_string()
+            .contains("defaultStore \" primary \" is not present"));
 
         let mut config = persistence(Some(SqlConfig {
             plugin_name: "sqlite".into(),

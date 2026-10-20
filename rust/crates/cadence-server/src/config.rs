@@ -13,6 +13,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Config {
+    /// Go's dynamicconfig.client provider stanza (filebased is supported for
+    /// Matching; other providers are rejected explicitly by the runtime).
+    #[serde(default, rename = "dynamicconfig")]
+    pub dynamic_config: DynamicConfigConfig,
+    /// Legacy spelling retained by Go config files.
+    #[serde(default, rename = "dynamicConfigClient")]
+    pub legacy_dynamic_config_client: Option<DynamicConfigClientConfig>,
     /// Mirrors Go dynamic config `worker.enableScheduler` (default false):
     /// schedule APIs are rejected until the operator enables them.
     #[serde(default, rename = "enableScheduler")]
@@ -171,6 +178,36 @@ impl ShardDistributorMatchingConfig {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicConfigConfig {
+    #[serde(default)]
+    pub client: String,
+    #[serde(default, rename = "filebased")]
+    pub file_based: DynamicConfigClientConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicConfigClientConfig {
+    #[serde(default)]
+    pub filepath: String,
+    #[serde(default, rename = "pollInterval")]
+    pub poll_interval: String,
+}
+
+impl Config {
+    /// Resolve Go's modern/legacy client selection. Empty modern clients defer
+    /// to the legacy stanza; nonempty modern clients take precedence.
+    pub fn selected_dynamic_config_client(&self) -> Option<(&str, &DynamicConfigClientConfig)> {
+        if !self.dynamic_config.client.is_empty() {
+            Some((&self.dynamic_config.client, &self.dynamic_config.file_based))
+        } else {
+            self.legacy_dynamic_config_client
+                .as_ref()
+                .map(|config| ("filebased", config))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RingpopConfig {
     #[serde(default)]
     pub name: String,
@@ -261,7 +298,7 @@ fn de_go_duration<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
     }
 }
 
-fn parse_go_duration(input: &str) -> Result<i64, String> {
+pub fn parse_go_duration(input: &str) -> Result<i64, String> {
     let (negative, mut rest) = if let Some(r) = input.strip_prefix('-') {
         (true, r)
     } else if let Some(r) = input.strip_prefix('+') {
@@ -423,8 +460,14 @@ pub struct SqlConfig {
     pub plugin_name: String,
     #[serde(default, rename = "databaseName")]
     pub database_name: String,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
     #[serde(default, rename = "connectAddr")]
     pub connect_addr: String,
+    #[serde(default, rename = "connectProtocol")]
+    pub connect_protocol: String,
     #[serde(default, rename = "connectAttributes")]
     pub connect_attributes: HashMap<String, String>,
     /// Go SQL persistence uses this for physical database routing. Matching's
@@ -433,6 +476,34 @@ pub struct SqlConfig {
     pub n_shards: i32,
     #[serde(default, rename = "useMultipleDatabases")]
     pub use_multiple_databases: bool,
+    #[serde(default, rename = "multipleDatabasesConfig")]
+    pub multiple_databases_config: Vec<MultipleDatabasesConfigEntry>,
+    #[serde(default, rename = "maxConns")]
+    pub max_conns: i64,
+    #[serde(default, rename = "maxIdleConns")]
+    pub max_idle_conns: i64,
+    #[serde(
+        default,
+        rename = "maxConnLifetime",
+        deserialize_with = "de_go_duration"
+    )]
+    pub max_conn_lifetime_nanos: i64,
+    #[serde(default, rename = "encodingType")]
+    pub encoding_type: String,
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultipleDatabasesConfigEntry {
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default, rename = "databaseName")]
+    pub database_name: String,
+    #[serde(default, rename = "connectAddr")]
+    pub connect_addr: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -658,6 +729,21 @@ fn expand_env(text: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn dynamic_config_modern_client_takes_precedence_and_legacy_is_supported() {
+        let modern = Config::from_yaml("dynamicconfig:\n  client: filebased\n  filebased:\n    filepath: modern.yaml\n    pollInterval: 7s\ndynamicConfigClient:\n  filepath: legacy.yaml\n").unwrap();
+        let (client, provider) = modern.selected_dynamic_config_client().unwrap();
+        assert_eq!(client, "filebased");
+        assert_eq!(provider.filepath, "modern.yaml");
+        assert_eq!(provider.poll_interval, "7s");
+        let legacy = Config::from_yaml("dynamicConfigClient:\n  filepath: legacy.yaml\n").unwrap();
+        assert_eq!(
+            legacy.selected_dynamic_config_client().unwrap().1.filepath,
+            "legacy.yaml"
+        );
+        assert_eq!(parse_go_duration("2s").unwrap(), 2_000_000_000);
+    }
+
     const SAMPLE: &str = r#"
 persistence:
   defaultStore: default
@@ -734,6 +820,26 @@ clusterMetadata:
             "active"
         );
         cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_go_sql_pool_and_tls_config_for_matching() {
+        let cfg = Config::from_yaml(
+            "persistence:\n  defaultStore: primary\n  datastores:\n    primary:\n      sql:\n        pluginName: mysql\n        user: cadence\n        password: secret\n        databaseName: cadence\n        connectProtocol: tcp\n        connectAddr: db.internal:3306\n        nShards: 4\n        maxConns: 32\n        maxIdleConns: 8\n        maxConnLifetime: 7m\n        encodingType: thriftrw\n        tls:\n          enabled: true\n          caFiles: [/ca/a.pem, /ca/b.pem]\n          certFile: /client/cert.pem\n          keyFile: /client/key.pem\n          enableHostVerification: true\n",
+        )
+        .unwrap();
+        let sql = cfg.persistence.datastores["primary"].sql.as_ref().unwrap();
+        assert_eq!(sql.user, "cadence");
+        assert_eq!(sql.connect_protocol, "tcp");
+        assert_eq!(sql.max_conns, 32);
+        assert_eq!(sql.max_idle_conns, 8);
+        assert_eq!(sql.max_conn_lifetime_nanos, 420_000_000_000);
+        let tls = sql.tls.as_ref().unwrap();
+        assert_eq!(
+            tls.ca_files,
+            vec!["/ca/a.pem".to_owned(), "/ca/b.pem".to_owned()]
+        );
+        assert!(tls.enable_host_verification);
     }
 
     #[test]
