@@ -1,0 +1,8 @@
+Mixed Go/Rust generated HistoryService peer gate: 0
+Result: 1 passed; 0 failed; 329 filtered out
+All-target Clippy with -D warnings: 0
+Changed-file rustfmt check: 0
+Go helper gofmt check: 0
+git diff --check: 0
+
+The all-target Clippy attempt before candidate cleanup exited 101 due to unused production declarations and one field_reassign_with_default test lint. Those diagnostics are preserved in clippy-all-targets-baseline-failure.log. The final exact lint has no suppression.

@@ -1,0 +1,16 @@
+Mixed Go/Rust generated-server gate:
+  CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target CARGO_BUILD_JOBS=1 scripts/verify-history-tchannel-go-peer.sh
+
+The script builds the peer with:
+  cd go && GOTOOLCHAIN=go1.25.14 go build -o <temporary-build-dir>/cadence-rust-history-peer ./tools/cadence-rust-history-peer
+
+The script runs the Rust test with:
+  cd rust && CADENCE_HISTORY_PEER_BIN=<temporary-build-dir>/cadence-rust-history-peer CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target CARGO_BUILD_JOBS=1 cargo test --locked -p cadence-server --lib matching_history_tchannel::typed_codec_tests::generated_go_history_server_accepts_native_tchannel_calls -- --ignored --exact --nocapture
+
+Strict all-target lint:
+  cd rust && CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target CARGO_BUILD_JOBS=1 cargo clippy --locked -p cadence-server --all-targets -- -D warnings
+
+Formatting and patch checks:
+  rustfmt --check --edition 2021 rust/crates/cadence-server/src/matching_history_tchannel.rs rust/crates/cadence-server/src/tchannel_json_client.rs
+  gofmt -d go/tools/cadence-rust-history-peer/main.go
+  git diff --check
