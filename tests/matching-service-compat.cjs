@@ -528,8 +528,22 @@ async function run() {
   assert.equal(decision.workflowExecution?.runId, started.runId, 'Go Frontend returned a decision task for a different workflow run');
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
   assert(described.pollers.some(poller => poller.identity === 'service-probe'));
-  assert.equal(described.taskListStatus.taskIdBlock.startId, '1');
-  assert.equal(described.taskListStatus.taskIdBlock.endId, '100000');
+  const decisionBlock = described.taskListStatus.taskIdBlock;
+  const decisionBlockStart = Number(decisionBlock.startId), decisionBlockEnd = Number(decisionBlock.endId);
+  assert(decisionBlockStart >= 1, `task ID block must start at a positive ID: ${JSON.stringify(decisionBlock)}`);
+  assert.equal(decisionBlockEnd - decisionBlockStart + 1, 100000, 'task ID block must preserve Go Matching range size');
+  assert.equal((decisionBlockStart - 1) % 100000, 0, 'task ID block must align to Go Matching range boundaries');
+  if (productionMode && failureRecoveryMode) {
+    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
+    const persistedRange = spawnSync('python3', ['-c',
+      'import sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1]); r=c.execute("select range_id from task_lists where domain_id=? and name=? and task_type=0", (uuid.UUID(sys.argv[2]).bytes, sys.argv[3])).fetchone(); print(r[0] if r else -1)',
+      database, domainId, taskList.name], { encoding: 'utf8' });
+    assert.equal(persistedRange.status, 0, `could not read persisted decision task-list range: ${persistedRange.stderr}`);
+    assert.equal(decisionBlockEnd / 100000, Number(persistedRange.stdout.trim()), 'reported task ID block must match the persisted Go-compatible range lease');
+  } else {
+    assert.equal(decisionBlockStart, 1, 'a fresh single-owner task list must start at ID 1');
+    assert.equal(decisionBlockEnd, 100000, 'a fresh single-owner task list must expose the first 100000-ID block');
+  }
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: decision.taskToken, identity: 'service-probe', decisions: [{ scheduleActivityTaskDecisionAttributes: {
       activityId: 'echo', activityType: { name: 'Echo' }, taskList, input: payload('activity'),
@@ -747,7 +761,8 @@ async function run() {
     scheduled = history.history.events.find(event => event.activityTaskScheduledEventAttributes);
     if (!scheduled && Date.now() > scheduleDeadline) throw new Error('isolated activity not scheduled');
   }
-  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } });
+  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } })
+    .then(response => ({ response }), error => ({ error }));
   const pollerB = randomUUID();
   const pollB = call('Matching', 'PollForActivityTask', { domainId, pollerId: pollerB, isolationGroup: 'zone-b', request: { taskList: isolatedList, identity: 'isolated-worker-b' } }).then(response => ({ response }), error => ({ error }));
   const registeredDeadline = Date.now() + 10000;
@@ -758,7 +773,9 @@ async function run() {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   await call('Matching', 'AddActivityTask', { domainId, sourceDomainId: domainId, workflowExecution: { workflowId: `isolated-${id}`, runId: isoStart.runId }, taskList: isolatedList, scheduleId: scheduled.eventId, partitionConfig: { 'isolation-group': 'zone-a' } });
-  const isolatedTask = await pollA;
+  const isolatedPollResult = await pollA;
+  if (isolatedPollResult.error) throw isolatedPollResult.error;
+  const isolatedTask = isolatedPollResult.response;
   assert.equal(isolatedTask.activityId, 'isolated');
   await call('Matching', 'CancelOutstandingPoll', { domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', pollerId: pollerB });
   assert.equal((await pollB).error?.code, grpc.status.CANCELLED, 'other isolation group must not consume the isolated activity');
