@@ -13,15 +13,14 @@ use crate::{
     },
 };
 use mysql::{
-    ClientIdentity, Conn, Error as MySqlError, IsolationLevel, Opts, OptsBuilder, SslOpts,
-    Transaction, TxOpts, consts::CapabilityFlags, prelude::Queryable,
+    consts::CapabilityFlags, prelude::Queryable, ClientIdentity, Conn, Error as MySqlError,
+    IsolationLevel, Opts, OptsBuilder, SslOpts, Transaction, TxOpts,
 };
 use std::{
     ops::{Deref, DerefMut},
     sync::{
-        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Arc, Condvar, Mutex,
     },
     thread,
     time::{Duration, Instant},
@@ -79,6 +78,8 @@ struct PoolState {
 
 pub(crate) struct SyncConnectionPool {
     options: Opts,
+    async_options: mysql_async::Opts,
+    query_runtime: tokio::runtime::Runtime,
     max_open: usize,
     max_idle: usize,
     max_lifetime: Option<Duration>,
@@ -88,7 +89,7 @@ pub(crate) struct SyncConnectionPool {
 
 pub(crate) enum TimedQueryError {
     Timeout,
-    MySql(MySqlError),
+    MySql(mysql_async::Error),
     Pool(String),
 }
 
@@ -145,6 +146,8 @@ impl SyncConnectionPool {
     /// Run a read-only operation on a dedicated connection with a wall-clock
     /// deadline. A timeout cancels only this connection's active statement;
     /// it cannot disturb another operation borrowed from the shared pool.
+    /// `operation` must await the driver's protocol future directly; inserting
+    /// unrelated awaits could leave a pending result for Conn::drop to drain.
     pub(crate) fn query_until<T, F>(
         self: &Arc<Self>,
         deadline: Instant,
@@ -152,98 +155,57 @@ impl SyncConnectionPool {
     ) -> std::result::Result<T, TimedQueryError>
     where
         T: Send + 'static,
-        F: FnOnce(&mut Conn) -> std::result::Result<T, MySqlError> + Send + 'static,
+        F: for<'a> FnOnce(
+                &'a mut mysql_async::Conn,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<Output = std::result::Result<T, mysql_async::Error>>
+                        + Send
+                        + 'a,
+                >,
+            > + Send
+            + 'static,
     {
         if !self.reserve_until(deadline) {
             return Err(TimedQueryError::Timeout);
         }
-        let pool = self.clone();
-        let options = self.options.clone();
         let (result_tx, result_rx) = mpsc::channel();
-        let state = Arc::new(Mutex::new(TimedQueryState::default()));
-        let worker_state = state.clone();
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             self.release_reserved();
             return Err(TimedQueryError::Timeout);
         }
-        let builder = OptsBuilder::from_opts(options.clone())
-            .tcp_connect_timeout(Some(min_timeout(
-                options.get_tcp_connect_timeout(),
-                remaining,
-            )))
-            .read_timeout(Some(min_timeout(options.get_read_timeout(), remaining)))
-            .write_timeout(Some(min_timeout(options.get_write_timeout(), remaining)));
-        let options = Opts::from(builder);
-        let worker = thread::Builder::new()
-            .name("cadence-mysql-domain-query".into())
-            .spawn(move || {
-                let _slot = ReservedConnectionSlot(pool);
-                let result = match Conn::new(options) {
-                    Ok(mut connection) => {
-                        let connection_id = connection.connection_id();
-                        let should_run = {
-                            let mut state = worker_state.lock().expect("query cancellation lock");
-                            if state.cancelled {
-                                false
-                            } else {
-                                state.connection_id = Some(connection_id);
-                                true
-                            }
-                        };
-                        if should_run {
-                            operation(&mut connection)
-                        } else {
-                            Err(MySqlError::server_disconnected())
-                        }
+        let slot = ReservedConnectionSlot(self.clone());
+        let options = self.async_options.clone();
+        let task = self.query_runtime.handle().spawn(async move {
+            let _slot = slot;
+            let result = tokio::time::timeout(remaining, async move {
+                let mut connection = mysql_async::Conn::new(options).await?;
+                let result = operation(&mut connection).await;
+                let disconnect = connection.disconnect().await;
+                match result {
+                    Ok(value) => {
+                        disconnect?;
+                        Ok(value)
                     }
                     Err(error) => Err(error),
-                };
-                let _ = result_tx.send(result);
+                }
             })
-            .map_err(|error| {
-                self.release_reserved();
-                TimedQueryError::Pool(format!("could not start timed MySQL query: {error}"))
-            })?;
+            .await
+            .map_err(|_| TimedQueryError::Timeout)
+            .and_then(|result| result.map_err(TimedQueryError::MySql));
+            let _ = result_tx.send(result);
+        });
 
         let remaining = deadline.saturating_duration_since(Instant::now());
         match result_rx.recv_timeout(remaining) {
-            Ok(Ok(value)) => {
-                worker.join().map_err(|_| {
-                    TimedQueryError::Pool("timed MySQL query worker panicked".into())
-                })?;
-                Ok(value)
-            }
-            Ok(Err(error)) => {
-                worker.join().map_err(|_| {
-                    TimedQueryError::Pool("timed MySQL query worker panicked".into())
-                })?;
-                Err(TimedQueryError::MySql(error))
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let _ = worker.join();
-                Err(TimedQueryError::Pool(
-                    "timed MySQL query worker stopped without a result".into(),
-                ))
-            }
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => Err(error),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(TimedQueryError::Pool(
+                "timed MySQL query worker stopped without a result".into(),
+            )),
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                let connection_id = {
-                    let mut state = state.lock().expect("query cancellation lock");
-                    state.cancelled = true;
-                    state.connection_id
-                };
-                if let Some(connection_id) = connection_id {
-                    let options = self.options.clone();
-                    let fallback_options = options.clone();
-                    if thread::Builder::new()
-                        .name("cadence-mysql-query-cancel".into())
-                        .spawn(move || kill_query(options, connection_id))
-                        .is_err()
-                    {
-                        kill_query(fallback_options, connection_id);
-                    }
-                }
-                drop(worker);
+                task.abort();
                 Err(TimedQueryError::Timeout)
             }
         }
@@ -256,9 +218,9 @@ impl SyncConnectionPool {
                 state.open += 1;
                 return true;
             }
-            // Dedicated deadline connections cannot reuse an idle socket with
-            // a longer per-connection timeout; retire one idle slot to make
-            // room while preserving all checked-out operations.
+            // Async deadline connections cannot reuse sync-driver sockets and
+            // are never pooled; retire an idle slot so the shared max-open
+            // limit still includes this dedicated connection.
             if let Some(idle) = state.idle.pop() {
                 state.open -= 1;
                 self.available.notify_one();
@@ -293,33 +255,11 @@ impl SyncConnectionPool {
     }
 }
 
-#[derive(Default)]
-struct TimedQueryState {
-    cancelled: bool,
-    connection_id: Option<u32>,
-}
-
 struct ReservedConnectionSlot(Arc<SyncConnectionPool>);
 impl Drop for ReservedConnectionSlot {
     fn drop(&mut self) {
         self.0.release_reserved();
     }
-}
-
-fn min_timeout(configured: Option<Duration>, remaining: Duration) -> Duration {
-    configured.map_or(remaining, |configured| configured.min(remaining))
-}
-
-fn kill_query(options: Opts, connection_id: u32) {
-    const CONTROL_TIMEOUT: Duration = Duration::from_millis(250);
-    let builder = OptsBuilder::from_opts(options)
-        .tcp_connect_timeout(Some(CONTROL_TIMEOUT))
-        .read_timeout(Some(CONTROL_TIMEOUT))
-        .write_timeout(Some(CONTROL_TIMEOUT));
-    let Ok(mut connection) = Conn::new(Opts::from(builder)) else {
-        return;
-    };
-    let _ = connection.query_drop(format!("KILL QUERY {connection_id}"));
 }
 
 pub(crate) struct ConnectionLease {
@@ -436,8 +376,21 @@ impl MySqlTaskStore {
         };
         let max_idle = max_idle.min(max_open);
         let options = mysql_options(config)?;
+        let async_options = mysql_async_options(config)?;
+        let query_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("cadence-mysql-domain-query")
+            .enable_all()
+            .build()
+            .map_err(|error| {
+                StorageError::BackendConfiguration(format!(
+                    "could not start MySQL domain-query runtime: {error}"
+                ))
+            })?;
         Ok(Arc::new(SyncConnectionPool {
             options,
+            async_options,
+            query_runtime,
             max_open,
             max_idle,
             max_lifetime: config.max_conn_lifetime.filter(|value| !value.is_zero()),
@@ -950,6 +903,99 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
     Ok(Opts::from(builder))
 }
 
+/// Build options for the non-pooled async connection used by deadline-bound
+/// domain-cache reads. mysql_async has no socket read/write timeout options;
+/// the caller enforces its monotonic deadline by dropping this connection's
+/// in-flight future.
+fn mysql_async_options(config: &MySqlTaskStoreConfig) -> Result<mysql_async::Opts> {
+    let mut builder = mysql_async::OptsBuilder::default()
+        .user(Some(config.user.clone()))
+        .pass(Some(config.password.clone()))
+        .db_name(Some(config.database_name.clone()))
+        .client_found_rows(true);
+    let protocol = if config.connect_protocol.is_empty() {
+        "tcp"
+    } else {
+        config.connect_protocol.as_str()
+    };
+    match protocol {
+        "tcp" => {
+            if config.connect_addr.is_empty() {
+                builder = builder.ip_or_hostname("127.0.0.1");
+            } else {
+                let (host, port) = split_host_port(&config.connect_addr)?;
+                builder = builder.ip_or_hostname(host).tcp_port(port);
+            }
+        }
+        "unix" => builder = builder.socket(Some(config.connect_addr.clone())),
+        other => {
+            return Err(StorageError::BackendConfiguration(format!(
+                "unsupported MySQL connectProtocol {other:?}"
+            )));
+        }
+    }
+
+    let tls_mode = config
+        .connect_attributes
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("tls"))
+        .map(|(_, value)| value.to_ascii_lowercase())
+        .unwrap_or_else(|| {
+            if let Some(tls) = config.tls.as_ref().filter(|tls| tls.enabled) {
+                if tls.ssl_mode.is_empty() {
+                    "tls-custom".into()
+                } else {
+                    tls.ssl_mode.to_ascii_lowercase()
+                }
+            } else {
+                "false".into()
+            }
+        });
+    if tls_mode != "false" {
+        let tls_config = config.tls.as_ref();
+        let mut ssl = mysql_async::SslOpts::default();
+        match tls_mode.as_str() {
+            "true" | "required" | "tls-custom" => {}
+            "preferred" => {
+                return Err(StorageError::BackendConfiguration(
+                    "MySQL tls=preferred fallback semantics are unsupported; use required TLS"
+                        .into(),
+                ));
+            }
+            "skip-verify" => {
+                ssl = ssl
+                    .with_danger_skip_domain_validation(true)
+                    .with_danger_accept_invalid_certs(true);
+            }
+            other => {
+                return Err(StorageError::BackendConfiguration(format!(
+                    "unsupported MySQL tls connect attribute {other:?}"
+                )));
+            }
+        }
+        if tls_mode == "tls-custom" {
+            if let Some(tls) = tls_config.filter(|tls| tls.enabled) {
+                if !tls.ca_file.is_empty() {
+                    ssl = ssl.with_root_certs(vec![std::path::PathBuf::from(&tls.ca_file).into()]);
+                }
+                if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
+                    ssl = ssl.with_client_identity(Some(mysql_async::ClientIdentity::new(
+                        std::path::PathBuf::from(&tls.cert_file).into(),
+                        std::path::PathBuf::from(&tls.key_file).into(),
+                    )));
+                }
+                if !tls.enable_host_verification {
+                    ssl = ssl
+                        .with_danger_skip_domain_validation(true)
+                        .with_danger_accept_invalid_certs(true);
+                }
+            }
+        }
+        builder = builder.ssl_opts(Some(ssl));
+    }
+    Ok(mysql_async::Opts::from(builder))
+}
+
 fn configured_isolation(
     attributes: &std::collections::HashMap<String, String>,
 ) -> Result<IsolationLevel> {
@@ -1202,6 +1248,26 @@ fn normalize_mysql_error(error: MySqlError) -> StorageError {
 mod tests {
     use super::*;
 
+    fn timed_mysql_test_config(max_conns: i64) -> MySqlTaskStoreConfig {
+        MySqlTaskStoreConfig {
+            user: std::env::var("CADENCE_MYSQL_USER").unwrap_or_else(|_| "root".into()),
+            password: std::env::var("CADENCE_MYSQL_PASSWORD").unwrap_or_else(|_| "cadence".into()),
+            database_name: std::env::var("CADENCE_MYSQL_DATABASE")
+                .unwrap_or_else(|_| "cadence".into()),
+            connect_protocol: "tcp".into(),
+            connect_addr: std::env::var("CADENCE_MYSQL_ADDR")
+                .unwrap_or_else(|_| "127.0.0.1:33307".into()),
+            connect_attributes: Default::default(),
+            max_conns,
+            max_idle_conns: 2,
+            max_conn_lifetime: None,
+            n_shards: 1,
+            use_multiple_databases: false,
+            encoding: BlobEncoding::ThriftRW,
+            tls: None,
+        }
+    }
+
     #[test]
     fn mysql_matching_schema_contract_matches_go_v8_primary_keys() {
         let schema = include_str!("../../../../go/schema/mysql/v8/cadence/schema.sql");
@@ -1354,29 +1420,15 @@ mod tests {
     #[test]
     #[ignore = "requires the opt-in MySQL interoperability server"]
     fn timed_domain_query_cancels_only_its_dedicated_connection() {
-        let config = MySqlTaskStoreConfig {
-            user: std::env::var("CADENCE_MYSQL_USER").unwrap_or_else(|_| "root".into()),
-            password: std::env::var("CADENCE_MYSQL_PASSWORD").unwrap_or_else(|_| "cadence".into()),
-            database_name: std::env::var("CADENCE_MYSQL_DATABASE")
-                .unwrap_or_else(|_| "cadence".into()),
-            connect_protocol: "tcp".into(),
-            connect_addr: std::env::var("CADENCE_MYSQL_ADDR")
-                .unwrap_or_else(|_| "127.0.0.1:33307".into()),
-            connect_attributes: Default::default(),
-            max_conns: 4,
-            max_idle_conns: 2,
-            max_conn_lifetime: None,
-            n_shards: 1,
-            use_multiple_databases: false,
-            encoding: BlobEncoding::ThriftRW,
-            tls: None,
-        };
+        use mysql_async::prelude::Queryable as _;
+
+        let config = timed_mysql_test_config(2);
         let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
         let mut unrelated = pool.checkout().unwrap();
         let mut transaction = unrelated.start_transaction(TxOpts::default()).unwrap();
         let started = Instant::now();
         let result = pool.query_until(Instant::now() + Duration::from_millis(250), |connection| {
-            connection.query_first::<u8, _>("SELECT SLEEP(10)")
+            Box::pin(async move { connection.query_first::<u8, _>("SELECT SLEEP(10)").await })
         });
         assert!(matches!(result, Err(TimedQueryError::Timeout)));
         assert!(started.elapsed() < Duration::from_secs(2));
@@ -1384,13 +1436,159 @@ mod tests {
         while pool.state.lock().unwrap().open != 1 {
             assert!(
                 Instant::now() < cleanup_deadline,
-                "timed query connection was not released after cancellation"
+                "timed query slot was not released after cancellation"
             );
             thread::sleep(Duration::from_millis(10));
         }
+        assert!(pool.state.lock().unwrap().open <= 2);
         let value: Option<u8> = transaction.query_first("SELECT 7", ()).unwrap();
         assert_eq!(value, Some(7));
         transaction.commit().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server"]
+    fn timed_domain_query_releases_single_pool_slot_after_cancellation() {
+        use mysql_async::prelude::Queryable as _;
+
+        let mut config = timed_mysql_test_config(1);
+        config.max_idle_conns = 0;
+        let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let result = pool.query_until(Instant::now() + Duration::from_millis(250), |connection| {
+            Box::pin(async move { connection.query_first::<u8, _>("SELECT SLEEP(10)").await })
+        });
+        assert!(matches!(result, Err(TimedQueryError::Timeout)));
+
+        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+        while pool.state.lock().unwrap().open != 0 {
+            assert!(Instant::now() < cleanup_deadline, "timed query slot leaked");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let value = pool
+            .query_until(Instant::now() + Duration::from_secs(2), |connection| {
+                Box::pin(async move { connection.query_first::<u8, _>("SELECT 7").await })
+            })
+            .unwrap();
+        assert_eq!(value, Some(7));
+        assert_eq!(pool.state.lock().unwrap().open, 0);
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server"]
+    fn timed_domain_query_cancels_while_draining_a_slow_result_set() {
+        use mysql_async::prelude::Queryable as _;
+
+        let config = timed_mysql_test_config(1);
+        let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let result = pool.query_until(Instant::now() + Duration::from_millis(250), |connection| {
+            Box::pin(async move { connection.query::<u8, _>(
+                "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 100) SELECT SLEEP(0.1) FROM seq",
+            ).await })
+        });
+        assert!(matches!(result, Err(TimedQueryError::Timeout)));
+        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+        while pool.state.lock().unwrap().open != 0 {
+            assert!(
+                Instant::now() < cleanup_deadline,
+                "slow-result query slot leaked"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let value = pool
+            .query_until(Instant::now() + Duration::from_secs(2), |connection| {
+                Box::pin(async move { connection.query_first::<u8, _>("SELECT 9").await })
+            })
+            .unwrap();
+        assert_eq!(value, Some(9));
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server"]
+    fn timed_domain_query_bounds_connect_failure_and_releases_slot() {
+        let mut config = timed_mysql_test_config(1);
+        config.connect_addr = "127.0.0.1:1".into();
+        let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let started = Instant::now();
+        let result = pool.query_until(Instant::now() + Duration::from_millis(250), |_| {
+            Box::pin(async { Ok::<(), mysql_async::Error>(()) })
+        });
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(matches!(
+            result,
+            Err(TimedQueryError::MySql(_)) | Err(TimedQueryError::Timeout)
+        ));
+        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+        while pool.state.lock().unwrap().open != 0 {
+            assert!(
+                Instant::now() < cleanup_deadline,
+                "failed connect leaked its slot"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn timed_domain_query_cancels_a_stalled_mysql_handshake() {
+        use std::io::Read;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (accepted_tx, accepted_rx) = mpsc::channel();
+        let peer_thread = thread::spawn(move || {
+            let (mut peer, _) = listener.accept().unwrap();
+            let _ = accepted_tx.send(());
+            peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut byte = [0u8; 1];
+            peer.read(&mut byte)
+        });
+        let mut config = timed_mysql_test_config(1);
+        config.connect_addr = address;
+        let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let started = Instant::now();
+        let query_pool = pool.clone();
+        let query_thread = thread::spawn(move || {
+            query_pool.query_until(Instant::now() + Duration::from_millis(250), |_| {
+                Box::pin(async { Ok::<(), mysql_async::Error>(()) })
+            })
+        });
+        accepted_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("timed query never reached the stalled handshake");
+        let result = query_thread.join().unwrap();
+        assert!(matches!(result, Err(TimedQueryError::Timeout)));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        match peer_thread.join().unwrap() {
+            Ok(0) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+            result => panic!("client did not close stalled handshake: {result:?}"),
+        }
+        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+        while pool.state.lock().unwrap().open != 0 {
+            assert!(
+                Instant::now() < cleanup_deadline,
+                "stalled handshake leaked its slot"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server"]
+    fn timed_domain_query_completes_before_deadline_and_disconnects() {
+        use mysql_async::prelude::Queryable as _;
+
+        let pool = MySqlTaskStore::create_mysql_pool(&timed_mysql_test_config(1)).unwrap();
+        let value = pool
+            .query_until(Instant::now() + Duration::from_secs(2), |connection| {
+                Box::pin(async move {
+                    connection
+                        .query_first::<u8, _>("SELECT IF(SLEEP(0.05) = 0, 11, 12)")
+                        .await
+                })
+            })
+            .unwrap();
+        assert_eq!(value, Some(11));
+        assert_eq!(pool.state.lock().unwrap().open, 0);
     }
 
     #[test]

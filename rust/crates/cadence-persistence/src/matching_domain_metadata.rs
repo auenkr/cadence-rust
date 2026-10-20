@@ -86,6 +86,8 @@ pub enum MatchingDomainMetadataError {
     Sqlite(#[from] rusqlite::Error),
     #[error("Go MySQL domain metadata database error: {0}")]
     MySql(#[from] mysql::Error),
+    #[error("Go MySQL async domain metadata database error: {0}")]
+    MySqlAsync(#[from] mysql_async::Error),
     #[error("Go MySQL domain metadata connection pool error: {0}")]
     MySqlPool(String),
     #[error("domain page size must be positive")]

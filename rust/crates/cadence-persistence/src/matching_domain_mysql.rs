@@ -4,11 +4,11 @@
 //! the Go default domain shard (54321). It never writes or migrates schema.
 
 use crate::matching_domain_metadata::{
-    MatchingDomainMetadata, MatchingDomainMetadataError, MatchingDomainPage,
-    decode_go_sql_domain_metadata,
+    decode_go_sql_domain_metadata, MatchingDomainMetadata, MatchingDomainMetadataError,
+    MatchingDomainPage,
 };
 use crate::matching_mysql::{MySqlTaskStore, MySqlTaskStoreConfig};
-use mysql::prelude::Queryable;
+use mysql_async::prelude::Queryable as AsyncQueryable;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -51,10 +51,10 @@ impl MySqlDomainMetadataStore {
         let deadline = Instant::now() + timeout;
         self.pool
             .query_until(deadline, |connection| {
-                connection.exec_first(
+                Box::pin(async move { connection.exec_first(
                     "SELECT /*+ MAX_EXECUTION_TIME(3000) */ notification_version FROM domain_metadata",
                     (),
-                )
+                ).await })
             })
             .map_err(query_error)?
             .ok_or_else(|| {
@@ -88,7 +88,7 @@ impl MySqlDomainMetadataStore {
             (None, None) => Err(MatchingDomainMetadataError::EmptyIdentity),
             (Some(name), None) => self.read_one(
                 "name",
-                mysql::Value::Bytes(name.as_bytes().to_vec()),
+                mysql_async::Value::Bytes(name.as_bytes().to_vec()),
                 name,
                 timeout,
             ),
@@ -97,7 +97,7 @@ impl MySqlDomainMetadataStore {
                     .map_err(|_| MatchingDomainMetadataError::InvalidUuid(id.to_string()))?;
                 self.read_one(
                     "id",
-                    mysql::Value::Bytes(uuid.as_bytes().to_vec()),
+                    mysql_async::Value::Bytes(uuid.as_bytes().to_vec()),
                     id,
                     timeout,
                 )
@@ -108,7 +108,7 @@ impl MySqlDomainMetadataStore {
     fn read_one(
         &self,
         selector: &str,
-        value: mysql::Value,
+        value: mysql_async::Value,
         identity: &str,
         timeout: Duration,
     ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
@@ -118,10 +118,10 @@ impl MySqlDomainMetadataStore {
         let row: Option<(Vec<u8>, String, bool, Vec<u8>, String)> = self
             .pool
             .query_until(deadline, move |connection| {
-                connection.exec_first(
+                Box::pin(async move { connection.exec_first(
                     format!("SELECT /*+ MAX_EXECUTION_TIME(3000) */ id, name, is_global, data, data_encoding FROM domains WHERE shard_id = ? AND {selector} = ?"),
                     (GO_DEFAULT_SHARD_ID, value),
-                )
+                ).await })
             })
             .map_err(query_error)?;
         let (id, name, is_global, data, data_encoding) =
@@ -155,16 +155,16 @@ impl MySqlDomainMetadataStore {
         let token = next_page_token.map(|token| token.to_vec());
         let rows: Vec<(Vec<u8>, String, bool, Vec<u8>, String)> = self
             .pool
-            .query_until(deadline, move |connection| match token {
+            .query_until(deadline, move |connection| Box::pin(async move { match token {
                 Some(token) => connection.exec(
                     "SELECT /*+ MAX_EXECUTION_TIME(3000) */ id, name, is_global, data, data_encoding FROM domains WHERE shard_id = ? AND id > ? ORDER BY id LIMIT ?",
                     (GO_DEFAULT_SHARD_ID, token, limit),
-                ),
+                ).await,
                 None => connection.exec(
                     "SELECT /*+ MAX_EXECUTION_TIME(3000) */ id, name, is_global, data, data_encoding FROM domains WHERE shard_id = ? ORDER BY id LIMIT ?",
                     (GO_DEFAULT_SHARD_ID, limit),
-                ),
-            })
+                ).await,
+            }}))
             .map_err(query_error)?;
         let next_page_token = if rows.len() >= page_size {
             rows.last().map(|row| row.0.clone())
@@ -208,7 +208,7 @@ fn query_error(error: crate::matching_mysql::TimedQueryError) -> MatchingDomainM
             MatchingDomainMetadataError::OperationTimedOut
         }
         crate::matching_mysql::TimedQueryError::MySql(error) => {
-            MatchingDomainMetadataError::MySql(error)
+            MatchingDomainMetadataError::MySqlAsync(error)
         }
         crate::matching_mysql::TimedQueryError::Pool(error) => {
             MatchingDomainMetadataError::MySqlPool(error)
