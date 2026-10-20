@@ -164,11 +164,71 @@ fn application_error(headers: &[(String, String)], body: &[u8]) -> Status {
         .find(|(key, _)| key == "$rpc$-application-error-details")
         .map(|(_, value)| value.as_str())
         .unwrap_or("History returned a Thrift application error.");
-    // Typed Cadence exception translation is performed by the operation
-    // adapters after decoding the exception schema. Keep the class and raw
-    // payload visible here until that mapping is applied.
-    let _ = body;
-    Status::new(Code::Unknown, format!("{name}: {details}"))
+    let exception = decode_typed_struct(body).ok();
+    let message = exception
+        .as_ref()
+        .and_then(|value| {
+            field_string(
+                value,
+                if name == "ShardOwnershipLostError" {
+                    10
+                } else {
+                    1
+                },
+            )
+            .ok()
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| details.to_owned());
+    use cadence_proto::{api, shared};
+    match name {
+        "EntityNotExistsError" => crate::grpc::detailed_status(
+            Code::NotFound,
+            message,
+            name,
+            api::EntityNotExistsError::default(),
+        ),
+        "WorkflowExecutionAlreadyCompletedError" => crate::grpc::detailed_status(
+            Code::NotFound,
+            message,
+            name,
+            api::WorkflowExecutionAlreadyCompletedError {},
+        ),
+        "EventAlreadyStartedError" => crate::grpc::detailed_status_type(
+            Code::AlreadyExists,
+            message,
+            "type.googleapis.com/uber.cadence.shared.v1.EventAlreadyStartedError".into(),
+            shared::EventAlreadyStartedError {},
+        ),
+        "DomainNotActiveError" => crate::grpc::detailed_status(
+            Code::FailedPrecondition,
+            message,
+            name,
+            api::DomainNotActiveError::default(),
+        ),
+        "ShardOwnershipLostError" => {
+            let owner = exception
+                .as_ref()
+                .and_then(|value| field_string(value, 20).ok())
+                .unwrap_or_default();
+            crate::grpc::detailed_status_type(
+                Code::Aborted,
+                message,
+                "type.googleapis.com/uber.cadence.shared.v1.ShardOwnershipLostError".into(),
+                shared::ShardOwnershipLostError { owner },
+            )
+        }
+        "ServiceBusyError" => crate::grpc::detailed_status(
+            Code::ResourceExhausted,
+            message,
+            name,
+            api::ServiceBusyError::default(),
+        ),
+        // FromInternalServiceError intentionally maps CodeInternal without
+        // details in Go's proto mapper.
+        "InternalServiceError" => Status::internal(message),
+        _ => Status::new(Code::Unknown, format!("{name}: {details}")),
+    }
 }
 
 /// Local typed representation used by schema adapters. Unlike the shared
@@ -2009,6 +2069,15 @@ fn write_typed_value(w: &mut cadence_thrift::protocol::Writer, v: &TypedValue) {
 #[cfg(test)]
 mod typed_codec_tests {
     use super::*;
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct RpcStatus {
+        #[prost(int32, tag = "1")]
+        code: i32,
+        #[prost(string, tag = "2")]
+        message: String,
+        #[prost(message, repeated, tag = "3")]
+        details: Vec<prost_types::Any>,
+    }
 
     #[test]
     fn empty_container_types_survive_tchannel_codec_round_trip() {
@@ -2051,6 +2120,62 @@ mod typed_codec_tests {
             panic!("field 10 is VersionHistories")
         };
         assert_eq!(version_histories_from_thrift(histories).unwrap(), value);
+    }
+
+    #[test]
+    fn history_application_errors_keep_retry_and_redirect_details() {
+        let ownership = encode_typed_struct(&TypedStruct {
+            fields: vec![
+                field(10, string("wrong shard owner")),
+                field(20, string("history-b:7935")),
+            ],
+        });
+        let status = application_error(
+            &[
+                (
+                    "$rpc$-application-error-name".into(),
+                    "ShardOwnershipLostError".into(),
+                ),
+                (
+                    "$rpc$-application-error-details".into(),
+                    "wrong shard owner".into(),
+                ),
+            ],
+            &ownership,
+        );
+        assert_eq!(status.code(), Code::Aborted);
+        let status = RpcStatus::decode(status.details()).unwrap();
+        let detail = status.details.first().unwrap();
+        assert_eq!(
+            detail.type_url,
+            "type.googleapis.com/uber.cadence.shared.v1.ShardOwnershipLostError"
+        );
+        assert_eq!(
+            cadence_proto::shared::ShardOwnershipLostError::decode(detail.value.as_slice())
+                .unwrap()
+                .owner,
+            "history-b:7935"
+        );
+
+        let status = application_error(
+            &[
+                (
+                    "$rpc$-application-error-name".into(),
+                    "EventAlreadyStartedError".into(),
+                ),
+                (
+                    "$rpc$-application-error-details".into(),
+                    "event already started".into(),
+                ),
+            ],
+            &[],
+        );
+        assert_eq!(status.code(), Code::AlreadyExists);
+        let status = RpcStatus::decode(status.details()).unwrap();
+        assert_eq!(
+            status.details[0].type_url,
+            "type.googleapis.com/uber.cadence.shared.v1.EventAlreadyStartedError"
+        );
     }
 
     #[test]

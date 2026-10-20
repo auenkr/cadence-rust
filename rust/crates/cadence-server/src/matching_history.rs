@@ -130,6 +130,17 @@ pub struct MatchingHistoryClient {
     /// per call because a running owner keeps its client.
     record_started_timeout: Option<RecordStartedTimeout>,
     peer_resolver: Option<Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>>,
+    /// Resolver must select the `tchannel` named membership port.
+    tchannel_peer_resolver:
+        Option<Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>>,
+}
+#[derive(Clone)]
+enum HistoryConnection {
+    Grpc(h::history_api_client::HistoryApiClient<Channel>),
+    Tchannel(
+        crate::matching_history_tchannel::TChannelHistoryClient,
+        Duration,
+    ),
 }
 /// Live per-domain `matching.recordTaskStartedTimeout` read, in nanoseconds.
 pub type RecordStartedTimeout = Arc<dyn Fn(&str) -> Duration + Send + Sync>;
@@ -151,6 +162,7 @@ impl MatchingHistoryClient {
             max_message_size,
             record_started_timeout: None,
             peer_resolver: None,
+            tchannel_peer_resolver: None,
         }
     }
     /// Override the factory's per-RPC timeout. Production uses Go's 30-second
@@ -169,6 +181,15 @@ impl MatchingHistoryClient {
         resolver: Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>,
     ) -> Self {
         self.peer_resolver = Some(resolver);
+        self
+    }
+    /// Select Go-compatible TChannel outbound calls to History. Construct the
+    /// resolver with `NamedPort::Tchannel`; the default remains gRPC.
+    pub fn with_tchannel_outbound(
+        mut self,
+        resolver: Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>,
+    ) -> Self {
+        self.tchannel_peer_resolver = Some(resolver);
         self
     }
     pub fn peer_for_workflow(&self, workflow_id: &str) -> Result<Option<String>, Status> {
@@ -270,7 +291,7 @@ impl MatchingHistoryClient {
         mut call: F,
     ) -> Result<R, Status>
     where
-        F: FnMut(h::history_api_client::HistoryApiClient<Channel>, Request<T>) -> Fut + Send,
+        F: FnMut(HistoryConnection, Request<T>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         // resource/resource_impl.go wraps the 30s timeout client in
@@ -358,7 +379,7 @@ impl MatchingHistoryClient {
         mut call: F,
     ) -> Result<R, Status>
     where
-        F: FnMut(h::history_api_client::HistoryApiClient<Channel>, Request<T>) -> Fut + Send,
+        F: FnMut(HistoryConnection, Request<T>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         let policy = ExponentialRetryPolicy::new(Duration::from_millis(250))
@@ -430,10 +451,15 @@ impl MatchingHistoryClient {
         call: &mut F,
     ) -> Result<R, Status>
     where
-        F: FnMut(h::history_api_client::HistoryApiClient<Channel>, Request<T>) -> Fut + Send,
+        F: FnMut(HistoryConnection, Request<T>) -> Fut + Send,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
-        let initial_peer = self.initial_peer(workflow_id)?;
+        let using_tchannel = self.tchannel_peer_resolver.is_some();
+        let initial_peer = if let Some(resolver) = &self.tchannel_peer_resolver {
+            Some(resolver.workflow(workflow_id)?)
+        } else {
+            self.initial_peer(workflow_id)?
+        };
         // The factory timeout wrapper adds a fresh per-RPC timeout. A caller
         // deadline and the Record*Started attempt budget can shorten it.
         let operation_deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
@@ -443,9 +469,18 @@ impl MatchingHistoryClient {
             (None, Some(operation)) => Some(operation),
             (None, None) => None,
         };
-        let mut client = match initial_peer.as_deref() {
-            Some(peer) => self.client_for_peer(peer)?,
-            None => self.history.clone(),
+        let mut connection = match (using_tchannel, initial_peer.as_deref()) {
+            (true, Some(peer)) => HistoryConnection::Tchannel(
+                crate::matching_history_tchannel::TChannelHistoryClient::new(peer.to_owned()),
+                self.history_rpc_timeout,
+            ),
+            (true, None) => {
+                return Err(Status::unavailable(
+                    "TChannel History outbound requires a peer resolver.",
+                ))
+            }
+            (false, Some(peer)) => HistoryConnection::Grpc(self.client_for_peer(peer)?),
+            (false, None) => HistoryConnection::Grpc(self.history.clone()),
         };
         loop {
             let remaining =
@@ -455,8 +490,15 @@ impl MatchingHistoryClient {
                     "History caller or operation deadline exceeded.",
                 ));
             }
+            let call_connection = match &connection {
+                HistoryConnection::Grpc(client) => HistoryConnection::Grpc(client.clone()),
+                HistoryConnection::Tchannel(client, _) => HistoryConnection::Tchannel(
+                    client.clone(),
+                    remaining.unwrap_or(self.history_rpc_timeout),
+                ),
+            };
             let result = call(
-                client.clone(),
+                call_connection,
                 self.request_with_timeout(payload.clone(), remaining),
             );
             let result = if let Some(remaining) = remaining {
@@ -472,11 +514,23 @@ impl MatchingHistoryClient {
                     let Some(owner) = ownership_lost_owner(&error) else {
                         return Err(error);
                     };
-                    let Some(resolver) = &self.peer_resolver else {
+                    let resolver = if using_tchannel {
+                        self.tchannel_peer_resolver.as_ref()
+                    } else {
+                        self.peer_resolver.as_ref()
+                    };
+                    let Some(resolver) = resolver else {
                         return Err(error);
                     };
                     let peer = resolver.host_address(&owner)?;
-                    client = self.client_for_peer(&peer)?;
+                    connection = if using_tchannel {
+                        HistoryConnection::Tchannel(
+                            crate::matching_history_tchannel::TChannelHistoryClient::new(peer),
+                            self.history_rpc_timeout,
+                        )
+                    } else {
+                        HistoryConnection::Grpc(self.client_for_peer(&peer)?)
+                    };
                 }
             }
         }
@@ -521,9 +575,17 @@ impl MatchingHistoryClient {
                 None,
                 caller_deadline,
                 &task.data.workflow_id,
-                &mut |mut client: h::history_api_client::HistoryApiClient<tonic::transport::Channel>,
-                      request: Request<h::RefreshWorkflowTasksRequest>| async move {
-                    client.refresh_workflow_tasks(request).await.map(|_| ())
+                &mut |client, request: Request<h::RefreshWorkflowTasksRequest>| async move {
+                    match client {
+                        HistoryConnection::Grpc(mut client) => {
+                            client.refresh_workflow_tasks(request).await.map(|_| ())
+                        }
+                        HistoryConnection::Tchannel(client, timeout) => {
+                            client
+                                .refresh_workflow_tasks(request.get_ref(), timeout)
+                                .await
+                        }
+                    }
                 },
             )
             .await;
@@ -564,12 +626,18 @@ impl MatchingHistoryClient {
             None,
             caller_deadline,
             &task.data.workflow_id,
-            &mut |mut client: h::history_api_client::HistoryApiClient<tonic::transport::Channel>,
-                  request: Request<h::DescribeWorkflowExecutionRequest>| async move {
-                client
-                    .describe_workflow_execution(request)
-                    .await
-                    .map(tonic::Response::into_inner)
+            &mut |client, request: Request<h::DescribeWorkflowExecutionRequest>| async move {
+                match client {
+                    HistoryConnection::Grpc(mut client) => client
+                        .describe_workflow_execution(request)
+                        .await
+                        .map(tonic::Response::into_inner),
+                    HistoryConnection::Tchannel(client, timeout) => {
+                        client
+                            .describe_workflow_execution(request.get_ref(), timeout)
+                            .await
+                    }
+                }
             },
         )
         .await
@@ -604,11 +672,16 @@ impl MatchingHistoryClient {
             None,
             caller_deadline,
             &execution.workflow_id,
-            move |mut client, request| async move {
-                client
-                    .get_mutable_state(request)
-                    .await
-                    .map(tonic::Response::into_inner)
+            move |client, request| async move {
+                match client {
+                    HistoryConnection::Grpc(mut client) => client
+                        .get_mutable_state(request)
+                        .await
+                        .map(tonic::Response::into_inner),
+                    HistoryConnection::Tchannel(client, timeout) => {
+                        client.get_mutable_state(request.get_ref(), timeout).await
+                    }
+                }
             },
         )
         .await
@@ -646,11 +719,18 @@ impl MatchingHistoryClient {
                 self.record_started_operation_timeout(domain_id),
                 caller_deadline,
                 &execution.workflow_id,
-                move |mut client, request| async move {
-                    client
-                        .record_decision_task_started(request)
-                        .await
-                        .map(tonic::Response::into_inner)
+                move |client, request| async move {
+                    match client {
+                        HistoryConnection::Grpc(mut client) => client
+                            .record_decision_task_started(request)
+                            .await
+                            .map(tonic::Response::into_inner),
+                        HistoryConnection::Tchannel(client, timeout) => {
+                            client
+                                .record_decision_task_started(request.get_ref(), timeout)
+                                .await
+                        }
+                    }
                 },
             )
             .await?;
@@ -716,11 +796,18 @@ impl MatchingHistoryClient {
                 self.record_started_operation_timeout(domain_id),
                 caller_deadline,
                 &execution.workflow_id,
-                move |mut client, request| async move {
-                    client
-                        .record_activity_task_started(request)
-                        .await
-                        .map(tonic::Response::into_inner)
+                move |client, request| async move {
+                    match client {
+                        HistoryConnection::Grpc(mut client) => client
+                            .record_activity_task_started(request)
+                            .await
+                            .map(tonic::Response::into_inner),
+                        HistoryConnection::Tchannel(client, timeout) => {
+                            client
+                                .record_activity_task_started(request.get_ref(), timeout)
+                                .await
+                        }
+                    }
                 },
             )
             .await?;
@@ -1209,10 +1296,13 @@ mod tests {
             Some(default)
         );
         assert_eq!(
-            history_client.request_with_timeout(
-                (),
-                history_client.record_started_operation_timeout("domain-a"),
-            ).metadata().get("grpc-timeout"),
+            history_client
+                .request_with_timeout(
+                    (),
+                    history_client.record_started_operation_timeout("domain-a"),
+                )
+                .metadata()
+                .get("grpc-timeout"),
             Some(&grpc_timeout(default))
         );
         // Go reads `matching.recordTaskStartedTimeout(domain)` per attempt.
@@ -1242,10 +1332,8 @@ mod tests {
             None,
             "Go WithOperationTimeout(0) leaves the caller deadline unchanged"
         );
-        let request = configured_client.request_with_timeout(
-            (),
-            configured_client.record_started_timeout("domain-a"),
-        );
+        let request = configured_client
+            .request_with_timeout((), configured_client.record_started_timeout("domain-a"));
         assert_eq!(
             request.metadata().get("grpc-timeout"),
             Some(&grpc_timeout(Duration::from_millis(250)))
@@ -1406,11 +1494,20 @@ mod tests {
             .await;
         result.unwrap();
         let value = query_timeout.lock().unwrap().clone().unwrap();
-        assert_ne!(value, unbounded_factory_timeout, "query RPC must use the caller deadline");
+        assert_ne!(
+            value, unbounded_factory_timeout,
+            "query RPC must use the caller deadline"
+        );
 
         for (operation, payload) in [
-            ("decision-start", h::RecordDecisionTaskStartedRequest::default().encode_to_vec()),
-            ("activity-start", h::RecordActivityTaskStartedRequest::default().encode_to_vec()),
+            (
+                "decision-start",
+                h::RecordDecisionTaskStartedRequest::default().encode_to_vec(),
+            ),
+            (
+                "activity-start",
+                h::RecordActivityTaskStartedRequest::default().encode_to_vec(),
+            ),
         ] {
             let observed = Arc::new(Mutex::new(None));
             let capture = observed.clone();
@@ -1428,8 +1525,10 @@ mod tests {
                 .await;
             result.unwrap();
             let value = observed.lock().unwrap().clone().unwrap();
-            assert_ne!(value, unbounded_factory_timeout,
-                "{operation} RPC must use the caller deadline");
+            assert_ne!(
+                value, unbounded_factory_timeout,
+                "{operation} RPC must use the caller deadline"
+            );
         }
     }
 }
