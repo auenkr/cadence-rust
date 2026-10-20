@@ -203,7 +203,7 @@ with (work / 'server.log').open('w') as log:
             'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
             'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
             'ringpopGate': 'original Go PeerProvider is active; runner does not substitute or hard-code Matching members and Rust must JOIN/publish serviceName/grpc labels' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
-            'historyRoutingGate': 'Matching-to-History still uses the explicit loopback endpoint until discovered History peer routing is integrated' if production_matching else None,
+            'historyRoutingGate': ('Rust Matching resolves History gRPC peers through its joined Ringpop view; system.enableGRPCOutbound must be true because the History TChannel client is not wired' if production_matching else None),
             'acceptanceEligible': not production_matching,
             'serverCommand': command}, indent=2) + '\n')
         if result.returncode:

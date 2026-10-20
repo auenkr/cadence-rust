@@ -2526,6 +2526,16 @@ pub async fn serve(
 /// matcher so production traffic uses the same partition/forwarding path as
 /// the mixed-service harness instead of the in-memory engine.
 pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    serve_with_listener(listener, matching).await
+}
+
+/// Serve a prebound Matching socket so production can fail listener startup
+/// before Ringpop advertises this node's gRPC endpoint.
+pub async fn serve_with_listener(
+    listener: tokio::net::TcpListener,
+    matching: Matching,
+) -> anyhow::Result<()> {
     let limit = matching.frontend.state.grpc_max_message_size;
     // Go runs a per-bucket liveness timer; a shared ticker unloads idle
     // semaphore buckets so a quiet host does not keep them forever.
@@ -2549,7 +2559,7 @@ pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyho
             m::matching_api_server::MatchingApiServer::new(matching)
                 .max_decoding_message_size(limit),
         )
-        .serve(addr)
+        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
         .await?;
     Ok(())
 }

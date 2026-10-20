@@ -767,6 +767,19 @@ async fn main() -> anyhow::Result<()> {
                     .unwrap_or(7935),
             );
             let run_matching = wanted.contains(&service::ServiceName::Matching);
+            // Reserve the production gRPC endpoint before Ringpop can publish
+            // it. A conflicting port therefore fails startup before peers see
+            // a label for a listener that could never start.
+            let mut matching_grpc_listener = if run_matching && !embedded_development {
+                Some(tokio::net::TcpListener::bind(matching_addr).await?)
+            } else {
+                None
+            };
+            let matching_addr = matching_grpc_listener
+                .as_ref()
+                .map(tokio::net::TcpListener::local_addr)
+                .transpose()?
+                .unwrap_or(matching_addr);
             // Production Matching shares its prebound TChannel socket with
             // Ringpop. Binding before provider construction ensures the
             // advertised port is the actual listener port. The explicit
@@ -957,10 +970,10 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            if let (Some(runtime), Some(membership)) =
-                (matching_runtime.take(), matching_membership.clone())
-            {
-                matching_runtime = Some(runtime.with_membership(membership));
+            if let Some(membership) = matching_membership.clone() {
+                if let Some(runtime) = matching_runtime.take() {
+                    matching_runtime = Some(runtime.with_membership(membership));
+                }
             }
             let matching_service = matching_runtime
                 .as_ref()
@@ -995,14 +1008,20 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 (None, None)
             };
+            let mut shutdown_during_start = false;
             if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
-                let start_result = if let Some(listener_done) = matching_tchannel_done.as_mut() {
-                    tokio::select! {
-                        result = lifecycle.start() => result.map_err(anyhow::Error::new),
-                        result = listener_done => Err(anyhow::anyhow!("shared Matching TChannel/Ringpop listener stopped during Ringpop bootstrap: {result:?}")),
-                    }
-                } else {
-                    lifecycle.start().await.map_err(anyhow::Error::new)
+                let start_result = tokio::select! {
+                    result = lifecycle.start() => result.map_err(anyhow::Error::new),
+                    signal = shutdown_signal() => {
+                        shutdown_during_start = signal.is_ok();
+                        Err(signal.err().unwrap_or_else(|| anyhow::anyhow!("shutdown requested during Matching Ringpop bootstrap")))
+                    },
+                    result = async {
+                        match matching_tchannel_done.as_mut() {
+                            Some(listener_done) => listener_done.await,
+                            None => std::future::pending().await,
+                        }
+                    } => Err(anyhow::anyhow!("shared Matching TChannel/Ringpop listener stopped during Ringpop bootstrap: {result:?}")),
                 };
                 if let Err(start_error) = start_result {
                     let mut cleanup_errors = Vec::new();
@@ -1033,6 +1052,10 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     if cleanup_errors.is_empty() {
+                        if shutdown_during_start {
+                            println!("shutting down");
+                            return Ok(());
+                        }
                         return Err(start_error.context("starting Matching Ringpop membership"));
                     }
                     anyhow::bail!(
@@ -1107,11 +1130,19 @@ async fn main() -> anyhow::Result<()> {
                     },
                     async {
                         if run_matching {
-                            cadence_server::grpc_matching::serve_with(
-                                matching_addr,
-                                matching_service.clone(),
-                            )
-                            .await
+                            if let Some(listener) = matching_grpc_listener.take() {
+                                cadence_server::grpc_matching::serve_with_listener(
+                                    listener,
+                                    matching_service.clone(),
+                                )
+                                .await
+                            } else {
+                                cadence_server::grpc_matching::serve_with(
+                                    matching_addr,
+                                    matching_service.clone(),
+                                )
+                                .await
+                            }
                         } else {
                             std::future::pending::<anyhow::Result<()>>().await
                         }
