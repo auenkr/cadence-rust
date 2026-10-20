@@ -281,7 +281,7 @@ were:
 | File | SHA-256 |
 | --- | --- |
 | `tests/matching-thrift-go_test.go` | `e49161b140a8c0e3ac6bb9527c5be5f853bd47d549045f270b6efe1e640d37ac` |
-| `tests/run-matching-thrift-compat.py` | `bbeb74e27497cd5708b1d04a50a6fce339d0621ed1104f6f651bf53b40fb90ba` |
+| `tests/run-matching-thrift-compat.py` | `37c8eb0bcc39c154fc6a248b24004ce577043fc713e632d7a30de842c3364e6d` |
 | `rust/crates/cadence-server/src/config.rs` | `00f0dd3153eb5084164277321e5eb94944108543b0738e02b4b0f0e5e412cf6a` |
 | `rust/crates/cadence-server/src/lib.rs` | `053aea7397291306fe6e7dd595f772e6c6ea672bbea25ceee4a9aad8bd856cce` |
 | `rust/Cargo.lock` | `a9995876e7e851652c6781142c2439b5d71e4903518df03b66a5047537d2b129` |
@@ -300,7 +300,12 @@ reported exit 0 for those four gates and is preserved as
 `historical-run-results-failed-probe.json` in
 `memory/evidence/matching-configured-store-20261019T220052Z/`. Its Go probe
 failed at that earlier source revision and is explicitly retained only as
-historical failure evidence. The focused final probe was consumed
-interactively (no raw stdout log was captured); it still requires a tee-captured
-rerun when the build slot is available. The source freeze manifest records the
-exact source hashes for the successful run state.
+historical failure evidence. The final focused probe was rerun with raw output
+capture at commit `62d9abf21a4e24ba4b3242b9d6b5abe997052b84`; it exited 0.
+The run also captured identical before/after hashes for all listed Rust and
+Go source files and the server binary. Raw output, exit metadata and hash
+manifests are in `memory/evidence/matching-configured-store-20261019T220052Z/`.
+The harness's shutdown drain window was widened to 30 seconds after one
+captured run saw a connection reset before the Go drain-health check; the
+follow-up passed. That is test-harness timing coverage, not a Rust business
+logic change.
