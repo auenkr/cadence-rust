@@ -201,6 +201,74 @@ pub struct CassandraSessionConfig {
     pub keyspace: String,
 }
 
+/// Session and dedicated async driver runtime for Matching's synchronous
+/// persistence traits. Calls are made from the server's blocking pool using
+/// `run`; the runtime is independent of the RPC runtime.
+pub struct CassandraBlockingSession {
+    session: Option<Arc<Session>>,
+    runtime: Option<Arc<tokio::runtime::Runtime>>,
+}
+
+impl fmt::Debug for CassandraBlockingSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CassandraBlockingSession").finish_non_exhaustive()
+    }
+}
+
+impl CassandraBlockingSession {
+    /// Build a private multi-thread runtime and connect on it. Invoke this
+    /// constructor from a blocking worker during service startup.
+    pub fn connect(config: &CassandraSessionConfig) -> anyhow::Result<Self> {
+        let runtime = Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build()?);
+        let session = runtime.block_on(config.connect())?;
+        Ok(Self { session: Some(Arc::new(session)), runtime: Some(runtime) })
+    }
+
+    pub(crate) fn session(&self) -> Arc<Session> {
+        self.session.as_ref().expect("live Cassandra session").clone()
+    }
+
+    /// Drive one Scylla operation from a Tokio blocking-pool worker. Calling
+    /// this on an async worker is forbidden because it blocks that worker.
+    pub fn run<F: std::future::Future>(&self, future: F) -> F::Output {
+        self.runtime.as_ref().expect("live Cassandra runtime").block_on(future)
+    }
+}
+
+impl Drop for CassandraBlockingSession {
+    fn drop(&mut self) {
+        // Drop the driver session before runtime shutdown. Runtime::drop may
+        // block, so transfer it to a plain thread even if we're on Tokio.
+        drop(self.session.take());
+        if let Some(runtime) = self.runtime.take() { shutdown_runtime(runtime); }
+    }
+}
+
+fn shutdown_runtime(runtime: Arc<tokio::runtime::Runtime>) {
+    let _ = std::thread::Builder::new()
+        .name("cadence-cassandra-runtime-shutdown".into())
+        .spawn(move || drop(runtime));
+}
+
+#[cfg(test)]
+mod blocking_session_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dedicated_runtime_shutdown_does_not_block_rpc_runtime() {
+        let runtime = Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap());
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        tokio::spawn(async move {
+            shutdown_runtime(runtime);
+            finished_tx.send(()).unwrap();
+        });
+        tokio::time::timeout(Duration::from_millis(200), tokio::time::sleep(Duration::from_millis(5)))
+            .await.expect("runtime shutdown blocked the RPC timer worker");
+        finished_rx.recv_timeout(Duration::from_secs(1)).expect("shutdown dispatch completes");
+    }
+}
+
 impl CassandraSessionConfig {
     pub fn from_parts(
         hosts: impl IntoIterator<Item = String>,
