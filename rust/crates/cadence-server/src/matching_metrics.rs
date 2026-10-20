@@ -78,6 +78,18 @@ pub const CADENCE_LATENCY_PER_TASK_LIST_NS: &str = "cadence_latency_per_tl_ns";
 pub const DOMAIN_TAG: &str = "domain";
 pub const TASK_LIST_TAG: &str = "task_list";
 pub const SEMAPHORE_NAME_TAG: &str = "semaphore_name";
+pub const CALLER_TAG: &str = "caller";
+pub const TRANSPORT_TAG: &str = "transport";
+
+#[derive(Clone, Debug, Default)]
+pub struct InboundMetricContext {
+    pub caller: Option<String>,
+    pub transport: Option<String>,
+}
+
+tokio::task_local! {
+    static INBOUND_METRIC_CONTEXT: InboundMetricContext;
+}
 
 fn go_sanitize_metric_value(value: &str) -> String {
     value
@@ -225,6 +237,30 @@ impl MatchingMetrics {
         Self(sink)
     }
 
+    pub fn context_from_metadata(
+        metadata: &tonic::metadata::MetadataMap,
+        transport: &str,
+    ) -> InboundMetricContext {
+        InboundMetricContext {
+            caller: Some(
+                metadata
+                    .get("rpc-caller")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
+            transport: Some(transport.to_owned()),
+        }
+    }
+
+    pub async fn with_inbound_context<F: std::future::Future>(
+        &self,
+        context: InboundMetricContext,
+        future: F,
+    ) -> F::Output {
+        INBOUND_METRIC_CONTEXT.scope(context, future).await
+    }
+
     /// Record one complete inbound Matching RPC. This is called at the shared
     /// MatchingAPI trait boundary, which Thrift dispatch also invokes.
     pub async fn matching_request<F, T, E>(
@@ -232,6 +268,7 @@ impl MatchingMetrics {
         method: &'static str,
         domain: Option<&str>,
         task_list: Option<(&str, Option<i32>)>,
+        context: Option<InboundMetricContext>,
         future: F,
     ) -> Result<T, E>
     where
@@ -264,6 +301,18 @@ impl MatchingMetrics {
                 tags.insert(SEMAPHORE_NAME_TAG.to_owned(), "_unknown_".to_owned());
             } else {
                 tags.insert(TASK_LIST_TAG.to_owned(), "_unknown_".to_owned());
+            }
+        }
+        let context = INBOUND_METRIC_CONTEXT
+            .try_with(Clone::clone)
+            .ok()
+            .or(context);
+        if let Some(context) = context {
+            if let Some(caller) = context.caller {
+                tags.insert(CALLER_TAG.to_owned(), caller);
+            }
+            if let Some(transport) = context.transport {
+                tags.insert(TRANSPORT_TAG.to_owned(), transport);
             }
         }
         self.0.record(MetricEvent {
@@ -369,6 +418,7 @@ mod inbound_tests {
                 "AcquireSemaphore",
                 Some("domain-a"),
                 Some(("locks", Some(0))),
+                None,
                 async { Err("typed service error") },
             )
             .await;
@@ -389,7 +439,9 @@ mod inbound_tests {
         let sink = Arc::new(RecordingMetricSink::default());
         let metrics = MatchingMetrics::new(sink.clone());
         metrics
-            .matching_request::<_, (), &'static str>("QueryWorkflow", None, None, async { Ok(()) })
+            .matching_request::<_, (), &'static str>("QueryWorkflow", None, None, None, async {
+                Ok(())
+            })
             .await
             .unwrap();
         let events = sink.events();
@@ -408,6 +460,7 @@ mod inbound_tests {
                 "PollForDecisionTask",
                 None,
                 Some(("worker-unique", Some(1))),
+                None,
                 async { Ok(()) },
             )
             .await
@@ -426,6 +479,7 @@ mod inbound_tests {
                 .matching_request::<_, (), tonic::Status>(
                     "PollForActivityTask",
                     Some("d"),
+                    None,
                     None,
                     std::future::pending::<Result<(), tonic::Status>>(),
                 )
@@ -451,10 +505,12 @@ mod inbound_tests {
         let status = tonic::Status::with_details(
             tonic::Code::FailedPrecondition,
             "query failed",
-            bytes::Bytes::from_static(b"type.googleapis.com/uber.cadence.api.v1.QueryFailedError"),
+            tonic::codegen::Bytes::from_static(
+                b"type.googleapis.com/uber.cadence.api.v1.QueryFailedError",
+            ),
         );
         let _: Result<(), _> = metrics
-            .matching_request("QueryWorkflow", Some("domain-a"), None, async {
+            .matching_request("QueryWorkflow", Some("domain-a"), None, None, async {
                 Err(status)
             })
             .await;
@@ -465,5 +521,55 @@ mod inbound_tests {
         assert!(!events
             .iter()
             .any(|event| event.name == CADENCE_FAILURES_PER_TASK_LIST));
+    }
+
+    #[tokio::test]
+    async fn inbound_request_context_is_isolated_between_concurrent_calls() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let first = metrics.clone();
+        let second = metrics.clone();
+        let (a, b) = tokio::join!(
+            first.with_inbound_context(
+                InboundMetricContext {
+                    caller: Some("caller-a".into()),
+                    transport: Some("grpc".into())
+                },
+                first.matching_request::<_, (), &'static str>(
+                    "QueryWorkflow",
+                    Some("a"),
+                    None,
+                    None,
+                    async { Ok(()) }
+                ),
+            ),
+            second.with_inbound_context(
+                InboundMetricContext {
+                    caller: Some("caller-b".into()),
+                    transport: Some("http".into())
+                },
+                second.matching_request::<_, (), &'static str>(
+                    "QueryWorkflow",
+                    Some("b"),
+                    None,
+                    None,
+                    async { Ok(()) }
+                ),
+            ),
+        );
+        a.unwrap();
+        b.unwrap();
+        let requests = sink
+            .events()
+            .into_iter()
+            .filter(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST)
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().any(
+            |event| event.tags[CALLER_TAG] == "caller-a" && event.tags[TRANSPORT_TAG] == "grpc"
+        ));
+        assert!(requests.iter().any(
+            |event| event.tags[CALLER_TAG] == "caller-b" && event.tags[TRANSPORT_TAG] == "http"
+        ));
     }
 }
