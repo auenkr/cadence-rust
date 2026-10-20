@@ -740,22 +740,35 @@ async function run() {
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
   console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
   } finally {
-    if (productionMode) rust.kill('SIGTERM');
-    else fs.writeFileSync(stop, 'stop');
-    let shutdownTimer;
-    const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
-    clearTimeout(shutdownTimer);
-    if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
-    if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
-    if (secondaryRust && secondaryRust.exitCode === null && secondaryRust.signalCode === null) {
-      secondaryRust.kill('SIGTERM');
-      const secondaryExit = await Promise.race([
-        new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal }))),
-        new Promise(resolve => setTimeout(() => resolve(null), 20000)),
+    const cleanupErrors = [];
+    async function stopRust(child, label, waitForExit) {
+      if (!child) return;
+      if (child.exitCode === null && child.signalCode === null) {
+        if (productionMode) child.kill('SIGTERM');
+        else if (label === 'primary') fs.writeFileSync(stop, 'stop');
+      }
+      let timer;
+      let result = await Promise.race([
+        waitForExit,
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), 20000); }),
       ]);
-      if (secondaryExit === null) { secondaryRust.kill('SIGKILL'); throw new Error('secondary Rust Matching did not stop'); }
-      if (secondaryExit.code !== 0) throw new Error(`secondary Rust Matching exited ${JSON.stringify(secondaryExit)}; see ${work}/rust-server-secondary.log`);
+      clearTimeout(timer);
+      if (result === null) {
+        child.kill('SIGKILL');
+        result = await waitForExit;
+        cleanupErrors.push(`${label} Rust Matching required SIGKILL after shutdown timeout`);
+      }
+      if (result?.code !== 0) cleanupErrors.push(`${label} Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-${label === 'primary' ? 'after-restart' : 'secondary'}.log`);
     }
+    // Each process gets its own bounded shutdown attempt. Collect errors so a
+    // stuck primary never prevents us from reaping the secondary instance.
+    const secondaryExit = secondaryRust && new Promise(resolve => {
+      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) resolve({ code: secondaryRust.exitCode, signal: secondaryRust.signalCode });
+      else secondaryRust.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    await stopRust(rust, 'primary', exited);
+    if (secondaryRust) await stopRust(secondaryRust, 'secondary', secondaryExit);
+    if (cleanupErrors.length) throw new Error(cleanupErrors.join('; '));
   }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));
