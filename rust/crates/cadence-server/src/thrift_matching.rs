@@ -824,6 +824,36 @@ async fn http_handler_with_procedures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn matching_inbound_metrics_count_native_and_thrift_dispatch_once_each() {
+        use crate::matching_metrics::{MetricKind, MetricValue, RecordingMetricSink, CADENCE_REQUESTS_PER_TASK_LIST};
+        use std::sync::Arc;
+
+        let sink = Arc::new(RecordingMetricSink::default());
+        let matching = Matching::new(crate::handlers::AppState::default()).with_metrics(sink.clone());
+        let request = m::GetTaskListsByDomainRequest { domain: "domain-a".into() };
+        m::matching_api_server::MatchingApi::get_task_lists_by_domain(
+            &matching,
+            Request::new(request),
+        ).await.unwrap();
+
+        let thrift_args = Struct {
+            fields: vec![(1, Value::Struct(Struct { fields: vec![(10, text("domain-a"))] }))],
+        };
+        dispatch(
+            &matching,
+            "MatchingService::GetTaskListsByDomain",
+            &thrift_args,
+            Instant::now() + std::time::Duration::from_secs(5),
+        ).await.unwrap();
+
+        let events = sink.events();
+        let requests = events.iter().filter(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST).collect::<Vec<_>>();
+        assert_eq!(requests.len(), 2, "one event for each logical transport request");
+        assert!(requests.iter().all(|event| event.tags.get("operation").map(String::as_str) == Some("GetTaskListsByDomain")));
+        assert!(events.iter().filter(|event| event.name == "cadence_latency_per_tl").all(|event| event.kind == MetricKind::Timer && matches!(event.value, MetricValue::Duration(_))));
+    }
     #[test]
     fn matching_thrift_preserves_nanos_and_internal_decision_field_ids() {
         let value = decision(m::PollForDecisionTaskResponse {
