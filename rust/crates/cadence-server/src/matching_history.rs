@@ -178,10 +178,14 @@ impl MatchingHistoryClient {
         F: Future<Output = Result<T, Status>>,
     {
         let tags = self.metrics.history_started(method, None);
-        let started = std::time::Instant::now();
+        let mut guard = HistoryCallMetricGuard {
+            metrics: self.metrics.clone(),
+            tags,
+            started: std::time::Instant::now(),
+            completed: false,
+        };
         let result = future.await;
-        self.metrics
-            .history_completed(tags, started.elapsed(), result.is_err());
+        guard.complete(result.is_err());
         result
     }
     /// Override the factory's per-RPC timeout. Production uses Go's 30-second
@@ -901,6 +905,34 @@ impl MatchingHistoryClient {
     }
 }
 
+struct HistoryCallMetricGuard {
+    metrics: crate::matching_metrics::MatchingMetrics,
+    tags: std::collections::BTreeMap<String, String>,
+    started: std::time::Instant,
+    completed: bool,
+}
+
+impl HistoryCallMetricGuard {
+    fn complete(&mut self, failed: bool) {
+        self.metrics.history_completed(
+            self.tags.clone(),
+            self.started.elapsed(),
+            failed,
+        );
+        self.completed = true;
+    }
+}
+
+impl Drop for HistoryCallMetricGuard {
+    fn drop(&mut self) {
+        // A future dropped after it started represents a canceled History
+        // call. Go's context-aware wrapper returns that cancellation as error.
+        if !self.completed {
+            self.complete(true);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -992,7 +1024,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn history_metrics_count_a_polled_call_without_fabricating_completion_on_cancel() {
+    async fn history_metrics_record_a_polled_cancellation_as_failure() {
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
         let client = client().with_metrics(sink.clone());
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -1008,8 +1040,11 @@ mod tests {
         task.abort();
         let _ = task.await;
         let events = sink.events();
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 4);
         assert_eq!(events[0].name, "cadence_client_requests");
+        assert_eq!(events[1].name, "cadence_client_errors");
+        assert_eq!(events[2].name, "cadence_client_latency");
+        assert_eq!(events[3].name, "cadence_client_latency_ns");
         assert_eq!(events[0].tags["operation"], "HistoryClientGetMutableState");
     }
 
