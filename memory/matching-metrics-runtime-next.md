@@ -204,3 +204,63 @@ go test ./common/config -run '^TestMetricsSuite$' -count=1
 ```
 
 None of these commands has been run for this source checkpoint.
+
+## MySQL integration candidate (source-only)
+
+The telemetry source pass was committed as `932ffe0ee` and merged with the
+validated MySQL task-store candidate `4bc9873b9` in merge `233698d36`. The
+candidate branch is `matching-telemetry-mysql-candidate`; a follow-up formatting
+commit `37900316c` applies the workspace's Rust 2021 formatting to the two
+conflict-resolved source files. The old `matching-telemetry` ref remains at its
+previous checkpoint.
+
+Conflict resolution preserved both source sides:
+
+* `main.rs` keeps the telemetry runtime selection, shared sink, and graceful
+  metrics shutdown. It also keeps the MySQL branch's prebound gRPC/TChannel
+  endpoints, Ringpop provider and membership lifecycle, configured task-store
+  abstraction, dynamic-config file reload, and shard-distributor wiring.
+* Configured production Matching obtains the generic task store and domain
+  metadata cache from `open_configured_default_store`, and uses the shared
+  discovery-aware History client constructed from the selected Ringpop named
+  port. Embedded mode keeps its selected local task store and the same prepared
+  History client, while in-memory mode remains available.
+* Metrics attach to `MatchingRuntime` before dynamic-config, membership, and
+  shard-distributor decorators. The exported `Matching` service then uses that
+  same sink; shutdown flushes metrics after Matching drains and membership
+  stops.
+* Query forwarding uses the MySQL branch's generic
+  `remote_channel_for_task_list` routing and retains telemetry's child task-list
+  `forward_query_latency` event for the remote RPC outcome. In-process fallback
+  continues its existing per-hop timing.
+
+Source-only checks passed with:
+
+```sh
+rustfmt --check --edition 2021 --config skip_children=true \
+  rust/crates/cadence-server/src/main.rs \
+  rust/crates/cadence-server/src/grpc_matching.rs
+```
+
+No build or test was run on this merged candidate because the shared Cargo lane
+is occupied by the two-host runtime gate. Once it is available, use
+`CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target`
+and `CARGO_BUILD_JOBS=1` on every Cargo command. Focused test commands:
+
+```sh
+cd rust
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target cargo test --locked -p cadence-common --lib selection_preserves_go_leak_causes
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target cargo test --locked -p cadence-server --lib report_limit_returns_go_rate_gauge_updates
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target cargo test --locked -p cadence-server --lib matching_metrics
+CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target cargo test --locked -p cadence-server --lib matching_rpc_standby_completes_started_tasks_without_worker_poll
+```
+
+The `matching_metrics` filter runs the Rust metric event tests and the StatsD,
+M3, Prometheus, and exporter-runtime unit tests. After the Go lane is available,
+run these exporter/source oracles from their respective module roots:
+
+```sh
+(cd go && go test ./service/matching/handler -run '^TestMatchingPollMetricOracle$' -count=1)
+(cd go && go test ./service/matching/handler -run '^TestMatchingEngineSuite$/^TestAddTaskTrafficMetricOracle$' -count=1)
+(cd go && go test ./common/config -run '^TestMetricsSuite$' -count=1)
+```
