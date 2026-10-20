@@ -50,6 +50,7 @@ pub struct MatchingRuntime {
     shard_distributor_executor: Option<crate::matching_shard_distributor::ShardDistributorExecutor>,
     shard_distributor_spectator: Option<crate::matching_shard_distributor::TonicSpectator>,
     shard_distributor_drain: Option<tokio::sync::watch::Sender<bool>>,
+    shard_distributor_peer_cleanup: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
     drain_duration: DrainDuration,
     evict_self: Option<EvictSelf>,
     drained: bool,
@@ -69,6 +70,7 @@ impl MatchingRuntime {
             shard_distributor_executor: None,
             shard_distributor_spectator: None,
             shard_distributor_drain: None,
+            shard_distributor_peer_cleanup: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -108,6 +110,7 @@ impl MatchingRuntime {
             shard_distributor_executor: None,
             shard_distributor_spectator: None,
             shard_distributor_drain: None,
+            shard_distributor_peer_cleanup: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -209,7 +212,11 @@ impl MatchingRuntime {
             Some(spectator.clone()),
             percentage_onboarded.clone(),
             exclude_short_lived.clone(),
-        );
+        )
+        .with_peer_ttl(Duration::from_nanos(
+            config.effective_peer_ttl_nanos() as u64
+        ));
+        let peer_cleanup = router.start_peer_cleanup();
         let executor_for_check = executor.clone();
         let membership_for_check = membership.clone();
         let percentage_for_check = percentage_onboarded.clone();
@@ -269,6 +276,7 @@ impl MatchingRuntime {
         self.shard_distributor_executor = Some(executor);
         self.shard_distributor_spectator = Some(spectator);
         self.shard_distributor_drain = Some(drain_tx);
+        self.shard_distributor_peer_cleanup = Some(peer_cleanup);
         Ok(self)
     }
 
@@ -431,6 +439,11 @@ impl MatchingRuntime {
             spectator.shutdown().await;
         }
         self.shard_distributor_drain.take();
+        if let Some((stop, task)) = self.shard_distributor_peer_cleanup.take() {
+            let _ = stop.send(());
+            task.await
+                .map_err(|error| anyhow::anyhow!("joining Matching shard peer cleanup: {error}"))?;
+        }
         if let Some(stop) = self.membership_maintenance_stop.take() {
             let _ = stop.send(());
         }

@@ -10,8 +10,13 @@ use crate::{
     matching_shard_distributor::{BoxFuture, ShardOwner, TonicSpectator},
 };
 use cadence_common::membership::Host;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use thiserror::Error;
+use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 pub const SHARD_DISTRIBUTOR_LOOKUP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -91,6 +96,8 @@ pub struct MatchingShardRouter {
     spectator: Option<Arc<dyn ShardOwnerLookup>>,
     percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
     exclude_short_lived_task_lists: Arc<dyn Fn() -> bool + Send + Sync>,
+    peer_ttl: Duration,
+    peer_channels: Arc<Mutex<HashMap<String, (tonic::transport::Channel, Instant)>>>,
 }
 
 impl MatchingShardRouter {
@@ -105,7 +112,42 @@ impl MatchingShardRouter {
             spectator,
             percentage_onboarded,
             exclude_short_lived_task_lists,
+            peer_ttl: Duration::from_secs(120),
+            peer_channels: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Configure Go's spectator peer-cache TTL. The caller passes the
+    /// normalized `clientcommon.Config.GetPeerTTL()` value.
+    #[must_use]
+    pub fn with_peer_ttl(mut self, peer_ttl: Duration) -> Self {
+        self.peer_ttl = peer_ttl.max(Duration::from_millis(1));
+        self
+    }
+
+    /// Start Go's half-TTL stale-peer eviction loop and return its owner.
+    /// Dropping the sender stops the loop; callers should join the task during
+    /// Matching shutdown.
+    pub fn start_peer_cleanup(&self) -> (tokio::sync::oneshot::Sender<()>, JoinHandle<()>) {
+        let channels = self.peer_channels.clone();
+        let peer_ttl = self.peer_ttl;
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval((peer_ttl / 2).max(Duration::from_millis(1)));
+            loop {
+                tokio::select! {
+                    _ = &mut stopped => break,
+                    _ = interval.tick() => {
+                        let now = Instant::now();
+                        channels
+                            .lock()
+                            .expect("Matching shard peer cache lock")
+                            .retain(|_, (_, last_used)| now.duration_since(*last_used) <= peer_ttl);
+                    }
+                }
+            }
+        });
+        (stop, task)
     }
 
     /// Production convenience constructor using the accepted cached/RPC
@@ -202,11 +244,48 @@ impl MatchingShardRouter {
         task_list_name: &str,
     ) -> Result<(Option<tonic::transport::Channel>, RoutingPath), RoutingError> {
         let (owner, path) = self.resolve(task_list_name).await?;
-        let channel = self
-            .ring
-            .remote_channel_for_owner(&owner.identity, &owner.grpc_address)
-            .map_err(|error| RoutingError::Endpoint(error.to_string(), path))?;
+        let channel = match path {
+            RoutingPath::HashRing => self
+                .ring
+                .remote_channel_for_owner(&owner.identity, &owner.grpc_address)
+                .map_err(|error| RoutingError::Endpoint(error.to_string(), path))?,
+            RoutingPath::ShardDistributor => self
+                .spectator_remote_channel(&owner.grpc_address)
+                .map_err(|error| RoutingError::Endpoint(error.to_string(), path))?,
+        };
         Ok((channel, path))
+    }
+
+    fn spectator_remote_channel(
+        &self,
+        grpc_address: &str,
+    ) -> Result<Option<tonic::transport::Channel>, RoutingError> {
+        if grpc_address.is_empty() {
+            return Err(RoutingError::Endpoint(
+                "Matching owner has no gRPC address".into(),
+                RoutingPath::ShardDistributor,
+            ));
+        }
+        let mut peers = self
+            .peer_channels
+            .lock()
+            .expect("Matching shard peer cache lock");
+        if let Some((channel, last_used)) = peers.get_mut(grpc_address) {
+            *last_used = Instant::now();
+            return Ok(Some(channel.clone()));
+        }
+        let address = if grpc_address.contains("://") {
+            grpc_address.to_owned()
+        } else {
+            format!("http://{grpc_address}")
+        };
+        let channel = tonic::transport::Endpoint::from_shared(address)
+            .map_err(|error| {
+                RoutingError::Endpoint(error.to_string(), RoutingPath::ShardDistributor)
+            })?
+            .connect_lazy();
+        peers.insert(grpc_address.to_owned(), (channel.clone(), Instant::now()));
+        Ok(Some(channel))
     }
 
     fn resolve_from_ring(
@@ -329,8 +408,8 @@ fn join_host_port(host: &str, port: u16) -> String {
 mod tests {
     use super::*;
     use std::sync::{
-        atomic::{AtomicI64, AtomicUsize, Ordering},
         Mutex,
+        atomic::{AtomicI64, AtomicUsize, Ordering},
     };
 
     struct FakeSpectator {
