@@ -41,6 +41,8 @@ pub fn checker(
     history: crate::matching_history::MatchingHistoryClient,
     key: cadence_persistence::matching_sqlite::TaskListKey,
     enabled: Option<Enabled>,
+    metrics: crate::matching_metrics::MatchingMetrics,
+    metric_context: crate::matching_metrics::PollMetricContext,
 ) -> crate::matching_reader::DispatchCheck {
     Arc::new(move |task| {
         let domains = domains.clone();
@@ -48,6 +50,8 @@ pub fn checker(
         let history = history.clone();
         let key = key.clone();
         let enabled = enabled.clone();
+        let metrics = metrics.clone();
+        let metric_context = metric_context.clone();
         Box::pin(async move {
             let domain = key.domain_id.to_string();
             let policy = ExponentialRetryPolicy::new(Duration::from_secs(1))
@@ -88,7 +92,7 @@ pub fn checker(
                     {
                         return Ok(Some(false));
                     }
-                    let started = match history
+                    let completed = match history
                         .describe_execution(
                             &domain,
                             description
@@ -100,21 +104,43 @@ pub fn checker(
                         )
                         .await
                     {
-                        Ok(state) => task_started(key.task_type, task.data.schedule_id, &state),
+                        Ok(state) => {
+                            let started = task_started(key.task_type, task.data.schedule_id, &state)?;
+                            let metric = if started {
+                                crate::matching_metrics::STANDBY_TASKS_COMPLETED
+                            } else {
+                                crate::matching_metrics::STANDBY_TASKS_NOT_STARTED
+                            };
+                            metrics.task_list_counter_event(metric, &metric_context);
+                            Ok(started.then_some(true))
+                        }
                         Err(error) if crate::matching_history::missing_execution(&error) => {
-                            Ok(super::grpc_matching::matching_now()
+                            let completed = super::grpc_matching::matching_now()
                                 .saturating_sub(task.data.created_nanos)
-                                > 86_400_000_000_000)
+                                > 86_400_000_000_000;
+                            if completed {
+                                metrics.task_list_counter_event(
+                                    crate::matching_metrics::STANDBY_TASKS_COMPLETED,
+                                    &metric_context,
+                                );
+                            }
+                            Ok(completed.then_some(true))
                         }
                         Err(error) => Err(error),
                     }?;
-                    Ok(started.then_some(true))
+                    Ok(completed)
                 }
                 .await;
                 if let Ok(Some(completed)) = result {
                     return Ok(completed);
                 }
                 let Some(delay) = retrier.next_backoff(&mut rand::thread_rng()) else {
+                    if result.is_err() {
+                        metrics.task_list_counter_event(
+                            crate::matching_metrics::STANDBY_TASKS_COMPLETION_FAILURE,
+                            &metric_context,
+                        );
+                    }
                     return result.and_then(|_| Err(Status::unavailable("task not started")));
                 };
                 tokio::time::sleep(delay).await;

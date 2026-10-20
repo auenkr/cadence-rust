@@ -108,6 +108,15 @@ pub const RATE_LIMIT_PER_TASK_LIST: &str = "rate_limit_per_tl";
 pub const POLLER_INVALID_ISOLATION_GROUP: &str = "poller_invalid_isolation_group_per_tl";
 pub const TASK_ISOLATION_LEAK: &str = "task_isolation_leak_per_tl";
 pub const PARTITION_UPDATE_FAILED: &str = "tasklist_partition_update_failed_per_tl";
+pub const TASK_LIST_PARTITION_CONFIG_NUM_READ: &str = "task_list_partition_config_num_read";
+pub const TASK_LIST_PARTITION_CONFIG_NUM_WRITE: &str = "task_list_partition_config_num_write";
+pub const TASK_LIST_PARTITION_CONFIG_VERSION: &str = "task_list_partition_config_version";
+pub const TASK_LIST_READ_WRITE_PARTITION_MISMATCH: &str = "tasklist_read_write_partition_mismatch";
+pub const TASK_LIST_POLLER_PARTITION_MISMATCH: &str = "tasklist_poller_partition_mismatch";
+pub const STANDBY_TASKS_COMPLETED: &str = "standby_cluster_tasks_completed_per_tl";
+pub const STANDBY_TASKS_NOT_STARTED: &str = "standby_cluster_tasks_not_started_per_tl";
+pub const STANDBY_TASKS_COMPLETION_FAILURE: &str = "standby_cluster_tasks_completion_failure_per_tl";
+pub const RESPOND_QUERY_TASK_FAILED: &str = "respond_query_task_failed_per_tl";
 pub const FORWARDED_PER_TASK_LIST: &str = "forwarded_per_tl";
 pub const FORWARD_POLL_LATENCY: &str = "forward_poll_latency_per_tl";
 pub const FORWARD_POLL_LATENCY_NS: &str = "forward_poll_latency_per_tl_ns";
@@ -501,6 +510,69 @@ impl MatchingMetrics {
                 ("leak_cause".to_owned(), cause.to_owned()),
             ]),
         );
+    }
+
+    pub fn partition_config_gauges(
+        &self,
+        context: &PollMetricContext,
+        root: &str,
+        read: usize,
+        write: usize,
+        version: Option<i64>,
+    ) {
+        let mut tags = self.task_list_tags(context);
+        tags.insert("tasklist_root_partition".to_owned(), go_sanitize_metric_value(root));
+        for (name, value) in [
+            (TASK_LIST_PARTITION_CONFIG_NUM_READ, read as f64),
+            (TASK_LIST_PARTITION_CONFIG_NUM_WRITE, write as f64),
+        ] {
+            self.0.record(MetricEvent {
+                name,
+                kind: MetricKind::Gauge,
+                value: MetricValue::Number(value),
+                tags: tags.clone(),
+                histogram: None,
+            });
+        }
+        if let Some(version) = version {
+            self.0.record(MetricEvent {
+                name: TASK_LIST_PARTITION_CONFIG_VERSION,
+                kind: MetricKind::Gauge,
+                value: MetricValue::Number(version as f64),
+                tags,
+                histogram: None,
+            });
+        }
+    }
+
+    pub fn partition_mismatch(
+        &self,
+        context: &PollMetricContext,
+        read_write_mismatch: bool,
+        poller_mismatch: bool,
+        isolation_enabled: bool,
+    ) {
+        let tags = self.task_list_tags(context);
+        if read_write_mismatch {
+            self.0.record(MetricEvent {
+                name: TASK_LIST_READ_WRITE_PARTITION_MISMATCH,
+                kind: MetricKind::Gauge,
+                value: MetricValue::Number(1.0),
+                tags: tags.clone(),
+                histogram: None,
+            });
+        }
+        if poller_mismatch {
+            let mut tags = tags;
+            tags.insert("isolation_enabled".to_owned(), isolation_enabled.to_string());
+            self.0.record(MetricEvent {
+                name: TASK_LIST_POLLER_PARTITION_MISMATCH,
+                kind: MetricKind::Gauge,
+                value: MetricValue::Number(1.0),
+                tags,
+                histogram: None,
+            });
+        }
     }
 
     pub fn poll_match(

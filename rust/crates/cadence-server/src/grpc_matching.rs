@@ -959,6 +959,78 @@ impl Matching {
             None => crate::matching_limiter::TASK_DISPATCH_RPS,
         }
     }
+    fn emit_partition_runtime_metrics(
+        &self,
+        domain_id: &str,
+        list: &p::TaskList,
+        task_type: i32,
+        queue: &crate::matching_registry::QueueHandle,
+    ) -> Result<(), Status> {
+        if list.kind != 0 {
+            return Ok(());
+        }
+        let parsed = task_list_name(&list.name)?;
+        let domain = domain_name_for(&self.frontend.state.domains, domain_id)
+            .unwrap_or_else(|| domain_id.to_owned());
+        let context = crate::matching_metrics::PollMetricContext {
+            domain: domain.clone(),
+            task_list: list.name.clone(),
+            task_list_kind: list.kind,
+            task_type: if task_type == 0 { "decision_task" } else { "activity_task" },
+            poller_isolation_group: String::new(),
+        };
+        let config = queue.partitions.get();
+        self.metrics.partition_config_gauges(
+            &context,
+            parsed.root(),
+            config.as_ref().map(|value| value.read_partitions.len()).unwrap_or(1),
+            config.as_ref().map(|value| value.write_partitions.len()).unwrap_or(1),
+            config.as_ref().map(|value| value.version),
+        );
+        if !parsed.is_root() {
+            return Ok(());
+        }
+        let (read_partitions, write_partitions, isolation_enabled) = {
+            let config = self
+                .frontend
+                .state
+                .admin
+                .dynamic_config
+                .lock()
+                .expect("admin lock");
+            let root = parsed.root();
+            let read = cadence_persistence::dynamic_config::task_list_integer(
+                config.property_values("matching.numTasklistReadPartitions"),
+                Some(&domain),
+                root,
+                task_type,
+                1,
+            )
+            .max(1) as usize;
+            let write = cadence_persistence::dynamic_config::task_list_integer(
+                config.property_values("matching.numTasklistWritePartitions"),
+                Some(&domain),
+                root,
+                task_type,
+                1,
+            )
+            .max(1) as usize;
+            let enabled = cadence_persistence::dynamic_config::boolean(
+                config.property_values("system.enableTasklistIsolation"),
+                Some(&domain),
+                false,
+            );
+            (read, write, enabled)
+        };
+        let poller_count = queue.pollers.lock().expect("poller history lock").count();
+        self.metrics.partition_mismatch(
+            &context,
+            read_partitions != write_partitions,
+            poller_count < read_partitions || poller_count < write_partitions,
+            isolation_enabled,
+        );
+        Ok(())
+    }
     /// Go `types.AutoConfigHint`. `taskMatcher.Poll` stamps the task it returns
     /// with `cfg.EnableClientAutoConfig()` bound to the manager's own task-list
     /// type plus the elapsed poll wait, and the engine stamps the same hint on
@@ -1405,6 +1477,12 @@ impl m::matching_api_server::MatchingApi for Matching {
                     0,
                 )
                 .await?;
+            self.emit_partition_runtime_metrics(
+                &r.domain_id,
+                payload.task_list.as_ref().expect("validated task list"),
+                0,
+                &queue,
+            )?;
             let poll_started = std::time::Instant::now();
             let expiration =
                 self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
@@ -1616,6 +1694,12 @@ impl m::matching_api_server::MatchingApi for Matching {
                     1,
                 )
                 .await?;
+            self.emit_partition_runtime_metrics(
+                &r.domain_id,
+                payload.task_list.as_ref().expect("validated task list"),
+                1,
+                &queue,
+            )?;
             let poll_started = std::time::Instant::now();
             let expiration =
                 self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
@@ -2726,7 +2810,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         // The internal request carries the authoritative domain/task routing;
         // the embedded worker token must agree with it, like Go's domain-cache
         // lookup by UUID before delivering to the query channel.
-        self.domain_name(&r.domain_id)?;
+        let domain = self.domain_name(&r.domain_id)?;
         if !r.task_id.is_empty() && !payload.task_token.is_empty() {
             if let Ok(token) =
                 cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
@@ -2771,10 +2855,23 @@ impl m::matching_api_server::MatchingApi for Matching {
                 result,
                 worker_version_info: payload.worker_version_info.clone(),
             };
-            queue.queries.complete(
+            let completed = queue.queries.complete(
                 &r.task_id,
                 crate::matching_query::QueryOutcome::Worker(answer),
-            )?;
+            );
+            if completed.is_err() {
+                self.metrics.task_list_counter_event(
+                    crate::matching_metrics::RESPOND_QUERY_TASK_FAILED,
+                    &crate::matching_metrics::PollMetricContext {
+                        domain: domain.clone(),
+                        task_list: task_list.name.clone(),
+                        task_list_kind: task_list.kind,
+                        task_type: "decision_task",
+                        poller_isolation_group: String::new(),
+                    },
+                );
+            }
+            completed?;
             return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
         }
         let input = cv::query_completed(payload)?;

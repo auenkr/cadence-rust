@@ -1967,6 +1967,8 @@ async fn matching_rpc_standby_completes_started_tasks_without_worker_poll() {
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
     });
     let (_dir, _store, matching, _key) = fixture_with_history(&peer);
+    let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+    let matching = matching.with_metrics(sink.clone());
     let domain = Uuid::from_u128(3).to_string();
     matching.frontend.state.domains.create(
         cadence_api::types::DomainInfo { name: "standby".into(), uuid: domain.clone(), ..Default::default() },
@@ -1986,6 +1988,13 @@ async fn matching_rpc_standby_completes_started_tasks_without_worker_poll() {
         }).await.expect("standby backlog should be acknowledged without SDK polls");
     }
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    let events = sink.events();
+    assert_eq!(
+        events.iter().filter(|event| event.name == crate::matching_metrics::STANDBY_TASKS_COMPLETED).count(),
+        2
+    );
+    assert!(!events.iter().any(|event| event.name == crate::matching_metrics::STANDBY_TASKS_NOT_STARTED));
+    assert!(!events.iter().any(|event| event.name == crate::matching_metrics::STANDBY_TASKS_COMPLETION_FAILURE));
     server.abort();
 }
 

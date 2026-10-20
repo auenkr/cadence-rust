@@ -191,6 +191,8 @@ mod tests {
         assert_eq!(policy(Ok(true), true, true, Some(&[]), 0, 0).select_with_cause().2, Some("group_drained"));
         assert_eq!(policy(Ok(false), false, true, Some(&[]), 0, 0).select_with_cause().2, Some("group_unknown"));
         assert_eq!(policy(Ok(false), true, false, Some(&[]), 0, 0).select_with_cause().2, Some("no_recent_pollers"));
+        let wrong_partition = vec!["b".to_owned()];
+        assert_eq!(policy(Ok(false), true, true, Some(&wrong_partition), 0, 0).select_with_cause().2, Some("partition_change"));
         assert_eq!(policy(Ok(false), true, true, Some(&[]), 100, 60).select_with_cause().2, Some("expired"));
     }
 }

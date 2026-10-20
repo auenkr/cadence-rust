@@ -1015,7 +1015,25 @@ impl TaskDispatcher {
                             self.finish_delivery(task, Err(error)).await;
                         }
                     }
-                    StartErrorKind::Retry => self.finish_delivery(task, Err(error)).await,
+                    StartErrorKind::Retry => {
+                        if !matches!(error.code(), tonic::Code::Cancelled | tonic::Code::DeadlineExceeded) {
+                            if let Some((metrics, context)) = lifecycle
+                                .as_ref()
+                                .and_then(|lifecycle| {
+                                    lifecycle
+                                        .metric_context
+                                        .as_ref()
+                                        .map(|context| (lifecycle.metrics.clone(), context.clone()))
+                                })
+                            {
+                                metrics.task_list_counter_event(
+                                    crate::matching_metrics::BUFFER_UNKNOWN_DISPATCH_ERROR,
+                                    &context,
+                                );
+                            }
+                        }
+                        self.finish_delivery(task, Err(error)).await;
+                    }
                 },
             }
         }

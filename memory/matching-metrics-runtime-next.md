@@ -160,12 +160,29 @@ metric, matching Go's post-validation `UpdateTaskListPartitionConfig` failure
 counter.
 
 These changes remain source-only and unvalidated. Rust selection reason and
-limiter gauge tests were added but not run. Remaining known gaps include
-partition config count/version gauges and mismatch gauges, standby completion
-counters, and unknown dispatch error classification. Rust's current
-`TaskReader`/`TaskDispatcher` does not expose the same task-dispatch error
-outcome as Go's `task_reader.go:568`, so a counter cannot be added without
-porting that outcome rather than mapping unrelated queue or History errors.
+limiter gauge tests were added but not run.
+
+The three prior gaps are now wired as follows:
+
+* Matching poll entry emits partition config read/write/version gauges for
+  normal task lists, and root poll entry emits read/write partition mismatch
+  plus poller-count mismatch gauges, including Go's `isolation_enabled` tag.
+  Values use the root owner's cached config or legacy single-partition default
+  and the matching dynamic read/write partition counts.
+* The standby checker emits completed and not-started counters for the same
+  History decisions as Go. It emits completion failure once when its retry
+  window expires on a History/domain error; active-domain bypasses and
+  cancellation/deadline handling do not manufacture completion outcomes.
+* Matching's task start retry classification now emits the unknown dispatch
+  counter for retryable statuses other than cancellation and deadline. Typed
+  discard and inactive-domain cases, limiter throttles, and standby checker
+  outcomes are classified separately.
+
+The remaining concrete callsite found in this pass was Go's
+`RespondQueryTaskFailedPerTaskListCounter` at `handler/engine.go:1094`. Rust now
+counts failed `QueryChannel::complete` delivery with
+`respond_query_task_failed_per_tl`. Go's `reportConditionFailed` helper has no
+callsite in the current Go source tree, so it remains intentionally unwired.
 
 ## Focused validation commands for the next build lane
 
@@ -175,6 +192,7 @@ Run the Rust tests after taking the Cargo lane:
 cargo test -p cadence-common selection_preserves_go_leak_causes
 cargo test -p cadence-server report_limit_returns_go_rate_gauge_updates
 cargo test -p cadence-server matching_metrics::matcher_metric_tests
+cargo test -p cadence-server matching_rpc_standby_completes_started_tasks_without_worker_poll
 ```
 
 Run the Go metric source/exporter oracles after taking the Go lane:

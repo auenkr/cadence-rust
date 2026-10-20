@@ -1004,6 +1004,14 @@ impl QueueRegistry {
                                     registry.history.clone(),
                                     key.clone(),
                                     registry.standby_enabled.clone(),
+                                    registry.metrics.clone(),
+                                    crate::matching_metrics::PollMetricContext {
+                                        domain: domain.clone(),
+                                        task_list: lookup.1.clone(),
+                                        task_list_kind: i32::from(kind),
+                                        task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
+                                        poller_isolation_group: String::new(),
+                                    },
                                 )
                             }),
                         Some((
