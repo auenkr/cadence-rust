@@ -9,15 +9,18 @@ Commits in the `matching-telemetry` worktree:
 - `27cf90152` Go `Low1ms100s` histogram bucket scheme.
 - `d4d3715db` configurable Prometheus sink, exposition, and listener.
 - `d7127725a` summary timers and Go reporter oracle harness.
+- `85729927c` rotating-stream audit and one-command Go/Rust exposition comparison.
 
 The Rust sink is in `rust/crates/cadence-server/src/matching_metrics_prometheus.rs`.
 It applies the Matching service tag, metric prefix, sanitizer, Prometheus
 histogram buckets, and seconds units for timer and duration histogram output.
 An omitted `timerType` selects Go Tally's default summary; explicit `summary`
 and `histogram` select those timer forms. Summary quantiles use the pinned
-Prometheus client's targeted CKMS stream behavior after the 500-observation
-flush, with the default objectives, 10-minute age, and summary count/sum
-semantics. Configurable objectives and histogram bounds are supported.
+Prometheus client's targeted CKMS stream behavior after each 500-observation
+flush, with the default objectives, five 2-minute rotating streams, and
+cumulative summary count/sum semantics. Because the client queries only its
+active stream, the effective quantile age window is coarse (roughly 8–10
+minutes). Configurable objectives and histogram bounds are supported.
 
 The pinned Go oracle harness is `go/tools/matching-metrics-prometheus-oracle`.
 From `go/`, run it without an argument to exercise Tally's default summary, or
@@ -39,3 +42,23 @@ go run ./tools/matching-metrics-prometheus-oracle histogram
 
 Then compare both outputs against the Rust renderer after running the focused
 `cadence-server` tests. Do not treat these source checks as parity evidence.
+
+## StatsD source port
+
+Pinned Go behavior was audited in `go/common/config/metrics.go`,
+`go/common/metrics/tally/statsd/reporter.go`, Tally v3.5.8, and
+cactus/go-statsd-client. The Cadence StatsD wrapper does not send protocol
+tags; it sorts tag keys and appends each as `.key.value` to the metric name.
+The Tally scope prefix is part of that name, then the cactus client prefix is
+prepended. Counters use `|c`, gauges truncate to `int64` and use `|g`, timers
+emit duration in milliseconds with `|ms`, and histogram buckets are counters
+named with Go duration ranges (including `-infinity` and `infinity` sentinels).
+Buffered UDP uses newline-separated lines, a 1432-byte default packet limit,
+and a 300ms default flush interval; shutdown flushes the final packet.
+
+`matching_metrics_statsd.rs` ports those name and wire conventions, the
+Matching root service tag, the Go histogram bounds/duration formatter, UDP
+packet sizing, timer-based flushing, and flush-on-drop. Source verification is
+limited to rustfmt and `git diff --check`; neither the new UDP test nor Cargo
+tests were run because the runtime lane is occupied. The service runtime still
+needs to own/configure this sink in a later integration step.
