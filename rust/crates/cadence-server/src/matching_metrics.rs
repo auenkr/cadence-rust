@@ -85,6 +85,28 @@ pub const MATCHING_HOST_TAG: &str = "matching_host";
 pub const SEMAPHORE_NAME_TAG: &str = "semaphore_name";
 pub const CALLER_TAG: &str = "caller";
 pub const TRANSPORT_TAG: &str = "transport";
+pub const POLL_SUCCESS: &str = "poll_success_per_tl";
+pub const POLL_TIMEOUT: &str = "poll_timeouts_per_tl";
+pub const POLL_SUCCESS_SYNC: &str = "poll_success_sync_per_tl";
+pub const LOCAL_TO_LOCAL_MATCH: &str = "local_to_local_matches_per_tl";
+pub const LOCAL_TO_REMOTE_MATCH: &str = "local_to_remote_matches_per_tl";
+pub const REMOTE_TO_LOCAL_MATCH: &str = "remote_to_local_matches_per_tl";
+pub const REMOTE_TO_REMOTE_MATCH: &str = "remote_to_remote_matches_per_tl";
+pub const ISOLATION_TASK_MATCH: &str = "isolation_task_matches_per_tl";
+pub const ISOLATION_SUCCESS: &str = "isolation_success_per_tl";
+pub const POLL_DECISION_ALREADY_STARTED: &str = "poll_decision_task_already_started_per_tl";
+pub const POLL_ACTIVITY_ALREADY_STARTED: &str = "poll_activity_task_already_started_per_tl";
+pub const ISOLATION_GROUP_TAG: &str = "isolation_group";
+pub const POLLER_ISOLATION_GROUP_TAG: &str = "poller_isolation_group";
+
+#[derive(Clone, Debug)]
+pub struct PollMetricContext {
+    pub domain: String,
+    pub task_list: String,
+    pub task_list_kind: i32,
+    pub task_type: &'static str,
+    pub poller_isolation_group: String,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct InboundMetricContext {
@@ -331,6 +353,110 @@ impl MatchingMetrics {
             tags: BTreeMap::from([(OPERATION_TAG.to_owned(), "TaskListMgr".to_owned())]),
             histogram: None,
         });
+    }
+
+    fn task_list_counter(
+        &self,
+        name: &'static str,
+        context: &PollMetricContext,
+        extra: BTreeMap<String, String>,
+    ) {
+        let list = match context.task_list_kind {
+            1 => "__sticky__",
+            2 => "__ephemeral__",
+            0 if !context.task_list.is_empty() => context.task_list.as_str(),
+            _ => "_unknown_",
+        };
+        let mut tags = BTreeMap::from([
+            (
+                DOMAIN_TAG.to_owned(),
+                if context.domain.is_empty() {
+                    "_unknown_".to_owned()
+                } else {
+                    context.domain.clone()
+                },
+            ),
+            (TASK_LIST_TAG.to_owned(), go_sanitize_metric_value(list)),
+        ]);
+        tags.extend(extra);
+        self.0.record(MetricEvent {
+            name,
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            tags,
+            histogram: None,
+        });
+    }
+
+    pub fn poll_success(&self, context: &PollMetricContext, sync: bool) {
+        self.task_list_counter(POLL_SUCCESS, context, BTreeMap::new());
+        if sync {
+            self.task_list_counter(POLL_SUCCESS_SYNC, context, BTreeMap::new());
+        }
+    }
+
+    pub fn poll_timeout(&self, context: &PollMetricContext) {
+        self.task_list_counter(POLL_TIMEOUT, context, BTreeMap::new());
+    }
+
+    pub fn poll_match(
+        &self,
+        context: &PollMetricContext,
+        task_forwarded: bool,
+        poll_forwarded: bool,
+        partition: Option<&BTreeMap<String, String>>,
+    ) {
+        let name = match (task_forwarded, poll_forwarded) {
+            (false, false) => LOCAL_TO_LOCAL_MATCH,
+            (false, true) => LOCAL_TO_REMOTE_MATCH,
+            (true, false) => REMOTE_TO_LOCAL_MATCH,
+            (true, true) => REMOTE_TO_REMOTE_MATCH,
+        };
+        self.task_list_counter(name, context, BTreeMap::new());
+        let Some(config) = partition else {
+            return;
+        };
+        let Some(current) = config.get("isolation-group") else {
+            return;
+        };
+        let original = config.get("original-isolation-group").unwrap_or(current);
+        self.task_list_counter(
+            ISOLATION_TASK_MATCH,
+            context,
+            BTreeMap::from([
+                (
+                    ISOLATION_GROUP_TAG.to_owned(),
+                    go_sanitize_metric_value(original),
+                ),
+                (
+                    POLLER_ISOLATION_GROUP_TAG.to_owned(),
+                    if context.poller_isolation_group.is_empty() {
+                        "_unknown_".to_owned()
+                    } else {
+                        go_sanitize_metric_value(&context.poller_isolation_group)
+                    },
+                ),
+            ]),
+        );
+        if original == &context.poller_isolation_group {
+            self.task_list_counter(
+                ISOLATION_SUCCESS,
+                context,
+                BTreeMap::from([(
+                    ISOLATION_GROUP_TAG.to_owned(),
+                    go_sanitize_metric_value(original),
+                )]),
+            );
+        }
+    }
+
+    pub fn poll_already_started(&self, context: &PollMetricContext) {
+        let name = if context.task_type == "activity_task" {
+            POLL_ACTIVITY_ALREADY_STARTED
+        } else {
+            POLL_DECISION_ALREADY_STARTED
+        };
+        self.task_list_counter(name, context, BTreeMap::new());
     }
 
     /// Record one complete inbound Matching RPC. This is called at the shared

@@ -1334,8 +1334,21 @@ impl m::matching_api_server::MatchingApi for Matching {
                 info: cadence_common::poller::Info {
                     identity: payload.identity.clone(),
                     rate_per_second: rate,
-                    isolation_group: r.isolation_group,
+                    isolation_group: r.isolation_group.clone(),
                 },
+                forwarded: !r.forwarded_from.is_empty(),
+                metric_context: Some(crate::matching_metrics::PollMetricContext {
+                    domain: payload.domain.clone(),
+                    task_list: guard.key.task_list.clone(),
+                    task_list_kind: payload
+                        .task_list
+                        .as_ref()
+                        .map(|list| list.kind)
+                        .unwrap_or_default(),
+                    task_type: "decision_task",
+                    poller_isolation_group: r.isolation_group.clone(),
+                }),
+                metrics: self.metrics.clone(),
             };
             // Go's matcher serves `queryTaskC` on the same long poll as the
             // decision backlog; a ready query is handed to this poller instead
@@ -1523,8 +1536,21 @@ impl m::matching_api_server::MatchingApi for Matching {
                 info: cadence_common::poller::Info {
                     identity: payload.identity.clone(),
                     rate_per_second: rate,
-                    isolation_group: r.isolation_group,
+                    isolation_group: r.isolation_group.clone(),
                 },
+                forwarded: !r.forwarded_from.is_empty(),
+                metric_context: Some(crate::matching_metrics::PollMetricContext {
+                    domain: payload.domain.clone(),
+                    task_list: guard.key.task_list.clone(),
+                    task_list_kind: payload
+                        .task_list
+                        .as_ref()
+                        .map(|list| list.kind)
+                        .unwrap_or_default(),
+                    task_type: "activity_task",
+                    poller_isolation_group: r.isolation_group.clone(),
+                }),
+                metrics: self.metrics.clone(),
             };
             return tokio::select! {
                 result=async {

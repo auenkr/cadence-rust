@@ -23,6 +23,9 @@ pub struct PollLifecycle {
     pub manager: Arc<std::sync::Mutex<cadence_common::poller::Manager>>,
     pub id: String,
     pub info: cadence_common::poller::Info,
+    pub forwarded: bool,
+    pub metric_context: Option<crate::matching_metrics::PollMetricContext>,
+    pub metrics: crate::matching_metrics::MatchingMetrics,
 }
 pub(crate) struct PollWaitGuard(PollLifecycle);
 impl PollLifecycle {
@@ -496,6 +499,10 @@ impl TaskDispatcher {
                 lifecycle.manager = parent.pollers.clone()?;
                 // ForwardPoll rebuilds the request without the worker's rate.
                 lifecycle.info.rate_per_second = crate::matching_limiter::TASK_DISPATCH_RPS;
+                lifecycle.forwarded = true;
+                if let Some(context) = lifecycle.metric_context.as_mut() {
+                    context.task_list = parent_name.clone();
+                }
                 Some(lifecycle)
             });
             parent
@@ -518,7 +525,8 @@ impl TaskDispatcher {
         &self,
         execution: &p::WorkflowExecution,
     ) -> Result<h::GetMutableStateResponse, Status> {
-        self.query_mutable_state_with_deadline(execution, None).await
+        self.query_mutable_state_with_deadline(execution, None)
+            .await
     }
     pub async fn query_mutable_state_with_deadline(
         &self,
@@ -665,6 +673,9 @@ impl TaskDispatcher {
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         let (sender, receiver) = oneshot::channel();
+        let timeout_metrics = lifecycle
+            .as_ref()
+            .and_then(|l| Some((l.metrics.clone(), l.metric_context.clone()?)));
         let worker = self.clone();
         let deadline = tokio::time::Instant::now() + expiration;
         tokio::spawn(async move {
@@ -675,7 +686,12 @@ impl TaskDispatcher {
         match tokio::time::timeout(expiration, receiver).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(Status::unavailable("Matching delivery worker stopped.")),
-            Err(_) => Ok(R::default()),
+            Err(_) => {
+                if let Some((metrics, context)) = timeout_metrics {
+                    metrics.poll_timeout(&context);
+                }
+                Ok(R::default())
+            }
         }
     }
     async fn delivery_worker<Q, R, F, Fut>(
@@ -854,6 +870,17 @@ impl TaskDispatcher {
                 }
                 continue;
             };
+            if let Some(lifecycle) = lifecycle.as_ref() {
+                if let Some(context) = lifecycle.metric_context.as_ref() {
+                    lifecycle.metrics.poll_success(context, task.sync.is_some());
+                    lifecycle.metrics.poll_match(
+                        context,
+                        task.forwarded,
+                        lifecycle.forwarded,
+                        task.task.data.partition_config.as_ref(),
+                    );
+                }
+            }
             drop(waiting.take());
             waiting_started = false;
             if sender.as_ref().is_some_and(|sender| sender.is_closed()) {
@@ -884,7 +911,15 @@ impl TaskDispatcher {
                     return;
                 }
                 Err(error) => match start_error_kind(&error) {
-                    StartErrorKind::Discard => self.finish_delivery(task, Ok(())).await,
+                    StartErrorKind::Discard => {
+                        if let (Some(lifecycle), Some(context)) = (
+                            lifecycle.as_ref(),
+                            lifecycle.as_ref().and_then(|l| l.metric_context.as_ref()),
+                        ) {
+                            lifecycle.metrics.poll_already_started(context);
+                        }
+                        self.finish_delivery(task, Ok(())).await
+                    }
                     StartErrorKind::InactiveDomain => {
                         if self
                             .history
@@ -1180,6 +1215,9 @@ mod tests {
                         rate_per_second: 1.0,
                         isolation_group: String::new(),
                     },
+                    forwarded: false,
+                    metric_context: None,
+                    metrics: crate::matching_metrics::MatchingMetrics::default(),
                 }),
             )
             .await
@@ -1217,16 +1255,44 @@ mod tests {
         let (_directory, _store, _key, dispatcher) = fixture(0);
         let calls = Arc::new(AtomicUsize::new(0));
         let copy = calls.clone();
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let metrics = crate::matching_metrics::MatchingMetrics::new(sink.clone());
         let response = dispatcher
-            .poll((), Duration::from_millis(10), move |_, _| {
-                copy.fetch_add(1, Ordering::Relaxed);
-                std::future::ready(Ok(m::PollForActivityTaskResponse::default()))
-            })
+            .poll_with_lifecycle(
+                (),
+                Duration::from_millis(10),
+                move |_, _, _| {
+                    copy.fetch_add(1, Ordering::Relaxed);
+                    std::future::ready(Ok(m::PollForActivityTaskResponse::default()))
+                },
+                Some(PollLifecycle {
+                    manager: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
+                    id: "timeout".into(),
+                    info: cadence_common::poller::Info {
+                        identity: "worker".into(),
+                        rate_per_second: 1.0,
+                        isolation_group: String::new(),
+                    },
+                    forwarded: false,
+                    metric_context: Some(crate::matching_metrics::PollMetricContext {
+                        domain: "metric-domain".into(),
+                        task_list: "metric-list".into(),
+                        task_list_kind: 0,
+                        task_type: "activity_task",
+                        poller_isolation_group: String::new(),
+                    }),
+                    metrics,
+                }),
+            )
             .await
             .unwrap();
         assert!(response.task_token.is_empty());
         assert_eq!(calls.load(Ordering::Relaxed), 0);
         assert_eq!(dispatcher.queue.levels().2, 0);
+        assert!(sink
+            .events()
+            .iter()
+            .any(|event| event.name == crate::matching_metrics::POLL_TIMEOUT));
     }
     #[tokio::test]
     async fn matching_dispatch_poller_wait_ends_before_history_and_restarts_after_failure() {
@@ -1240,6 +1306,9 @@ mod tests {
                 rate_per_second: 42.0,
                 isolation_group: "a".into(),
             },
+            forwarded: false,
+            metric_context: None,
+            metrics: crate::matching_metrics::MatchingMetrics::default(),
         };
         let seen = Arc::new(Mutex::new(Vec::new()));
         let timestamps = seen.clone();
@@ -1298,6 +1367,132 @@ mod tests {
         poll.abort();
         assert!(poll.await.unwrap_err().is_cancelled());
     }
+    #[tokio::test]
+    async fn matching_dispatch_records_poll_events_from_claimed_task_and_real_poll_context() {
+        let directions = [
+            (false, false, crate::matching_metrics::LOCAL_TO_LOCAL_MATCH),
+            (false, true, crate::matching_metrics::LOCAL_TO_REMOTE_MATCH),
+            (true, false, crate::matching_metrics::REMOTE_TO_LOCAL_MATCH),
+            (true, true, crate::matching_metrics::REMOTE_TO_REMOTE_MATCH),
+        ];
+        for (case, (task_forwarded, poll_forwarded, direction)) in
+            directions.into_iter().enumerate()
+        {
+            let (_directory, _store, _key, dispatcher) = fixture(0);
+            let original = if case == 3 { Some("red") } else { None };
+            let mut partition_config =
+                std::collections::BTreeMap::from([("isolation-group".into(), "blue".into())]);
+            if let Some(original) = original {
+                partition_config.insert("original-isolation-group".into(), original.into());
+            }
+            let data = TaskData {
+                workflow_id: format!("telemetry-{case}"),
+                partition_config: Some(partition_config),
+                ..Default::default()
+            }
+            .at_creation(now(), 0);
+            let reader = crate::matching_reader::TaskReader::new(
+                dispatcher.queue.clone(),
+                dispatcher.task_notification(),
+                crate::matching_reader::ReaderConfig::default(),
+            );
+            let matcher = Arc::new(crate::matching_sync::SyncMatcher::new(
+                &["blue".into()],
+                reader.stop_signal().subscribe(),
+            ));
+            let dispatcher = dispatcher
+                .with_reader(reader.clone())
+                .with_sync_matcher(matcher.clone());
+            let producer = tokio::spawn(async move {
+                matcher
+                    .offer(
+                        data,
+                        "blue",
+                        "00000000-0000-0000-0000-000000000001",
+                        task_forwarded,
+                        Duration::from_secs(1),
+                        tokio::time::Instant::now() + Duration::from_secs(2),
+                    )
+                    .await
+            });
+            let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+            let metrics = crate::matching_metrics::MatchingMetrics::new(sink.clone());
+            let lifecycle = PollLifecycle {
+                manager: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
+                id: format!("metric-poller-{case}"),
+                info: cadence_common::poller::Info {
+                    identity: "worker".into(),
+                    rate_per_second: 1.0,
+                    isolation_group: "blue".into(),
+                },
+                forwarded: poll_forwarded,
+                metric_context: Some(crate::matching_metrics::PollMetricContext {
+                    domain: "metric-domain".into(),
+                    task_list: "metric-list".into(),
+                    task_list_kind: 0,
+                    task_type: "decision_task",
+                    poller_isolation_group: "blue".into(),
+                }),
+                metrics,
+            };
+            dispatcher
+                .poll_with_lifecycle(
+                    p::PollForDecisionTaskRequest::default(),
+                    Duration::from_secs(2),
+                    |_, _, _| std::future::ready(Ok(m::PollForDecisionTaskResponse::default())),
+                    Some(lifecycle),
+                )
+                .await
+                .unwrap();
+            assert!(producer.await.unwrap());
+            let events = sink.events();
+            let poll_success = events
+                .iter()
+                .find(|e| e.name == crate::matching_metrics::POLL_SUCCESS)
+                .unwrap();
+            assert_eq!(
+                poll_success.tags[crate::matching_metrics::DOMAIN_TAG],
+                "metric-domain"
+            );
+            assert_eq!(
+                poll_success.tags[crate::matching_metrics::TASK_LIST_TAG],
+                "metric-list"
+            );
+            assert!(events
+                .iter()
+                .any(|e| e.name == crate::matching_metrics::POLL_SUCCESS_SYNC));
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|e| e.name.contains("_to_") && e.name.ends_with("matches_per_tl"))
+                    .map(|e| e.name)
+                    .collect::<Vec<_>>(),
+                vec![direction]
+            );
+            let isolation = events
+                .iter()
+                .find(|e| e.name == crate::matching_metrics::ISOLATION_TASK_MATCH)
+                .unwrap();
+            assert_eq!(
+                isolation.tags[crate::matching_metrics::ISOLATION_GROUP_TAG],
+                original.unwrap_or("blue")
+            );
+            assert_eq!(
+                isolation.tags[crate::matching_metrics::POLLER_ISOLATION_GROUP_TAG],
+                "blue"
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .any(|e| e.name == crate::matching_metrics::ISOLATION_SUCCESS),
+                original.is_none()
+            );
+            reader.stop();
+            dispatcher.queue.stop();
+            reader.wait_stopped().await;
+        }
+    }
+
     #[tokio::test]
     async fn matching_dispatch_sync_offer_delivers_without_durable_claim() {
         let (_directory, store, key, dispatcher) = fixture(0);
