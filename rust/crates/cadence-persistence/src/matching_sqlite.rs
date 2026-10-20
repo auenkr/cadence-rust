@@ -2,48 +2,12 @@
 //! This store is independent of the workflow execution engine. The standalone
 //! Matching RPC delivery loop is a separate consumer of this persistence API.
 use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskListData};
+pub use crate::matching_task_store::{
+    AllocatedTask, MatchingTaskStoreError as StorageError, Result, TaskListKey, TaskListRecord,
+};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::{path::Path, sync::Mutex, time::Duration};
 use uuid::Uuid;
-
-#[derive(Debug, thiserror::Error)]
-pub enum StorageError {
-    #[error("unsupported SQLite task-store configuration: {0}")]
-    UnsupportedConfiguration(String),
-    #[error("incompatible Go SQLite Matching schema: {0}")]
-    IncompatibleSchema(String),
-    #[error("{0}")]
-    ConditionFailed(String),
-    #[error("task list does not exist")]
-    NotFound,
-    #[error(transparent)]
-    Sql(#[from] rusqlite::Error),
-    #[error(transparent)]
-    Blob(#[from] cadence_thrift::Error),
-    #[error("missing limit parameter")]
-    MissingLimit,
-    #[error("delete failed: {0} rows affected instead of 1")]
-    DeleteCount(usize),
-}
-pub type Result<T> = std::result::Result<T, StorageError>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskListKey {
-    pub domain_id: Uuid,
-    pub name: String,
-    /// Go persistence types: 0 decision, 1 activity (not protobuf enum values).
-    pub task_type: i32,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskListRecord {
-    pub range_id: i64,
-    pub data: TaskListData,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AllocatedTask {
-    pub task_id: i64,
-    pub data: TaskData,
-}
 
 pub struct SqliteTaskStore {
     connection: Mutex<Connection>,

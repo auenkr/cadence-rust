@@ -16,6 +16,8 @@ sqlparser = "0.53"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 rand = "0.8"
 rusqlite = { version = "0.32.1", features = ["bundled", "hooks"] }
+mysql = { version = "26.0.1", default-features = false, features = ["minimal-rust", "rustls-tls-ring"] }
+farmhash = "1.1.5"
 snap = "1.1.1"
 tokio = { version = "1", features = ["sync"] }
 

@@ -1,9 +1,7 @@
 //! Durable single-owner Matching queue. Workflow state lives in History, not here.
 use crate::{
     matching_blob::{TaskData, TaskListData},
-    matching_sqlite::{
-        AllocatedTask, Result as StorageResult, StorageError, TaskListKey,
-    },
+    matching_sqlite::{AllocatedTask, Result as StorageResult, StorageError, TaskListKey},
     matching_task_store::MatchingTaskStore,
 };
 use cadence_common::ack_manager::AckManager;
@@ -267,11 +265,9 @@ impl DurableTaskQueue {
             .zip(data)
             .map(|(task, (domain, _))| (*domain, task))
             .collect::<Vec<_>>();
-        let result = self.store.create_tasks_with_domains(
-            &self.key,
-            range_id,
-            &tasks_with_domains,
-        );
+        let result = self
+            .store
+            .create_tasks_with_domains(&self.key, range_id, &tasks_with_domains);
         // Go advances the read boundary after the write returns, even on error.
         // Allocated IDs are never reused after an uncertain persistence outcome.
         if let Some(last) = tasks.last() {
@@ -550,18 +546,29 @@ impl DurableTaskQueue {
     }
     /// Go defaults: 100 rows per delete batch, one second between small drains.
     pub fn run_garbage_collection(&self, force: bool) -> Result<usize> {
-        let provider = self.gc_batch_size_provider.lock().expect("matching GC config lock").clone();
+        let provider = self
+            .gc_batch_size_provider
+            .lock()
+            .expect("matching GC config lock")
+            .clone();
         match provider {
             Some(provider) => self.run_garbage_collection_with_batch_provider(
-                force, move || provider(), std::time::Duration::from_secs(1),
+                force,
+                move || provider(),
+                std::time::Duration::from_secs(1),
             ),
             None => self.run_garbage_collection_with(
-                force, NonZeroU32::new(100).unwrap(), std::time::Duration::from_secs(1),
+                force,
+                NonZeroU32::new(100).unwrap(),
+                std::time::Duration::from_secs(1),
             ),
         }
     }
     pub fn set_gc_batch_size_provider(&self, provider: Arc<dyn Fn() -> i64 + Send + Sync>) {
-        *self.gc_batch_size_provider.lock().expect("matching GC config lock") = Some(provider);
+        *self
+            .gc_batch_size_provider
+            .lock()
+            .expect("matching GC config lock") = Some(provider);
     }
     pub fn run_garbage_collection_with(
         &self,
@@ -745,7 +752,10 @@ mod tests {
     #[test]
     fn matching_queue_live_gc_batch_provider_is_used_for_each_attempt() {
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("gc.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("gc.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
         let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
         let configured = Arc::new(std::sync::atomic::AtomicI64::new(1));
         let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -757,7 +767,9 @@ mod tests {
         }));
         let written = queue.append(&[data(), data()], 2).unwrap();
         let batch = queue.read_batch(10, n(10), 3).unwrap();
-        for task in batch.tasks { queue.complete(task.task_id).unwrap(); }
+        for task in batch.tasks {
+            queue.complete(task.task_id).unwrap();
+        }
         assert_eq!(queue.run_garbage_collection(true).unwrap(), 2);
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(written.len(), 2);
@@ -765,7 +777,9 @@ mod tests {
         configured.store(2, std::sync::atomic::Ordering::SeqCst);
         let later = queue.append(&[data()], 4).unwrap();
         let batch = queue.read_batch(10, n(10), 5).unwrap();
-        for task in batch.tasks { queue.complete(task.task_id).unwrap(); }
+        for task in batch.tasks {
+            queue.complete(task.task_id).unwrap();
+        }
         assert_eq!(queue.run_garbage_collection(true).unwrap(), 1);
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert_eq!(later.len(), 1);

@@ -18,7 +18,7 @@ fn run<T>(
         };
         // Go SQL converts driver errors to transient InternalServiceError or
         // TimeoutError. Condition failures and serializer errors remain typed.
-        if !matches!(error, StorageError::Sql(_)) {
+        if !error.is_transient() {
             return Err(previous.unwrap_or(error));
         }
         let Some(delay) = next_delay(attempt) else {
