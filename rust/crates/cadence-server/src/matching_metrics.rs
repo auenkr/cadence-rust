@@ -104,7 +104,10 @@ pub const ISOLATION_SUCCESS: &str = "isolation_success_per_tl";
 pub const POLL_DECISION_ALREADY_STARTED: &str = "poll_decision_task_already_started_per_tl";
 pub const POLL_ACTIVITY_ALREADY_STARTED: &str = "poll_activity_task_already_started_per_tl";
 pub const POLLER_PER_TASK_LIST: &str = "poller_count_per_tl";
+pub const RATE_LIMIT_PER_TASK_LIST: &str = "rate_limit_per_tl";
 pub const POLLER_INVALID_ISOLATION_GROUP: &str = "poller_invalid_isolation_group_per_tl";
+pub const TASK_ISOLATION_LEAK: &str = "task_isolation_leak_per_tl";
+pub const PARTITION_UPDATE_FAILED: &str = "tasklist_partition_update_failed_per_tl";
 pub const FORWARDED_PER_TASK_LIST: &str = "forwarded_per_tl";
 pub const FORWARD_POLL_LATENCY: &str = "forward_poll_latency_per_tl";
 pub const FORWARD_POLL_LATENCY_NS: &str = "forward_poll_latency_per_tl_ns";
@@ -482,6 +485,22 @@ impl MatchingMetrics {
     /// partition, including add-task and query RPCs.
     pub fn forwarded_per_task_list(&self, context: &PollMetricContext) {
         self.task_list_counter(FORWARDED_PER_TASK_LIST, context, BTreeMap::new());
+    }
+
+    pub fn task_isolation_leak(
+        &self,
+        context: &PollMetricContext,
+        group: &str,
+        cause: &'static str,
+    ) {
+        self.task_list_counter(
+            TASK_ISOLATION_LEAK,
+            context,
+            BTreeMap::from([
+                (ISOLATION_GROUP_TAG.to_owned(), go_sanitize_metric_value(group)),
+                ("leak_cause".to_owned(), cause.to_owned()),
+            ]),
+        );
     }
 
     pub fn poll_match(

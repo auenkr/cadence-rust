@@ -127,19 +127,62 @@ task-list labels. These events were added to the gRPC Matching handlers after
 domain resolution and before their core operation, like Go's handler callsites
 in `handler/handler.go:167,200,233,273,314`.
 
-The next metrics parity gaps confirmed by the Go callsite audit are the
-root/non-sticky partition mismatch gauges in
-`task_list_manager.go:960+` (`tasklist_read_write_partition_mismatch` and
-`tasklist_poller_partition_mismatch`) and task isolation leak cause events at
-`:917-946`. The Rust isolation selector currently returns only selected group
-and timeout, so emitting cause-tagged leak metrics requires extending its
-outcome while preserving selection behavior. Go's task-list partition config
-version/read/write gauges at `task_list_manager.go:372-380,492` also need a
-Rust callsite audit against cache loads, updates, and refreshes. These gaps
-remain open; no metric is emitted absent an equivalent Rust behavior path.
+The root/non-sticky partition mismatch gauges in `task_list_manager.go:960+`
+(`tasklist_read_write_partition_mismatch` and
+`tasklist_poller_partition_mismatch`) and task-list partition config
+version/read/write gauges at `:372-380,492` still need Rust callsite wiring.
 
 Terminal unknown dispatch error parity remains unimplemented: Go emits from
 `task_reader.go:568`; a source scan of Rust `matching_dispatch.rs` found no
 equivalent classified terminal error callback yet. No Cargo or Go build/test
 was run for this checkpoint; formatting and `git diff --check` are the only
 validation permitted in the occupied build lane.
+
+## Additional source-only metric wiring
+
+The task-list limiter now returns the aggregate rate value when Go
+`task_list_limiter.go:103-112` would update `rate_limit_per_tl`: an accepted
+lower poller rate or a TTL refresh. Poll handling emits this gauge with the
+request's domain/task-list context. The limiter preserves the prior report
+behavior; the return value only exposes the Go gauge update point.
+
+Task isolation selection now retains Go's leak cause (`error`, `group_drained`,
+`group_unknown`, `no_recent_pollers`, `partition_change`, `expired`) alongside
+the same selected group and timeout. Matching reader dispatch and buffer
+admission emit `task_isolation_leak_per_tl` with isolation-group and leak-cause
+tags. `TaskIsolation::select` remains available with its prior return shape;
+`select_with_cause` adds the telemetry outcome without changing selection.
+
+Manual task-list partition config persistence failures now emit
+`tasklist_partition_update_failed_per_tl` from both durable registry and
+legacy-store update paths. Configuration validation errors remain outside the
+metric, matching Go's post-validation `UpdateTaskListPartitionConfig` failure
+counter.
+
+These changes remain source-only and unvalidated. Rust selection reason and
+limiter gauge tests were added but not run. Remaining known gaps include
+partition config count/version gauges and mismatch gauges, standby completion
+counters, and unknown dispatch error classification. Rust's current
+`TaskReader`/`TaskDispatcher` does not expose the same task-dispatch error
+outcome as Go's `task_reader.go:568`, so a counter cannot be added without
+porting that outcome rather than mapping unrelated queue or History errors.
+
+## Focused validation commands for the next build lane
+
+Run the Rust tests after taking the Cargo lane:
+
+```sh
+cargo test -p cadence-common selection_preserves_go_leak_causes
+cargo test -p cadence-server report_limit_returns_go_rate_gauge_updates
+cargo test -p cadence-server matching_metrics::matcher_metric_tests
+```
+
+Run the Go metric source/exporter oracles after taking the Go lane:
+
+```sh
+cd go
+go test ./service/matching/handler -run '^TestMatchingPollMetricOracle$' -count=1
+go test ./common/config -run '^TestMetricsSuite$' -count=1
+```
+
+None of these commands has been run for this source checkpoint.

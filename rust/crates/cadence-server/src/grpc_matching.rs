@@ -798,8 +798,8 @@ impl Matching {
                             total_duration,
                             task_latency: now.saturating_sub(task.created_nanos),
                     };
-                    let (group, duration) = policy.select();
-                    (group.to_owned(), duration)
+                    let (group, duration, leak_cause) = policy.select_with_cause();
+                    (group.to_owned(), duration, leak_cause)
                 }),
             }
             },
@@ -909,6 +909,7 @@ impl Matching {
         &self,
         domain: &str,
         list: &str,
+        task_list_kind: i32,
         task_type: i32,
         worker_rate: Option<f64>,
         limiter: &crate::matching_limiter::TaskListLimiter,
@@ -939,7 +940,20 @@ impl Matching {
         };
         match rate.filter(|rate| *rate >= 0.0) {
             Some(rate) => {
-                limiter.report_limit(rate);
+                if let Some(reported) = limiter.report_limit(rate) {
+                    self.metrics.task_list_gauge(
+                        crate::matching_metrics::RATE_LIMIT_PER_TASK_LIST,
+                        &crate::matching_metrics::PollMetricContext {
+                            domain: domain_name_for(&self.frontend.state.domains, domain)
+                                .unwrap_or_else(|| domain.to_owned()),
+                            task_list: list.to_owned(),
+                            task_list_kind,
+                            task_type: if task_type == 0 { "decision_task" } else { "activity_task" },
+                            poller_isolation_group: String::new(),
+                        },
+                        reported,
+                    );
+                }
                 rate
             }
             None => crate::matching_limiter::TASK_DISPATCH_RPS,
@@ -1405,7 +1419,14 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ..Default::default()
                 }));
             }
-            let rate = self.poll_rate(&r.domain_id, &guard.key.task_list, 0, None, &queue.limiter);
+            let rate = self.poll_rate(
+                &r.domain_id,
+                &guard.key.task_list,
+                payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                0,
+                None,
+                &queue.limiter,
+            );
             let lifecycle = crate::matching_dispatch::PollLifecycle {
                 manager: queue.pollers.clone(),
                 id: guard.key.poller.clone(),
@@ -1620,6 +1641,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             let rate = self.poll_rate(
                 &r.domain_id,
                 &guard.key.task_list,
+                payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
                 1,
                 max_dispatch,
                 &queue.limiter,
@@ -2478,7 +2500,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
         let r = request.into_inner();
-        self.domain_name(&r.domain_id)?;
+        let domain = self.domain_name(&r.domain_id)?;
         let task_list = r
             .task_list
             .clone()
@@ -2518,30 +2540,55 @@ impl m::matching_api_server::MatchingApi for Matching {
             let queue = self
                 .durable_queue(&r.domain_id, &task_list, r.task_list_type - 1)
                 .await?;
-            registry
+            let update = registry
                 .update_partition_config(
                     cadence_persistence::matching_sqlite::TaskListKey {
                         domain_id: uuid::Uuid::parse_str(&r.domain_id).expect("validated domain"),
-                        name: task_list.name,
+                        name: task_list.name.clone(),
                         task_type: r.task_list_type - 1,
                     },
                     queue,
                     partition_config_from_proto(config),
                     matching_now(),
                 )
-                .await?;
+                .await;
+            if update.is_err() {
+                self.metrics.task_list_counter_event(
+                    crate::matching_metrics::PARTITION_UPDATE_FAILED,
+                    &crate::matching_metrics::PollMetricContext {
+                        domain: domain.clone(),
+                        task_list: task_list.name.clone(),
+                        task_list_kind: task_list.kind,
+                        task_type: if r.task_list_type == 2 { "activity_task" } else { "decision_task" },
+                        poller_isolation_group: String::new(),
+                    },
+                );
+            }
+            update?;
             return Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {}));
         }
         let store = self.frontend.state.executions.clone();
-        let domain = self.domain_name(&r.domain_id)?;
         let stored = partition_config_from_proto(config);
-        match store.update_partition_config(
+        let update = store.update_partition_config(
             &domain,
             &task_list.name,
             r.task_list_type,
             kind_is_normal,
             stored,
-        ) {
+        );
+        if update.is_err() {
+            self.metrics.task_list_counter_event(
+                crate::matching_metrics::PARTITION_UPDATE_FAILED,
+                &crate::matching_metrics::PollMetricContext {
+                    domain: domain.clone(),
+                    task_list: task_list.name.clone(),
+                    task_list_kind: task_list.kind,
+                    task_type: if r.task_list_type == 2 { "activity_task" } else { "decision_task" },
+                    poller_isolation_group: String::new(),
+                },
+            );
+        }
+        match update {
             Ok(()) => Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {})),
             Err(
                 cadence_persistence::TaskError::InvalidToken(e)

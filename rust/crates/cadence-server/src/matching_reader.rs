@@ -268,13 +268,16 @@ pub struct IsolationConfig {
     pub select: IsolationSelector,
     pub should_reload: Arc<dyn Fn() -> bool + Send + Sync>,
 }
-pub type IsolationSelector =
-    Arc<dyn Fn(&cadence_persistence::matching_blob::TaskData) -> (String, i64) + Send + Sync>;
+pub type IsolationSelector = Arc<
+    dyn Fn(&cadence_persistence::matching_blob::TaskData) -> (String, i64, Option<&'static str>)
+        + Send
+        + Sync,
+>;
 impl Default for IsolationConfig {
     fn default() -> Self {
         Self {
             groups: Vec::new(),
-            select: Arc::new(|_| (String::new(), 0)),
+            select: Arc::new(|_| (String::new(), 0, None)),
             should_reload: Arc::new(|| false),
         }
     }
@@ -488,7 +491,26 @@ impl TaskReader {
                         }
                         // Go `newDispatchContext`: the deadline only applies to an
                         // active (or unknown) domain above the 1e-7 noise floor.
-                        let (group, mut isolation_duration) = (isolation.select)(&task.data);
+                    let original_group = task
+                        .data
+                        .partition_config
+                        .as_ref()
+                        .and_then(|config| config.get("isolation-group"))
+                        .map(String::as_str)
+                        .unwrap_or_default();
+                    let (group, mut isolation_duration, leak_cause) =
+                        (isolation.select)(&task.data);
+                    if let (Some(cause), Some(reader_metrics)) = (
+                        leak_cause,
+                        dispatch_metrics
+                            .lock()
+                            .expect("matching reader metrics lock")
+                            .as_ref(),
+                    ) {
+                        reader_metrics
+                            .metrics
+                            .task_isolation_leak(&reader_metrics.context, original_group, cause);
+                    }
                         let target = isolated.get(&group).unwrap_or_else(|| {
                             isolation_duration = 0;
                             &matcher
@@ -696,7 +718,25 @@ impl TaskReader {
                             break 'pump;
                         }
                     };
-                    let (group, _) = (isolation.select)(&task.data);
+                    let original_group = task
+                        .data
+                        .partition_config
+                        .as_ref()
+                        .and_then(|config| config.get("isolation-group"))
+                        .map(String::as_str)
+                        .unwrap_or_default();
+                    let (group, _, leak_cause) = (isolation.select)(&task.data);
+                    if let (Some(cause), Some(reader_metrics)) = (
+                        leak_cause,
+                        reader_metrics
+                            .lock()
+                            .expect("matching reader metrics lock")
+                            .as_ref(),
+                    ) {
+                        reader_metrics
+                            .metrics
+                            .task_isolation_leak(&reader_metrics.context, original_group, cause);
+                    }
                     let buffer_send = buffer_senders
                         .get(&group)
                         .unwrap_or_else(|| &buffer_senders[""]);
@@ -1029,6 +1069,7 @@ mod tests {
                             .cloned()
                             .unwrap_or_default(),
                         0,
+                        None,
                     )
                 }),
             },
@@ -1081,9 +1122,9 @@ mod tests {
                 select: Arc::new(move |_| {
                     let remaining = expires - now();
                     if remaining > 50_000_000 {
-                        ("a".into(), remaining)
+                        ("a".into(), remaining, None)
                     } else {
-                        (String::new(), 0)
+                        (String::new(), 0, None)
                     }
                 }),
             },
