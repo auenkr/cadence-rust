@@ -47,6 +47,9 @@ pub struct MatchingRuntime {
     membership_maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
     dynamic_config_watch: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
+    shard_distributor_executor: Option<crate::matching_shard_distributor::ShardDistributorExecutor>,
+    shard_distributor_spectator: Option<crate::matching_shard_distributor::TonicSpectator>,
+    shard_distributor_drain: Option<tokio::sync::watch::Sender<bool>>,
     drain_duration: DrainDuration,
     evict_self: Option<EvictSelf>,
     drained: bool,
@@ -63,6 +66,9 @@ impl MatchingRuntime {
             membership_maintenance: None,
             domain_cache: None,
             dynamic_config_watch: None,
+            shard_distributor_executor: None,
+            shard_distributor_spectator: None,
+            shard_distributor_drain: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -99,6 +105,9 @@ impl MatchingRuntime {
             membership_maintenance: None,
             domain_cache: None,
             dynamic_config_watch: None,
+            shard_distributor_executor: None,
+            shard_distributor_spectator: None,
+            shard_distributor_drain: None,
             drain_duration,
             evict_self: None,
             drained: false,
@@ -107,6 +116,160 @@ impl MatchingRuntime {
 
     pub fn matching(&self) -> &Matching {
         &self.matching
+    }
+
+    /// Attach shard-distributor ownership checks to both the RPC acquisition
+    /// path and registry publication/unload lifecycle. Runtime construction
+    /// owns these dependencies so handlers and processors share one policy.
+    pub fn with_task_list_ownership(
+        mut self,
+        check: crate::grpc_matching::TaskListOwnershipCheck,
+        policy: crate::matching_registry::QueueOwnershipPolicy,
+    ) -> Self {
+        self.matching = self.matching.clone().with_task_list_ownership(check);
+        if let Some(registry) = &self.registry {
+            registry.set_ownership_policy(policy);
+        }
+        self
+    }
+
+    /// Attach discovered shard routing to the same Matching instance exposed
+    /// by the owned runtime and its durable queue registry.
+    pub fn with_shard_router(
+        mut self,
+        router: crate::matching_shard_routing::MatchingShardRouter,
+    ) -> Self {
+        self.matching = self.matching.clone().with_shard_router(router);
+        self
+    }
+
+    /// Start Go's Matching shard executor and attach its assignment routing to
+    /// the same durable registry used by Matching RPCs. A configured manager
+    /// requires the production durable registry; silently running with a
+    /// no-op executor would split assignments from queue ownership.
+    pub async fn with_shard_distributor(
+        mut self,
+        config: &crate::config::ShardDistributorMatchingConfig,
+        channel: tonic::transport::Channel,
+        membership: crate::matching_membership::Membership,
+        metadata: std::collections::HashMap<String, String>,
+        percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
+        exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> anyhow::Result<Self> {
+        if config.namespaces.is_empty() {
+            return Ok(self);
+        }
+        let registry = self.registry.clone().ok_or_else(|| {
+            anyhow::anyhow!("shard-distributor Matching requires the durable queue registry")
+        })?;
+        let enabled = {
+            let percentage = percentage_onboarded.clone();
+            Arc::new(move || percentage() > 0) as Arc<dyn Fn() -> bool + Send + Sync>
+        };
+        let rpc = Arc::new(
+            crate::matching_shard_distributor::TonicExecutorRpc::from_channel(channel.clone()),
+        );
+        let factory = Arc::new(
+            crate::matching_shard_processor::QueueRegistryShardProcessorFactory::new(
+                registry.clone(),
+                config.report_ttl_nanos(),
+            ),
+        );
+        let (drain_tx, drain_rx) = tokio::sync::watch::channel(false);
+        let executor = crate::matching_shard_distributor::ShardDistributorExecutor::new(
+            config,
+            rpc,
+            factory,
+            enabled,
+            metadata,
+            Some(drain_rx),
+        )?;
+        executor
+            .start()
+            .await
+            .map_err(|error| anyhow::anyhow!("starting shard-distributor executor: {error}"))?;
+
+        let spectator = crate::matching_shard_distributor::TonicSpectator::new(
+            channel,
+            config.namespaces[0].namespace.clone(),
+            Arc::new({
+                let percentage = percentage_onboarded.clone();
+                move || percentage() > 0
+            }),
+        );
+        if let Err(error) = spectator.start().await {
+            executor.shutdown().await;
+            return Err(anyhow::anyhow!(
+                "starting shard-distributor spectator: {error}"
+            ));
+        }
+
+        let router = crate::matching_shard_routing::MatchingShardRouter::with_tonic_spectator(
+            membership.clone(),
+            Some(spectator.clone()),
+            percentage_onboarded.clone(),
+            exclude_short_lived.clone(),
+        );
+        let executor_for_check = executor.clone();
+        let membership_for_check = membership.clone();
+        let percentage_for_check = percentage_onboarded.clone();
+        let excluded_for_check = exclude_short_lived.clone();
+        let ownership_check: crate::grpc_matching::TaskListOwnershipCheck =
+            Arc::new(move |name, _cached| {
+                let executor = executor_for_check.clone();
+                let membership = membership_for_check.clone();
+                let percentage = percentage_for_check.clone();
+                let exclude = excluded_for_check.clone();
+                Box::pin(async move {
+                    if crate::matching_shard_routing::task_list_excluded_from_shard_distributor(
+                        &name,
+                        percentage().max(0) as u64,
+                        exclude(),
+                    ) {
+                        return membership.check_task_list(&name);
+                    }
+                    match executor.get_shard_process(&name).await {
+                        Ok(_) => Ok(()),
+                        Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(
+                            _,
+                        )) => Err(membership.task_list_not_owned_by(&name, "not known")),
+                        Err(
+                            crate::matching_shard_distributor::GetShardProcessError::Heartbeat(
+                                error,
+                            ),
+                        ) => Err(tonic::Status::unavailable(format!(
+                            "failed to lookup ownership in SD: {error}"
+                        ))),
+                    }
+                })
+                    as std::pin::Pin<
+                        Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send>,
+                    >
+            });
+        let policy = crate::matching_registry::QueueOwnershipPolicy::new(
+            Arc::new({
+                let percentage = percentage_onboarded.clone();
+                let exclude = exclude_short_lived.clone();
+                move |name| {
+                    !crate::matching_shard_routing::task_list_excluded_from_shard_distributor(
+                        name,
+                        percentage().max(0) as u64,
+                        exclude(),
+                    )
+                }
+            }),
+            Arc::new({
+                let executor = executor.clone();
+                move |name| executor.has_local_shard_process(name)
+            }),
+        );
+        self = self
+            .with_task_list_ownership(ownership_check, policy)
+            .with_shard_router(router);
+        self.shard_distributor_executor = Some(executor);
+        self.shard_distributor_spectator = Some(spectator);
+        self.shard_distributor_drain = Some(drain_tx);
+        Ok(self)
     }
 
     /// Own Go file-based dynamic-config polling for the lifetime of Matching.
@@ -241,6 +404,9 @@ impl MatchingRuntime {
         if self.drained {
             return Ok(());
         }
+        if let Some(drain) = &self.shard_distributor_drain {
+            let _ = drain.send(true);
+        }
         let result = drain_service(&mut self.evict_self, &self.drain_duration).await;
         self.drained = true;
         result
@@ -258,6 +424,13 @@ impl MatchingRuntime {
         } else {
             Ok(())
         };
+        if let Some(executor) = self.shard_distributor_executor.take() {
+            executor.shutdown().await;
+        }
+        if let Some(spectator) = self.shard_distributor_spectator.take() {
+            spectator.shutdown().await;
+        }
+        self.shard_distributor_drain.take();
         if let Some(stop) = self.membership_maintenance_stop.take() {
             let _ = stop.send(());
         }

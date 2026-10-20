@@ -60,6 +60,58 @@ fn dynamic_bool_property(
         .unwrap_or(default)
 }
 
+fn dynamic_i64_property(
+    overlay: std::sync::Arc<std::sync::Mutex<cadence_server::admin::DynamicConfigOverlay>>,
+    name: &str,
+    default: i64,
+) -> i64 {
+    let Ok(overlay) = overlay.lock() else {
+        return default;
+    };
+    overlay
+        .property_values(name)
+        .iter()
+        .filter(|value| value.filters.is_empty())
+        .filter_map(|value| value.value.as_ref())
+        .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
+        .filter_map(|blob| serde_json::from_slice::<i64>(&blob.data).ok())
+        .next_back()
+        .unwrap_or(default)
+}
+
+fn matching_listen_ip(rpc: Option<&config::RpcConfig>) -> anyhow::Result<std::net::IpAddr> {
+    if let Some(rpc) = rpc {
+        if rpc.bind_on_local_host && !rpc.bind_on_ip.is_empty() {
+            anyhow::bail!("bindOnLocalHost and bindOnIP are mutually exclusive");
+        }
+        if rpc.bind_on_local_host {
+            return Ok(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        }
+        if !rpc.bind_on_ip.is_empty() {
+            return rpc.bind_on_ip.parse().map_err(|_| {
+                anyhow::anyhow!(
+                    "unable to parse bindOnIP value or it is not an IPv4 or IPv6 address: {}",
+                    rpc.bind_on_ip
+                )
+            });
+        }
+    }
+    let interfaces = if_addrs::get_if_addrs()?;
+    let mut best: Option<(i32, std::net::IpAddr)> = None;
+    for iface in interfaces {
+        let ip = iface.ip();
+        let mut score = if ip.is_ipv4() { 300 } else { 0 };
+        if !iface.is_loopback() && !ip.is_loopback() {
+            score += 200;
+        }
+        if best.as_ref().is_none_or(|(previous, _)| score > *previous) {
+            best = Some((score, ip));
+        }
+    }
+    best.map(|(_, ip)| ip)
+        .ok_or_else(|| anyhow::anyhow!("no addresses to listen on"))
+}
+
 async fn shutdown_signal() -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -1042,6 +1094,62 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(runtime) = matching_runtime.take() {
                     matching_runtime = Some(runtime.with_membership(membership));
                 }
+            }
+            if run_matching && !cfg.shard_distributor_matching.namespaces.is_empty() {
+                let membership = matching_membership.clone().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Matching shard-distributor configuration requires Ringpop membership"
+                    )
+                })?;
+                let runtime = matching_runtime.take().ok_or_else(|| {
+                    anyhow::anyhow!("Matching runtime is unavailable for shard-distributor setup")
+                })?;
+                let target = if cfg.shard_distributor_client.host_port.contains("://") {
+                    cfg.shard_distributor_client.host_port.clone()
+                } else {
+                    format!("http://{}", cfg.shard_distributor_client.host_port)
+                };
+                let shard_distributor_channel =
+                    tonic::transport::Endpoint::from_shared(target)?.connect_lazy();
+                let mut metadata = std::collections::HashMap::new();
+                metadata.insert(
+                    "tchannel".to_string(),
+                    matching_tchannel_addr.port().to_string(),
+                );
+                metadata.insert("grpc".to_string(), matching_addr.port().to_string());
+                metadata.insert(
+                    "hostIP".to_string(),
+                    matching_listen_ip(matching_rpc.as_ref())?.to_string(),
+                );
+
+                let overlay = state.admin.dynamic_config.clone();
+                let percentage = std::sync::Arc::new(move || {
+                    dynamic_i64_property(
+                        overlay.clone(),
+                        "matching.percentageOnboardedToShardManager",
+                        0,
+                    )
+                }) as std::sync::Arc<dyn Fn() -> i64 + Send + Sync>;
+                let overlay = state.admin.dynamic_config.clone();
+                let exclude_short_lived = std::sync::Arc::new(move || {
+                    dynamic_bool_property(
+                        overlay.clone(),
+                        "matching.excludeShortLivedTaskListsFromShardManager",
+                        true,
+                    )
+                }) as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
+                matching_runtime = Some(
+                    runtime
+                        .with_shard_distributor(
+                            &cfg.shard_distributor_matching,
+                            shard_distributor_channel,
+                            membership,
+                            metadata,
+                            percentage,
+                            exclude_short_lived,
+                        )
+                        .await?,
+                );
             }
             let matching_service = matching_runtime
                 .as_ref()
