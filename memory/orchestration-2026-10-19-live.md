@@ -284,3 +284,30 @@ SWIM next source-only rebase/review unvalidated SD clienteecb1a1c9+2e713ebed
 onto rootc9c1f4f5b; no build until cache releases. Runtime owns main assembly;
 SD registry callbacks/config integration remain later. Sole warmed target stays
 t3-6f14baa6/rust/target jobs1,47GB free. User AGENTS edits untouched.
+
+## Recovered worker state and configured-store acceptance (2026-10-20)
+
+Worker messages/handoff were stale: actual cache branch had already captured
+passing probe62d9abf21/01a2a3f46/0cdd87e2c and main sourcebbd411812+b850bdc7f.
+Parent inspected raw attempt2 output, metadata exit0, before/after hashes and
+reviewed drain window change5s->30s (RPC must still complete during drain).
+Accepted factory chain through0cdd87e2c into root160fcc6f3, pushed; relevant
+main/factory/config/lib/sqlite/probe files byte-equal tested source. Go task
+readback and lease transition verified. Root now contains both independently
+validated healer and configured factory; combined main validation remains next.
+
+Main candidate is unbuilt. Parent review found taking runtime Option in tuple
+if-let drops embedded runtime when membership absent; worker instructed fix
+before gates. Also verify Go dynamic bool precedence/default and advertising
+gRPC labels before binding gRPC; add rollback/occupied-port coverage. Worker
+rebasing only main2 commits onto accepted root, source-only while SD has lane.
+
+SD worker rebased client+review onto160fcc6f3, tipf83c47fab, sole heavy lane
+started tmux matching-shard-distributor-review at051406UTC. Frozen hashes/raw
+exits initially /tmp/matching-shard-distributor-evidence/attempt-20261020T051406Z.
+Must package evidence before merge. Resolver Go oracle is not executor parity.
+History transport worker actual recovered HEAD58c5b9f5a includes GetMutableState
+and task-start mappings; all5 callable adapters now source-only, production
+retry/redirect/transport selection remains under implementation. No nested
+workers active, no future service migration. Cache pending_init was interrupted
+and resumed; no source lost. Avoid duplicating captured probe work.
