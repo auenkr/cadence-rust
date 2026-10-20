@@ -1,7 +1,7 @@
 //! Matching's registry-backed adapter for shard-manager executor callbacks.
 //!
-//! A shard processor is a view over existing QueueRegistry owners. It does not
-//! construct queue state: Matching RPCs acquire managers through the same
+//! A shard processor is a view over the existing QueueRegistry owners. It does
+//! not construct queue state: Matching RPCs acquire managers through the same
 //! registry as before, and assignment loss stops those owners by task-list name.
 
 use crate::{
@@ -221,11 +221,11 @@ mod tests {
         );
         assert!(
             !other_partition.queue.is_stopped(),
-            "partition name is a distinct exact key"
+            "sibling partition is a distinct exact key"
         );
         assert_eq!(registry.loaded_owner_count(), 2);
-        // Normal registry access after assignment returns can rebuild from the
-        // same SQLite store; no second queue owner is created by the factory.
+        // Reassignment accesses the same registry and SQLite store through the
+        // normal owner path; the processor itself never created queue state.
         let reassigned = registry.get(key(1, "queue/1", 0), 0, 2).await.unwrap();
         assert!(!reassigned.queue.is_stopped());
         assert_eq!(registry.loaded_owner_count(), 3);
