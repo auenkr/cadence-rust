@@ -92,11 +92,6 @@ if args.rust_matching or args.matching_restart:
         'system.allIsolationGroups:\n'
         '  - value: ["zone-a", "zone-b"]\n'
     )
-if production_matching:
-    dynamic_text += (
-        '\nsystem.enableGRPCOutbound:\n'
-        f'  - value: {str(args.history_transport == "grpc").lower()}\n'
-    )
 dynamic_config.write_text(dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
         'FRONTEND_PORT_GRPC', 'MATCHING_PORT_GRPC', 'HISTORY_PORT_GRPC',
@@ -133,6 +128,12 @@ text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_vi
 (config / 'development_sqlite.yaml').write_text(text)
 if production_matching:
     rust_config = work / 'rust-matching.yaml'
+    rust_dynamic_config = work / 'rust-dynamic-config.yaml'
+    rust_dynamic_text = dynamic_text + (
+        '\nsystem.enableGRPCOutbound:\n'
+        f'  - value: {str(args.history_transport == "grpc").lower()}\n'
+    )
+    rust_dynamic_config.write_text(rust_dynamic_text)
     rust_text = (root / 'rust/config/development.yaml').read_text()
     database_name = json.dumps(str(work / 'cadence.db'))
     sqlite_persistence = (
@@ -163,7 +164,7 @@ if production_matching:
     # this path anchored to the isolated run directory so the transport and
     # isolation settings written above are the ones Rust actually loads.
     rust_text = rust_text.replace('filepath: "config/dynamicconfig/development.yaml"',
-        'filepath: ' + json.dumps(str(dynamic_config)))
+        'filepath: ' + json.dumps(str(rust_dynamic_config)))
     rust_config.write_text(rust_text)
     (work / 'rust-matching-command.json').write_text(json.dumps([
         str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config), '--root', str(work),
@@ -230,7 +231,7 @@ with (work / 'server.log').open('w') as log:
             'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
             'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
             'historyTransport': args.history_transport if production_matching else None,
-            'rustDynamicConfigFile': str(dynamic_config) if production_matching else None,
+            'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
             'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
             'acceptanceEligible': not production_matching,
             'serverCommand': command}, indent=2) + '\n')
