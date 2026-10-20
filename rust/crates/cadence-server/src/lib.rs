@@ -32,6 +32,7 @@ pub mod yarpc;
 #[allow(clippy::result_large_err)]
 pub mod matching_history;
 pub mod matching_metrics;
+pub mod matching_metrics_prometheus;
 // The resolver carries tonic Status through matching placement call paths.
 #[allow(clippy::result_large_err)]
 pub mod matching_history_peer_resolver;
