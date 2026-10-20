@@ -151,9 +151,26 @@ async function run() {
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
     taskStartToCloseTimeout: { seconds: '10' }, input: payload('start'),
   };
+  // The persisted watermark of a queue is read while its task is stored and
+  // undelivered. A task that a poller already holds may be collected before
+  // the poll returns, so the watermark is never read after a delivery.
+  const awaitPersistedTask = async (listName, taskType, timeoutMs = 20000) => {
+    if (!process.env.CADENCE_MATCHING_MYSQL) return null;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const rows = mysqlRows(`SELECT COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(listName)}' AND task_type=${taskType}`);
+      const count = Number(rows[0][0]);
+      const value = rows[0][1] && rows[0][1] !== 'NULL' ? Number(rows[0][1]) : null;
+      if (count > 0 && value !== null && Number.isFinite(value)) return { taskType, rows: count, maxTaskId: value };
+      if (Date.now() >= deadline) return { taskType, rows: count, maxTaskId: value === null ? null : value };
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  };
   let restartEvidence;
+  let restartTaskList = null;
   if (restartMode) {
-    const restartID = `restart-${id}`, restartTaskList = `restart-tasks-${id}`;
+    const restartID = `restart-${id}`;
+    restartTaskList = `restart-tasks-${id}`;
     const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     let restartStarted;
     const restartProvisionDeadline = Date.now() + 15000;
@@ -166,6 +183,7 @@ async function run() {
     }
     const persistedDeadline = Date.now() + 20000;
     let persisted;
+    let restartWatermark = null;
     while (Date.now() < persistedDeadline) {
       persisted = durableTaskCount(domainId, restartTaskList, 0, path.join(work, 'matching.db'));
       if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
@@ -173,6 +191,8 @@ async function run() {
     }
     assert.equal(persisted?.status, 0, `could not inspect Matching durable queue: ${persisted?.stderr}`);
     assert(Number(persisted.stdout.trim()) > 0, 'workflow task was not persisted before Matching restart');
+    // The persisted watermark is read while the row is stored and undelivered.
+    restartWatermark = await awaitPersistedTask(restartTaskList, 0);
     const beforePid = rust.pid;
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -186,7 +206,7 @@ async function run() {
     const finalHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: restartID, runId: restartStarted.runId } });
     const completions = finalHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(completions, 1, 'restart workflow must have exactly one visible completion');
-    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
+    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), durableWatermarkBeforeKill: restartWatermark, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
     // Reuse the second live process for the existing compatibility coverage below.
   }
   let started;
@@ -199,22 +219,9 @@ async function run() {
     }
   }
   const execution = { workflowId: id, runId: started.runId };
-  // Track the highest task id Go's schema holds for every queue the probe
-  // uses, so the production GC gate can compare the persisted acknowledgement
-  // with the rows the collector removed.
-  const observedMaxTaskIds = new Map();
-  const observeMaxTaskId = taskType => {
-    if (!process.env.CADENCE_MATCHING_MYSQL) return;
-    const rows = mysqlRows(`SELECT COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList.name)}' AND task_type=${taskType}`);
-    const count = Number(rows[0][0]);
-    const value = rows[0][1] && rows[0][1] !== 'NULL' ? Number(rows[0][1]) : null;
-    if (value === null || !Number.isFinite(value)) return;
-    const previous = observedMaxTaskIds.get(taskType);
-    if (!previous || previous.maxTaskId < value) observedMaxTaskIds.set(taskType, { maxTaskId: value, rows: count });
-  };
+  const mainDecisionWatermark = await awaitPersistedTask(taskList.name, 0);
   const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(decision.workflowExecution.runId, started.runId);
-  observeMaxTaskId(0);
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
   assert(described.pollers.some(poller => poller.identity === 'service-probe'));
   assert.equal(described.taskListStatus.taskIdBlock.startId, '1');
@@ -226,13 +233,13 @@ async function run() {
       startToCloseTimeout: { seconds: '30' }, heartbeatTimeout: { seconds: '10' },
     } }],
   });
+  const mainActivityWatermark = await awaitPersistedTask(taskList.name, 1);
   const activity = await call('WorkerAPI', 'PollForActivityTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(activity.input.data.toString(), 'activity');
-  observeMaxTaskId(1);
   assert.equal((await call('WorkerAPI', 'RecordActivityTaskHeartbeat', { taskToken: activity.taskToken, details: payload('heartbeat') })).cancelRequested, false);
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: activity.taskToken, result: payload('activity-result'), identity: 'service-probe' });
+  const finalWatermark = await awaitPersistedTask(taskList.name, 0);
   const final = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
-  observeMaxTaskId(0);
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: final.taskToken, identity: 'service-probe', decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('done') } }],
   });
@@ -432,29 +439,55 @@ async function run() {
     // The GC assertions below decode Go's task-list metadata, so the decoder
     // is checked against the committed blob fixtures first.
     const decoderFixtureCases = verifyTaskListBlobDecoder();
+    // A dedicated backlog on a task list without any poller. Its persisted
+    // watermark is read while the decision task is stored and undelivered,
+    // and the existing SDK drains it afterwards.
+    const backlogList = { name: `gc-backlog-${id}` };
+    const backlogWorkflowId = `gc-backlog-${id}`;
+    const backlogStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: backlogWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: backlogList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const backlogWatermark = await awaitPersistedTask(backlogList.name, 0);
+    assert(backlogWatermark && backlogWatermark.maxTaskId !== null,
+      'Go History did not persist the dedicated garbage collection backlog task');
+    const backlogSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: backlogWorkflowId, CADENCE_MIXED_RESTART_TASK_LIST: backlogList.name,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'gc-backlog-sdk.log'), `${backlogSdk.stdout || ''}\n${backlogSdk.stderr || ''}`);
+    if (backlogSdk.status !== 0) throw new Error(`Existing SDK did not drain the garbage collection backlog: ${backlogSdk.error || backlogSdk.status}; see ${work}/gc-backlog-sdk.log`);
+    const backlogHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: backlogWorkflowId, runId: backlogStarted.runId } });
+    const backlogCompletions = backlogHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(backlogCompletions, 1, 'the drained garbage collection backlog must have exactly one visible completion');
+    // A task that is never acknowledged must survive the collector.
     const pendingList = { name: `gc-pending-${id}` };
     const pendingStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
       ...startRequest, workflowId: `gc-pending-${id}`, taskList: pendingList, requestId: randomUUID(),
     });
-    const pendingDeadline = Date.now() + 20000;
-    let pendingRows = 0;
-    while (Date.now() < pendingDeadline) {
-      pendingRows = Number(mysqlRows(`SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(pendingList.name)}' AND task_type=0`)[0][0]);
-      if (pendingRows > 0) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    assert(pendingRows > 0, 'Go History did not persist the unacknowledged control task');
-    const liveBlockProvider = async taskType => {
+    const pendingWatermark = await awaitPersistedTask(pendingList.name, 0);
+    assert(pendingWatermark && pendingWatermark.maxTaskId !== null, 'Go History did not persist the unacknowledged control task');
+    const liveBlockProvider = async (listName, taskType) => {
       const taskListType = taskType === 0 ? 'TASK_LIST_TYPE_DECISION' : 'TASK_LIST_TYPE_ACTIVITY';
-      const status = (await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType, includeTaskListStatus: true })).taskListStatus;
+      const status = (await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: listName }, taskListType, includeTaskListStatus: true })).taskListStatus;
       return { startId: Number(status.taskIdBlock.startId), endId: Number(status.taskIdBlock.endId) };
     };
+    const mainDecisionMax = Math.max(mainDecisionWatermark?.maxTaskId ?? 0, finalWatermark?.maxTaskId ?? 0);
+    const gateExpectations = [
+      { label: 'backlogDecision', name: backlogList.name, taskType: 0, observedMaxTaskId: backlogWatermark.maxTaskId },
+      { label: 'backlogActivity', name: backlogList.name, taskType: 1, minAck: 1 },
+      { label: 'mainDecision', name: taskList.name, taskType: 0, observedMaxTaskId: mainDecisionMax },
+      { label: 'mainActivity', name: taskList.name, taskType: 1, observedMaxTaskId: mainActivityWatermark?.maxTaskId ?? 1 },
+    ];
+    if (restartMode && restartWatermark && restartWatermark.maxTaskId !== null) {
+      gateExpectations.push({ label: 'restartDecision', name: restartTaskList, taskType: 0, observedMaxTaskId: restartWatermark.maxTaskId });
+      gateExpectations.push({ label: 'restartActivity', name: restartTaskList, taskType: 1, minAck: 1 });
+    }
     const taskGarbageCollection = await verifyProductionMySqlTaskGc({
       query: mysqlRows,
       domainId,
-      taskListName: taskList.name,
+      taskLists: gateExpectations,
       pendingListName: pendingList.name,
-      observedMaxTaskIds: [...observedMaxTaskIds.entries()].sort((left, right) => left[0] - right[0]),
       liveBlockProvider,
       rangeSize: 100000,
       sleep: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
@@ -464,7 +497,8 @@ async function run() {
       decoderFixtureCases,
       taskGarbageCollection,
       domainMetadata,
-      pendingControl: { taskList: pendingList.name, workflowId: pendingStarted.workflowId || `gc-pending-${id}`, taskRows: pendingRows },
+      backlog: { taskList: backlogList.name, workflowId: backlogWorkflowId, watermark: backlogWatermark, completionEvents: backlogCompletions },
+      pendingControl: { taskList: pendingList.name, workflowId: pendingStarted.workflowId || `gc-pending-${id}`, watermark: pendingWatermark },
     };
     fs.writeFileSync(path.join(work, 'db-observations.json'), JSON.stringify(productionDatabaseEvidence, null, 2) + '\n');
   }
