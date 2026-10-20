@@ -16,6 +16,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import uuid
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--artifacts-dir', type=Path)
@@ -37,6 +38,7 @@ root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
 work.mkdir(parents=True, exist_ok=True)
 print(f'Go baseline artifacts: {work}', flush=True)
+probe_id = str(uuid.uuid4())
 production_matching = args.rust_production_binary is not None
 if production_matching and not (args.rust_matching or args.matching_restart):
     parser.error('--rust-production-binary requires --rust-matching or --matching-restart')
@@ -119,6 +121,9 @@ if args.matching_idle_check_seconds is not None:
     dynamic_text += (
         '\nmatching.idleTasklistCheckInterval:\n'
         f'  - value: {args.matching_idle_check_seconds}s\n'
+        '    constraints:\n'
+        f'      domainName: "service-compat-{probe_id}"\n'
+        f'      taskListName: "production-idle-{probe_id}"\n'
     )
 dynamic_config.write_text(dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
@@ -272,6 +277,7 @@ with (work / 'server.log').open('w') as log:
                     'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
                     'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db'),
+                    'CADENCE_MATCHING_TEST_ID': probe_id,
                     'CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL': os.environ.get('CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL', ''),
                     'CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE': args.matching_shard_distributor_namespace or '',
                     'CADENCE_MATCHING_ONBOARDING_PERCENTAGE': str(args.matching_onboarding_percentage if args.matching_onboarding_percentage is not None else '')}

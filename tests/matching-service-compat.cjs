@@ -101,7 +101,8 @@ function callRpc(service, method, request) {
 }
 const payload = data => ({ data: Buffer.from(data) });
 async function run() {
-  const id = randomUUID(), domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
+  const id = process.env.CADENCE_MATCHING_TEST_ID || randomUUID();
+  const domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
   await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
   const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
   const work = path.resolve(process.argv[5]);
@@ -283,7 +284,16 @@ async function run() {
     fs.writeFileSync(path.join(work, 'production-idle-recovery-sdk.log'), `${idleSdk.stdout || ''}\n${idleSdk.stderr || ''}`);
     if (idleSdk.status !== 0) throw new Error(`existing SDK could not complete work after production idle eviction: ${idleSdk.error || idleSdk.status}; see ${work}/production-idle-recovery-sdk.log`);
     const idleHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: idleRecoveryID } });
-    assert.equal(idleHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1, 'production idle eviction recovery must complete exactly once');
+    const idleCompletions = idleHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(idleCompletions, 1, 'production idle eviction recovery must complete exactly once');
+    fs.writeFileSync(path.join(work, 'production-failure-recovery-checkpoints.json'), JSON.stringify({
+      topology: 'two Rust Matching hosts with Go Frontend/History/Worker',
+      sameRingOwnershipMap: convergedOwnership,
+      idleEviction: {
+        taskList: idleList.name, releasedWithEmptyResponse: idleResult.taskToken.length === 0,
+        sdkCompletedWorkflow: idleRecoveryID, completionEvents: idleCompletions,
+      },
+    }, null, 2) + '\n');
 
     const crashList = `production-crash-${id}`;
     const crashProbeID = `production-crash-owner-probe-${id}`;
@@ -310,6 +320,23 @@ async function run() {
     assert.equal(staleResult.status, 'rejected', 'direct request to non-owner must be rejected with Go-compatible typed ownership');
     assert.equal(staleResult.reason.code, grpc.status.ABORTED, 'non-owner must return the typed TaskListNotOwnedByHost status');
     assert.match(staleResult.reason.details || '', /task list is not owned by this host/i);
+    const nonOwnerIndex = 1 - ownerIndex;
+    const nonOwnerGrpcPort = nonOwnerIndex === 0
+      ? rustGrpcPort : process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT;
+    const goTypedOwnership = spawnSync('go', ['run', './tests/matching-error-oracle'], {
+      cwd: path.resolve(__dirname, '..', 'go'),
+      env: {
+        ...process.env,
+        CADENCE_MATCHING_ERROR_TARGET: `127.0.0.1:${nonOwnerGrpcPort}`,
+        CADENCE_MATCHING_ERROR_DOMAIN_ID: domainId,
+        CADENCE_MATCHING_ERROR_DOMAIN: domain,
+        CADENCE_MATCHING_ERROR_TASK_LIST: crashList,
+        CADENCE_MATCHING_ERROR_EXPECTED_OWNER: ownerIndex === 0 ? primaryAddress : secondaryAddress,
+        CADENCE_MATCHING_ERROR_EXPECTED_SELF: nonOwnerIndex === 0 ? primaryAddress : secondaryAddress,
+      }, encoding: 'utf8', timeout: 120000,
+    });
+    fs.writeFileSync(path.join(work, 'production-typed-ownership-go.log'), `${goTypedOwnership.stdout || ''}\n${goTypedOwnership.stderr || ''}`);
+    assert.equal(goTypedOwnership.status, 0, `pinned Go Matching client did not decode Rust's typed non-owner response; see ${work}/production-typed-ownership-go.log`);
     const ownerProbeTask = directPolls[ownerIndex].value;
     await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
       taskToken: ownerProbeTask.taskToken,
@@ -409,6 +436,20 @@ async function run() {
       afterCount = Number(queuedAfter.stdout.trim());
     }
     assert.equal(afterCount, 0, 'recovered task remained queued after SDK completion');
+    fs.writeFileSync(path.join(work, 'production-failure-recovery-checkpoints.json'), JSON.stringify({
+      topology: 'two Rust Matching hosts with Go Frontend/History/Worker',
+      sameRingOwnershipMap: convergedOwnership,
+      idleEviction: {
+        taskList: idleList.name, releasedWithEmptyResponse: idleResult.taskToken.length === 0,
+        sdkCompletedWorkflow: idleRecoveryID, completionEvents: idleCompletions,
+      },
+      crashRecovery: {
+        taskList: crashList, crashedPid: failedPid, crashedHostIndex: ownerIndex,
+        survivorPid: survivor.pid, workflowId: crashID, completionEvents: crashCompletions,
+        rangeBefore, rangeAfter, ackBefore: beforeAck, ackAfter: afterAck,
+        queuedRowsAfterCompletion: afterCount,
+      },
+    }, null, 2) + '\n');
     if (ownerIndex === 0) {
       rust = startRust('after-failure-recovery');
       await waitForRustReady('after-failure-recovery');
@@ -476,8 +517,15 @@ async function run() {
     }
   }
   const execution = { workflowId: id, runId: started.runId };
-  const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
-  assert.equal(decision.workflowExecution.runId, started.runId);
+  let decision;
+  const decisionDeadline = Date.now() + 30000;
+  while (Date.now() < decisionDeadline) {
+    decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
+    if (decision.taskToken?.length > 0) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert(decision?.taskToken?.length > 0, `Go Frontend did not return the started workflow task within 30s; task list ${taskList.name}`);
+  assert.equal(decision.workflowExecution?.runId, started.runId, 'Go Frontend returned a decision task for a different workflow run');
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
   assert(described.pollers.some(poller => poller.identity === 'service-probe'));
   assert.equal(described.taskListStatus.taskIdBlock.startId, '1');
