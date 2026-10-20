@@ -88,7 +88,7 @@ impl DynamicConfigOverlay {
                 let raw_value = fields.get(&value_key).unwrap_or(&null_value);
                 let data = serde_json::to_vec(&yaml_value_to_json(raw_value)?)?;
                 let mut filters = Vec::new();
-                if let Some(constraints) = fields.get(&serde_yaml::Value::String("constraints".into())) {
+                if let Some(constraints) = fields.get(serde_yaml::Value::String("constraints".into())) {
                     if constraints.is_null() { /* Go treats YAML null as a nil map. */ }
                     else {
                     let constraints = constraints.as_mapping().ok_or_else(|| {
@@ -1165,7 +1165,7 @@ mod tests {
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
         let values = overlay.property_values("testGetBoolPropertyKey");
         assert_eq!(values.len(), 3);
-        assert_eq!(serde_json::from_slice::<bool>(&values[0].value.as_ref().unwrap().data).unwrap(), false);
+        assert!(!serde_json::from_slice::<bool>(&values[0].value.as_ref().unwrap().data).unwrap());
         assert_eq!(values[1].filters[0].name, "domainName");
         let attributes = overlay.property_values("frontend.validSearchAttributes");
         let json: serde_json::Value = serde_json::from_slice(&attributes[0].value.as_ref().unwrap().data).unwrap();

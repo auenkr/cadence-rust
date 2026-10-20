@@ -17,6 +17,7 @@ import (
 	"github.com/cadence-workflow/shard-manager/common/log"
 	"github.com/cadence-workflow/shard-manager/common/metrics"
 	"github.com/cadence-workflow/shard-manager/common/types"
+	sharddistributorv1 "github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1"
 	"github.com/cadence-workflow/shard-manager/service/sharddistributor/config"
 	"github.com/cadence-workflow/shard-manager/service/sharddistributor/handler"
 	"github.com/cadence-workflow/shard-manager/service/sharddistributor/store"
@@ -67,6 +68,7 @@ func (s *fixtureStore) RecordHeartbeat(_ context.Context, namespace, executor st
 	return nil
 }
 func (s *fixtureStore) SubscribeToAssignmentChanges(ctx context.Context, _ string) (<-chan map[*store.ShardOwner][]string, func(), error) {
+	fmt.Fprintln(os.Stderr, "fixture: SubscribeToAssignmentChanges entered")
 	ch := make(chan map[*store.ShardOwner][]string, 8)
 	s.mu.Lock()
 	s.subscribers[ch] = struct{}{}
@@ -134,6 +136,15 @@ func main() {
 	grpcwrapper.NewGRPCHandler(api).Register(dispatcher)
 	grpcwrapper.NewExecutorGRPCExecutor(executor).Register(dispatcher)
 	must(dispatcher.Start())
+	clientTransport := grpctransport.NewTransport()
+	clientDispatcher := yarpc.NewDispatcher(yarpc.Config{
+		Name: "cadence-matching",
+		Outbounds: yarpc.Outbounds{
+			"shard-manager": {ServiceName: "shard-manager", Unary: clientTransport.NewSingleOutbound(listener.Addr().String()), Stream: clientTransport.NewSingleOutbound(listener.Addr().String())},
+		},
+	})
+	must(clientDispatcher.Start())
+	var baselineCancel context.CancelFunc
 	defer dispatcher.Stop()
 	defer api.Stop()
 	must(json.NewEncoder(os.Stdout).Encode(map[string]string{"address": listener.Addr().String(), "namespace": "matching"}))
@@ -155,7 +166,28 @@ func main() {
 			respond(fixture.snapshot(cmd.Namespace))
 		case "watchers":
 			respond(fixture.watcherCount())
+		case "go-watch":
+			if baselineCancel != nil {
+				baselineCancel()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			baselineCancel = cancel
+			client := sharddistributorv1.NewShardDistributorAPIYARPCClient(clientDispatcher.ClientConfig("shard-manager"))
+			stream, err := client.WatchNamespaceState(ctx, &sharddistributorv1.WatchNamespaceStateRequest{Namespace: "matching"})
+			if err != nil {
+				respond("error: " + err.Error())
+				continue
+			}
+			go func() { _, _ = stream.Recv() }()
+			respond("started")
+		case "stop-go-watch":
+			if baselineCancel != nil {
+				baselineCancel()
+				baselineCancel = nil
+			}
+			respond("stopped")
 		case "stop":
+			clientDispatcher.Stop()
 			respond("stopping")
 			return
 		default:

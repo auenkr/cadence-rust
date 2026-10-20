@@ -65,7 +65,10 @@ fn report_read_error(property_type: &str, reason: &str) {
     // Go's dynamic-config Collection logs typed client errors before returning
     // the property's default. This module has no injected server logger, so
     // preserve that diagnostic on the process error stream.
-    if READ_ERROR_COUNT.fetch_add(1, Ordering::Relaxed) % 1_000 == 0 {
+    if READ_ERROR_COUNT
+        .fetch_add(1, Ordering::Relaxed)
+        .is_multiple_of(1_000)
+    {
         eprintln!("dynamic config {property_type} read failed ({reason}); using default");
     }
 }

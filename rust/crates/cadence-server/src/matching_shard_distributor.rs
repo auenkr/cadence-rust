@@ -33,13 +33,13 @@ const LIFECYCLE_STOPPING: u8 = 2;
 const LIFECYCLE_STOPPED: u8 = 3;
 
 /// YARPC gRPC inbound routing metadata. These values match Go's
-/// `service.ShardDistributor`, `service.Matching`, and protobuf encoding.
+/// the Go shard-manager dispatcher, Matching caller, and protobuf encoding.
 fn yarpc_grpc_request<T>(message: T) -> tonic::Request<T> {
     let mut request = tonic::Request::new(message);
     let metadata = request.metadata_mut();
     metadata.insert(
         "rpc-service",
-        tonic::metadata::MetadataValue::from_static("shard-distributor"),
+        tonic::metadata::MetadataValue::from_static("shard-manager"),
     );
     metadata.insert(
         "rpc-caller",
@@ -280,13 +280,12 @@ impl TonicSpectator {
             );
             let call_timeout =
                 RPC_TIMEOUT.min(deadline.saturating_duration_since(tokio::time::Instant::now()));
-            let call = tokio::time::timeout(
-                call_timeout,
-                client.get_shard_owner(yarpc_grpc_request(sd::GetShardOwnerRequest {
-                    shard_key: shard_key.to_string(),
-                    namespace: self.namespace.to_string(),
-                })),
-            );
+            let mut request = yarpc_grpc_request(sd::GetShardOwnerRequest {
+                shard_key: shard_key.to_string(),
+                namespace: self.namespace.to_string(),
+            });
+            request.set_timeout(call_timeout);
+            let call = tokio::time::timeout(call_timeout, client.get_shard_owner(request));
             let response = tokio::select! {
                 response = call => response,
                 _ = tokio::time::sleep_until(deadline) => return Err("GetShardOwner caller deadline exceeded".into()),
@@ -460,10 +459,14 @@ impl ExecutorRpc for TonicExecutorRpc {
     ) -> BoxFuture<Result<sd::HeartbeatResponse, String>> {
         let client = self.client.clone();
         Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
             tokio::time::timeout(timeout, async move {
                 let mut client = client.lock().await;
+                let mut request = yarpc_grpc_request(request);
+                request
+                    .set_timeout(deadline.saturating_duration_since(tokio::time::Instant::now()));
                 client
-                    .heartbeat(yarpc_grpc_request(request))
+                    .heartbeat(request)
                     .await
                     .map(tonic::Response::into_inner)
                     .map_err(|error| error.to_string())
@@ -1081,8 +1084,8 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize};
     use tokio_stream::wrappers::TcpListenerStream;
 
-    fn yarpc_headers<T>(request: &tonic::Request<T>) -> [String; 3] {
-        ["rpc-service", "rpc-caller", "rpc-encoding"].map(|key| {
+    fn yarpc_headers<T>(request: &tonic::Request<T>) -> [String; 4] {
+        ["rpc-service", "rpc-caller", "rpc-encoding", "grpc-timeout"].map(|key| {
             request
                 .metadata()
                 .get(key)
@@ -1097,7 +1100,7 @@ mod tests {
         assigned: Arc<AtomicBool>,
         fail: Arc<AtomicBool>,
         requests: Arc<Mutex<Vec<sd::HeartbeatRequest>>>,
-        yarpc_metadata: Arc<Mutex<Vec<[String; 3]>>>,
+        yarpc_metadata: Arc<Mutex<Vec<[String; 4]>>>,
     }
 
     #[tonic::async_trait]
@@ -1182,7 +1185,7 @@ mod tests {
     #[derive(Clone)]
     struct FakeSpectatorService {
         get_requests: Arc<Mutex<Vec<sd::GetShardOwnerRequest>>>,
-        yarpc_metadata: Arc<Mutex<Vec<[String; 3]>>>,
+        yarpc_metadata: Arc<Mutex<Vec<[String; 4]>>>,
     }
 
     #[tonic::async_trait]
@@ -1335,8 +1338,12 @@ mod tests {
         assert_eq!(report.metadata["tchannel"], "7935");
         assert_eq!(report.metadata["hostIP"], "127.0.0.1");
         assert_eq!(
-            yarpc_metadata.lock().unwrap().last().unwrap(),
-            &["shard-distributor", "cadence-matching", "proto"]
+            &yarpc_metadata.lock().unwrap().last().unwrap()[..3],
+            &["shard-manager", "cadence-matching", "proto"]
+        );
+        assert!(
+            !yarpc_metadata.lock().unwrap().last().unwrap()[3].is_empty(),
+            "Heartbeat has an RPC deadline"
         );
         assert_eq!(
             report.shard_status_reports["task-list-a"].status,
@@ -1447,11 +1454,21 @@ mod tests {
             get_requests.lock().unwrap()[0].shard_key,
             "remote-task-list"
         );
-        let metadata = yarpc_metadata.lock().unwrap();
-        assert!(metadata.len() >= 2, "watch and GetShardOwner were called");
-        assert!(metadata
-            .iter()
-            .all(|headers| headers == &["shard-distributor", "cadence-matching", "proto"]));
+        {
+            let metadata = yarpc_metadata.lock().unwrap();
+            assert!(metadata.len() >= 2, "watch and GetShardOwner were called");
+            assert!(metadata
+                .iter()
+                .all(|headers| headers[..3] == ["shard-manager", "cadence-matching", "proto"]));
+            assert!(
+                metadata.iter().any(|headers| headers[3].is_empty()),
+                "long-lived WatchNamespaceState has no RPC deadline"
+            );
+            assert!(
+                metadata.iter().any(|headers| !headers[3].is_empty()),
+                "GetShardOwner carries its RPC deadline"
+            );
+        }
 
         let (first_shutdown, second_shutdown) =
             tokio::join!(spectator.shutdown(), spectator.shutdown());

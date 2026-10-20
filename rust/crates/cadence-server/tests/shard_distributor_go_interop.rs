@@ -1,5 +1,5 @@
 //! Ignored mixed-language gate against the pinned Go shard-manager handlers.
-//! Run through tests/run-shard-distributor-review-gates.sh after validation is
+//! Run through tests/run-shard-distributor-go-interop.sh after validation is
 //! authorized; it is source-only during the current review lane.
 use cadence_proto::sharddistributor as sd;
 use cadence_server::{
@@ -12,9 +12,10 @@ use cadence_server::{
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Write},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::{Child, ChildStdin, Command, Stdio},
     sync::{
         atomic::{AtomicUsize, Ordering},
+        mpsc::{self, Receiver},
         Arc,
     },
     time::Duration,
@@ -24,23 +25,48 @@ use tokio::time::Instant;
 struct GoFixture {
     child: Child,
     input: ChildStdin,
-    output: BufReader<ChildStdout>,
+    output: Receiver<String>,
     address: String,
 }
 impl GoFixture {
     fn start() -> Self {
         let go = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../go");
-        let mut child = Command::new("go")
+        let mut command = Command::new("go");
+        command
             .args(["run", "./tests/shard-distributor-interoperability"])
             .current_dir(go)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
             .spawn()
             .expect("launch pinned Go shard-manager fixture");
         let input = child.stdin.take().unwrap();
-        let mut output = BufReader::new(child.stdout.take().unwrap());
-        let line = read_json_line(&mut output);
+        let stdout = child.stdout.take().unwrap();
+        let (output_tx, output) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) if output_tx.send(line).is_err() => return,
+                    Ok(_) => {}
+                }
+            }
+        });
+        let line = match read_json_line(&output) {
+            Ok(line) => line,
+            Err(error) => {
+                kill_go_process_group(&mut child);
+                panic!("Go fixture startup response failed: {error}");
+            }
+        };
         let address = line["address"]
             .as_str()
             .expect("Go fixture address")
@@ -55,20 +81,34 @@ impl GoFixture {
     fn command(&mut self, value: serde_json::Value) -> serde_json::Value {
         writeln!(self.input, "{value}").unwrap();
         self.input.flush().unwrap();
-        read_json_line(&mut self.output)["result"].clone()
+        read_json_line(&self.output)
+            .unwrap_or_else(|error| panic!("Go fixture command failed: {error}"))["result"]
+            .clone()
     }
 }
 impl Drop for GoFixture {
     fn drop(&mut self) {
-        let _ = self.command(serde_json::json!({"op":"stop"}));
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let _ = writeln!(self.input, "{{\"op\":\"stop\"}}");
+        let _ = self.input.flush();
+        let _ = self.output.recv_timeout(Duration::from_secs(2));
+        kill_go_process_group(&mut self.child);
     }
 }
-fn read_json_line(reader: &mut impl BufRead) -> serde_json::Value {
-    let mut line = String::new();
-    reader.read_line(&mut line).expect("read Go fixture output");
-    serde_json::from_str(&line).expect("Go fixture emits JSON lines")
+fn kill_go_process_group(child: &mut Child) {
+    #[cfg(unix)]
+    if let Ok(pid) = i32::try_from(child.id()) {
+        // `go run` owns a compiler-launched child in the same process group.
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+fn read_json_line(reader: &Receiver<String>) -> Result<serde_json::Value, String> {
+    let line = reader
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|error| format!("timed out waiting for Go fixture output: {error}"))?;
+    serde_json::from_str(&line)
+        .map_err(|error| format!("Go fixture emitted invalid JSON {line:?}: {error}"))
 }
 
 #[derive(Default)]
@@ -102,14 +142,14 @@ impl ShardProcessorFactory for Factory {
     }
 }
 
-async fn until(mut condition: impl FnMut() -> bool) {
+async fn until(label: &str, mut condition: impl FnMut() -> bool) {
     tokio::time::timeout(Duration::from_secs(5), async {
         while !condition() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("interop condition timed out");
+    .unwrap_or_else(|_| panic!("interop condition timed out: {label}"));
 }
 
 #[tokio::test]
@@ -121,10 +161,25 @@ async fn rust_executor_and_spectator_interoperate_with_pinned_go_handlers() {
         .connect()
         .await
         .unwrap();
+    assert_eq!(go.command(serde_json::json!({"op":"go-watch"})), "started");
+    until("Go YARPC baseline subscriber", || {
+        go.command(serde_json::json!({"op":"watchers"}))
+            .as_u64()
+            .is_some_and(|count| count > 0)
+    })
+    .await;
+    assert_eq!(
+        go.command(serde_json::json!({"op":"stop-go-watch"})),
+        "stopped"
+    );
+    until("Go baseline unsubscribed", || {
+        go.command(serde_json::json!({"op":"watchers"})).as_u64() == Some(0)
+    })
+    .await;
     let enabled: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| true);
     let spectator = TonicSpectator::new(channel.clone(), "matching", enabled.clone());
     spectator.start().await.unwrap();
-    until(|| {
+    until("Rust YARPC subscriber", || {
         go.command(serde_json::json!({"op":"watchers"}))
             .as_u64()
             .is_some_and(|count| count > 0)
@@ -161,7 +216,10 @@ async fn rust_executor_and_spectator_interoperate_with_pinned_go_handlers() {
         owner.metadata.get("host").map(String::as_str),
         Some("go-fixture")
     );
-    until(|| probe.starts.load(Ordering::SeqCst) == 1).await;
+    until("first executor processor start", || {
+        probe.starts.load(Ordering::SeqCst) == 1
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(60)).await;
     let stats = go.command(serde_json::json!({"op":"stats", "namespace":"matching"}));
     assert_eq!(
@@ -174,25 +232,33 @@ async fn rust_executor_and_spectator_interoperate_with_pinned_go_handlers() {
     );
 
     go.command(serde_json::json!({"op":"reassign", "namespace":"matching", "executor":executor.executor_id(), "shards":["shard-b"], "metadata":{"host":"go-fixture"}}));
-    until(|| probe.starts.load(Ordering::SeqCst) == 2 && probe.stops.load(Ordering::SeqCst) == 1)
-        .await;
+    until("reassigned processor lifecycle", || {
+        probe.starts.load(Ordering::SeqCst) == 2 && probe.stops.load(Ordering::SeqCst) == 1
+    })
+    .await;
     let reassigned = spectator
         .get_shard_owner("shard-b", Instant::now() + Duration::from_secs(5))
         .await
         .unwrap();
     assert_eq!(reassigned.executor_id, executor.executor_id());
-    until(|| {
+    until("reassignment state report", || {
         let state = go.command(serde_json::json!({"op":"stats", "namespace":"matching"}));
-        state[executor.executor_id()]["ReportedShards"]["shard-b"]["Status"] == "DONE"
+        state[executor.executor_id()]["ReportedShards"]["shard-b"]["Status"] == "ShardStatusREADY"
     })
     .await;
 
     go.command(serde_json::json!({"op":"lose", "namespace":"matching"}));
-    until(|| probe.stops.load(Ordering::SeqCst) == 2).await;
+    until("lost assignment stops processor", || {
+        probe.stops.load(Ordering::SeqCst) == 2
+    })
+    .await;
     executor.shutdown().await;
     spectator.shutdown().await;
     let heartbeat = go.command(serde_json::json!({"op":"stats", "namespace":"matching"}));
-    assert_eq!(heartbeat[executor.executor_id()]["Status"], "DRAINING");
+    assert_eq!(
+        heartbeat[executor.executor_id()]["Status"],
+        "ExecutorStatusDRAINING"
+    );
     assert!(heartbeat[executor.executor_id()]["ReportedShards"]
         .get("shard-a")
         .is_none());

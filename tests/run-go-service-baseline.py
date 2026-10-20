@@ -4,6 +4,8 @@
 Run in tmux cadence-rust. Default mode is an all-Go baseline.
 --matching-delivery checks the Rust Matching RPC/History boundary.
 --rust-matching replaces Go Matching with Rust using test-only Fx discovery.
+--history-transport selects Rust Matching's outbound History transport in the
+production Ringpop lane (grpc or tchannel).
 """
 import argparse
 import json
@@ -23,6 +25,8 @@ parser.add_argument('--matching-restart', action='store_true', help='restart Rus
 parser.add_argument('--binary', type=Path, help='use an already built Go server')
 parser.add_argument('--go-mixed-server-bin', type=Path, help='reuse a Go test binary built with the Rust Matching discovery overlay')
 parser.add_argument('--rust-production-binary', type=Path, help='run an already built Rust server binary with the original Go Ringpop provider (requires production Matching Ringpop assembly)')
+parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
+    help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
@@ -35,6 +39,8 @@ if production_matching and args.go_mixed_server_bin:
     parser.error('--rust-production-binary cannot use the Go test-binary discovery overlay')
 if production_matching and (not args.rust_production_binary.is_file() or not os.access(args.rust_production_binary, os.X_OK)):
     parser.error(f'--rust-production-binary must name an existing executable: {args.rust_production_binary}')
+if args.history_transport != 'grpc' and not production_matching:
+    parser.error('--history-transport applies only with --rust-production-binary')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
@@ -79,12 +85,18 @@ config = work / 'config'
 config.mkdir(exist_ok=True)
 dynamic_config = work / 'dynamic-config.yaml'
 dynamic_text = (root / 'go/config/dynamicconfig/development.yaml').read_text()
-dynamic_text += (
-    '\nsystem.enableTasklistIsolation:\n'
-    '  - value: true\n'
-    'system.allIsolationGroups:\n'
-    '  - value: ["zone-a", "zone-b"]\n'
-)
+if args.rust_matching or args.matching_restart:
+    dynamic_text += (
+        '\nsystem.enableTasklistIsolation:\n'
+        '  - value: true\n'
+        'system.allIsolationGroups:\n'
+        '  - value: ["zone-a", "zone-b"]\n'
+    )
+if production_matching:
+    dynamic_text += (
+        '\nsystem.enableGRPCOutbound:\n'
+        f'  - value: {str(args.history_transport == "grpc").lower()}\n'
+    )
 dynamic_config.write_text(dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
         'FRONTEND_PORT_GRPC', 'MATCHING_PORT_GRPC', 'HISTORY_PORT_GRPC',
@@ -213,7 +225,8 @@ with (work / 'server.log').open('w') as log:
             'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
             'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
             'ringpopGate': 'original Go PeerProvider is active; runner does not substitute or hard-code Matching members and Rust must JOIN/publish serviceName/grpc labels' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
-            'historyRoutingGate': ('Rust Matching resolves History gRPC peers through its joined Ringpop view; system.enableGRPCOutbound must be true because the History TChannel client is not wired' if production_matching else None),
+            'historyTransport': args.history_transport if production_matching else None,
+            'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
             'acceptanceEligible': not production_matching,
             'serverCommand': command}, indent=2) + '\n')
         if result.returncode:
