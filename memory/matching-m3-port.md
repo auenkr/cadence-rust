@@ -2,14 +2,15 @@
 
 The isolated Rust sink is `cadence_server::matching_metrics_m3::M3MetricSink`.
 It implements the object-safe `matching_metrics::MetricSink` contract and
-depends on the shared `cadence_thrift::protocol::Writer` only for generic
-Thrift binary primitives. `matching_metrics_m3::M3MetricsConfig` mirrors the
+uses a local compact Thrift writer because Tally's default M3 protocol is
+compact; binary is only selected by an explicit Go option that Cadence's YAML
+does not expose. `matching_metrics_m3::M3MetricsConfig` mirrors the
 Go `tally/m3.Configuration` YAML fields. Construct it with the M3 config,
 generic metrics prefix, generic root tags (including `cadence_service`), and
 the generic reporting interval. This deliberately leaves mounting in the
 Matching service runtime to the integration worker.
 
-The exporter emits strict-binary Thrift v2 oneway `emitMetricBatchV2` calls.
+The exporter emits compact Thrift v2 oneway `emitMetricBatchV2` calls.
 The outer args struct contains `MetricBatch`, with metrics field 1 and common
 tags field 2. Each metric carries name, `MetricValue` (type/count/gauge/timer),
 report timestamp, and per-metric tags. M3 config tags plus service/env and an
@@ -25,9 +26,9 @@ bounded queue; the packet worker drains that queue into a staging batch, sends
 on size or flush marker, and unblocks producers as it drains (matching Tally's
 bounded channel plus process goroutine model).
 
-The pinned Go oracle lives at `go/tools/matching-metrics-m3-oracle`; run it
-with `scripts/emit-matching-m3-go-oracle.sh` after the runtime lane opens. It
-uses Tally's real reporter and UDP transport, decodes the v2 packet into JSON,
+The pinned Go oracle lives at `go/tools/matching-metrics-m3-oracle`. It uses
+Tally's real compact reporter and UDP transport, captures raw packets, and
+decodes v2 packets into JSON for the source parity comparison.
 and exercises counter/gauge/timer/histogram fields, tags, two-host fan-out,
 explicit flush, and reporter close. Rust has focused source tests for
 aggregation, queue backpressure, multi-host sends and drop flush. Neither the

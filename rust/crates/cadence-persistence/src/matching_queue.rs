@@ -26,6 +26,7 @@ pub enum QueueError {
     ReaderState(String),
 }
 pub type Result<T> = std::result::Result<T, QueueError>;
+pub type LeaseObserver = Arc<dyn Fn(bool) + Send + Sync>;
 #[derive(Clone)]
 pub struct PendingTask {
     pub data: TaskData,
@@ -53,7 +54,7 @@ pub struct DurableTaskQueue {
     gc_batch_size_provider: Mutex<Option<Arc<dyn Fn() -> i64 + Send + Sync>>>,
     stopped: AtomicBool,
     stop_waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    lease_observer: Mutex<Option<Arc<dyn Fn(bool) + Send + Sync>>>,
+    lease_observer: Mutex<Option<LeaseObserver>>,
 }
 #[derive(Default)]
 struct ReaderGate {
@@ -215,7 +216,7 @@ impl DurableTaskQueue {
     /// Install a service-owned callback for each task-list lease renewal.
     /// `true` means the retry operation obtained a lease; a failed renewal is
     /// reported once after its retry policy terminates.
-    pub fn set_lease_observer(&self, observer: Arc<dyn Fn(bool) + Send + Sync>) {
+    pub fn set_lease_observer(&self, observer: LeaseObserver) {
         *self.lease_observer.lock().expect("matching lease observer lock") = Some(observer);
     }
     fn observe_lease(&self, success: bool) {

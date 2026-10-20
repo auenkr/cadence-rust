@@ -19,6 +19,7 @@ import (
 )
 
 func main() {
+	captureHex := len(os.Args) > 1 && os.Args[1] == "capture-hex"
 	if len(os.Args) > 1 && os.Args[1] == "decode-hex" {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
@@ -77,7 +78,11 @@ func main() {
 			if readErr != nil {
 				break
 			}
-			fmt.Fprintln(os.Stdout, decode(buf[:n]))
+			if captureHex {
+				fmt.Fprintf(os.Stdout, "%x\n", buf[:n])
+			} else {
+				fmt.Fprintln(os.Stdout, decode(buf[:n]))
+			}
 		}
 	}
 }
@@ -87,7 +92,7 @@ func decode(packet []byte) string {
 	if _, err := transport.Write(packet); err != nil {
 		panic(err)
 	}
-	protocol := thrift.NewTBinaryProtocolFactoryDefault().GetProtocol(transport)
+	protocol := thrift.NewTCompactProtocolFactory().GetProtocol(transport)
 	name, _, _, err := protocol.ReadMessageBegin()
 	if err != nil {
 		panic(err)

@@ -1,9 +1,8 @@
-//! M3 metrics sink using Tally's v2 `MetricBatch` Thrift wire protocol.
+//! M3 metrics sink using Tally's default v2 `MetricBatch` compact Thrift wire protocol.
 //!
 //! This is intentionally isolated from server configuration/runtime mounting.
 
 use crate::matching_metrics::{HistogramSpec, MetricEvent, MetricKind, MetricSink, MetricValue};
-use cadence_thrift::protocol::{MessageType, TType, Writer};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -115,7 +114,7 @@ enum BackendMessage {
 }
 
 impl M3MetricSink {
-    /// Bind the M3 v2 binary Thrift UDP sink. `scope_tags` are the per-metric
+    /// Bind the M3 v2 compact Thrift UDP sink. `scope_tags` are the per-metric
     /// Tally root tags; M3 config tags become per-metric common tags.
     pub fn new(
         config: M3MetricsConfig,
@@ -367,7 +366,7 @@ impl MetricSink for M3MetricSink {
                     timestamp,
                     tags,
                     bucket: Some((
-                    format!("{:04}", index + 1),
+                    format!("{index:04}"),
                         format!("{}-{}", duration_string(lower), duration_string(upper)),
                     )),
                 });
@@ -611,44 +610,48 @@ fn send_to_all(inner: &Inner, packet: &[u8], first_error: &mut Option<io::Error>
 }
 
 fn encode_batch(metrics: &[M3Metric], common_tags: &[M3Tag]) -> Vec<u8> {
-    let mut w = Writer::new();
-    w.write_message_begin("emitMetricBatchV2", MessageType::Oneway, 0);
-    w.write_field_begin(TType::Struct, 1); // args.batch
-    w.write_field_begin(TType::List, 1);
-    w.write_list_begin(TType::Struct, metrics.len());
+    let mut w = CompactWriter::default();
+    w.write_message_begin("emitMetricBatchV2");
+    w.struct_begin(); // args
+    w.field_begin(12, 1); // STRUCT: args.batch
+    w.struct_begin(); // MetricBatch
+    w.field_begin(9, 1); // LIST: metrics
+    w.list_begin(12, metrics.len()); // STRUCT elements
     for metric in metrics {
         write_metric(&mut w, metric);
     }
-    w.write_field_begin(TType::List, 2);
-    w.write_list_begin(TType::Struct, common_tags.len());
+    w.field_begin(9, 2); // LIST: commonTags
+    w.list_begin(12, common_tags.len());
     for tag in common_tags {
         write_tag(&mut w, tag);
     }
-    w.write_field_stop(); // MetricBatch
-    w.write_field_stop(); // args
-    w.into_bytes()
+    w.struct_end(); // MetricBatch
+    w.struct_end(); // args
+    w.bytes
 }
 
-fn write_metric(w: &mut Writer, metric: &M3Metric) {
-    w.write_field_begin(TType::String, 1);
-    w.write_string(&metric.name);
-    w.write_field_begin(TType::Struct, 2);
+fn write_metric(w: &mut CompactWriter, metric: &M3Metric) {
+    w.struct_begin();
+    w.field_begin(8, 1); // BINARY: name
+    w.string(&metric.name);
+    w.field_begin(12, 2); // STRUCT: value
+    w.struct_begin();
     let (ty, count, gauge, timer) = match metric.value {
         Value::Counter(v) => (1, v, 0.0, 0),
         Value::Gauge(v) => (2, 0, v, 0),
         Value::Timer(v) => (3, 0, 0.0, v),
     };
-    w.write_field_begin(TType::I32, 1);
-    w.write_i32(ty);
-    w.write_field_begin(TType::I64, 2);
-    w.write_i64(count);
-    w.write_field_begin(TType::Double, 3);
-    w.write_f64(gauge);
-    w.write_field_begin(TType::I64, 4);
-    w.write_i64(timer);
-    w.write_field_stop();
-    w.write_field_begin(TType::I64, 3);
-    w.write_i64(metric.timestamp);
+    w.field_begin(5, 1); // I32: metricType
+    w.i32(ty);
+    w.field_begin(6, 2); // I64: count
+    w.i64(count);
+    w.field_begin(7, 3); // DOUBLE: gauge
+    w.f64(gauge);
+    w.field_begin(6, 4); // I64: timer
+    w.i64(timer);
+    w.struct_end(); // MetricValue
+    w.field_begin(6, 3); // I64: timestamp
+    w.i64(metric.timestamp);
     let mut tags = metric.tags.clone();
     if let Some((bucket_id, bucket)) = &metric.bucket {
         tags.push(M3Tag {
@@ -661,21 +664,85 @@ fn write_metric(w: &mut Writer, metric: &M3Metric) {
         });
     }
     if !tags.is_empty() {
-        w.write_field_begin(TType::List, 4);
-        w.write_list_begin(TType::Struct, tags.len());
+        w.field_begin(9, 4); // LIST: tags
+        w.list_begin(12, tags.len());
         for tag in &tags {
             write_tag(w, tag);
         }
     }
-    w.write_field_stop();
+    w.struct_end(); // Metric
 }
 
-fn write_tag(w: &mut Writer, tag: &M3Tag) {
-    w.write_field_begin(TType::String, 1);
-    w.write_string(&tag.name);
-    w.write_field_begin(TType::String, 2);
-    w.write_string(&tag.value);
-    w.write_field_stop();
+fn write_tag(w: &mut CompactWriter, tag: &M3Tag) {
+    w.struct_begin();
+    w.field_begin(8, 1); // BINARY: name
+    w.string(&tag.name);
+    w.field_begin(8, 2); // BINARY: value
+    w.string(&tag.value);
+    w.struct_end();
+}
+
+#[derive(Default)]
+struct CompactWriter {
+    bytes: Vec<u8>,
+    last_field_ids: Vec<i16>,
+}
+
+impl CompactWriter {
+    fn write_message_begin(&mut self, name: &str) {
+        self.bytes.extend_from_slice(&[0x82, 0x81]); // compact v1, ONEWAY
+        self.varint(0); // sequence id
+        self.string(name);
+    }
+    fn struct_begin(&mut self) {
+        self.last_field_ids.push(0);
+    }
+    fn struct_end(&mut self) {
+        self.bytes.push(0); // STOP
+        self.last_field_ids.pop().expect("compact struct stack");
+    }
+    fn field_begin(&mut self, kind: u8, id: i16) {
+        let previous = *self.last_field_ids.last().expect("inside compact struct");
+        let delta = id - previous;
+        if (1..=15).contains(&delta) {
+            self.bytes.push(((delta as u8) << 4) | kind);
+        } else {
+            self.bytes.push(kind);
+            self.i16(id);
+        }
+        *self.last_field_ids.last_mut().expect("inside compact struct") = id;
+    }
+    fn list_begin(&mut self, element_kind: u8, size: usize) {
+        if size <= 14 {
+            self.bytes.push(((size as u8) << 4) | element_kind);
+        } else {
+            self.bytes.push(0xf0 | element_kind);
+            self.varint(size as u64);
+        }
+    }
+    fn string(&mut self, value: &str) {
+        self.varint(value.len() as u64);
+        self.bytes.extend_from_slice(value.as_bytes());
+    }
+    fn i16(&mut self, value: i16) {
+        self.varint(((value << 1) ^ (value >> 15)) as u16 as u64);
+    }
+    fn i32(&mut self, value: i32) {
+        self.varint(((value << 1) ^ (value >> 31)) as u32 as u64);
+    }
+    fn i64(&mut self, value: i64) {
+        self.varint(((value << 1) ^ (value >> 63)) as u64);
+    }
+    fn f64(&mut self, value: f64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    fn varint(&mut self, mut value: u64) {
+        while value > 0x7f {
+            self.bytes.push((value as u8 & 0x7f) | 0x80);
+            value >>= 7;
+        }
+        self.bytes.push(value as u8);
+    }
 }
 
 fn low_1ms100s_bounds() -> Vec<u64> {
@@ -773,12 +840,9 @@ mod tests {
         .unwrap()
     }
     #[test]
-    fn binary_batch_starts_with_go_v2_oneway_envelope() {
+    fn compact_batch_starts_with_go_v2_oneway_envelope() {
         let packet = encode_batch(&[], &[]);
-        assert_eq!(
-            &packet[..4],
-            &(-2147418112_i32 | MessageType::Oneway as i32).to_be_bytes()
-        );
+        assert_eq!(&packet[..3], &[0x82, 0x81, 0x00]);
         assert!(packet
             .windows(b"emitMetricBatchV2".len())
             .any(|window| window == b"emitMetricBatchV2"));
@@ -791,7 +855,7 @@ mod tests {
             .iter()
             .position(|bound| 20_000_000_u128 <= u128::from(*bound))
             .unwrap();
-        assert_eq!(index + 1, 11);
+        assert_eq!(index, 10);
         assert_eq!(duration_string(bounds[index - 1] as i64), "16ms");
         assert_eq!(duration_string(bounds[index] as i64), "22.627416ms");
     }

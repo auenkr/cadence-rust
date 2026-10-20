@@ -93,15 +93,18 @@ and closes its reporter with the scope lifecycle. Histogram bucket values
 become `bucketid` and `bucket` tags with default precision 6. The config also
 accepts common tags, queue, packet size and internal tags.
 
-The Tally M3 reporter defaults to the Thrift binary protocol; compact protocol
+The Tally M3 reporter defaults to the Thrift compact protocol; binary protocol
 is available in Tally's API but is not exposed by Cadence's YAML configuration.
-Rust now has a dedicated M3 v2 binary Thrift UDP sink with reporting aggregation,
+Rust now has a dedicated M3 v2 compact Thrift UDP sink with reporting aggregation,
 packet sizing, multi-address fan-out, host/service/env/common tags, histogram
 bucket formatting, and flush/close semantics. `matching_metrics_m3_oracle.rs`
 emits packets to two local receivers. The pinned Go oracle's `decode-hex` mode
 decodes Rust packets with Go's generated v2 Thrift reader; the comparison
 normalizes timestamp and reporter-internal fields before comparing metric
-values/tags and common tags. This direct comparison has not yet run.
+values/tags and common tags. Direct comparisons now pass for both default and
+custom StatsD output and the pinned Go M3 v2 UDP producer/decoder. See
+`memory/evidence/matching-telemetry/m3/` for raw Go and Rust packet hex,
+decoded JSON, and the matching canonical JSON hash.
 
 ## Candidate validation sequence
 
