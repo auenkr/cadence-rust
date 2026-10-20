@@ -62,3 +62,13 @@ packet sizing, timer-based flushing, and flush-on-drop. Source verification is
 limited to rustfmt and `git diff --check`; neither the new UDP test nor Cargo
 tests were run because the runtime lane is occupied. The service runtime still
 needs to own/configure this sink in a later integration step.
+
+The StatsD sink now also stages counters and histogram bucket counts at a
+separate `reportingInterval` (default one second), while replacing gauges with
+their latest value and emitting timers immediately. `flush()` forces pending
+aggregates into the UDP buffer before flushing packets; the periodic StatsD
+packet flush remains governed independently by `flushInterval`. A source-only
+UDP test covers these aggregate semantics with an explicit flush boundary.
+This has not yet been run, and there is not yet a pinned-Go StatsD UDP oracle;
+do not treat the implementation as validated until both are exercised and
+compared semantically.

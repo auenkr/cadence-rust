@@ -20,6 +20,7 @@ const CADENCE_SERVICE_TAG: &str = "cadence_service";
 const MATCHING_SERVICE: &str = "cadence_matching";
 const DEFAULT_PACKET_BYTES: usize = 1432;
 const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_millis(300);
+const DEFAULT_REPORTING_INTERVAL: Duration = Duration::from_secs(1);
 const GO_DURATION_MIN: i64 = i64::MIN;
 const GO_DURATION_MAX: i64 = i64::MAX;
 
@@ -37,6 +38,12 @@ pub struct StatsdMetricsConfig {
         deserialize_with = "deserialize_go_duration"
     )]
     pub flush_interval: Duration,
+    #[serde(
+        default,
+        rename = "reportingInterval",
+        deserialize_with = "deserialize_go_duration"
+    )]
+    pub reporting_interval: Duration,
     #[serde(default, rename = "flushBytes")]
     pub flush_bytes: i64,
 }
@@ -47,6 +54,7 @@ impl Default for StatsdMetricsConfig {
             host_port: String::new(),
             prefix: String::new(),
             flush_interval: Duration::ZERO,
+            reporting_interval: Duration::ZERO,
             flush_bytes: 0,
         }
     }
@@ -125,12 +133,21 @@ struct StatsdInner {
     client_prefix: String,
     scope_prefix: String,
     root_tags: BTreeMap<String, String>,
+    aggregates: Mutex<BTreeMap<(String, String), Aggregate>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Aggregate {
+    Counter(i64),
+    Gauge(f64),
 }
 
 pub struct StatsdMetricSink {
     inner: Arc<StatsdInner>,
     stop: Option<mpsc::Sender<()>>,
     worker: Option<JoinHandle<()>>,
+    report_stop: Option<mpsc::Sender<()>>,
+    report_worker: Option<JoinHandle<()>>,
 }
 
 impl StatsdMetricSink {
@@ -140,6 +157,11 @@ impl StatsdMetricSink {
         scope_prefix: impl Into<String>,
         root_tags: BTreeMap<String, String>,
     ) -> io::Result<Self> {
+        let reporting_interval = if config.reporting_interval.is_zero() {
+            DEFAULT_REPORTING_INTERVAL
+        } else {
+            config.reporting_interval
+        };
         if config.host_port.trim().is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -171,6 +193,7 @@ impl StatsdMetricSink {
             client_prefix: config.prefix,
             scope_prefix: scope_prefix.into(),
             root_tags,
+            aggregates: Mutex::new(BTreeMap::new()),
         });
         let interval = if config.flush_interval.is_zero() {
             DEFAULT_FLUSH_INTERVAL
@@ -182,16 +205,64 @@ impl StatsdMetricSink {
         let worker = thread::Builder::new()
             .name("cadence-statsd-flush".to_owned())
             .spawn(move || flush_worker(weak, receiver, interval))?;
+        let report_weak = Arc::downgrade(&inner);
+        let (report_stop, report_receiver) = mpsc::channel();
+        let report_worker = thread::Builder::new()
+            .name("cadence-statsd-report".to_owned())
+            .spawn(move || report_worker(report_weak, report_receiver, reporting_interval))?;
         Ok(Self {
             inner,
             stop: Some(stop),
             worker: Some(worker),
+            report_stop: Some(report_stop),
+            report_worker: Some(report_worker),
         })
     }
 
     /// Flush a packet immediately. Useful during service shutdown.
     pub fn flush(&self) -> io::Result<()> {
+        self.flush_aggregates();
         flush_buffer(&self.inner)
+    }
+
+    fn aggregate(&self, name: String, kind: &str, value: Aggregate) {
+        let mut aggregates = self
+            .inner
+            .aggregates
+            .lock()
+            .expect("StatsD aggregates poisoned");
+        match aggregates.entry((name, kind.to_owned())) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(value);
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                match (entry.get_mut(), value) {
+                    (Aggregate::Counter(current), Aggregate::Counter(add)) => *current += add,
+                    (current, Aggregate::Gauge(latest)) => *current = Aggregate::Gauge(latest),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn flush_aggregates(&self) {
+        let pending = {
+            let mut aggregates = self
+                .inner
+                .aggregates
+                .lock()
+                .expect("StatsD aggregates poisoned");
+            std::mem::take(&mut *aggregates)
+        };
+        for ((name, kind), value) in pending {
+            match (kind.as_str(), value) {
+                ("c", Aggregate::Counter(value)) => self.enqueue(&format!("{name}:{value}|c")),
+                ("g", Aggregate::Gauge(value)) => {
+                    self.enqueue(&format!("{name}:{}|g", value as i64))
+                }
+                _ => {}
+            }
+        }
     }
 
     fn metric_name(&self, name: &str, event_tags: &BTreeMap<String, String>) -> String {
@@ -220,20 +291,19 @@ impl StatsdMetricSink {
     }
 
     fn enqueue(&self, metric_line: &str) {
-        let mut buffer = self
-            .inner
-            .buffer
-            .lock()
-            .expect("StatsD packet buffer poisoned");
-        if !buffer.is_empty() && buffer.len() + metric_line.len() + 1 >= self.inner.max_packet_bytes
-        {
-            let _ = send_buffer(&self.inner, &mut buffer);
-        }
-        buffer.extend_from_slice(metric_line.as_bytes());
-        buffer.push(b'\n');
-        if buffer.len() >= self.inner.max_packet_bytes {
-            let _ = send_buffer(&self.inner, &mut buffer);
-        }
+        enqueue_inner(&self.inner, metric_line);
+    }
+}
+
+fn enqueue_inner(inner: &StatsdInner, metric_line: &str) {
+    let mut buffer = inner.buffer.lock().expect("StatsD packet buffer poisoned");
+    if !buffer.is_empty() && buffer.len() + metric_line.len() + 1 >= inner.max_packet_bytes {
+        let _ = send_buffer(inner, &mut buffer);
+    }
+    buffer.extend_from_slice(metric_line.as_bytes());
+    buffer.push(b'\n');
+    if buffer.len() >= inner.max_packet_bytes {
+        let _ = send_buffer(inner, &mut buffer);
     }
 }
 
@@ -242,10 +312,10 @@ impl MetricSink for StatsdMetricSink {
         let name = self.metric_name(event.name, &event.tags);
         match (event.kind, event.value) {
             (MetricKind::Counter, MetricValue::Count(value)) => {
-                self.enqueue(&format!("{name}:{value}|c"))
+                self.aggregate(name, "c", Aggregate::Counter(value))
             }
             (MetricKind::Gauge, MetricValue::Number(value)) => {
-                self.enqueue(&format!("{name}:{}|g", value as i64))
+                self.aggregate(name, "g", Aggregate::Gauge(value))
             }
             (MetricKind::Timer, MetricValue::Duration(duration)) => {
                 let milliseconds = duration.as_nanos() as f64 / 1_000_000.0;
@@ -262,7 +332,7 @@ impl MetricSink for StatsdMetricSink {
                     go_duration_string(lower),
                     go_duration_string(upper)
                 );
-                self.enqueue(&format!("{bucket_name}:1|c"));
+                self.aggregate(bucket_name, "c", Aggregate::Counter(1));
             }
             _ => {}
         }
@@ -277,7 +347,41 @@ impl Drop for StatsdMetricSink {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
+        if let Some(stop) = self.report_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(worker) = self.report_worker.take() {
+            let _ = worker.join();
+        }
+        self.flush_aggregates();
         let _ = flush_buffer(&self.inner);
+    }
+}
+
+fn report_worker(inner: Weak<StatsdInner>, stop: mpsc::Receiver<()>, interval: Duration) {
+    loop {
+        match stop.recv_timeout(interval) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let Some(inner) = inner.upgrade() else { break };
+                let pending = {
+                    let mut aggregates =
+                        inner.aggregates.lock().expect("StatsD aggregates poisoned");
+                    std::mem::take(&mut *aggregates)
+                };
+                for ((name, kind), value) in pending {
+                    match (kind.as_str(), value) {
+                        ("c", Aggregate::Counter(value)) => {
+                            enqueue_inner(&inner, &format!("{name}:{value}|c"))
+                        }
+                        ("g", Aggregate::Gauge(value)) => {
+                            enqueue_inner(&inner, &format!("{name}:{}|g", value as i64))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -411,10 +515,11 @@ mod tests {
     #[test]
     fn config_accepts_go_statsd_duration_and_integer_packet_limit() {
         let config: StatsdMetricsConfig = serde_yaml::from_str(
-            "hostPort: 127.0.0.1:8125\nprefix: agent\nflushInterval: 2s\nflushBytes: 512\n",
+            "hostPort: 127.0.0.1:8125\nprefix: agent\nflushInterval: 2s\nreportingInterval: 250ms\nflushBytes: 512\n",
         )
         .unwrap();
         assert_eq!(config.flush_interval, Duration::from_secs(2));
+        assert_eq!(config.reporting_interval, Duration::from_millis(250));
         assert_eq!(config.flush_bytes, 512);
         assert_eq!(parse_go_duration("250ms"), Ok(250_000_000));
         assert!(parse_go_duration("").is_err());
@@ -468,5 +573,72 @@ mod tests {
         let size = receiver.recv(&mut packet).unwrap();
         let line = std::str::from_utf8(&packet[..size]).unwrap();
         assert_eq!(line, "agent.cadence.cadence_client_requests.cadence_role.history_client.cadence_service.cadence_matching.operation.HistoryClientGetMutableState.zone.west:1|c\n");
+    }
+
+    #[test]
+    fn counters_and_histogram_buckets_aggregate_while_gauges_keep_latest_value() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let sink = StatsdMetricSink::new(
+            StatsdMetricsConfig {
+                host_port: receiver.local_addr().unwrap().to_string(),
+                reporting_interval: Duration::from_secs(60),
+                ..Default::default()
+            },
+            "scope",
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let event = |name, kind, value| MetricEvent {
+            name,
+            kind,
+            value,
+            tags: BTreeMap::new(),
+            histogram: None,
+        };
+        sink.record(event(
+            "requests",
+            MetricKind::Counter,
+            MetricValue::Count(2),
+        ));
+        sink.record(event(
+            "requests",
+            MetricKind::Counter,
+            MetricValue::Count(3),
+        ));
+        sink.record(event("queue", MetricKind::Gauge, MetricValue::Number(4.0)));
+        sink.record(event("queue", MetricKind::Gauge, MetricValue::Number(9.0)));
+        sink.record(event(
+            "latency",
+            MetricKind::Histogram,
+            MetricValue::Duration(Duration::from_millis(20)),
+        ));
+        sink.record(event(
+            "latency",
+            MetricKind::Histogram,
+            MetricValue::Duration(Duration::from_millis(21)),
+        ));
+        // Timers bypass the reporting interval.
+        sink.record(event(
+            "elapsed",
+            MetricKind::Timer,
+            MetricValue::Duration(Duration::from_millis(7)),
+        ));
+        let mut packet = [0; 2048];
+        let timer = receiver.recv(&mut packet).unwrap();
+        assert!(std::str::from_utf8(&packet[..timer])
+            .unwrap()
+            .contains("scope.elapsed.cadence_service.cadence_matching:7|ms"));
+        sink.flush().unwrap();
+        let size = receiver.recv(&mut packet).unwrap();
+        let lines: std::collections::BTreeSet<_> = std::str::from_utf8(&packet[..size])
+            .unwrap()
+            .lines()
+            .collect();
+        assert!(lines.contains("scope.requests.cadence_service.cadence_matching:5|c"));
+        assert!(lines.contains("scope.queue.cadence_service.cadence_matching:9|g"));
+        assert!(lines.contains("scope.latency.cadence_service.cadence_matching.10ms-25ms:2|c"));
     }
 }
