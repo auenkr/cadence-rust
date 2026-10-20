@@ -311,3 +311,40 @@ and task-start mappings; all5 callable adapters now source-only, production
 retry/redirect/transport selection remains under implementation. No nested
 workers active, no future service migration. Cache pending_init was interrupted
 and resumed; no source lost. Avoid duplicating captured probe work.
+
+## Production main validation and real restart metadata failure
+
+Standalone SD client accepted root5c15c39e6 after7 Rust SD/12 config tests,
+strict Clippy, existing pinned Go resolver suite; executor/spectator live Go
+interop and registry/main wiring remain unproven. Evidence packaged with scope.
+
+Main worker source1a8591566 fixes parent-found embedded runtime take/drop bug,
+prebinds grpc, handles bootstrap signals, adds embedded durable native probe
+and occupiedgrpc check. Build/no-run/runtime/lifecycle/provider pass; initial
+Clippy last() lint fixed equivalently in a7f2603a2; corrected strict lint passes.
+Focused embedded durability probe passes, production focused probe fails empty
+polls because isolated harness only advertises Matching membership, no History.
+Do not add production loopback fallback; fixture needs History Ringpop peer.
+
+Actual mixed Go Frontend/History/Worker (no Go Matching) reached Rust through
+real discovery. First attempt missing node dependencies fixed with explicit
+NODE_PATH to existing root locked cadence-web node_modules. Next attempt got
+through real production startup/task writes and SIGKILL, then Rust restart
+failed valid Go metadata decode unknown ttype89. Root found Go codec version0
+preamble0x59=89 (common/codec/interface.go/version0_thriftrw.go); nested domain
+blob decoder currently reads raw struct. Worker owns sole lane diagnosing exact
+nested-vs-outer serialization boundary, actual Go bytes, version validation and
+regression fixtures; no dropping invalid cache rows/fallback allowed. Root main
+still unmerged until recovered mixed evidence. Raw failures retained in cache
+memory/evidence/matching-main-gate-20261020-a7f2603a2.
+
+User confirmed root uncommitted matching_registry.rs and untracked
+matching_shard_processor.rs are THEIR edits. Preserve alongsideAGENTS; never
+restore/overwrite/blind cherry-pick. SWIM isolated candidate96b297447+f4a3e54b5
+is source-only callback implementation/tests; now comparing read-only user
+snapshot and preparing additive tests preserving their behavior. QPS gap
+hypothesis disproved: existing grpc_matching report_arrival records nonforwarded
+loads. No worker modifies root. History source candidate685cca4c8 includes5
+transport adapters/integration, coherent TChannel named endpoints, Args/Result
+wrappers, prepared Go fixture generator/consumer and native fake-peer tests.
+Actual Go fixture and builds pending main lane; no parity claim.
