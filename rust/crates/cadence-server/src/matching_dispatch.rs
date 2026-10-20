@@ -222,6 +222,8 @@ fn now() -> i64 {
 struct DeliveryTask {
     task: AllocatedTask,
     sync: Option<crate::matching_sync::SyncTask>,
+    /// Forwarding is request scoped in Go and absent from persisted TaskData.
+    forwarded: bool,
 }
 enum ClaimError {
     Queue(QueueError),
@@ -321,12 +323,19 @@ impl TaskDispatcher {
     ) -> Result<(Option<DeliveryTask>, bool), ClaimError> {
         if let Some(matcher) = self.sync_matcher.as_ref().filter(|_| self.reader.is_some()) {
             tokio::select! {
-                task = matcher.poll(group) => task.map(|sync| (Some(DeliveryTask { task: sync.task.clone(), sync: Some(sync) }), false)).ok_or(ClaimError::Queue(QueueError::Stopped)),
-                result = self.claim(group) => result.map(|(task, pending)| (task.map(|task| DeliveryTask { task, sync: None }), pending)),
+                task = matcher.poll(group) => task.map(|sync| { let forwarded = sync.forwarded; (Some(DeliveryTask { task: sync.task.clone(), sync: Some(sync), forwarded }), false) }).ok_or(ClaimError::Queue(QueueError::Stopped)),
+                result = self.claim(group) => result.map(|(task, pending)| (task.map(|task| DeliveryTask { task, sync: None, forwarded: false }), pending)),
             }
         } else {
             self.claim(group).await.map(|(task, pending)| {
-                (task.map(|task| DeliveryTask { task, sync: None }), pending)
+                (
+                    task.map(|task| DeliveryTask {
+                        task,
+                        sync: None,
+                        forwarded: false,
+                    }),
+                    pending,
+                )
             })
         }
     }
@@ -1314,6 +1323,7 @@ mod tests {
                     data,
                     "",
                     &Uuid::from_u128(1).to_string(),
+                    false,
                     Duration::from_secs(10),
                     tokio::time::Instant::now() + Duration::from_secs(10),
                 )

@@ -239,7 +239,7 @@ impl QueueHandle {
         source_domain: Uuid,
         deadline: tokio::time::Instant,
     ) -> bool {
-        self.offer_sync(data, source_domain, deadline, true).await
+        self.offer_sync(data, source_domain, deadline, true, false).await
     }
     /// Go `TaskMatcher.Offer` skips the dispatch rate limiter for tasks
     /// already forwarded from a child partition; the entry partition limited
@@ -250,7 +250,7 @@ impl QueueHandle {
         source_domain: Uuid,
         deadline: tokio::time::Instant,
     ) -> bool {
-        self.offer_sync(data, source_domain, deadline, false).await
+        self.offer_sync(data, source_domain, deadline, false, true).await
     }
     pub async fn offer_forwarded_backlog(
         &self,
@@ -264,6 +264,7 @@ impl QueueHandle {
                 data.clone(),
                 &group,
                 &source_domain.to_string(),
+                true,
                 deadline.saturating_duration_since(tokio::time::Instant::now()),
                 deadline,
             )
@@ -275,6 +276,7 @@ impl QueueHandle {
         source_domain: Uuid,
         deadline: tokio::time::Instant,
         limit: bool,
+        forwarded: bool,
     ) -> bool {
         use crate::matching_limiter::WaitOutcome;
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -302,6 +304,7 @@ impl QueueHandle {
                 data.clone(),
                 &group,
                 &source_domain.to_string(),
+                forwarded,
                 (self.sync_wait)(),
                 deadline,
             )
