@@ -121,7 +121,7 @@ impl MatchingShardRouter {
     /// normalized `clientcommon.Config.GetPeerTTL()` value.
     #[must_use]
     pub fn with_peer_ttl(mut self, peer_ttl: Duration) -> Self {
-        self.peer_ttl = peer_ttl.max(Duration::from_millis(1));
+        self.peer_ttl = peer_ttl.max(Duration::from_nanos(1));
         self
     }
 
@@ -133,7 +133,9 @@ impl MatchingShardRouter {
         let peer_ttl = self.peer_ttl;
         let (stop, mut stopped) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval((peer_ttl / 2).max(Duration::from_millis(1)));
+            let interval_period = (peer_ttl / 2).max(Duration::from_nanos(1));
+            let mut interval =
+                tokio::time::interval_at(Instant::now() + interval_period, interval_period);
             loop {
                 tokio::select! {
                     _ = &mut stopped => break,
@@ -712,5 +714,33 @@ mod tests {
             RoutingPath::ShardDistributor
         );
         assert_eq!(spectator.calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn spectator_peer_cache_refreshes_use_and_evicts_at_ttl() {
+        let spectator = Arc::new(FakeSpectator::new(Ok(shard_owner(&[
+            (HOST_IP, "127.0.0.1"),
+            (PORT_GRPC, "7835"),
+        ]))));
+        let router = MatchingShardRouter::new(
+            ring(),
+            Some(spectator),
+            Arc::new(|| 100),
+            Arc::new(|| false),
+        )
+        .with_peer_ttl(Duration::from_millis(80));
+        let (stop, cleanup) = router.start_peer_cleanup();
+
+        router.remote_channel("queue").await.unwrap();
+        assert_eq!(router.peer_channels.lock().unwrap().len(), 1);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        router.remote_channel("queue").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(router.peer_channels.lock().unwrap().len(), 1);
+        tokio::time::sleep(Duration::from_millis(90)).await;
+        assert!(router.peer_channels.lock().unwrap().is_empty());
+
+        let _ = stop.send(());
+        cleanup.await.unwrap();
     }
 }

@@ -439,11 +439,15 @@ impl MatchingRuntime {
             spectator.shutdown().await;
         }
         self.shard_distributor_drain.take();
-        if let Some((stop, task)) = self.shard_distributor_peer_cleanup.take() {
+        let peer_cleanup_result = if let Some((stop, task)) =
+            self.shard_distributor_peer_cleanup.take()
+        {
             let _ = stop.send(());
             task.await
-                .map_err(|error| anyhow::anyhow!("joining Matching shard peer cleanup: {error}"))?;
-        }
+                .map_err(|error| anyhow::anyhow!("joining Matching shard peer cleanup: {error}"))
+        } else {
+            Ok(())
+        };
         if let Some(stop) = self.membership_maintenance_stop.take() {
             let _ = stop.send(());
         }
@@ -486,6 +490,7 @@ impl MatchingRuntime {
         }
         maintenance_result?;
         membership_result?;
+        peer_cleanup_result?;
         dynamic_config_result?;
         drain_result?;
         Ok(())
@@ -509,6 +514,10 @@ impl Drop for MatchingRuntime {
             task.abort();
         }
         if let Some((stop, task)) = self.dynamic_config_watch.take() {
+            let _ = stop.send(());
+            task.abort();
+        }
+        if let Some((stop, task)) = self.shard_distributor_peer_cleanup.take() {
             let _ = stop.send(());
             task.abort();
         }
