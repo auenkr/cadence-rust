@@ -21,10 +21,17 @@ Run from the repository root with:
 python3 tests/run-matching-mysql-interop.py
 ```
 
-The script requires Docker and Go. Rust runs with `--locked`, so dependency
-resolution and Cargo.lock updates must happen in a separately authorized
-build-lane window before running it. It removes only the temporary MySQL
-container it creates. It does not inspect, stop, or alter other containers.
+The script requires Docker and Go. After the workspace lockfile has been
+resolved, it runs the MySQL DSN unit tests, ignored domain-query cancellation
+tests (including max-connections recovery), and a TLS query with Go timeout
+options against the same disposable MySQL 8 server before the Go -> Rust -> Go
+interop phases. `tests/run-matching-mysql-timeout-validation.sh` is the
+serialized entry point: it resolves `rust/Cargo.lock` once, runs the locked
+workspace check, tests the vendored driver's timeout unit tests from a
+temporary isolated copy, and then invokes this MySQL 8 / Go interop harness.
+Run that entry point only in the authorized build lane. It removes only the
+temporary MySQL container and temporary vendor test copy it creates; it does
+not inspect, stop, or alter other containers.
 
 The expiry portion validates the persisted deadline and the task manager's
 fenced delete operation; it does not run Matching's service-level expiry scan.

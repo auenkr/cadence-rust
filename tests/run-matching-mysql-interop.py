@@ -85,6 +85,22 @@ def main():
                 "-p", "cadence-persistence", "--test", "matching_mysql_interop",
                 "mysql_interop_harness", "--", "--ignored", "--exact", "--nocapture",
             ]
+            mysql_unit_command = [
+                "cargo", "test", "--locked", "--manifest-path", str(ROOT / "rust/Cargo.toml"),
+                "-p", "cadence-persistence", "matching_mysql::tests::", "--", "--nocapture",
+            ]
+            mysql_timeout_command = [
+                "cargo", "test", "--locked", "--manifest-path", str(ROOT / "rust/Cargo.toml"),
+                "-p", "cadence-persistence", "timed_domain_query", "--", "--ignored", "--nocapture",
+            ]
+            mysql_tls_command = [
+                "cargo", "test", "--locked", "--manifest-path", str(ROOT / "rust/Cargo.toml"),
+                "-p", "cadence-persistence", "mysql_async_tls_uses_go_socket_timeout_options",
+                "--", "--ignored", "--nocapture",
+            ]
+            run(mysql_unit_command, cwd=ROOT, env=environment)
+            run(mysql_timeout_command, cwd=ROOT, env=environment)
+            run(mysql_tls_command, cwd=ROOT, env=environment)
             run(go_command, cwd=ROOT / "go", env={**environment, "CADENCE_MYSQL_PHASE": "seed"})
             run(rust_command, cwd=ROOT, env=environment)
             run(go_command, cwd=ROOT / "go", env={**environment, "CADENCE_MYSQL_PHASE": "verify-rust"})

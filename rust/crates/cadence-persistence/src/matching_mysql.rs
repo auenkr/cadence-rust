@@ -1380,6 +1380,34 @@ mod tests {
     }
 
     #[test]
+    fn mysql_async_options_apply_go_socket_timeout_attributes() {
+        let mut config = timed_mysql_test_config(1);
+        config.connect_attributes = [
+            ("TIMEOUT".into(), "2s".into()),
+            ("readTimeout".into(), "100ms".into()),
+            ("writeTimeout".into(), "250ms".into()),
+        ]
+        .into_iter()
+        .collect();
+        let opts = mysql_async_options(&config).unwrap();
+        assert_eq!(opts.tcp_connect_timeout(), Some(Duration::from_secs(2)));
+        assert_eq!(opts.read_timeout(), Some(Duration::from_millis(100)));
+        assert_eq!(opts.write_timeout(), Some(Duration::from_millis(250)));
+
+        config.connect_attributes = [
+            ("timeout".into(), "0".into()),
+            ("readTimeout".into(), "0".into()),
+            ("writeTimeout".into(), "0".into()),
+        ]
+        .into_iter()
+        .collect();
+        let opts = mysql_async_options(&config).unwrap();
+        assert_eq!(opts.tcp_connect_timeout(), None);
+        assert_eq!(opts.read_timeout(), None);
+        assert_eq!(opts.write_timeout(), None);
+    }
+
+    #[test]
     fn mysql_driver_errors_keep_go_retry_categories() {
         let error = |code| {
             MySqlError::MySqlError(mysql::MySqlError {
@@ -1604,6 +1632,33 @@ mod tests {
             .unwrap();
         assert_eq!(value, Some(11));
         assert_eq!(pool.state.lock().unwrap().open, 0);
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server with TLS enabled"]
+    fn mysql_async_tls_uses_go_socket_timeout_options() {
+        use mysql_async::prelude::Queryable as _;
+
+        let mut config = timed_mysql_test_config(1);
+        config.connect_attributes = [
+            ("tls".into(), "skip-verify".into()),
+            ("timeout".into(), "3s".into()),
+            ("readTimeout".into(), "3s".into()),
+            ("writeTimeout".into(), "3s".into()),
+        ]
+        .into_iter()
+        .collect();
+        let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let status: Option<(String, String)> = pool
+            .query_until(Instant::now() + Duration::from_secs(5), |connection| {
+                Box::pin(async move {
+                    connection
+                        .exec_first("SHOW STATUS LIKE 'Ssl_cipher'", ())
+                        .await
+                })
+            })
+            .unwrap();
+        assert!(status.is_some_and(|(_, cipher)| !cipher.is_empty()));
     }
 
     #[test]
