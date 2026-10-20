@@ -12,8 +12,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -28,11 +30,40 @@ parser.add_argument('--rust-production-binary', type=Path, help='run an already 
 parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
     help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
+parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
 work.mkdir(parents=True, exist_ok=True)
 print(f'Go baseline artifacts: {work}', flush=True)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import matching_evidence
+
+
+def mysql_rows(sql):
+    """Run one read-only MySQL statement against the shared database."""
+    return matching_evidence.mysql_rows(
+        sql,
+        container=os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'),
+        password=mysql_password,
+        database=mysql_database,
+        host=mysql_host,
+        port=mysql_port,
+        user=mysql_user,
+    )
+
+
+def check_go_schema_only():
+    """Confirm the shared database holds Go's schema and no private tables."""
+    return matching_evidence.check_go_schema_only(
+        root / 'go/schema/mysql/v8/cadence/schema.sql',
+        container=os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'),
+        password=mysql_password,
+        database=mysql_database,
+        host=mysql_host,
+        port=mysql_port,
+        user=mysql_user,
+    )
 production_matching = args.rust_production_binary is not None
 if production_matching and not (args.rust_matching or args.matching_restart):
     parser.error('--rust-production-binary requires --rust-matching or --matching-restart')
@@ -230,82 +261,137 @@ if (args.rust_matching or args.matching_restart) and not production_matching:
     import os
     command = [str(binary), '-test.run=^TestRustMatchingGoServices$', '-test.timeout=15m']
     environment = {**os.environ, 'CADENCE_GO_CONFIG': str(config), 'CADENCE_RUST_MATCHING_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}'}
-with (work / 'server.log').open('w') as log:
-    server = subprocess.Popen(command, cwd=work, stdout=log, stderr=subprocess.STDOUT, env=environment)
-    try:
-        deadline = time.monotonic() + 90
-        while True:
-            if server.poll() is not None:
-                raise RuntimeError(f'Go baseline exited; see {work / "server.log"}')
-            try:
-                with socket.create_connection(('127.0.0.1', int(ports['FRONTEND_PORT_GRPC'])), timeout=0.5):
-                    break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('Go baseline startup timed out')
-                time.sleep(0.1)
-        with (work / 'probe.log').open('w') as output:
-            if production_matching:
-                probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
-                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
-                    f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
-                    'restart' if args.matching_restart else '', str(server.pid), 'production']
-            elif args.rust_matching or args.matching_restart:
-                probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
-                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
-                    f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
-                    'restart' if args.matching_restart else '', str(server.pid)]
-            elif args.matching_delivery:
-                probe = ['node', str(root / 'tests/matching-history-compat.cjs'),
-                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}']
-            else:
-                probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
-                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
-            probe_environment = None
-            if matching_test_executable and (args.rust_matching or args.matching_restart):
-                probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
-            if production_matching:
-                probe_environment = {**os.environ,
-                    'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(args.rust_production_binary.resolve()),
-                    'CADENCE_RUST_MATCHING_PRODUCTION_CONFIG': str(rust_config),
-                    'CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL': ports['RUST_MATCHING_PORT'],
-                    'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
-                    'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
-                    'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
-                    'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
-                if args.mysql:
-                    probe_environment.update({
-                        'CADENCE_MATCHING_MYSQL': '1',
-                        'CADENCE_MYSQL_HOST': mysql_host,
-                        'CADENCE_MYSQL_PORT': mysql_port,
-                        'CADENCE_MYSQL_USER': mysql_user,
-                        'CADENCE_MYSQL_PASSWORD': mysql_password,
-                        'CADENCE_MYSQL_DATABASE': mysql_database,
-                    })
-                    if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
-                        probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
-            result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
-        (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
-            'topology': ('Go Frontend/History/Worker with Rust Matching via production Ringpop' if production_matching else ('Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'))),
-            'goServicesPid': server.pid, 'goServicesAliveAfterProbe': server.poll() is None,
-            'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
-            'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
-            'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
-            'historyTransport': args.history_transport if production_matching else None,
-            'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
-            'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
-            'acceptanceEligible': not production_matching,
-            'serverCommand': command}, indent=2) + '\n')
-        if result.returncode:
-            raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
-    finally:
-        server.terminate()
+results = {
+    'topology': ('Go Frontend/History/Worker with Rust Matching via production Ringpop' if production_matching else ('Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'))),
+    'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
+    'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
+    'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
+    'historyTransport': args.history_transport if production_matching else None,
+    'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
+    'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
+    'acceptanceEligible': not production_matching,
+    'serverCommand': command,
+    'artifactsDirectory': str(work),
+}
+
+
+def copy_evidence(destination, results):
+    """Copy the selected run evidence into a durable directory."""
+    config_files = sorted(config.glob('*.yaml'))
+    if production_matching:
+        config_files += [Path(rust_config), Path(rust_dynamic_config)]
+    binaries = {'goBinary': Path(binary)}
+    if production_matching:
+        binaries['rustProductionBinary'] = Path(args.rust_production_binary)
+    return matching_evidence.copy_evidence(
+        destination,
+        work=work,
+        config_files=config_files,
+        repository=root,
+        binaries=binaries,
+        results=results,
+    )
+
+
+environment_note = {key: value for key, value in os.environ.items()
+                   if key.startswith('CADENCE_') and 'PASSWORD' not in key.upper()}
+(work / 'command.txt').write_text(
+    'env ' + ' '.join(f'{key}={value}' for key, value in sorted(environment_note.items())) + '\n'
+    + ' '.join([shlex.quote(part) for part in [sys.executable, *sys.argv]]) + '\n')
+exit_code = 0
+failure = None
+try:
+    with (work / 'server.log').open('w') as log:
+        server = subprocess.Popen(command, cwd=work, stdout=log, stderr=subprocess.STDOUT, env=environment)
         try:
-            server.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            server.kill()
-            server.wait(timeout=10)
+            deadline = time.monotonic() + 90
+            while True:
+                if server.poll() is not None:
+                    raise RuntimeError(f'Go baseline exited; see {work / "server.log"}')
+                try:
+                    with socket.create_connection(('127.0.0.1', int(ports['FRONTEND_PORT_GRPC'])), timeout=0.5):
+                        break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('Go baseline startup timed out')
+                    time.sleep(0.1)
+            with (work / 'probe.log').open('w') as output:
+                if production_matching:
+                    probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
+                        f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
+                        'restart' if args.matching_restart else '', str(server.pid), 'production']
+                elif args.rust_matching or args.matching_restart:
+                    probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
+                        f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
+                        'restart' if args.matching_restart else '', str(server.pid)]
+                elif args.matching_delivery:
+                    probe = ['node', str(root / 'tests/matching-history-compat.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}']
+                else:
+                    probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
+                probe_environment = None
+                if matching_test_executable and (args.rust_matching or args.matching_restart):
+                    probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
+                if production_matching:
+                    probe_environment = {**os.environ,
+                        'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(args.rust_production_binary.resolve()),
+                        'CADENCE_RUST_MATCHING_PRODUCTION_CONFIG': str(rust_config),
+                        'CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL': ports['RUST_MATCHING_PORT'],
+                        'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
+                        'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
+                        'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
+                        'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
+                    if args.mysql:
+                        probe_environment.update({
+                            'CADENCE_MATCHING_MYSQL': '1',
+                            'CADENCE_MYSQL_HOST': mysql_host,
+                            'CADENCE_MYSQL_PORT': mysql_port,
+                            'CADENCE_MYSQL_USER': mysql_user,
+                            'CADENCE_MYSQL_PASSWORD': mysql_password,
+                            'CADENCE_MYSQL_DATABASE': mysql_database,
+                        })
+                        if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
+                            probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
+                result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
+                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120)))
+            results['probeExitCode'] = result.returncode
+            results['goServicesPid'] = server.pid
+            results['goServicesAliveAfterProbe'] = server.poll() is None
+            if (work / 'db-observations.json').is_file():
+                observations = json.loads((work / 'db-observations.json').read_text())
+                results['taskGarbageCollection'] = observations.get('taskGarbageCollection')
+                results['domainMetadata'] = observations.get('domainMetadata')
+                results['decoderFixtureCases'] = observations.get('decoderFixtureCases')
+            if args.mysql:
+                try:
+                    results['goSchemaOnly'] = check_go_schema_only()
+                except Exception as error:  # the schema observation must not mask the probe failure
+                    results['goSchemaOnly'] = {'error': f'{type(error).__name__}: {error}'}
+            (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
+            if result.returncode:
+                raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=10)
+except BaseException as error:
+    exit_code = 1
+    failure = f'{type(error).__name__}: {error}'
+    raise
+finally:
+    results['runExitCode'] = exit_code
+    results['failure'] = failure
+    (work / 'run.exit').write_text(f'{exit_code}\n')
+    (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
+    if args.evidence_dir:
+        copied = copy_evidence(args.evidence_dir, results)
+        print(f'Selected evidence copied to {args.evidence_dir}: {copied}', flush=True)
 if production_matching:
     print(f'Preliminary production process probe completed; it is not Matching acceptance evidence: {work / "results.json"}', flush=True)
 else:

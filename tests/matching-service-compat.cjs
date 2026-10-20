@@ -30,23 +30,50 @@ function call(service, method, request) {
     { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
 }
 const payload = data => ({ data: Buffer.from(data) });
-function durableTaskCount(taskList, fallbackDatabase) {
+function sqlText(value) { return String(value).replaceAll("'", "''"); }
+function domainHex(domainId) { return String(domainId).replace(/-/g, '').toLowerCase(); }
+const MYSQL_OBSERVATION_TIMEOUT_MS = 30000;
+function mysqlQuery(sql) {
+  if (!process.env.CADENCE_MATCHING_MYSQL) return { status: 1, stdout: '', stderr: 'MySQL probe mode is not enabled' };
+  const container = process.env.CADENCE_MYSQL_DOCKER_CONTAINER;
+  const password = process.env.CADENCE_MYSQL_PASSWORD || '';
+  const database = process.env.CADENCE_MYSQL_DATABASE || 'cadence';
+  const command = container
+    ? ['docker', ['exec', container, 'mysql', '--batch', '--skip-column-names', '-uroot',
+      `-p${password}`, database, '-e', sql]]
+    : ['mysql', ['--batch', '--skip-column-names', '--host', process.env.CADENCE_MYSQL_HOST || '127.0.0.1',
+      '--port', process.env.CADENCE_MYSQL_PORT || '3306', '--user', process.env.CADENCE_MYSQL_USER || 'root',
+      `--password=${password}`, database, '-e', sql]];
+  // The observation is bounded so a stalled database or container cannot hang
+  // the gate; every failure mode is reported instead of a silent empty result.
+  const result = spawnSync(command[0], command[1], {
+    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: MYSQL_OBSERVATION_TIMEOUT_MS,
+  });
+  if (result.error) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation failed: ${result.error.message}` };
+  if (result.signal) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation was killed by ${result.signal} after ${MYSQL_OBSERVATION_TIMEOUT_MS}ms` };
+  return { status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
+}
+function mysqlRows(sql) {
+  const result = mysqlQuery(sql);
+  if (result.status !== 0) throw new Error(`MySQL query failed: ${(result.stderr || '').trim() || sql}`);
+  return result.stdout.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => line.split('\t'));
+}
+// Every task query is constrained by the canonical domain UUID, the task list
+// and the task type, exactly like Go's task table keys.
+function durableTaskCount(domainId, taskList, taskType, fallbackDatabase) {
   if (process.env.CADENCE_MATCHING_MYSQL) {
-    const query = `SELECT COUNT(*) FROM tasks WHERE task_list_name='${taskList.replaceAll("'", "''")}' AND task_type=0`;
-    const container = process.env.CADENCE_MYSQL_DOCKER_CONTAINER;
-    const command = container
-      ? ['docker', ['exec', container, 'mysql', '--batch', '--skip-column-names', '-uroot',
-        `-p${process.env.CADENCE_MYSQL_PASSWORD || ''}`, process.env.CADENCE_MYSQL_DATABASE, '-e', query]]
-      : ['mysql', ['--batch', '--skip-column-names', '--host', process.env.CADENCE_MYSQL_HOST,
-        '--port', process.env.CADENCE_MYSQL_PORT, '--user', process.env.CADENCE_MYSQL_USER,
-        `--password=${process.env.CADENCE_MYSQL_PASSWORD || ''}`, process.env.CADENCE_MYSQL_DATABASE, '-e', query]];
-    const result = spawnSync(command[0], command[1], { encoding: 'utf8' });
+    const query = `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList)}' AND task_type=${taskType}`;
+    const result = mysqlQuery(query);
     if (result.status === 0) result.stdout = result.stdout.trim();
     return result;
   }
   const database = process.env.CADENCE_MATCHING_SQLITE_DB || fallbackDatabase;
-  return spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, taskList], { encoding: 'utf8' });
+  return spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where domain_id=? and task_list_name=? and task_type=?", (bytes.fromhex(sys.argv[2]), sys.argv[3], int(sys.argv[4]))).fetchone()[0])', database, domainHex(domainId), taskList, String(taskType)], { encoding: 'utf8', timeout: 60000 });
 }
+// The production MySQL gate (task garbage collection, persisted
+// acknowledgement, range consistency and Go's domain metadata) lives in
+// tests/matching-mysql-gate.cjs together with the ThriftRW blob decoder.
+const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder } = require('./matching-mysql-gate.cjs');
 async function run() {
   const id = randomUUID(), domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
   await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
@@ -140,7 +167,7 @@ async function run() {
     const persistedDeadline = Date.now() + 20000;
     let persisted;
     while (Date.now() < persistedDeadline) {
-      persisted = durableTaskCount(restartTaskList, path.join(work, 'matching.db'));
+      persisted = durableTaskCount(domainId, restartTaskList, 0, path.join(work, 'matching.db'));
       if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -172,8 +199,22 @@ async function run() {
     }
   }
   const execution = { workflowId: id, runId: started.runId };
+  // Track the highest task id Go's schema holds for every queue the probe
+  // uses, so the production GC gate can compare the persisted acknowledgement
+  // with the rows the collector removed.
+  const observedMaxTaskIds = new Map();
+  const observeMaxTaskId = taskType => {
+    if (!process.env.CADENCE_MATCHING_MYSQL) return;
+    const rows = mysqlRows(`SELECT COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList.name)}' AND task_type=${taskType}`);
+    const count = Number(rows[0][0]);
+    const value = rows[0][1] && rows[0][1] !== 'NULL' ? Number(rows[0][1]) : null;
+    if (value === null || !Number.isFinite(value)) return;
+    const previous = observedMaxTaskIds.get(taskType);
+    if (!previous || previous.maxTaskId < value) observedMaxTaskIds.set(taskType, { maxTaskId: value, rows: count });
+  };
   const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(decision.workflowExecution.runId, started.runId);
+  observeMaxTaskId(0);
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
   assert(described.pollers.some(poller => poller.identity === 'service-probe'));
   assert.equal(described.taskListStatus.taskIdBlock.startId, '1');
@@ -187,9 +228,11 @@ async function run() {
   });
   const activity = await call('WorkerAPI', 'PollForActivityTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(activity.input.data.toString(), 'activity');
+  observeMaxTaskId(1);
   assert.equal((await call('WorkerAPI', 'RecordActivityTaskHeartbeat', { taskToken: activity.taskToken, details: payload('heartbeat') })).cancelRequested, false);
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: activity.taskToken, result: payload('activity-result'), identity: 'service-probe' });
   const final = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
+  observeMaxTaskId(0);
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: final.taskToken, identity: 'service-probe', decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('done') } }],
   });
@@ -212,7 +255,7 @@ async function run() {
     const taskDeadline = Date.now() + 20000;
     let queued;
     while (Date.now() < taskDeadline) {
-      queued = durableTaskCount(drainTaskList, path.join(work, 'matching.db'));
+      queued = durableTaskCount(domainId, drainTaskList, 0, path.join(work, 'matching.db'));
       if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -384,7 +427,48 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
+  let productionDatabaseEvidence;
+  if (productionMode && process.env.CADENCE_MATCHING_MYSQL) {
+    // The GC assertions below decode Go's task-list metadata, so the decoder
+    // is checked against the committed blob fixtures first.
+    const decoderFixtureCases = verifyTaskListBlobDecoder();
+    const pendingList = { name: `gc-pending-${id}` };
+    const pendingStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: `gc-pending-${id}`, taskList: pendingList, requestId: randomUUID(),
+    });
+    const pendingDeadline = Date.now() + 20000;
+    let pendingRows = 0;
+    while (Date.now() < pendingDeadline) {
+      pendingRows = Number(mysqlRows(`SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(pendingList.name)}' AND task_type=0`)[0][0]);
+      if (pendingRows > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert(pendingRows > 0, 'Go History did not persist the unacknowledged control task');
+    const liveBlocks = {};
+    for (const [taskType, taskListType] of [[0, 'TASK_LIST_TYPE_DECISION'], [1, 'TASK_LIST_TYPE_ACTIVITY']]) {
+      const status = (await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType, includeTaskListStatus: true })).taskListStatus;
+      liveBlocks[taskType] = { startId: Number(status.taskIdBlock.startId), endId: Number(status.taskIdBlock.endId) };
+    }
+    const taskGarbageCollection = await verifyProductionMySqlTaskGc({
+      query: mysqlRows,
+      domainId,
+      taskListName: taskList.name,
+      pendingListName: pendingList.name,
+      observedMaxTaskIds: [...observedMaxTaskIds.entries()].sort((left, right) => left[0] - right[0]),
+      liveBlocks,
+      rangeSize: 100000,
+      sleep: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
+    });
+    const domainMetadata = observeProductionMySqlDomain({ query: mysqlRows, domain, domainId });
+    productionDatabaseEvidence = {
+      decoderFixtureCases,
+      taskGarbageCollection,
+      domainMetadata,
+      pendingControl: { taskList: pendingList.name, workflowId: pendingStarted.workflowId || `gc-pending-${id}`, taskRows: pendingRows },
+    };
+    fs.writeFileSync(path.join(work, 'db-observations.json'), JSON.stringify(productionDatabaseEvidence, null, 2) + '\n');
+  }
+  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
   } finally {
     if (productionMode) rust.kill('SIGTERM');
     else fs.writeFileSync(stop, 'stop');
