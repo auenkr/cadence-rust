@@ -130,7 +130,7 @@ impl MatchingHistoryPeerResolver {
 
     fn owner(&self, key: &str) -> Result<String, Status> {
         let hosts = self.membership.resolved_hosts()?;
-        let ring_hosts = hosts.iter().map(|peer| peer.host.clone()).collect();
+        let ring_hosts: Vec<_> = hosts.iter().map(|peer| peer.host.clone()).collect();
         Ring::new(ring_hosts)
             .lookup(key)
             .and_then(|host| hosts.iter().find(|peer| peer.host.address == host.address))
