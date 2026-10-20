@@ -109,7 +109,7 @@ async function run() {
       const response = await fetch(endpoint, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ configName, configValues: [{ value: {
-          EncodingType: 'JSON', Data: Buffer.from(value).toString('base64'),
+          EncodingType: 1, Data: Buffer.from(value).toString('base64'),
         } }] }),
       });
       if (!response.ok) throw new Error(`Rust Matching dynamic config ${configName} update failed: HTTP ${response.status}`);
