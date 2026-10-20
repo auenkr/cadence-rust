@@ -46,38 +46,38 @@ func TestGenerateHistoryTChannelWireOracle(t *testing.T) {
 		t.Skip("set CADENCE_THRIFT_WIRE_FIXTURE_OUT to generate pinned Go ThriftRW wire fixtures")
 	}
 	fixtures := []historyWireFixture{
-		encodeHistoryWireFixture(t, "get_mutable_state_request", FromHistoryGetMutableStateRequest(&testdata.HistoryGetMutableStateRequest)),
-		encodeHistoryWireFixture(t, "get_mutable_state_response", FromHistoryGetMutableStateResponse(&testdata.HistoryGetMutableStateResponse)),
-		encodeHistoryWireFixture(t, "refresh_workflow_tasks_request", FromHistoryRefreshWorkflowTasksRequest(&testdata.HistoryRefreshWorkflowTasksRequest)),
-		encodeHistoryWireFixture(t, "describe_workflow_execution_request", FromHistoryDescribeWorkflowExecutionRequest(&testdata.HistoryDescribeWorkflowExecutionRequest)),
-		encodeHistoryWireFixture(t, "describe_workflow_execution_response", FromDescribeWorkflowExecutionResponse(&testdata.DescribeWorkflowExecutionResponse)),
-		encodeHistoryWireFixture(t, "record_decision_task_started_request", FromRecordDecisionTaskStartedRequest(&testdata.HistoryRecordDecisionTaskStartedRequest)),
-		encodeHistoryWireFixture(t, "record_decision_task_started_response", FromRecordDecisionTaskStartedResponse(&testdata.HistoryRecordDecisionTaskStartedResponse)),
-		encodeHistoryWireFixture(t, "record_activity_task_started_request", FromRecordActivityTaskStartedRequest(&testdata.HistoryRecordActivityTaskStartedRequest)),
-		encodeHistoryWireFixture(t, "record_activity_task_started_response", FromRecordActivityTaskStartedResponse(&testdata.HistoryRecordActivityTaskStartedResponse)),
-		encodeHistoryWireFixture(t, "record_activity_empty_header", FromRecordActivityTaskStartedResponse(&types.RecordActivityTaskStartedResponse{
+		encodeHistoryWireFixture(t, "get_mutable_state_request", history.HistoryService_GetMutableState_Helper.Args(FromHistoryGetMutableStateRequest(&testdata.HistoryGetMutableStateRequest))),
+		encodeHistoryWireFixture(t, "get_mutable_state_response", historySuccess(history.HistoryService_GetMutableState_Helper.WrapResponse(FromHistoryGetMutableStateResponse(&testdata.HistoryGetMutableStateResponse), nil))),
+		encodeHistoryWireFixture(t, "refresh_workflow_tasks_request", history.HistoryService_RefreshWorkflowTasks_Helper.Args(FromHistoryRefreshWorkflowTasksRequest(&testdata.HistoryRefreshWorkflowTasksRequest))),
+		encodeHistoryWireFixture(t, "describe_workflow_execution_request", history.HistoryService_DescribeWorkflowExecution_Helper.Args(FromHistoryDescribeWorkflowExecutionRequest(&testdata.HistoryDescribeWorkflowExecutionRequest))),
+		encodeHistoryWireFixture(t, "describe_workflow_execution_response", historySuccess(history.HistoryService_DescribeWorkflowExecution_Helper.WrapResponse(FromDescribeWorkflowExecutionResponse(&testdata.DescribeWorkflowExecutionResponse), nil))),
+		encodeHistoryWireFixture(t, "record_decision_task_started_request", history.HistoryService_RecordDecisionTaskStarted_Helper.Args(FromRecordDecisionTaskStartedRequest(&testdata.HistoryRecordDecisionTaskStartedRequest))),
+		encodeHistoryWireFixture(t, "record_decision_task_started_response", historySuccess(history.HistoryService_RecordDecisionTaskStarted_Helper.WrapResponse(FromRecordDecisionTaskStartedResponse(&testdata.HistoryRecordDecisionTaskStartedResponse), nil))),
+		encodeHistoryWireFixture(t, "record_activity_task_started_request", history.HistoryService_RecordActivityTaskStarted_Helper.Args(FromRecordActivityTaskStartedRequest(&testdata.HistoryRecordActivityTaskStartedRequest))),
+		encodeHistoryWireFixture(t, "record_activity_task_started_response", historySuccess(history.HistoryService_RecordActivityTaskStarted_Helper.WrapResponse(FromRecordActivityTaskStartedResponse(&testdata.HistoryRecordActivityTaskStartedResponse), nil))),
+		encodeHistoryWireFixture(t, "record_activity_empty_header", historySuccess(history.HistoryService_RecordActivityTaskStarted_Helper.WrapResponse(FromRecordActivityTaskStartedResponse(&types.RecordActivityTaskStartedResponse{
 			ScheduledEvent: &types.HistoryEvent{ActivityTaskScheduledEventAttributes: &types.ActivityTaskScheduledEventAttributes{Header: &types.Header{Fields: map[string][]byte{}}}},
-		})),
-		encodeHistoryWireFixture(t, "record_activity_absent_header", FromRecordActivityTaskStartedResponse(&types.RecordActivityTaskStartedResponse{
+		}), nil))),
+		encodeHistoryWireFixture(t, "record_activity_absent_header", historySuccess(history.HistoryService_RecordActivityTaskStarted_Helper.WrapResponse(FromRecordActivityTaskStartedResponse(&types.RecordActivityTaskStartedResponse{
 			ScheduledEvent: &types.HistoryEvent{ActivityTaskScheduledEventAttributes: &types.ActivityTaskScheduledEventAttributes{}},
-		})),
-		encodeHistoryWireFixture(t, "record_activity_empty_input", FromRecordActivityTaskStartedResponse(&types.RecordActivityTaskStartedResponse{
+		}), nil))),
+		encodeHistoryWireFixture(t, "record_activity_empty_input", historySuccess(history.HistoryService_RecordActivityTaskStarted_Helper.WrapResponse(FromRecordActivityTaskStartedResponse(&types.RecordActivityTaskStartedResponse{
 			ScheduledEvent: &types.HistoryEvent{ActivityTaskScheduledEventAttributes: &types.ActivityTaskScheduledEventAttributes{Input: []byte{}}},
-		})),
-		encodeHistoryWireFixture(t, "record_activity_absent_input", FromRecordActivityTaskStartedResponse(&types.RecordActivityTaskStartedResponse{
+		}), nil))),
+		encodeHistoryWireFixture(t, "record_activity_absent_input", historySuccess(history.HistoryService_RecordActivityTaskStarted_Helper.WrapResponse(FromRecordActivityTaskStartedResponse(&types.RecordActivityTaskStartedResponse{
 			ScheduledEvent: &types.HistoryEvent{ActivityTaskScheduledEventAttributes: &types.ActivityTaskScheduledEventAttributes{}},
-		})),
-		encodeHistoryWireFixture(t, "record_decision_empty_queries", FromRecordDecisionTaskStartedResponse(&types.RecordDecisionTaskStartedResponse{Queries: map[string]*types.WorkflowQuery{}})),
-		encodeHistoryWireFixture(t, "record_decision_absent_queries", FromRecordDecisionTaskStartedResponse(&types.RecordDecisionTaskStartedResponse{})),
-		encodeHistoryWireFixture(t, "get_mutable_empty_version_histories", FromHistoryGetMutableStateResponse(&types.GetMutableStateResponse{VersionHistories: &types.VersionHistories{Histories: []*types.VersionHistory{}}})),
-		encodeHistoryWireFixture(t, "get_mutable_absent_version_histories", FromHistoryGetMutableStateResponse(&types.GetMutableStateResponse{})),
-		encodeHistoryWireFixture(t, "exception_entity_not_exists", FromEntityNotExistsError(&types.EntityNotExistsError{Message: "missing", CurrentCluster: "active", ActiveCluster: "active", ActiveClusters: []string{"active"}})),
-		encodeHistoryWireFixture(t, "exception_workflow_already_completed", FromWorkflowExecutionAlreadyCompletedError(&types.WorkflowExecutionAlreadyCompletedError{Message: "closed"})),
-		encodeHistoryWireFixture(t, "exception_event_already_started", FromEventAlreadyStartedError(&types.EventAlreadyStartedError{Message: "duplicate"})),
-		encodeHistoryWireFixture(t, "exception_domain_not_active", FromDomainNotActiveError(&types.DomainNotActiveError{Message: "inactive", DomainName: "domain", CurrentCluster: "standby", ActiveCluster: "active", ActiveClusters: []string{"active"}})),
-		encodeHistoryWireFixture(t, "exception_shard_ownership_lost", &history.ShardOwnershipLostError{Owner: stringPtr("history-b:7935"), Message: stringPtr("wrong owner")}),
-		encodeHistoryWireFixture(t, "exception_service_busy", FromServiceBusyError(&types.ServiceBusyError{Message: "busy", Reason: "capacity"})),
-		encodeHistoryWireFixture(t, "exception_internal_service", FromInternalServiceError(&types.InternalServiceError{Message: "internal"})),
+		}), nil))),
+		encodeHistoryWireFixture(t, "record_decision_empty_queries", historySuccess(history.HistoryService_RecordDecisionTaskStarted_Helper.WrapResponse(FromRecordDecisionTaskStartedResponse(&types.RecordDecisionTaskStartedResponse{Queries: map[string]*types.WorkflowQuery{}}), nil))),
+		encodeHistoryWireFixture(t, "record_decision_absent_queries", historySuccess(history.HistoryService_RecordDecisionTaskStarted_Helper.WrapResponse(FromRecordDecisionTaskStartedResponse(&types.RecordDecisionTaskStartedResponse{}), nil))),
+		encodeHistoryWireFixture(t, "get_mutable_empty_version_histories", historySuccess(history.HistoryService_GetMutableState_Helper.WrapResponse(FromHistoryGetMutableStateResponse(&types.GetMutableStateResponse{VersionHistories: &types.VersionHistories{Histories: []*types.VersionHistory{}}}), nil))),
+		encodeHistoryWireFixture(t, "get_mutable_absent_version_histories", historySuccess(history.HistoryService_GetMutableState_Helper.WrapResponse(FromHistoryGetMutableStateResponse(&types.GetMutableStateResponse{}), nil))),
+		encodeHistoryWireFixture(t, "exception_entity_not_exists", &history.HistoryService_GetMutableState_Result{EntityNotExistError: FromEntityNotExistsError(&types.EntityNotExistsError{Message: "missing", CurrentCluster: "active", ActiveCluster: "active", ActiveClusters: []string{"active"}})}),
+		encodeHistoryWireFixture(t, "exception_workflow_already_completed", &history.HistoryService_RecordActivityTaskStarted_Result{WorkflowExecutionAlreadyCompletedError: FromWorkflowExecutionAlreadyCompletedError(&types.WorkflowExecutionAlreadyCompletedError{Message: "closed"})}),
+		encodeHistoryWireFixture(t, "exception_event_already_started", &history.HistoryService_RecordDecisionTaskStarted_Result{EventAlreadyStartedError: FromEventAlreadyStartedError(&types.EventAlreadyStartedError{Message: "duplicate"})}),
+		encodeHistoryWireFixture(t, "exception_domain_not_active", &history.HistoryService_RefreshWorkflowTasks_Result{DomainNotActiveError: FromDomainNotActiveError(&types.DomainNotActiveError{Message: "inactive", DomainName: "domain", CurrentCluster: "standby", ActiveCluster: "active", ActiveClusters: []string{"active"}})}),
+		encodeHistoryWireFixture(t, "exception_shard_ownership_lost", &history.HistoryService_DescribeWorkflowExecution_Result{ShardOwnershipLostError: &history.ShardOwnershipLostError{Owner: stringPtr("history-b:7935"), Message: stringPtr("wrong owner")}}),
+		encodeHistoryWireFixture(t, "exception_service_busy", &history.HistoryService_RecordActivityTaskStarted_Result{ServiceBusyError: FromServiceBusyError(&types.ServiceBusyError{Message: "busy", Reason: "capacity"})}),
+		encodeHistoryWireFixture(t, "exception_internal_service", &history.HistoryService_GetMutableState_Result{InternalServiceError: FromInternalServiceError(&types.InternalServiceError{Message: "internal"})}),
 	}
 	encoded, err := json.MarshalIndent(fixtures, "", "  ")
 	if err != nil {
@@ -89,3 +89,10 @@ func TestGenerateHistoryTChannelWireOracle(t *testing.T) {
 }
 
 func stringPtr(value string) *string { return &value }
+
+func historySuccess(value thriftWireEncoder, err error) thriftWireEncoder {
+	if err != nil {
+		panic(err)
+	}
+	return value
+}

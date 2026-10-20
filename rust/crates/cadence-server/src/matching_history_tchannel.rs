@@ -31,7 +31,13 @@ impl TChannelHistoryClient {
         body: &TypedStruct,
         timeout: Duration,
     ) -> Result<TypedStruct, Status> {
-        let method = format!("History::{method}");
+        let procedure = format!("History::{method}");
+        // YARPC Thrift methods receive an Args struct whose first field is
+        // the single IDL argument. The method-specific request mappers above
+        // produce that nested argument value.
+        let arguments = TypedStruct {
+            fields: vec![field(1, TypedValue::Struct(body.clone()))],
+        };
         let headers = vec![
             ("$rpc$-caller".to_owned(), "internal".to_owned()),
             ("$rpc$-service".to_owned(), HISTORY_SERVICE.to_owned()),
@@ -39,9 +45,9 @@ impl TChannelHistoryClient {
         let response = crate::tchannel_json_client::call_thrift(
             &self.address,
             HISTORY_SERVICE,
-            &method,
+            &procedure,
             &headers,
-            &encode_typed_struct(body),
+            &encode_typed_struct(&arguments),
             timeout,
         )
         .await
@@ -57,11 +63,20 @@ impl TChannelHistoryClient {
                 }
             }
         })?;
+        let result = decode_typed_struct(&response.body)
+            .map_err(|error| Status::internal(format!("invalid History Thrift result: {error}")))?;
         if response.application_error {
-            return Err(application_error(&response.headers, &response.body));
+            return Err(application_error(method, &response.headers, &result));
         }
-        decode_typed_struct(&response.body)
-            .map_err(|error| Status::internal(format!("invalid History Thrift reply: {error}")))
+        if method == "RefreshWorkflowTasks" && result.fields.is_empty() {
+            return Ok(TypedStruct::default());
+        }
+        field_struct(&result, 0)
+            .map_err(|error| {
+                Status::internal(format!("invalid History Thrift success result: {error}"))
+            })?
+            .cloned()
+            .ok_or_else(|| Status::internal("History Thrift success result is missing field 0."))
     }
 
     pub(crate) async fn refresh_workflow_tasks(
@@ -153,7 +168,59 @@ impl TChannelHistoryClient {
     }
 }
 
-fn application_error(headers: &[(String, String)], body: &[u8]) -> Status {
+fn exception_name(method: &str, id: i16) -> Option<&'static str> {
+    match (method, id) {
+        ("GetMutableState" | "DescribeWorkflowExecution", 1) => Some("BadRequestError"),
+        ("GetMutableState" | "DescribeWorkflowExecution", 2) => Some("InternalServiceError"),
+        ("GetMutableState" | "DescribeWorkflowExecution", 3) => Some("EntityNotExistsError"),
+        ("GetMutableState" | "DescribeWorkflowExecution", 4) => Some("ShardOwnershipLostError"),
+        ("GetMutableState" | "DescribeWorkflowExecution", 5) => Some("LimitExceededError"),
+        ("GetMutableState" | "DescribeWorkflowExecution", 6) => Some("ServiceBusyError"),
+        ("GetMutableState", 7) => Some("CurrentBranchChangedError"),
+        ("RefreshWorkflowTasks", 1) => Some("BadRequestError"),
+        ("RefreshWorkflowTasks", 2) => Some("InternalServiceError"),
+        ("RefreshWorkflowTasks", 3) => Some("DomainNotActiveError"),
+        ("RefreshWorkflowTasks", 4) => Some("ShardOwnershipLostError"),
+        ("RefreshWorkflowTasks", 5) => Some("ServiceBusyError"),
+        ("RefreshWorkflowTasks", 6) => Some("EntityNotExistsError"),
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 1) => Some("BadRequestError"),
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 2) => {
+            Some("InternalServiceError")
+        }
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 3) => {
+            Some("EventAlreadyStartedError")
+        }
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 4) => {
+            Some("EntityNotExistsError")
+        }
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 5) => {
+            Some("ShardOwnershipLostError")
+        }
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 6) => {
+            Some("DomainNotActiveError")
+        }
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 7) => {
+            Some("LimitExceededError")
+        }
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 8) => Some("ServiceBusyError"),
+        ("RecordDecisionTaskStarted" | "RecordActivityTaskStarted", 9) => {
+            Some("WorkflowExecutionAlreadyCompletedError")
+        }
+        _ => None,
+    }
+}
+
+fn error_string_list(value: Option<&TypedValue>, id: i16) -> Vec<String> {
+    match value {
+        Some(TypedValue::List(TType::String, values)) => values
+            .iter()
+            .filter_map(|value| string_value(value, id).ok())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn application_error(method: &str, headers: &[(String, String)], result: &TypedStruct) -> Status {
     let name = headers
         .iter()
         .find(|(key, _)| key == "$rpc$-application-error-name")
@@ -164,29 +231,48 @@ fn application_error(headers: &[(String, String)], body: &[u8]) -> Status {
         .find(|(key, _)| key == "$rpc$-application-error-details")
         .map(|(_, value)| value.as_str())
         .unwrap_or("History returned a Thrift application error.");
-    let exception = decode_typed_struct(body).ok();
-    let message = exception
-        .as_ref()
-        .and_then(|value| {
-            field_string(
-                value,
-                if name == "ShardOwnershipLostError" {
-                    10
-                } else {
-                    1
-                },
-            )
-            .ok()
+    let (exception_id, exception) = result
+        .fields
+        .first()
+        .and_then(|(id, value)| match value {
+            TypedValue::Struct(exception) => Some((*id, exception)),
+            _ => None,
         })
+        .map_or((None, None), |(id, value)| (Some(id), Some(value)));
+    let name = exception_id
+        .and_then(|id| exception_name(method, id))
+        .unwrap_or(name);
+    let message_id = if matches!(
+        name,
+        "ShardOwnershipLostError" | "CurrentBranchChangedError"
+    ) {
+        10
+    } else {
+        1
+    };
+    let message = exception
+        .and_then(|value| field_string(value, message_id).ok())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| details.to_owned());
     use cadence_proto::{api, shared};
     match name {
+        "BadRequestError" => Status::invalid_argument(message),
         "EntityNotExistsError" => crate::grpc::detailed_status(
             Code::NotFound,
             message,
             name,
-            api::EntityNotExistsError::default(),
+            api::EntityNotExistsError {
+                current_cluster: exception
+                    .and_then(|value| field_string(value, 2).ok())
+                    .unwrap_or_default(),
+                active_cluster: exception
+                    .and_then(|value| field_string(value, 3).ok())
+                    .unwrap_or_default(),
+                active_clusters: error_string_list(
+                    exception.and_then(|value| typed_field(value, 4)),
+                    4,
+                ),
+            },
         ),
         "WorkflowExecutionAlreadyCompletedError" => crate::grpc::detailed_status(
             Code::NotFound,
@@ -204,11 +290,24 @@ fn application_error(headers: &[(String, String)], body: &[u8]) -> Status {
             Code::FailedPrecondition,
             message,
             name,
-            api::DomainNotActiveError::default(),
+            api::DomainNotActiveError {
+                domain: exception
+                    .and_then(|value| field_string(value, 2).ok())
+                    .unwrap_or_default(),
+                current_cluster: exception
+                    .and_then(|value| field_string(value, 3).ok())
+                    .unwrap_or_default(),
+                active_cluster: exception
+                    .and_then(|value| field_string(value, 4).ok())
+                    .unwrap_or_default(),
+                active_clusters: error_string_list(
+                    exception.and_then(|value| typed_field(value, 5)),
+                    5,
+                ),
+            },
         ),
         "ShardOwnershipLostError" => {
             let owner = exception
-                .as_ref()
                 .and_then(|value| field_string(value, 20).ok())
                 .unwrap_or_default();
             crate::grpc::detailed_status_type(
@@ -222,7 +321,27 @@ fn application_error(headers: &[(String, String)], body: &[u8]) -> Status {
             Code::ResourceExhausted,
             message,
             name,
-            api::ServiceBusyError::default(),
+            api::ServiceBusyError {
+                reason: exception
+                    .and_then(|value| field_string(value, 2).ok())
+                    .unwrap_or_default(),
+            },
+        ),
+        "LimitExceededError" => crate::grpc::detailed_status(
+            Code::ResourceExhausted,
+            message,
+            name,
+            api::LimitExceededError {},
+        ),
+        "CurrentBranchChangedError" => crate::grpc::detailed_status_type(
+            Code::Aborted,
+            message,
+            "type.googleapis.com/uber.cadence.shared.v1.CurrentBranchChangedError".into(),
+            shared::CurrentBranchChangedError {
+                current_branch_token: exception
+                    .and_then(|value| field_bytes(value, 20).ok())
+                    .unwrap_or_default(),
+            },
         ),
         // FromInternalServiceError intentionally maps CodeInternal without
         // details in Go's proto mapper.
@@ -2130,7 +2249,9 @@ mod typed_codec_tests {
                 field(20, string("history-b:7935")),
             ],
         });
+        let ownership = decode_typed_struct(&ownership).unwrap();
         let status = application_error(
+            "RecordActivityTaskStarted",
             &[
                 (
                     "$rpc$-application-error-name".into(),
@@ -2141,7 +2262,9 @@ mod typed_codec_tests {
                     "wrong shard owner".into(),
                 ),
             ],
-            &ownership,
+            &TypedStruct {
+                fields: vec![field(5, TypedValue::Struct(ownership))],
+            },
         );
         assert_eq!(status.code(), Code::Aborted);
         let status = RpcStatus::decode(status.details()).unwrap();
@@ -2158,6 +2281,7 @@ mod typed_codec_tests {
         );
 
         let status = application_error(
+            "RecordActivityTaskStarted",
             &[
                 (
                     "$rpc$-application-error-name".into(),
@@ -2168,7 +2292,12 @@ mod typed_codec_tests {
                     "event already started".into(),
                 ),
             ],
-            &[],
+            &TypedStruct {
+                fields: vec![field(
+                    3,
+                    struct_value(vec![field(1, string("event already started"))]),
+                )],
+            },
         );
         assert_eq!(status.code(), Code::AlreadyExists);
         let status = RpcStatus::decode(status.details()).unwrap();
