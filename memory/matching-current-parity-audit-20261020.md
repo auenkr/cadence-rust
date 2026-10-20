@@ -106,3 +106,24 @@ not a Matching acceptance audit.
    restart, and recovery evidence before beginning History migration.
 
 No Matching completion claim is made by this audit.
+
+## Semaphore backend correction (2026-10-20)
+
+Pinned Go source review corrected the earlier “make production semaphores
+shared” recommendation for the current SQL path: Go's
+`go/common/persistence/sql/sql_semaphore_metadata_store.go` and
+`sql_semaphore_token_store.go` are explicit stubs. Every operation returns a
+`types.BadRequestError` with `distributed semaphore is not supported on the SQL
+persistence backend`; the comments state that the distributed semaphore
+feature is supported only by NoSQL/Cassandra. Therefore a Rust SQLite schema
+would change Go behavior and violate the schema compatibility requirement.
+
+The isolated source branch `t3/matching-semaphore-durable` adds a backend
+boundary, routes configured SQL metadata create and Matching acquire through
+that exact unsupported behavior, and keeps the in-memory adapter for embedded
+mode/tests. It does not create SQL tables. Cassandra remains the real persistence
+parity gap: port the NoSQL metadata rows and the logged-batch conditional grant
+and release semantics on `semaphore_metadata` and `semaphore_tokens`, then wire
+them with the Cassandra Matching task/domain store. No Cassandra implementation
+or runtime claim is made until a Rust driver and configured NoSQL boundary are
+present and validated.

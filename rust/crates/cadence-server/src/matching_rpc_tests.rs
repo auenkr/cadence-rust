@@ -956,6 +956,31 @@ async fn matching_rpc_semaphore_acquire_grants_and_reports_no_slot() {
     assert_eq!(disabled.code(), tonic::Code::InvalidArgument);
 }
 
+#[tokio::test]
+async fn matching_rpc_sql_semaphore_matches_go_unsupported_backend_error() {
+    let (_dir, _store, mut matching, _key) = fixture();
+    matching.frontend.state.semaphore_enabled = true;
+    matching.semaphores = crate::matching_semaphore::Registry::new(Arc::new(
+        cadence_persistence::SqlUnsupportedSemaphorePersistence,
+    ));
+    let response = MatchingApi::acquire_semaphore(
+        &matching,
+        Request::new(m::AcquireSemaphoreRequest {
+            domain_id: Uuid::from_u128(1).to_string(),
+            semaphore_name: "sem".into(),
+            bucket: 0,
+            owner_id: "1:w:r1:1".into(),
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(response.code(), tonic::Code::InvalidArgument);
+    assert_eq!(
+        response.message(),
+        cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE
+    );
+}
+
 fn scaler_config_value(matching: &Matching, property: &str, json: &[u8]) {
     matching
         .frontend

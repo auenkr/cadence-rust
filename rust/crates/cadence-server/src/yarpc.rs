@@ -1146,8 +1146,10 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
     semaphore_gate(state, &req.domain)?;
     validation::validate_create_semaphore_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
-    match executions.create_semaphore(
+    let semaphores = state
+        .semaphore_store_for_domain(&req.domain)
+        .map_err(|e| AppError::entity_not_exists(e.message))?;
+    match semaphores.create_semaphore(
         &req.domain,
         &req.semaphore_name,
         req.capacity,
@@ -1167,6 +1169,9 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
         Err(cadence_persistence::SemaphoreError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }
+        Err(cadence_persistence::SemaphoreError::UnsupportedBackend) => Err(AppError::bad_request(
+            cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE,
+        )),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }

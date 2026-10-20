@@ -298,7 +298,11 @@ pub type TaskListOwnershipCheck = Arc<
 >;
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
-        let semaphores = crate::matching_semaphore::Registry::new(state.executions.clone());
+        let semaphore_store = state
+            .semaphore_persistence
+            .clone()
+            .unwrap_or_else(|| Arc::new(state.executions.clone()));
+        let semaphores = crate::matching_semaphore::Registry::new(semaphore_store);
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),

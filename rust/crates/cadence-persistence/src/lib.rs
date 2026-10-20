@@ -24,7 +24,8 @@ pub use executions::{
 };
 pub use schedules::{ScheduleError, ScheduleRecord};
 pub use semaphores::{
-    AcquireError, GrantOutcome, SemaphoreError, SemaphoreHold, SemaphoreMetadata, SemaphoreRow,
+    AcquireError, GrantOutcome, SemaphoreError, SemaphoreHold, SemaphoreMetadata,
+    SemaphorePersistence, SemaphoreRow, SqlUnsupportedSemaphorePersistence,
 };
 
 pub mod matching_blob;

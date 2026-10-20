@@ -15,7 +15,7 @@
 use cadence_api::enums::SemaphoreAcquireOutcome;
 use cadence_common::liveness::Liveness;
 use cadence_persistence::{
-    AcquireError, GrantOutcome, InMemoryExecutionStore, SemaphoreRow,
+    AcquireError, GrantOutcome, InMemoryExecutionStore, SemaphorePersistence, SemaphoreRow,
 };
 use std::{
     collections::HashMap,
@@ -132,13 +132,17 @@ struct Index {
 /// One bucket's manager, mirroring Go's `semaphoreManagerImpl`.
 pub struct Manager {
     id: Identifier,
-    store: InMemoryExecutionStore,
+    store: Arc<dyn SemaphorePersistence>,
     liveness: Liveness,
     index: Mutex<Index>,
 }
 
 impl Manager {
-    fn new(id: Identifier, store: InMemoryExecutionStore, idle_ttl_nanos: i64) -> Self {
+    fn new(
+        id: Identifier,
+        store: Arc<dyn SemaphorePersistence>,
+        idle_ttl_nanos: i64,
+    ) -> Self {
         Self {
             id,
             store,
@@ -403,12 +407,12 @@ fn remove_from_free_set(index: &mut Index, token_id: i32) {
 #[derive(Clone)]
 pub struct Registry {
     managers: Arc<Mutex<HashMap<Identifier, Arc<Manager>>>>,
-    store: InMemoryExecutionStore,
+    store: Arc<dyn SemaphorePersistence>,
     idle_ttl_nanos: i64,
 }
 
 impl Registry {
-    pub fn new(store: InMemoryExecutionStore) -> Self {
+    pub fn new(store: Arc<dyn SemaphorePersistence>) -> Self {
         Self {
             managers: Arc::new(Mutex::new(HashMap::new())),
             store,
@@ -515,7 +519,7 @@ mod tests {
 
     #[test]
     fn matching_semaphore_registry_shares_one_manager_per_bucket() {
-        let registry = Registry::new(store());
+        let registry = Registry::new(Arc::new(store()));
         let first = registry.get_or_create(identifier(0)).unwrap();
         let second = registry.get_or_create(identifier(0)).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
@@ -530,7 +534,7 @@ mod tests {
 
     #[test]
     fn matching_semaphore_grants_until_full_then_reports_no_slot() {
-        let registry = Registry::new(store());
+        let registry = Registry::new(Arc::new(store()));
         let manager = registry.get_or_create(identifier(0)).unwrap();
         let first = manager.acquire("1:w:r1:1").unwrap();
         assert_eq!(first.outcome, SemaphoreAcquireOutcome::Acquired);
@@ -554,7 +558,7 @@ mod tests {
         store
             .grant_semaphore_token("uuid-d", "sem", 0, 2, "1:w:r1:1")
             .unwrap();
-        let registry = Registry::new(store);
+        let registry = Registry::new(Arc::new(store));
         let manager = registry.get_or_create(identifier(0)).unwrap();
         assert_eq!(manager.free_count(), 1);
         // The persisted holder keeps its slot without a new grant.
@@ -567,7 +571,7 @@ mod tests {
     #[test]
     fn matching_semaphore_confirm_hold_drops_stale_index_entry() {
         let store = store();
-        let registry = Registry::new(store.clone());
+        let registry = Registry::new(Arc::new(store.clone()));
         let manager = registry.get_or_create(identifier(0)).unwrap();
         let granted = manager.acquire("1:w:r1:1").unwrap();
         // Simulate another host taking the slot behind this cache.
@@ -586,7 +590,7 @@ mod tests {
     fn matching_semaphore_missing_semaphore_is_not_ready_after_scan() {
         let store = InMemoryExecutionStore::new();
         store.register_domain("d", "uuid-d");
-        let registry = Registry::new(store);
+        let registry = Registry::new(Arc::new(store));
         let error = match registry.get_or_create(identifier(0)) {
             Ok(_) => panic!("a missing semaphore must fail the startup scan"),
             Err(error) => error,
@@ -598,7 +602,7 @@ mod tests {
 
     #[test]
     fn matching_semaphore_sweep_unloads_idle_buckets() {
-        let registry = Registry::new(store()).with_idle_ttl(1_000_000_000);
+        let registry = Registry::new(Arc::new(store())).with_idle_ttl(1_000_000_000);
         let manager = registry.get_or_create(identifier(0)).unwrap();
         registry.sweep_idle(now_nanos());
         assert!(registry.by_identifier(&identifier(0)).is_some());

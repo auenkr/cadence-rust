@@ -659,6 +659,19 @@ async fn main() -> anyhow::Result<()> {
                 num_history_shards,
                 ..Default::default()
             };
+            // Go SQL semaphore stores return BadRequest for every operation;
+            // distributed semaphore persistence is supported by Cassandra.
+            // Do not silently serve configured SQL with process-local holds.
+            if cfg
+                .persistence
+                .datastores
+                .get(&cfg.persistence.default_store)
+                .is_some_and(|store| store.sql.is_some())
+            {
+                state.semaphore_persistence = Some(std::sync::Arc::new(
+                    cadence_persistence::SqlUnsupportedSemaphorePersistence,
+                ));
+            }
             let mut dynamic_config_loaded_at = None;
             let dynamic_config_loaded = if let Some(path) = dynamic_config_path.as_ref() {
                 match cadence_server::admin::DynamicConfigOverlay::from_file(path) {
