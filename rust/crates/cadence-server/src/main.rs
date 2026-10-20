@@ -432,12 +432,10 @@ mod matching_http_listener_tests {
     #[tokio::test]
     async fn rejects_invalid_configuration_and_detects_enabled_tls() {
         let rpc: config::RpcConfig = serde_yaml::from_str("http: {port: 0}").unwrap();
-        assert!(
-            matching_http_addr(&rpc)
-                .unwrap_err()
-                .to_string()
-                .contains("HTTP port is not set")
-        );
+        assert!(matching_http_addr(&rpc)
+            .unwrap_err()
+            .to_string()
+            .contains("HTTP port is not set"));
         let tls: config::HttpConfig = serde_yaml::from_str("tls: {enabled: true}").unwrap();
         assert!(matching_http_tls(&tls).await.unwrap().is_none());
     }
@@ -446,63 +444,51 @@ mod matching_http_listener_tests {
     async fn validates_tls_mode_and_certificate_configuration() {
         let enforced_without_tls: config::HttpConfig =
             serde_yaml::from_str("TLSMode: enforced").unwrap();
-        assert!(
-            matching_http_tls(&enforced_without_tls)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(matching_http_tls(&enforced_without_tls)
+            .await
+            .unwrap()
+            .is_none());
         let enforced_with_tls_disabled: config::HttpConfig =
             serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: false}").unwrap();
-        assert!(
-            matching_http_tls(&enforced_with_tls_disabled)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(matching_http_tls(&enforced_with_tls_disabled)
+            .await
+            .unwrap()
+            .is_none());
         let permissive_without_tls: config::HttpConfig =
             serde_yaml::from_str("TLSMode: permissive").unwrap();
-        assert!(
-            matching_http_tls(&permissive_without_tls)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(matching_http_tls(&permissive_without_tls)
+            .await
+            .unwrap()
+            .is_none());
 
         let uppercase: config::HttpConfig = serde_yaml::from_str(
             "TLSMode: Enforced\ntls: {enabled: true, certFile: cert, keyFile: key}",
         )
         .unwrap();
-        assert!(
-            matching_http_tls(&uppercase)
-                .await
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("unknown TLSMode")
-        );
+        assert!(matching_http_tls(&uppercase)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("unknown TLSMode"));
         let empty: config::HttpConfig = serde_yaml::from_str("TLSMode: ''").unwrap();
-        assert!(
-            matching_http_tls(&empty)
-                .await
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("unknown TLSMode")
-        );
+        assert!(matching_http_tls(&empty)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("unknown TLSMode"));
 
         let permissive: config::HttpConfig = serde_yaml::from_str(
             "TLSMode: permissive\ntls: {enabled: true, certFile: cert, keyFile: key}",
         )
         .unwrap();
-        assert!(
-            matching_http_tls(&permissive)
-                .await
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("loading Matching HTTP TLS certificate/key")
-        );
+        assert!(matching_http_tls(&permissive)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("loading Matching HTTP TLS certificate/key"));
 
         let missing_cert: config::HttpConfig =
             serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: true, keyFile: key}").unwrap();
@@ -518,14 +504,12 @@ mod matching_http_listener_tests {
             invalid_key.path().to_string_lossy(),
         ))
         .unwrap();
-        assert!(
-            matching_http_tls(&invalid_pair)
-                .await
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("loading Matching HTTP TLS certificate/key")
-        );
+        assert!(matching_http_tls(&invalid_pair)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("loading Matching HTTP TLS certificate/key"));
     }
 }
 
