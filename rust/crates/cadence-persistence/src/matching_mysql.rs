@@ -289,6 +289,9 @@ impl SyncConnectionPool {
             .await
             .map_err(|_| TimedQueryError::Timeout)
             .and_then(|result| result.map_err(TimedQueryError::MySql));
+            // A successful result means both protocol cleanup and the shared
+            // max-open reservation have completed.
+            drop(_slot);
             let _ = result_tx.send(result);
         });
 
@@ -1778,17 +1781,12 @@ mod tests {
             })
             .unwrap();
         assert_eq!(value, Some(11));
-        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            if pool.state.lock().unwrap().open == 0 {
-                break;
-            }
-            assert!(
-                Instant::now() < cleanup_deadline,
-                "successful timed query did not release its dedicated pool slot"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        let follow_up = pool
+            .query_until(Instant::now() + Duration::from_secs(2), |connection| {
+                Box::pin(async move { connection.query_first::<u8, _>("SELECT 13").await })
+            })
+            .unwrap();
+        assert_eq!(follow_up, Some(13));
     }
 
     #[test]

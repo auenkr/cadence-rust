@@ -12,6 +12,7 @@ import (
 	p "github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/persistence/serialization"
 	sqlstore "github.com/uber/cadence/common/persistence/sql"
+	_ "github.com/uber/cadence/common/persistence/sql/sqlplugin/mysql"
 )
 
 // TestRustMatchingMySQLInterop is injected into go/common/persistence/sql by
