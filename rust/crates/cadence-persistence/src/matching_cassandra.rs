@@ -27,6 +27,7 @@ use uuid::Uuid;
 const LIST_ROW: i32 = 1;
 const TASK_ROW: i32 = 0;
 const LIST_SENTINEL: i64 = -12345;
+const MAX_CASSANDRA_TTL_SECONDS: i64 = 157_680_000;
 const SELECT_LIST: &str = "SELECT range_id, task_list FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=?";
 const UPDATE_LIST: &str = "UPDATE tasks SET range_id=?, task_list=?, last_updated_time=? WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=? IF range_id=?";
 const UPDATE_LIST_TTL: &str = "UPDATE tasks USING TTL 86400 SET range_id=?, task_list=?, last_updated_time=? WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=? IF range_id=?";
@@ -267,7 +268,7 @@ fn task_ttl(data: &TaskData) -> Option<i32> {
         return None;
     }
     let seconds = (data.expiry_nanos - data.created_nanos) / 1_000_000_000;
-    (seconds > 0).then(|| seconds.min(630_720_000) as i32)
+    (seconds > 0).then(|| seconds.min(MAX_CASSANDRA_TTL_SECONDS) as i32)
 }
 
 fn task_not_expired(data: &TaskData, now_nanos: i64) -> bool {
@@ -293,6 +294,16 @@ mod tests {
         assert_eq!(task_ttl(&task), Some(2), "Go truncates TTL seconds");
         assert!(!task_not_expired(&task, task.expiry_nanos));
         assert!(task_not_expired(&task, task.expiry_nanos - 1));
+        let capped = TaskData {
+            created_nanos: 1,
+            expiry_nanos: i64::MAX,
+            ..Default::default()
+        };
+        assert_eq!(
+            task_ttl(&capped),
+            Some(MAX_CASSANDRA_TTL_SECONDS as i32),
+            "Go caps task TTL at five years",
+        );
         let subsecond = TaskData {
             expiry_nanos: 1_900_000_000,
             ..task
