@@ -56,7 +56,7 @@ fn dynamic_bool_property(
         .filter_map(|value| value.value.as_ref())
         .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
         .filter_map(|blob| serde_json::from_slice::<bool>(&blob.data).ok())
-        .last()
+        .next_back()
         .unwrap_or(default)
 }
 

@@ -87,3 +87,15 @@ requires original Go Ringpop discovery, runs the SDK workflow, SIGKILL/restarts
 Rust Matching against the same SQLite database, and verifies recovery. Its
 runner intentionally marks the current production mixed result as preliminary
 until the separate parity audit and failure/recovery cases are complete.
+
+Gate attempt 1 on source commit `1a8591566` stopped fail-fast at strict server
+Clippy (exit 101): Clippy flagged `.last()` on a double-ended iterator in
+`dynamic_bool_property`. Replacing it with `.next_back()` preserves the audited
+Go behavior (last unfiltered global value wins) while satisfying the lint.
+Attempt 1 raw output and exit markers remain under
+`memory/evidence/matching-main-gate-20261020-1a8591566/`; it did not reach
+focused or mixed live probes. Attempt 2 uses fresh evidence and source hashes,
+rebuilds the binary, reruns strict server Clippy and the live probes. The
+attempt-1 no-run, runtime/lifecycle/provider tests, and common/persistence
+Clippy apply to unchanged crate/test sources; no full no-run rebuild is needed
+for the one-line main-only correction.
