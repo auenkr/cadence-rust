@@ -18,7 +18,12 @@ use mysql::{
 };
 use std::{
     ops::{Deref, DerefMut},
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread,
     time::{Duration, Instant},
 };
 use uuid::Uuid;
@@ -81,9 +86,15 @@ pub(crate) struct SyncConnectionPool {
     available: Condvar,
 }
 
+pub(crate) enum TimedQueryError {
+    Timeout,
+    MySql(MySqlError),
+    Pool(String),
+}
+
 impl SyncConnectionPool {
     pub(crate) fn checkout(self: &Arc<Self>) -> Result<ConnectionLease> {
-        loop {
+        'checkout: loop {
             let mut state = self.state.lock().expect("MySQL Matching pool lock");
             while let Some(idle) = state.idle.pop() {
                 let expired = self
@@ -92,22 +103,16 @@ impl SyncConnectionPool {
                 if expired {
                     state.open -= 1;
                     self.available.notify_one();
-                    continue;
+                    drop(state);
+                    drop(idle);
+                    continue 'checkout;
                 }
-                let mut connection = idle.connection;
-                drop(state);
-                if connection.ping().is_ok() {
-                    return Ok(ConnectionLease {
-                        pool: self.clone(),
-                        connection: Some(connection),
-                        created_at: idle.created_at,
-                    });
-                }
-                let mut state = self.state.lock().expect("MySQL Matching pool lock");
-                state.open -= 1;
-                self.available.notify_one();
-                drop(connection);
-                continue;
+                return Ok(ConnectionLease {
+                    pool: self.clone(),
+                    connection: Some(idle.connection),
+                    created_at: idle.created_at,
+                    discard: Arc::new(AtomicBool::new(false)),
+                });
             }
             if state.open < self.max_open {
                 // Reserve the slot before connecting so simultaneous callers
@@ -119,6 +124,7 @@ impl SyncConnectionPool {
                         pool: self.clone(),
                         connection: Some(connection),
                         created_at: Instant::now(),
+                        discard: Arc::new(AtomicBool::new(false)),
                     }),
                     Err(error) => {
                         let mut state = self.state.lock().expect("MySQL Matching pool lock");
@@ -135,13 +141,211 @@ impl SyncConnectionPool {
             drop(state);
         }
     }
+
+    /// Run a read-only operation on a dedicated connection with a wall-clock
+    /// deadline. A timeout cancels only this connection's active statement;
+    /// it cannot disturb another operation borrowed from the shared pool.
+    pub(crate) fn query_until<T, F>(
+        self: &Arc<Self>,
+        deadline: Instant,
+        operation: F,
+    ) -> std::result::Result<T, TimedQueryError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Conn) -> std::result::Result<T, MySqlError> + Send + 'static,
+    {
+        if !self.reserve_until(deadline) {
+            return Err(TimedQueryError::Timeout);
+        }
+        let pool = self.clone();
+        let options = self.options.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+        let state = Arc::new(Mutex::new(TimedQueryState::default()));
+        let worker_state = state.clone();
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            self.release_reserved();
+            return Err(TimedQueryError::Timeout);
+        }
+        let builder = OptsBuilder::from_opts(options.clone())
+            .tcp_connect_timeout(Some(min_timeout(
+                options.get_tcp_connect_timeout(),
+                remaining,
+            )))
+            .read_timeout(Some(min_timeout(options.get_read_timeout(), remaining)))
+            .write_timeout(Some(min_timeout(options.get_write_timeout(), remaining)));
+        let options = Opts::from(builder);
+        let worker = thread::Builder::new()
+            .name("cadence-mysql-domain-query".into())
+            .spawn(move || {
+                let _slot = ReservedConnectionSlot(pool);
+                let result = match Conn::new(options) {
+                    Ok(mut connection) => {
+                        let connection_id = connection.connection_id();
+                        let should_run = {
+                            let mut state = worker_state.lock().expect("query cancellation lock");
+                            if state.cancelled {
+                                false
+                            } else {
+                                state.connection_id = Some(connection_id);
+                                true
+                            }
+                        };
+                        if should_run {
+                            operation(&mut connection)
+                        } else {
+                            Err(MySqlError::server_disconnected())
+                        }
+                    }
+                    Err(error) => Err(error),
+                };
+                let _ = result_tx.send(result);
+            })
+            .map_err(|error| {
+                self.release_reserved();
+                TimedQueryError::Pool(format!("could not start timed MySQL query: {error}"))
+            })?;
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match result_rx.recv_timeout(remaining) {
+            Ok(Ok(value)) => {
+                worker.join().map_err(|_| {
+                    TimedQueryError::Pool("timed MySQL query worker panicked".into())
+                })?;
+                Ok(value)
+            }
+            Ok(Err(error)) => {
+                worker.join().map_err(|_| {
+                    TimedQueryError::Pool("timed MySQL query worker panicked".into())
+                })?;
+                Err(TimedQueryError::MySql(error))
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = worker.join();
+                Err(TimedQueryError::Pool(
+                    "timed MySQL query worker stopped without a result".into(),
+                ))
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let connection_id = {
+                    let mut state = state.lock().expect("query cancellation lock");
+                    state.cancelled = true;
+                    state.connection_id
+                };
+                if let Some(connection_id) = connection_id {
+                    let options = self.options.clone();
+                    let fallback_options = options.clone();
+                    if thread::Builder::new()
+                        .name("cadence-mysql-query-cancel".into())
+                        .spawn(move || kill_query(options, connection_id))
+                        .is_err()
+                    {
+                        kill_query(fallback_options, connection_id);
+                    }
+                }
+                drop(worker);
+                Err(TimedQueryError::Timeout)
+            }
+        }
+    }
+
+    fn reserve_until(&self, deadline: Instant) -> bool {
+        let mut state = self.state.lock().expect("MySQL Matching pool lock");
+        loop {
+            if state.open < self.max_open {
+                state.open += 1;
+                return true;
+            }
+            // Dedicated deadline connections cannot reuse an idle socket with
+            // a longer per-connection timeout; retire one idle slot to make
+            // room while preserving all checked-out operations.
+            if let Some(idle) = state.idle.pop() {
+                state.open -= 1;
+                self.available.notify_one();
+                drop(state);
+                // Conn::drop sends COM_QUIT synchronously. Retire stale idle
+                // sockets off the deadline-bearing caller thread.
+                let _ = thread::Builder::new()
+                    .name("cadence-mysql-idle-retire".into())
+                    .spawn(move || drop(idle));
+                state = self.state.lock().expect("MySQL Matching pool lock");
+                continue;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            let (next, timeout) = self
+                .available
+                .wait_timeout(state, remaining)
+                .expect("MySQL Matching pool lock");
+            state = next;
+            if timeout.timed_out() && state.open >= self.max_open && state.idle.is_empty() {
+                return false;
+            }
+        }
+    }
+
+    fn release_reserved(&self) {
+        let mut state = self.state.lock().expect("MySQL Matching pool lock");
+        state.open -= 1;
+        self.available.notify_one();
+    }
+}
+
+#[derive(Default)]
+struct TimedQueryState {
+    cancelled: bool,
+    connection_id: Option<u32>,
+}
+
+struct ReservedConnectionSlot(Arc<SyncConnectionPool>);
+impl Drop for ReservedConnectionSlot {
+    fn drop(&mut self) {
+        self.0.release_reserved();
+    }
+}
+
+fn min_timeout(configured: Option<Duration>, remaining: Duration) -> Duration {
+    configured.map_or(remaining, |configured| configured.min(remaining))
+}
+
+fn kill_query(options: Opts, connection_id: u32) {
+    const CONTROL_TIMEOUT: Duration = Duration::from_millis(250);
+    let builder = OptsBuilder::from_opts(options)
+        .tcp_connect_timeout(Some(CONTROL_TIMEOUT))
+        .read_timeout(Some(CONTROL_TIMEOUT))
+        .write_timeout(Some(CONTROL_TIMEOUT));
+    let Ok(mut connection) = Conn::new(Opts::from(builder)) else {
+        return;
+    };
+    let _ = connection.query_drop(format!("KILL QUERY {connection_id}"));
 }
 
 pub(crate) struct ConnectionLease {
     pool: Arc<SyncConnectionPool>,
     connection: Option<Conn>,
     created_at: Instant,
+    /// Connectivity failures poison this lease. The Arc lets a transaction
+    /// mark it before `Transaction::drop` performs its implicit rollback.
+    discard: Arc<AtomicBool>,
 }
+impl ConnectionLease {
+    pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
+        self.discard.clone()
+    }
+}
+
+pub(crate) fn normalize_mysql_error_on_lease(
+    error: MySqlError,
+    discard: &AtomicBool,
+) -> StorageError {
+    if error.is_connectivity_error() {
+        discard.store(true, Ordering::Release);
+    }
+    normalize_mysql_error(error)
+}
+
 impl Deref for ConnectionLease {
     type Target = Conn;
     fn deref(&self) -> &Self::Target {
@@ -167,7 +371,8 @@ impl Drop for ConnectionLease {
             .pool
             .max_lifetime
             .is_some_and(|lifetime| self.created_at.elapsed() >= lifetime);
-        if !expired && state.idle.len() < self.pool.max_idle {
+        let discard = self.discard.load(Ordering::Acquire);
+        if !discard && !expired && state.idle.len() < self.pool.max_idle {
             state.idle.push(IdleConnection {
                 connection,
                 created_at: self.created_at,
@@ -251,18 +456,19 @@ impl MySqlTaskStore {
 
     fn validate_schema(&self) -> Result<()> {
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         connection
             .exec_drop(
                 "SELECT shard_id, domain_id, name, task_type, range_id, data, data_encoding FROM task_lists LIMIT 0",
                 (),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         connection
             .exec_drop(
                 "SELECT domain_id, task_list_name, task_type, task_id, data, data_encoding FROM tasks LIMIT 0",
                 (),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         for (table, expected) in [
             (
                 "task_lists",
@@ -278,7 +484,7 @@ impl MySqlTaskStore {
                     "SELECT column_name FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND table_name = ? AND constraint_name = 'PRIMARY' ORDER BY ordinal_position",
                     (table,),
                 )
-                .map_err(normalize_mysql_error)?;
+                .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
             if columns.len() != expected.len()
                 || columns
                     .iter()
@@ -299,12 +505,13 @@ impl MySqlTaskStore {
         key: &TaskListKey,
     ) -> Result<Option<(i64, Vec<u8>, String)>> {
         let shard_id = self.database_shard(key);
+        let discard = connection.discard.clone();
         connection
             .exec_first(
                 "SELECT range_id, data, data_encoding FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?",
                 (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
-            .map_err(normalize_mysql_error)
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))
     }
 
     fn decode_task_list_row(row: (i64, Vec<u8>, String)) -> Result<TaskListRecord> {
@@ -330,6 +537,7 @@ impl MySqlTaskStore {
 
     fn lock_and_check(
         transaction: &mut Transaction<'_>,
+        discard: &AtomicBool,
         shard_id: i32,
         key: &TaskListKey,
         expected_range: i64,
@@ -339,7 +547,7 @@ impl MySqlTaskStore {
                 "SELECT range_id FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ? FOR UPDATE",
                 (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, discard))?;
         match range {
             Some(range) if range == expected_range => Ok(()),
             Some(range) => Err(StorageError::ConditionFailed(format!(
@@ -375,6 +583,7 @@ impl MatchingTaskStore for MySqlTaskStore {
     ) -> Result<TaskListRecord> {
         let shard_id = self.database_shard(key);
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         let mut current = match self.read_task_list_row(&mut connection, key)? {
             Some((range_id, bytes, encoding)) => {
                 if previous_range > 0 && previous_range != range_id {
@@ -402,7 +611,7 @@ impl MatchingTaskStore for MySqlTaskStore {
                         "INSERT INTO task_lists (shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES (?, ?, ?, ?, 0, ?, ?)",
                         (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, bytes, encoding),
                     )
-                    .map_err(normalize_mysql_error)?;
+                    .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
                 TaskListRecord { range_id: 0, data }
             }
         };
@@ -416,8 +625,12 @@ impl MatchingTaskStore for MySqlTaskStore {
         }
         let mut transaction = connection
             .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
-            .map_err(normalize_mysql_error)?;
-        Self::lock_and_check(&mut transaction, shard_id, key, current.range_id)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
+        // Any early return below drops the transaction and asks mysql 26 to
+        // roll it back. Since Drop intentionally hides rollback errors, never
+        // recycle this connection unless commit succeeds.
+        discard.store(true, Ordering::Release);
+        Self::lock_and_check(&mut transaction, &discard, shard_id, key, current.range_id)?;
         current.range_id = current.range_id.wrapping_add(1);
         current.data.last_updated_nanos = now_nanos;
         let (bytes, encoding) = self.encode_task_list(&current.data)?;
@@ -426,7 +639,7 @@ impl MatchingTaskStore for MySqlTaskStore {
                 "UPDATE task_lists SET range_id = ?, data = ?, data_encoding = ? WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?",
                 (current.range_id, bytes, encoding, shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         if transaction.affected_rows() != 1 {
             return Err(StorageError::Backend {
                 kind: BackendErrorKind::Permanent,
@@ -436,7 +649,10 @@ impl MatchingTaskStore for MySqlTaskStore {
                 ),
             });
         }
-        transaction.commit().map_err(normalize_mysql_error)?;
+        transaction
+            .commit()
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
+        discard.store(false, Ordering::Release);
         // Go reports the requested kind but does not overwrite stored kind.
         current.data.kind = kind;
         Ok(current)
@@ -457,17 +673,19 @@ impl MatchingTaskStore for MySqlTaskStore {
         };
         let shard_id = self.database_shard(key);
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         let mut transaction = connection
             .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
-            .map_err(normalize_mysql_error)?;
-        Self::lock_and_check(&mut transaction, shard_id, key, range)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
+        discard.store(true, Ordering::Release);
+        Self::lock_and_check(&mut transaction, &discard, shard_id, key, range)?;
         let (bytes, encoding) = self.encode_task_list(&data)?;
         transaction
             .exec_drop(
                 "UPDATE task_lists SET range_id = ?, data = ?, data_encoding = ? WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?",
                 (range, bytes, encoding, shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         if transaction.affected_rows() != 1 {
             return Err(StorageError::Backend {
                 kind: BackendErrorKind::Permanent,
@@ -477,7 +695,11 @@ impl MatchingTaskStore for MySqlTaskStore {
                 ),
             });
         }
-        transaction.commit().map_err(normalize_mysql_error)
+        transaction
+            .commit()
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
+        discard.store(false, Ordering::Release);
+        Ok(())
     }
 
     fn create_tasks_with_domains(
@@ -488,9 +710,11 @@ impl MatchingTaskStore for MySqlTaskStore {
     ) -> Result<()> {
         let shard_id = self.database_shard(key);
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         let mut transaction = connection
             .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
+        discard.store(true, Ordering::Release);
         for (domain, task) in tasks {
             let bytes = self.encoding.encode(&blob::encode_task(&task.data))?;
             transaction
@@ -498,10 +722,14 @@ impl MatchingTaskStore for MySqlTaskStore {
                     "INSERT INTO tasks (domain_id, task_list_name, task_type, task_id, data, data_encoding) VALUES (?, ?, ?, ?, ?, ?)",
                     (domain.as_bytes().as_slice(), &key.name, key.task_type, task.task_id, bytes, self.encoding.as_str()),
                 )
-                .map_err(normalize_mysql_error)?;
+                .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         }
-        Self::lock_and_check(&mut transaction, shard_id, key, range)?;
-        transaction.commit().map_err(normalize_mysql_error)
+        Self::lock_and_check(&mut transaction, &discard, shard_id, key, range)?;
+        transaction
+            .commit()
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
+        discard.store(false, Ordering::Release);
+        Ok(())
     }
 
     fn get_tasks(
@@ -512,12 +740,13 @@ impl MatchingTaskStore for MySqlTaskStore {
         batch_size: i64,
     ) -> Result<Vec<AllocatedTask>> {
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         let rows: Vec<(i64, Vec<u8>, String)> = connection
             .exec(
                 "SELECT task_id, data, data_encoding FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id > ? AND task_id <= ? ORDER BY task_id LIMIT ?",
                 (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, read_level, max_read_level, batch_size),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         rows.into_iter()
             .map(|(task_id, bytes, encoding)| {
                 let encoded = BlobEncoding::parse(&encoding)?.decode(&bytes)?;
@@ -531,12 +760,13 @@ impl MatchingTaskStore for MySqlTaskStore {
 
     fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> Result<i64> {
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         let size: Option<i64> = connection
             .exec_first(
                 "SELECT COUNT(*) FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id > ?",
                 (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, ack_level),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         size.ok_or_else(|| StorageError::Backend {
             kind: BackendErrorKind::Permanent,
             message: "COUNT(*) returned no row".into(),
@@ -545,12 +775,13 @@ impl MatchingTaskStore for MySqlTaskStore {
 
     fn complete_task(&self, key: &TaskListKey, task_id: i64) -> Result<()> {
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         connection
             .exec_drop(
                 "DELETE FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id = ?",
                 (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, task_id),
             )
-            .map_err(normalize_mysql_error)
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))
     }
 
     fn complete_tasks_less_than(
@@ -563,12 +794,13 @@ impl MatchingTaskStore for MySqlTaskStore {
             return Err(StorageError::MissingLimit);
         }
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         connection
             .exec_drop(
                 "DELETE FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id <= ? ORDER BY domain_id, task_list_name, task_type, task_id LIMIT ?",
                 (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, inclusive_task_id, limit),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         usize::try_from(connection.affected_rows()).map_err(|error| StorageError::Backend {
             kind: BackendErrorKind::Permanent,
             message: format!("MySQL affected-row count did not fit usize: {error}"),
@@ -578,12 +810,13 @@ impl MatchingTaskStore for MySqlTaskStore {
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
         let shard_id = self.database_shard(key);
         let mut connection = self.pool.checkout()?;
+        let discard = connection.discard.clone();
         connection
             .exec_drop(
                 "DELETE FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ? AND range_id = ?",
                 (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, range),
             )
-            .map_err(normalize_mysql_error)?;
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         let affected = connection.affected_rows();
         if affected != 1 {
             return Err(StorageError::DeleteCount(affected as usize));
@@ -646,9 +879,9 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
         }
     }
     builder = builder
-        .tcp_connect_timeout(connect_timeout.filter(|value: &Duration| !value.is_zero()))
-        .read_timeout(read_timeout.filter(|value: &Duration| !value.is_zero()))
-        .write_timeout(write_timeout.filter(|value: &Duration| !value.is_zero()));
+        .tcp_connect_timeout(connect_timeout.and_then(GoTimeout::connect_timeout))
+        .read_timeout(read_timeout.and_then(GoTimeout::socket_timeout))
+        .write_timeout(write_timeout.and_then(GoTimeout::socket_timeout));
 
     let tls_mode = tls_mode.unwrap_or_else(|| {
         if let Some(tls) = config.tls.as_ref().filter(|tls| tls.enabled) {
@@ -797,7 +1030,32 @@ fn split_host_port(address: &str) -> Result<(String, u16)> {
     Ok((host.to_owned(), port))
 }
 
-fn parse_go_duration(value: &str) -> Result<Duration> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GoTimeout {
+    negative: bool,
+    magnitude: Duration,
+}
+
+impl GoTimeout {
+    fn connect_timeout(self) -> Option<Duration> {
+        (!self.negative && !self.magnitude.is_zero()).then_some(self.magnitude)
+    }
+
+    fn socket_timeout(self) -> Option<Duration> {
+        if self.magnitude.is_zero() {
+            None
+        } else if self.negative {
+            // Go turns a negative absolute deadline into immediate I/O expiry.
+            // mysql 26 only accepts relative socket timeouts, so one nanosecond
+            // is the closest supported behavior.
+            Some(Duration::from_nanos(1))
+        } else {
+            Some(self.magnitude)
+        }
+    }
+}
+
+fn parse_go_duration(value: &str) -> Result<GoTimeout> {
     // Match Go time.ParseDuration's signed sequence of decimal components.
     // Keep the total in nanoseconds so conversion cannot panic or silently
     // saturate at Duration's range boundary.
@@ -813,7 +1071,10 @@ fn parse_go_duration(value: &str) -> Result<Duration> {
         _ => (false, input),
     };
     if rest == "0" {
-        return Ok(Duration::ZERO);
+        return Ok(GoTimeout {
+            negative: false,
+            magnitude: Duration::ZERO,
+        });
     }
     let bytes = rest.as_bytes();
     let mut index = 0;
@@ -855,7 +1116,7 @@ fn parse_go_duration(value: &str) -> Result<Duration> {
         let unit = &rest[index..unit_end];
         let unit_nanos = match unit {
             "ns" => 1u128,
-            "us" | "µs" => 1_000,
+            "us" | "µs" | "μs" => 1_000,
             "ms" => 1_000_000,
             "s" => 1_000_000_000,
             "m" => 60_000_000_000,
@@ -883,18 +1144,26 @@ fn parse_go_duration(value: &str) -> Result<Duration> {
             .checked_add(whole_nanos)
             .and_then(|n| n.checked_add(fractional_nanos))
             .ok_or_else(invalid)?;
-        if total_nanos > i64::MAX as u128 {
+        let maximum = if negative {
+            (i64::MAX as u128) + 1
+        } else {
+            i64::MAX as u128
+        };
+        if total_nanos > maximum {
             return Err(invalid());
         }
         index = unit_end;
         components += 1;
     }
-    if components == 0 || (negative && total_nanos != 0) {
+    if components == 0 {
         return Err(invalid());
     }
     let seconds = u64::try_from(total_nanos / 1_000_000_000).map_err(|_| invalid())?;
     let nanos = (total_nanos % 1_000_000_000) as u32;
-    Ok(Duration::new(seconds, nanos))
+    Ok(GoTimeout {
+        negative,
+        magnitude: Duration::new(seconds, nanos),
+    })
 }
 
 fn normalize_mysql_error(error: MySqlError) -> StorageError {
@@ -986,39 +1255,47 @@ mod tests {
 
     #[test]
     fn mysql_timeout_duration_matches_go_composite_and_boundary_forms() {
+        let positive = |magnitude| GoTimeout {
+            negative: false,
+            magnitude,
+        };
         let cases = [
-            ("0", Duration::ZERO),
-            ("+1.5h", Duration::from_secs(5_400)),
-            ("1h30m", Duration::from_secs(5_400)),
-            ("1.000000001s", Duration::new(1, 1)),
-            ("500µs", Duration::from_micros(500)),
-            ("500μs", Duration::from_micros(500)),
-            ("1ns", Duration::from_nanos(1)),
-            ("0.0000000001s", Duration::ZERO),
+            ("0", positive(Duration::ZERO)),
+            ("+1.5h", positive(Duration::from_secs(5_400))),
+            ("1h30m", positive(Duration::from_secs(5_400))),
+            ("1.000000001s", positive(Duration::new(1, 1))),
+            ("500µs", positive(Duration::from_micros(500))),
+            ("500μs", positive(Duration::from_micros(500))),
+            ("1ns", positive(Duration::from_nanos(1))),
+            ("0.0000000001s", positive(Duration::ZERO)),
             (
                 "9223372036.854775807s",
-                Duration::new(9_223_372_036, 854_775_807),
+                positive(Duration::new(9_223_372_036, 854_775_807)),
             ),
             (
                 "0.00000000000000000000000000000000000000000000000001s",
-                Duration::ZERO,
+                positive(Duration::ZERO),
             ),
-            ("-0s", Duration::ZERO),
+            ("-0s", positive(Duration::ZERO)),
+            (
+                "-1s",
+                GoTimeout {
+                    negative: true,
+                    magnitude: Duration::from_secs(1),
+                },
+            ),
         ];
         for (source, expected) in cases {
             assert_eq!(parse_go_duration(source).unwrap(), expected, "{source}");
         }
-        for source in [
-            "",
-            "1",
-            " 1s",
-            "-1s",
-            "1s2",
-            "1fortnight",
-            "9223372036.854775808s",
-        ] {
+        for source in ["", "1", " 1s", "1s2", "1fortnight", "9223372036.854775808s"] {
             assert!(parse_go_duration(source).is_err(), "{source}");
         }
+        assert_eq!(parse_go_duration("-1s").unwrap().connect_timeout(), None);
+        assert_eq!(
+            parse_go_duration("-1s").unwrap().socket_timeout(),
+            Some(Duration::from_nanos(1))
+        );
     }
 
     #[test]
@@ -1051,6 +1328,69 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn connectivity_errors_poison_only_their_connection_lease() {
+        let first = AtomicBool::new(false);
+        let other = AtomicBool::new(false);
+        let network_error = MySqlError::IoError(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "server gone",
+        ));
+        normalize_mysql_error_on_lease(network_error, &first);
+        assert!(first.load(Ordering::Acquire));
+        assert!(!other.load(Ordering::Acquire));
+
+        let server_error = MySqlError::MySqlError(mysql::MySqlError {
+            state: "HY000".into(),
+            message: "ordinary SQL failure".into(),
+            code: 1146,
+        });
+        normalize_mysql_error_on_lease(server_error, &other);
+        assert!(!other.load(Ordering::Acquire));
+    }
+
+    #[test]
+    #[ignore = "requires the opt-in MySQL interoperability server"]
+    fn timed_domain_query_cancels_only_its_dedicated_connection() {
+        let config = MySqlTaskStoreConfig {
+            user: std::env::var("CADENCE_MYSQL_USER").unwrap_or_else(|_| "root".into()),
+            password: std::env::var("CADENCE_MYSQL_PASSWORD").unwrap_or_else(|_| "cadence".into()),
+            database_name: std::env::var("CADENCE_MYSQL_DATABASE")
+                .unwrap_or_else(|_| "cadence".into()),
+            connect_protocol: "tcp".into(),
+            connect_addr: std::env::var("CADENCE_MYSQL_ADDR")
+                .unwrap_or_else(|_| "127.0.0.1:33307".into()),
+            connect_attributes: Default::default(),
+            max_conns: 4,
+            max_idle_conns: 2,
+            max_conn_lifetime: None,
+            n_shards: 1,
+            use_multiple_databases: false,
+            encoding: BlobEncoding::ThriftRW,
+            tls: None,
+        };
+        let pool = MySqlTaskStore::create_mysql_pool(&config).unwrap();
+        let mut unrelated = pool.checkout().unwrap();
+        let mut transaction = unrelated.start_transaction(TxOpts::default()).unwrap();
+        let started = Instant::now();
+        let result = pool.query_until(Instant::now() + Duration::from_millis(250), |connection| {
+            connection.query_first::<u8, _>("SELECT SLEEP(10)")
+        });
+        assert!(matches!(result, Err(TimedQueryError::Timeout)));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+        while pool.state.lock().unwrap().open != 1 {
+            assert!(
+                Instant::now() < cleanup_deadline,
+                "timed query connection was not released after cancellation"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let value: Option<u8> = transaction.query_first("SELECT 7", ()).unwrap();
+        assert_eq!(value, Some(7));
+        transaction.commit().unwrap();
     }
 
     #[test]

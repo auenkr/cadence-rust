@@ -70,6 +70,7 @@ func assertGoDurationOracle(t *testing.T) {
 		{"1ns", time.Nanosecond},
 		{"0.0000000001s", 0},
 		{"-0s", 0},
+		{"-1s", -time.Second},
 	}
 	for _, test := range cases {
 		got, err := time.ParseDuration(test.input)
@@ -77,7 +78,7 @@ func assertGoDurationOracle(t *testing.T) {
 			t.Fatalf("Go duration oracle %q = %v, %v; want %v", test.input, got, err, test.want)
 		}
 	}
-	for _, input := range []string{"", "1", " 1s", "-1s", "1s2", "1fortnight", "9223372037s"} {
+	for _, input := range []string{"", "1", " 1s", "1s2", "1fortnight", "9223372037s"} {
 		if _, err := time.ParseDuration(input); err == nil {
 			t.Fatalf("Go duration oracle unexpectedly accepted %q", input)
 		}
