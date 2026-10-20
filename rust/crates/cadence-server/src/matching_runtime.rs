@@ -14,6 +14,73 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+
+type ShardProcessLookup = Arc<
+    dyn Fn(
+            String,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            (),
+                            crate::matching_shard_distributor::GetShardProcessError,
+                        >,
+                    > + Send,
+            >,
+        > + Send
+        + Sync,
+>;
+
+fn shard_task_list_ownership_check(
+    membership: crate::matching_membership::Membership,
+    percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
+    exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
+    draining: tokio::sync::watch::Receiver<bool>,
+    lookup: ShardProcessLookup,
+) -> crate::grpc_matching::TaskListOwnershipCheck {
+    Arc::new(move |name, cached| {
+        let membership = membership.clone();
+        let percentage = percentage_onboarded.clone();
+        let exclude = exclude_short_lived.clone();
+        let draining = draining.clone();
+        let lookup = lookup.clone();
+        Box::pin(async move {
+            if *draining.borrow() {
+                return Err(membership.task_list_not_owned_by(&name, "not known"));
+            }
+            // Match Go's signed-to-uint64 conversion, including negative
+            // dynamic values that wrap to a large eligible percentage.
+            let excluded = crate::matching_shard_routing::task_list_excluded_from_shard_distributor(
+                &name,
+                percentage() as u64,
+                exclude(),
+            );
+            if excluded {
+                if cached {
+                    return Ok(());
+                }
+                return membership.check_task_list(&name);
+            }
+            match lookup(name.clone()).await {
+                Ok(()) => Ok(()),
+                Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(_)) => {
+                    Err(membership.task_list_not_owned_by(&name, "not known"))
+                }
+                Err(crate::matching_shard_distributor::GetShardProcessError::Heartbeat(error)) => {
+                    // Go wraps non-not-found executor errors as a generic
+                    // internal error; do not surface gRPC Unavailable as a
+                    // service-busy/YARPC transport class.
+                    Err(tonic::Status::internal(format!(
+                        "failed to lookup ownership in SD: {error}"
+                    )))
+                }
+            }
+        })
+            as std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send>,
+            >
+    })
+}
 use tokio::{sync::oneshot, task::JoinHandle};
 
 pub type DrainDuration = Arc<dyn Fn() -> Duration + Send + Sync>;
@@ -218,41 +285,27 @@ impl MatchingRuntime {
         ));
         let peer_cleanup = router.start_peer_cleanup();
         let executor_for_check = executor.clone();
-        let membership_for_check = membership.clone();
-        let percentage_for_check = percentage_onboarded.clone();
-        let excluded_for_check = exclude_short_lived.clone();
-        let ownership_check: crate::grpc_matching::TaskListOwnershipCheck =
-            Arc::new(move |name, _cached| {
-                let executor = executor_for_check.clone();
-                let membership = membership_for_check.clone();
-                let percentage = percentage_for_check.clone();
-                let exclude = excluded_for_check.clone();
-                Box::pin(async move {
-                    if crate::matching_shard_routing::task_list_excluded_from_shard_distributor(
-                        &name,
-                        percentage().max(0) as u64,
-                        exclude(),
-                    ) {
-                        return membership.check_task_list(&name);
-                    }
-                    match executor.get_shard_process(&name).await {
-                        Ok(_) => Ok(()),
-                        Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(
-                            _,
-                        )) => Err(membership.task_list_not_owned_by(&name, "not known")),
-                        Err(
-                            crate::matching_shard_distributor::GetShardProcessError::Heartbeat(
-                                error,
-                            ),
-                        ) => Err(tonic::Status::unavailable(format!(
-                            "failed to lookup ownership in SD: {error}"
-                        ))),
-                    }
-                })
-                    as std::pin::Pin<
-                        Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send>,
-                    >
-            });
+        let lookup: ShardProcessLookup = Arc::new(move |name| {
+            let executor = executor_for_check.clone();
+            Box::pin(async move { executor.get_shard_process(&name).await.map(|_| ()) })
+                as Pin<
+                    Box<
+                        dyn Future<
+                                Output = Result<
+                                    (),
+                                    crate::matching_shard_distributor::GetShardProcessError,
+                                >,
+                            > + Send,
+                    >,
+                >
+        });
+        let ownership_check = shard_task_list_ownership_check(
+            membership.clone(),
+            percentage_onboarded.clone(),
+            exclude_short_lived.clone(),
+            drain_tx.subscribe(),
+            lookup,
+        );
         let policy = crate::matching_registry::QueueOwnershipPolicy::new(
             Arc::new({
                 let percentage = percentage_onboarded.clone();
@@ -260,7 +313,7 @@ impl MatchingRuntime {
                 move |name| {
                     !crate::matching_shard_routing::task_list_excluded_from_shard_distributor(
                         name,
-                        percentage().max(0) as u64,
+                        percentage() as u64,
                         exclude(),
                     )
                 }
@@ -560,6 +613,117 @@ pub fn live_shutdown_drain_duration(overlay: Arc<Mutex<DynamicConfigOverlay>>) -
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn empty_membership() -> crate::matching_membership::Membership {
+        crate::matching_membership::Membership::new("local", Vec::new())
+    }
+
+    fn installed_ownership_check(
+        percentage: i64,
+        draining: bool,
+        calls: Arc<AtomicUsize>,
+        result: Result<(), crate::matching_shard_distributor::GetShardProcessError>,
+    ) -> crate::grpc_matching::TaskListOwnershipCheck {
+        let (drain_tx, drain_rx) = tokio::sync::watch::channel(draining);
+        let _keep_drain_sender_alive = drain_tx;
+        shard_task_list_ownership_check(
+            empty_membership(),
+            Arc::new(move || percentage),
+            Arc::new(|| false),
+            drain_rx,
+            Arc::new(move |_| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let result = match &result {
+                    Ok(()) => Ok(()),
+                    Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(key)) => {
+                        Err(
+                            crate::matching_shard_distributor::GetShardProcessError::NotFound(
+                                key.clone(),
+                            ),
+                        )
+                    }
+                    Err(crate::matching_shard_distributor::GetShardProcessError::Heartbeat(
+                        error,
+                    )) => Err(
+                        crate::matching_shard_distributor::GetShardProcessError::Heartbeat(
+                            error.clone(),
+                        ),
+                    ),
+                };
+                Box::pin(async move { result })
+                    as Pin<
+                        Box<
+                            dyn Future<
+                                    Output = Result<
+                                        (),
+                                        crate::matching_shard_distributor::GetShardProcessError,
+                                    >,
+                                > + Send,
+                        >,
+                    >
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn installed_shard_ownership_check_matches_notfound_shutdown_and_transient_errors() {
+        use crate::matching_shard_distributor::GetShardProcessError;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let not_found = installed_ownership_check(
+            100,
+            false,
+            calls.clone(),
+            Err(GetShardProcessError::NotFound("queue".into())),
+        );
+        assert_eq!(
+            not_found("queue".into(), false).await.unwrap_err().code(),
+            tonic::Code::Aborted
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let transient = installed_ownership_check(
+            100,
+            false,
+            calls.clone(),
+            Err(GetShardProcessError::Heartbeat("rpc unavailable".into())),
+        );
+        let error = transient("queue".into(), false).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error
+            .message()
+            .starts_with("failed to lookup ownership in SD:"));
+
+        let shutting_down = installed_ownership_check(100, true, calls.clone(), Ok(()));
+        assert_eq!(
+            shutting_down("queue".into(), false)
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::Aborted
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "shutdown skips SD lookup");
+    }
+
+    #[tokio::test]
+    async fn installed_shard_ownership_check_bypasses_ring_for_cached_excluded_and_wraps_negative_percent(
+    ) {
+        use crate::matching_shard_distributor::GetShardProcessError;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let cached_excluded = installed_ownership_check(
+            0,
+            false,
+            calls.clone(),
+            Err(GetShardProcessError::NotFound("unused".into())),
+        );
+        assert!(cached_excluded("queue".into(), true).await.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let negative = installed_ownership_check(-1, false, calls.clone(), Ok(()));
+        assert!(negative("negative-percentage".into(), false).await.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn shutdown_drain_provider_reads_live_unfiltered_value() {
