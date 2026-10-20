@@ -63,6 +63,94 @@ impl TChannelHistoryClient {
         decode_typed_struct(&response.body)
             .map_err(|error| Status::internal(format!("invalid History Thrift reply: {error}")))
     }
+
+    pub(crate) async fn refresh_workflow_tasks(
+        &self,
+        request: &cadence_proto::history::RefreshWorkflowTasksRequest,
+        timeout: Duration,
+    ) -> Result<(), Status> {
+        self.call(
+            "RefreshWorkflowTasks",
+            &refresh_workflow_tasks_request(request),
+            timeout,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn describe_workflow_execution(
+        &self,
+        request: &cadence_proto::history::DescribeWorkflowExecutionRequest,
+        timeout: Duration,
+    ) -> Result<cadence_proto::history::DescribeWorkflowExecutionResponse, Status> {
+        let response = self
+            .call(
+                "DescribeWorkflowExecution",
+                &describe_workflow_execution_request(request),
+                timeout,
+            )
+            .await?;
+        describe_workflow_execution_response_from_thrift(&response).map_err(|error| {
+            Status::internal(format!(
+                "invalid History DescribeWorkflowExecution response: {error}"
+            ))
+        })
+    }
+
+    pub(crate) async fn get_mutable_state(
+        &self,
+        request: &cadence_proto::history::GetMutableStateRequest,
+        timeout: Duration,
+    ) -> Result<cadence_proto::history::GetMutableStateResponse, Status> {
+        let response = self
+            .call(
+                "GetMutableState",
+                &get_mutable_state_request(request),
+                timeout,
+            )
+            .await?;
+        get_mutable_state_response_from_thrift(&response).map_err(|error| {
+            Status::internal(format!("invalid History GetMutableState response: {error}"))
+        })
+    }
+
+    pub(crate) async fn record_decision_task_started(
+        &self,
+        request: &cadence_proto::history::RecordDecisionTaskStartedRequest,
+        timeout: Duration,
+    ) -> Result<cadence_proto::history::RecordDecisionTaskStartedResponse, Status> {
+        let response = self
+            .call(
+                "RecordDecisionTaskStarted",
+                &record_decision_task_started_request(request),
+                timeout,
+            )
+            .await?;
+        record_decision_task_started_response_from_thrift(&response).map_err(|error| {
+            Status::internal(format!(
+                "invalid History RecordDecisionTaskStarted response: {error}"
+            ))
+        })
+    }
+
+    pub(crate) async fn record_activity_task_started(
+        &self,
+        request: &cadence_proto::history::RecordActivityTaskStartedRequest,
+        timeout: Duration,
+    ) -> Result<cadence_proto::history::RecordActivityTaskStartedResponse, Status> {
+        let response = self
+            .call(
+                "RecordActivityTaskStarted",
+                &record_activity_task_started_request(request),
+                timeout,
+            )
+            .await?;
+        record_activity_task_started_response_from_thrift(&response).map_err(|error| {
+            Status::internal(format!(
+                "invalid History RecordActivityTaskStarted response: {error}"
+            ))
+        })
+    }
 }
 
 fn application_error(headers: &[(String, String)], body: &[u8]) -> Status {
