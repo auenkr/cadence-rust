@@ -97,7 +97,7 @@ impl PostgresConnectionPool {
     fn checkout(self: &Arc<Self>) -> Result<PostgresLease> {
         'checkout: loop {
             let mut state = self.state.lock().expect("PostgreSQL Matching pool lock");
-            while let Some(idle) = state.idle.pop() {
+            if let Some(idle) = state.idle.pop() {
                 let expired = self
                     .max_lifetime
                     .is_some_and(|lifetime| idle.created_at.elapsed() >= lifetime);
@@ -389,9 +389,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         if previous_range > 0 && previous_range != current.range_id {
             return Err(stale_range(key, current.range_id));
         }
-        let mut transaction = client
-            .transaction()
-            .map_err(|error| normalize_postgres_error(error))?;
+        let mut transaction = client.transaction().map_err(normalize_postgres_error)?;
         self.lock_and_check(&mut transaction, key, current.range_id)?;
         current.range_id = current.range_id.wrapping_add(1);
         current.data.last_updated_nanos = now_nanos;
@@ -438,9 +436,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         let shard_id = self.shard_id(key);
         let task_type = postgres_task_type(key)?;
         let mut client = self.pool(key).checkout()?;
-        let mut transaction = client
-            .transaction()
-            .map_err(|error| normalize_postgres_error(error))?;
+        let mut transaction = client.transaction().map_err(normalize_postgres_error)?;
         self.lock_and_check(&mut transaction, key, range)?;
         let (bytes, encoding) = self.encode_task_list(&data)?;
         let params: &[&(dyn ToSql + Sync)] = &[
@@ -475,9 +471,7 @@ impl MatchingTaskStore for PostgresTaskStore {
     ) -> Result<()> {
         let task_type = postgres_task_type(key)?;
         let mut client = self.pool(key).checkout()?;
-        let mut transaction = client
-            .transaction()
-            .map_err(|error| normalize_postgres_error(error))?;
+        let mut transaction = client.transaction().map_err(normalize_postgres_error)?;
         for (domain, task) in tasks {
             let bytes = self.encoding.encode(&blob::encode_task(&task.data))?;
             let encoding = self.encoding.as_str();

@@ -192,7 +192,7 @@ impl SyncConnectionPool {
     pub(crate) fn checkout(self: &Arc<Self>) -> Result<ConnectionLease> {
         'checkout: loop {
             let mut state = self.state.lock().expect("MySQL Matching pool lock");
-            while let Some(idle) = state.idle.pop() {
+            if let Some(idle) = state.idle.pop() {
                 let expired = self
                     .max_lifetime
                     .is_some_and(|lifetime| idle.created_at.elapsed() >= lifetime);

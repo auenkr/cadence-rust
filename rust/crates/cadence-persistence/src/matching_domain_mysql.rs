@@ -16,6 +16,7 @@ use std::{
 
 const GO_DEFAULT_SHARD_ID: i32 = 54321;
 const GO_DOMAIN_PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(3);
+type DomainMetadataRow = (Vec<u8>, String, bool, Vec<u8>, String);
 
 pub struct MySqlDomainMetadataStore {
     pool: Arc<crate::matching_mysql::SyncConnectionPool>,
@@ -115,7 +116,7 @@ impl MySqlDomainMetadataStore {
         // Selector is only one of the two literals above.
         let selector = selector.to_owned();
         let deadline = Instant::now() + timeout;
-        let row: Option<(Vec<u8>, String, bool, Vec<u8>, String)> = self
+        let row: Option<DomainMetadataRow> = self
             .pool
             .query_until(deadline, move |connection| {
                 Box::pin(async move { connection.exec_first(
@@ -153,7 +154,7 @@ impl MySqlDomainMetadataStore {
             i64::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
         let deadline = Instant::now() + timeout;
         let token = next_page_token.map(|token| token.to_vec());
-        let rows: Vec<(Vec<u8>, String, bool, Vec<u8>, String)> = self
+        let rows: Vec<DomainMetadataRow> = self
             .pool
             .query_until(deadline, move |connection| Box::pin(async move { match token {
                 Some(token) => connection.exec(
