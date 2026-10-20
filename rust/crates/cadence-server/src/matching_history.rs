@@ -133,6 +133,7 @@ pub struct MatchingHistoryClient {
     /// Resolver must select the `tchannel` named membership port.
     tchannel_peer_resolver:
         Option<Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>>,
+    metrics: crate::matching_metrics::MatchingMetrics,
 }
 #[derive(Clone)]
 enum HistoryConnection {
@@ -163,7 +164,25 @@ impl MatchingHistoryClient {
             record_started_timeout: None,
             peer_resolver: None,
             tchannel_peer_resolver: None,
+            metrics: crate::matching_metrics::MatchingMetrics::default(),
         }
+    }
+    /// Install a metrics sink. The default sink is a no-op to preserve existing behavior.
+    pub fn with_metrics(mut self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
+        self.metrics = crate::matching_metrics::MatchingMetrics::new(sink);
+        self
+    }
+
+    async fn instrument_history<T, F>(&self, method: &'static str, future: F) -> Result<T, Status>
+    where
+        F: Future<Output = Result<T, Status>>,
+    {
+        let tags = self.metrics.history_started(method, None);
+        let started = std::time::Instant::now();
+        let result = future.await;
+        self.metrics
+            .history_completed(tags, started.elapsed(), result.is_err());
+        result
     }
     /// Override the factory's per-RPC timeout. Production uses Go's 30-second
     /// default; keeping this seam injectable makes timeout/retry tests bounded.
@@ -570,23 +589,26 @@ impl MatchingHistoryClient {
             workflow_execution: Some(Self::execution(task)?),
         };
         let result = self
-            .retry(
-                payload,
-                None,
-                caller_deadline,
-                &task.data.workflow_id,
-                &mut |client, request: Request<h::RefreshWorkflowTasksRequest>| async move {
-                    match client {
-                        HistoryConnection::Grpc(mut client) => {
-                            client.refresh_workflow_tasks(request).await.map(|_| ())
+            .instrument_history(
+                "RefreshWorkflowTasks",
+                self.retry(
+                    payload,
+                    None,
+                    caller_deadline,
+                    &task.data.workflow_id,
+                    &mut |client, request: Request<h::RefreshWorkflowTasksRequest>| async move {
+                        match client {
+                            HistoryConnection::Grpc(mut client) => {
+                                client.refresh_workflow_tasks(request).await.map(|_| ())
+                            }
+                            HistoryConnection::Tchannel(client, timeout) => {
+                                client
+                                    .refresh_workflow_tasks(request.get_ref(), timeout)
+                                    .await
+                            }
                         }
-                        HistoryConnection::Tchannel(client, timeout) => {
-                            client
-                                .refresh_workflow_tasks(request.get_ref(), timeout)
-                                .await
-                        }
-                    }
-                },
+                    },
+                ),
             )
             .await;
         match result {
@@ -621,24 +643,27 @@ impl MatchingHistoryClient {
                 ..Default::default()
             }),
         };
-        self.retry(
-            payload,
-            None,
-            caller_deadline,
-            &task.data.workflow_id,
-            &mut |client, request: Request<h::DescribeWorkflowExecutionRequest>| async move {
-                match client {
-                    HistoryConnection::Grpc(mut client) => client
-                        .describe_workflow_execution(request)
-                        .await
-                        .map(tonic::Response::into_inner),
-                    HistoryConnection::Tchannel(client, timeout) => {
-                        client
-                            .describe_workflow_execution(request.get_ref(), timeout)
+        self.instrument_history(
+            "DescribeWorkflowExecution",
+            self.retry(
+                payload,
+                None,
+                caller_deadline,
+                &task.data.workflow_id,
+                &mut |client, request: Request<h::DescribeWorkflowExecutionRequest>| async move {
+                    match client {
+                        HistoryConnection::Grpc(mut client) => client
+                            .describe_workflow_execution(request)
                             .await
+                            .map(tonic::Response::into_inner),
+                        HistoryConnection::Tchannel(client, timeout) => {
+                            client
+                                .describe_workflow_execution(request.get_ref(), timeout)
+                                .await
+                        }
                     }
-                }
-            },
+                },
+            ),
         )
         .await
     }
@@ -667,22 +692,25 @@ impl MatchingHistoryClient {
             workflow_execution: Some(execution.clone()),
             ..Default::default()
         };
-        self.retry(
-            payload,
-            None,
-            caller_deadline,
-            &execution.workflow_id,
-            move |client, request| async move {
-                match client {
-                    HistoryConnection::Grpc(mut client) => client
-                        .get_mutable_state(request)
-                        .await
-                        .map(tonic::Response::into_inner),
-                    HistoryConnection::Tchannel(client, timeout) => {
-                        client.get_mutable_state(request.get_ref(), timeout).await
+        self.instrument_history(
+            "GetMutableState",
+            self.retry(
+                payload,
+                None,
+                caller_deadline,
+                &execution.workflow_id,
+                move |client, request| async move {
+                    match client {
+                        HistoryConnection::Grpc(mut client) => client
+                            .get_mutable_state(request)
+                            .await
+                            .map(tonic::Response::into_inner),
+                        HistoryConnection::Tchannel(client, timeout) => {
+                            client.get_mutable_state(request.get_ref(), timeout).await
+                        }
                     }
-                }
-            },
+                },
+            ),
         )
         .await
     }
@@ -714,24 +742,27 @@ impl MatchingHistoryClient {
             poll_request: Some(poll),
         };
         let started = self
-            .retry_record_started(
-                payload,
-                self.record_started_operation_timeout(domain_id),
-                caller_deadline,
-                &execution.workflow_id,
-                move |client, request| async move {
-                    match client {
-                        HistoryConnection::Grpc(mut client) => client
-                            .record_decision_task_started(request)
-                            .await
-                            .map(tonic::Response::into_inner),
-                        HistoryConnection::Tchannel(client, timeout) => {
-                            client
-                                .record_decision_task_started(request.get_ref(), timeout)
+            .instrument_history(
+                "RecordDecisionTaskStarted",
+                self.retry_record_started(
+                    payload,
+                    self.record_started_operation_timeout(domain_id),
+                    caller_deadline,
+                    &execution.workflow_id,
+                    move |client, request| async move {
+                        match client {
+                            HistoryConnection::Grpc(mut client) => client
+                                .record_decision_task_started(request)
                                 .await
+                                .map(tonic::Response::into_inner),
+                            HistoryConnection::Tchannel(client, timeout) => {
+                                client
+                                    .record_decision_task_started(request.get_ref(), timeout)
+                                    .await
+                            }
                         }
-                    }
-                },
+                    },
+                ),
             )
             .await?;
         let token = TaskToken {
@@ -791,24 +822,27 @@ impl MatchingHistoryClient {
             poll_request: Some(poll),
         };
         let started = self
-            .retry_record_started(
-                payload,
-                self.record_started_operation_timeout(domain_id),
-                caller_deadline,
-                &execution.workflow_id,
-                move |client, request| async move {
-                    match client {
-                        HistoryConnection::Grpc(mut client) => client
-                            .record_activity_task_started(request)
-                            .await
-                            .map(tonic::Response::into_inner),
-                        HistoryConnection::Tchannel(client, timeout) => {
-                            client
-                                .record_activity_task_started(request.get_ref(), timeout)
+            .instrument_history(
+                "RecordActivityTaskStarted",
+                self.retry_record_started(
+                    payload,
+                    self.record_started_operation_timeout(domain_id),
+                    caller_deadline,
+                    &execution.workflow_id,
+                    move |client, request| async move {
+                        match client {
+                            HistoryConnection::Grpc(mut client) => client
+                                .record_activity_task_started(request)
                                 .await
+                                .map(tonic::Response::into_inner),
+                            HistoryConnection::Tchannel(client, timeout) => {
+                                client
+                                    .record_activity_task_started(request.get_ref(), timeout)
+                                    .await
+                            }
                         }
-                    }
-                },
+                    },
+                ),
             )
             .await?;
         let event = started.scheduled_event.ok_or_else(|| {
@@ -878,6 +912,118 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     };
+
+    #[tokio::test]
+    async fn history_metrics_record_one_outer_call_with_go_names_and_tags() {
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let client = client().with_metrics(sink.clone());
+        let mut attempts = 0;
+        let result = client
+            .instrument_history("GetMutableState", async {
+                // A retrying History operation is metered once around all
+                // transport attempts, as in Go's client factory wrapper order.
+                attempts += 1;
+                attempts += 1;
+                Ok::<_, Status>(())
+            })
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(attempts, 2);
+
+        let events = sink.events();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].name, "cadence_client_requests");
+        assert_eq!(events[1].name, "cadence_client_latency");
+        assert_eq!(events[2].name, "cadence_client_latency_ns");
+        assert_eq!(
+            events[2].histogram,
+            Some(crate::matching_metrics::HistogramSpec::Exponential {
+                minimum: Duration::from_millis(1),
+                maximum: Duration::from_secs(100),
+            })
+        );
+        for event in &events {
+            assert_eq!(event.tags["operation"], "HistoryClientGetMutableState");
+            assert_eq!(event.tags["cadence_role"], "history_client");
+            assert!(!event.tags.contains_key("is_retry"));
+        }
+    }
+
+    #[tokio::test]
+    async fn history_metrics_record_typed_error_as_failure() {
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let client = client().with_metrics(sink.clone());
+        let result = client
+            .instrument_history("RecordActivityTaskStarted", async {
+                Err::<(), _>(typed(
+                    Code::Unavailable,
+                    "uber.cadence.api.v1.ServiceBusyError",
+                ))
+            })
+            .await;
+        assert_eq!(result.unwrap_err().code(), Code::Unavailable);
+        let events = sink.events();
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].name, "cadence_client_requests");
+        assert_eq!(events[1].name, "cadence_client_errors");
+        assert_eq!(events[2].name, "cadence_client_latency");
+        assert_eq!(events[3].name, "cadence_client_latency_ns");
+        assert_eq!(
+            events[0].tags["operation"],
+            "HistoryClientRecordActivityTaskStarted"
+        );
+    }
+
+    #[tokio::test]
+    async fn history_metrics_record_deadline_as_failure() {
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let client = client().with_metrics(sink.clone());
+        let result = client
+            .instrument_history("GetMutableState", async {
+                Err::<(), _>(Status::deadline_exceeded("caller deadline"))
+            })
+            .await;
+        assert_eq!(result.unwrap_err().code(), Code::DeadlineExceeded);
+        let events = sink.events();
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].name, "cadence_client_requests");
+        assert_eq!(events[1].name, "cadence_client_errors");
+        assert_eq!(events[0].tags["operation"], "HistoryClientGetMutableState");
+    }
+
+    #[tokio::test]
+    async fn history_metrics_count_a_polled_call_without_fabricating_completion_on_cancel() {
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let client = client().with_metrics(sink.clone());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            client
+                .instrument_history("GetMutableState", async move {
+                    let _ = started_tx.send(());
+                    std::future::pending::<Result<(), Status>>().await
+                })
+                .await
+        });
+        started_rx.await.unwrap();
+        task.abort();
+        let _ = task.await;
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, "cadence_client_requests");
+        assert_eq!(events[0].tags["operation"], "HistoryClientGetMutableState");
+    }
+
+    #[test]
+    fn history_metrics_do_not_count_an_unpolled_future() {
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let client = client().with_metrics(sink.clone());
+        drop(client.instrument_history(
+            "GetMutableState",
+            std::future::pending::<Result<(), Status>>(),
+        ));
+        assert!(sink.events().is_empty());
+    }
+
     fn client() -> MatchingHistoryClient {
         MatchingHistoryClient::new(
             tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
@@ -1137,7 +1283,10 @@ mod tests {
                     == resolver.host_address("history-ring-a:7935").unwrap()
             })
             .expect("a key should map to peer A");
-        let history = client().with_peer_resolver(resolver);
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let history = client()
+            .with_peer_resolver(resolver)
+            .with_metrics(sink.clone());
         let response = history
             .mutable_state(
                 "domain-id",
@@ -1152,6 +1301,12 @@ mod tests {
             response.next_event_id, 77,
             "the response must come from peer B after A redirects"
         );
+        let events = sink.events();
+        assert_eq!(events.len(), 3, "redirect attempts count as one operation");
+        assert_eq!(events[0].name, "cadence_client_requests");
+        assert_eq!(events[1].name, "cadence_client_latency");
+        assert_eq!(events[2].name, "cadence_client_latency_ns");
+        assert_eq!(events[0].tags["operation"], "HistoryClientGetMutableState");
     }
     #[tokio::test]
     async fn record_started_redirects_share_one_attempt_budget() {
