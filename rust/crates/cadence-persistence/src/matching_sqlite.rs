@@ -49,6 +49,78 @@ pub struct SqliteTaskStore {
     connection: Mutex<Connection>,
     encoding: BlobEncoding,
 }
+
+impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
+    fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
+        SqliteTaskStore::get_task_list(self, key)
+    }
+
+    fn lease(
+        &self,
+        key: &TaskListKey,
+        kind: i16,
+        previous_range: i64,
+        now_nanos: i64,
+    ) -> Result<TaskListRecord> {
+        SqliteTaskStore::lease(self, key, kind, previous_range, now_nanos)
+    }
+
+    fn update_task_list(
+        &self,
+        key: &TaskListKey,
+        range: i64,
+        data: TaskListData,
+        now_nanos: i64,
+    ) -> Result<()> {
+        SqliteTaskStore::update_task_list(self, key, range, data, now_nanos)
+    }
+
+    fn create_tasks_with_domains(
+        &self,
+        key: &TaskListKey,
+        range: i64,
+        tasks: &[(Uuid, &AllocatedTask)],
+    ) -> Result<()> {
+        SqliteTaskStore::create_tasks_with_domains(
+            self,
+            key,
+            range,
+            tasks.iter().map(|(domain, task)| (*domain, *task)),
+        )
+    }
+
+    fn get_tasks(
+        &self,
+        key: &TaskListKey,
+        read_level: i64,
+        max_read_level: i64,
+        batch_size: i64,
+    ) -> Result<Vec<AllocatedTask>> {
+        SqliteTaskStore::get_tasks(self, key, read_level, max_read_level, batch_size)
+    }
+
+    fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> Result<i64> {
+        SqliteTaskStore::task_list_size(self, key, ack_level)
+    }
+
+    fn complete_task(&self, key: &TaskListKey, task_id: i64) -> Result<()> {
+        SqliteTaskStore::complete_task(self, key, task_id)
+    }
+
+    fn complete_tasks_less_than(
+        &self,
+        key: &TaskListKey,
+        inclusive_task_id: i64,
+        limit: i64,
+    ) -> Result<usize> {
+        SqliteTaskStore::complete_tasks_less_than(self, key, inclusive_task_id, limit)
+    }
+
+    fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
+        SqliteTaskStore::delete_task_list(self, key, range)
+    }
+}
+
 impl SqliteTaskStore {
     fn validate_schema(connection: &Connection) -> Result<()> {
         // These SELECTs verify every column used by Matching queue operations.

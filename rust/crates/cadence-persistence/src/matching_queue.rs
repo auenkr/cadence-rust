@@ -2,8 +2,9 @@
 use crate::{
     matching_blob::{TaskData, TaskListData},
     matching_sqlite::{
-        AllocatedTask, Result as StorageResult, SqliteTaskStore, StorageError, TaskListKey,
+        AllocatedTask, Result as StorageResult, StorageError, TaskListKey,
     },
+    matching_task_store::MatchingTaskStore,
 };
 use cadence_common::ack_manager::AckManager;
 use std::{
@@ -42,7 +43,7 @@ struct State {
     in_flight: HashMap<i64, AllocatedTask>,
 }
 pub struct DurableTaskQueue {
-    store: Arc<SqliteTaskStore>,
+    store: Arc<dyn MatchingTaskStore>,
     key: TaskListKey,
     range_size: NonZeroU32,
     state: Mutex<State>,
@@ -120,7 +121,7 @@ struct ScannedBatch {
     finished: bool,
 }
 fn scan_batch(
-    store: &SqliteTaskStore,
+    store: &dyn MatchingTaskStore,
     key: &TaskListKey,
     mut read: i64,
     max: i64,
@@ -165,7 +166,7 @@ fn block(range: i64, size: NonZeroU32) -> (i64, i64) {
 }
 impl DurableTaskQueue {
     pub fn open(
-        store: Arc<SqliteTaskStore>,
+        store: Arc<dyn MatchingTaskStore>,
         key: TaskListKey,
         kind: i16,
         range_size: NonZeroU32,
@@ -261,13 +262,15 @@ impl DurableTaskQueue {
                 task.data = task.data.clone().at_creation(timestamp, *timeout);
             }
         }
+        let tasks_with_domains = tasks
+            .iter()
+            .zip(data)
+            .map(|(task, (domain, _))| (*domain, task))
+            .collect::<Vec<_>>();
         let result = self.store.create_tasks_with_domains(
             &self.key,
             range_id,
-            tasks
-                .iter()
-                .zip(data)
-                .map(|(task, (domain, _))| (*domain, task)),
+            &tasks_with_domains,
         );
         // Go advances the read boundary after the write returns, even on error.
         // Allocated IDs are never reused after an uncertain persistence outcome.
@@ -633,6 +636,7 @@ impl DurableTaskQueue {
 mod tests {
     use super::*;
     use crate::matching_blob::BlobEncoding;
+    use crate::matching_sqlite::SqliteTaskStore;
     use uuid::Uuid;
     fn n(value: u32) -> NonZeroU32 {
         NonZeroU32::new(value).unwrap()
