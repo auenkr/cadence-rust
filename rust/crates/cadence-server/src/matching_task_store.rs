@@ -103,6 +103,7 @@ pub async fn open_configured_semaphore_store(
 pub fn open_configured_default_store(
     persistence: &crate::config::PersistenceConfig,
     active_cluster_name: &str,
+    all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> anyhow::Result<ConfiguredMatchingStores> {
     let name = persistence.default_store.as_str();
     if name.is_empty() {
@@ -123,8 +124,9 @@ pub fn open_configured_default_store(
             Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
         return Ok(ConfiguredMatchingStores {
             task_store: Arc::new(
-                cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::new(
+                cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::with_all_consistency_delete(
                     driver.clone(),
+                    all_consistency_delete,
                 ),
             ),
             domain_metadata_source: Some(Arc::new(
@@ -416,7 +418,7 @@ mod tests {
             use_multiple_databases: true,
             ..Default::default()
         }));
-        let error = open_configured_default_store(&config, "active")
+        let error = open_configured_default_store(&config, "active", Arc::new(|| false))
             .err()
             .unwrap();
         assert!(error

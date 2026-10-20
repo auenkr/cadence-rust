@@ -67,6 +67,7 @@ fn is_unavailable(error: &ExecutionError) -> bool {
 
 pub struct CassandraMatchingTaskStore {
     driver: Arc<CassandraBlockingSession>,
+    all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 impl std::fmt::Debug for CassandraMatchingTaskStore {
@@ -78,7 +79,17 @@ impl std::fmt::Debug for CassandraMatchingTaskStore {
 
 impl CassandraMatchingTaskStore {
     pub fn new(driver: Arc<CassandraBlockingSession>) -> Self {
-        Self { driver }
+        Self::with_all_consistency_delete(driver, Arc::new(|| false))
+    }
+
+    pub fn with_all_consistency_delete(
+        driver: Arc<CassandraBlockingSession>,
+        enabled: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        Self {
+            driver,
+            all_consistency_delete: enabled,
+        }
     }
 
     fn session(&self) -> Arc<Session> {
@@ -731,46 +742,68 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
             .map(|(count,)| usize::try_from(count).map_err(Self::internal))
             .ok_or_else(|| Self::internal("Cassandra count returned no row"))?;
         let count = count?;
-        self.driver.run(session.query_unpaged(
-            "DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=?",
-            (key.domain_id, &key.name, key.task_type, TASK_ROW, 0_i64, inclusive_task_id))).map_err(Self::internal)?;
+        const DELETE: &str = "DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=?";
+        let params = (
+            key.domain_id,
+            &key.name,
+            key.task_type,
+            TASK_ROW,
+            0_i64,
+            inclusive_task_id,
+        );
+        if (self.all_consistency_delete)() {
+            let mut all = Statement::new(DELETE);
+            all.set_consistency(scylla::frame::types::Consistency::All);
+            match self.driver.run(session.query_unpaged(all, params)) {
+                Ok(_) => {}
+                Err(error) if is_unavailable(&error) => {
+                    let mut fallback = Statement::new(DELETE);
+                    fallback.set_consistency(self.driver.default_consistency());
+                    self.driver
+                        .run(session.query_unpaged(fallback, params))
+                        .map_err(Self::internal)?;
+                }
+                Err(error) => return Err(Self::internal(error)),
+            }
+        } else {
+            self.driver
+                .run(session.query_unpaged(DELETE, params))
+                .map_err(Self::internal)?;
+        }
         Ok(count)
     }
 
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
         let session = self.session();
-        let mut all_consistency = Statement::new(DELETE_LIST);
-        all_consistency.set_consistency(scylla::frame::types::Consistency::All);
-        let result = match self.driver.run(session.query_unpaged(
-            all_consistency,
-            (
-                key.domain_id,
-                &key.name,
-                key.task_type,
-                LIST_ROW,
-                LIST_SENTINEL,
-                range,
-            ),
-        )) {
-            Ok(result) => result,
-            Err(error) if is_unavailable(&error) => {
-                let mut fallback = Statement::new(DELETE_LIST);
-                fallback.set_consistency(self.driver.default_consistency());
-                self.driver
-                    .run(session.query_unpaged(
-                        fallback,
-                        (
-                            key.domain_id,
-                            &key.name,
-                            key.task_type,
-                            LIST_ROW,
-                            LIST_SENTINEL,
-                            range,
-                        ),
-                    ))
-                    .map_err(Self::internal)?
+        let params = (
+            key.domain_id,
+            &key.name,
+            key.task_type,
+            LIST_ROW,
+            LIST_SENTINEL,
+            range,
+        );
+        let result = if (self.all_consistency_delete)() {
+            let mut all_consistency = Statement::new(DELETE_LIST);
+            all_consistency.set_consistency(scylla::frame::types::Consistency::All);
+            match self
+                .driver
+                .run(session.query_unpaged(all_consistency, params))
+            {
+                Ok(result) => result,
+                Err(error) if is_unavailable(&error) => {
+                    let mut fallback = Statement::new(DELETE_LIST);
+                    fallback.set_consistency(self.driver.default_consistency());
+                    self.driver
+                        .run(session.query_unpaged(fallback, params))
+                        .map_err(Self::internal)?
+                }
+                Err(error) => return Err(Self::internal(error)),
             }
-            Err(error) => return Err(Self::internal(error)),
+        } else {
+            self.driver
+                .run(session.query_unpaged(DELETE_LIST, params))
+                .map_err(Self::internal)?
         };
         if task_list_lwt_applied(result)? {
             Ok(())

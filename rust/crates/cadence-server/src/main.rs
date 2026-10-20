@@ -1011,11 +1011,23 @@ async fn main() -> anyhow::Result<()> {
             let configured_matching_stores = if run_matching && !embedded_development {
                 let persistence = cfg.persistence.clone();
                 let cluster_name = state.current_cluster_name.clone();
+                let dynamic_config = state.admin.dynamic_config.clone();
+                let all_consistency_delete: std::sync::Arc<dyn Fn() -> bool + Send + Sync> =
+                    std::sync::Arc::new(move || {
+                        let overlay = dynamic_config.lock().expect("admin lock");
+                        cadence_persistence::dynamic_config::boolean(
+                            overlay
+                                .property_values("system.enableCassandraAllConsistencyLevelDelete"),
+                            None,
+                            false,
+                        )
+                    });
                 Some(
                     tokio::task::spawn_blocking(move || {
                         cadence_server::matching_task_store::open_configured_default_store(
                             &persistence,
                             &cluster_name,
+                            all_consistency_delete,
                         )
                     })
                     .await

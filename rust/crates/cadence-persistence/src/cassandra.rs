@@ -489,6 +489,7 @@ pub struct CassandraSessionConfig {
     pub datacenter: String,
     pub region: String,
     pub tls: Option<CassandraTlsConfig>,
+    pub allowed_authenticators: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -670,6 +671,7 @@ impl CassandraSessionConfig {
             datacenter: String::new(),
             region: String::new(),
             tls: None,
+            allowed_authenticators: Vec::new(),
         })
     }
 
@@ -695,12 +697,7 @@ impl CassandraSessionConfig {
         self.datacenter = options.datacenter;
         self.region = options.region;
         self.tls = options.tls;
-        if !self.user.is_empty()
-            && !self.password.is_empty()
-            && !options.allowed_authenticators.is_empty()
-        {
-            anyhow::bail!("Cassandra allowedAuthenticators is not supported by the Scylla Rust driver; custom authenticator configuration cannot be honored");
-        }
+        self.allowed_authenticators = options.allowed_authenticators;
         if options.proto_version != 0 && options.proto_version != 4 {
             anyhow::bail!("Cassandra protoVersion {} cannot be selected by the Scylla Rust driver (only negotiated protocol is supported)", options.proto_version);
         }
@@ -760,7 +757,11 @@ impl CassandraSessionConfig {
             builder = builder.tls_context(Some(build_rustls_client_config(tls)?));
         }
         if !self.user.is_empty() && !self.password.is_empty() {
-            builder = builder.user(self.user.clone(), self.password.clone());
+            builder = builder.authenticator_provider(Arc::new(GoPasswordAuthenticator {
+                username: self.user.clone(),
+                password: self.password.clone(),
+                allowed: self.allowed_authenticators.clone(),
+            }));
         }
         Ok(builder.build().await?)
     }
@@ -829,7 +830,19 @@ fn build_rustls_client_config(
     let builder = if tls.verify_hostname {
         let mut roots = rustls::RootCertStore::empty();
         if tls.ca_files.is_empty() {
-            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let native = rustls_native_certs::load_native_certs();
+            if native.certs.is_empty() {
+                anyhow::bail!(
+                    "failed to load any native Cassandra TLS trust roots: {:?}",
+                    native.errors
+                );
+            }
+            let (accepted, _rejected) = roots.add_parsable_certificates(native.certs);
+            if accepted == 0 {
+                anyhow::bail!(
+                    "the native Cassandra TLS trust store contained no usable certificates"
+                );
+            }
         } else {
             for path in &tls.ca_files {
                 let file = std::fs::File::open(path)?;
@@ -871,6 +884,71 @@ fn build_rustls_client_config(
         _ => builder.with_no_client_auth(),
     };
     Ok(Arc::new(client))
+}
+
+const GO_DEFAULT_AUTHENTICATORS: &[&str] = &[
+    "org.apache.cassandra.auth.PasswordAuthenticator",
+    "com.instaclustr.cassandra.auth.SharedSecretAuthenticator",
+    "com.datastax.bdp.cassandra.auth.DseAuthenticator",
+    "io.aiven.cassandra.auth.AivenAuthenticator",
+    "com.ericsson.bss.cassandra.ecaudit.auth.AuditPasswordAuthenticator",
+    "com.amazon.helenus.auth.HelenusAuthenticator",
+    "com.ericsson.bss.cassandra.ecaudit.auth.AuditAuthenticator",
+];
+
+#[derive(Debug)]
+struct GoPasswordAuthenticator {
+    username: String,
+    password: String,
+    allowed: Vec<String>,
+}
+
+#[derive(Debug)]
+struct GoPasswordSession;
+
+#[async_trait]
+impl scylla::authentication::AuthenticatorSession for GoPasswordSession {
+    async fn evaluate_challenge(
+        &mut self,
+        _token: Option<&[u8]>,
+    ) -> Result<Option<Vec<u8>>, String> {
+        Err("challenges are not expected for Cassandra password authentication".into())
+    }
+    async fn success(&mut self, _token: Option<&[u8]>) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl scylla::authentication::AuthenticatorProvider for GoPasswordAuthenticator {
+    async fn start_authentication_session(
+        &self,
+        name: &str,
+    ) -> Result<
+        (
+            Option<Vec<u8>>,
+            Box<dyn scylla::authentication::AuthenticatorSession>,
+        ),
+        String,
+    > {
+        let allowed = if self.allowed.is_empty() {
+            GO_DEFAULT_AUTHENTICATORS
+                .iter()
+                .copied()
+                .any(|candidate| candidate == name)
+        } else {
+            self.allowed.iter().any(|candidate| candidate == name)
+        };
+        if !allowed {
+            return Err(format!("unexpected Cassandra authenticator {name:?}"));
+        }
+        let mut token = Vec::with_capacity(2 + self.username.len() + self.password.len());
+        token.push(0);
+        token.extend_from_slice(self.username.as_bytes());
+        token.push(0);
+        token.extend_from_slice(self.password.as_bytes());
+        Ok((Some(token), Box::new(GoPasswordSession)))
+    }
 }
 
 #[cfg(test)]
@@ -920,7 +998,7 @@ mod session_config_tests {
     }
 
     #[test]
-    fn unsupported_cassandra_driver_options_fail_explicitly() {
+    fn configured_authenticator_allowlist_is_preserved() {
         let config = CassandraSessionConfig::from_parts(
             ["127.0.0.1".to_string()],
             9042,
@@ -929,14 +1007,13 @@ mod session_config_tests {
             "cadence".to_string(),
         )
         .unwrap();
-        assert!(config
+        let configured = config
             .with_go_options(CassandraSessionOptions {
                 allowed_authenticators: vec!["custom".into()],
                 ..Default::default()
             })
-            .unwrap_err()
-            .to_string()
-            .contains("allowedAuthenticators"));
+            .unwrap();
+        assert_eq!(configured.allowed_authenticators, vec!["custom"]);
     }
 }
 
