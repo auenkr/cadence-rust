@@ -362,7 +362,7 @@ async fn create_semaphore(
         &req.semaphore_name,
         req.capacity,
         req.bucket_capacity,
-    ) {
+    ).await {
         Ok(meta) => (
             StatusCode::OK,
             Json(cadence_api::types::CreateSemaphoreResponse {

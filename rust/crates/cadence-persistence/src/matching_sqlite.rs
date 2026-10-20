@@ -88,8 +88,9 @@ impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
     }
 }
 
+#[async_trait::async_trait]
 impl crate::SemaphorePersistence for SqliteTaskStore {
-    fn create_semaphore(
+    async fn create_semaphore(
         &self,
         domain: &str,
         name: &str,
@@ -101,19 +102,19 @@ impl crate::SemaphorePersistence for SqliteTaskStore {
             name,
             size,
             bucket_size,
-        )
+        ).await
     }
 
-    fn scan_semaphore_bucket(
+    async fn scan_semaphore_bucket(
         &self,
         domain_id: &str,
         name: &str,
         bucket: i32,
     ) -> std::result::Result<Vec<crate::SemaphoreRow>, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.scan_semaphore_bucket(domain_id, name, bucket)
+        crate::SqlUnsupportedSemaphorePersistence.scan_semaphore_bucket(domain_id, name, bucket).await
     }
 
-    fn get_semaphore_ownership_by_token(
+    async fn get_semaphore_ownership_by_token(
         &self,
         domain_id: &str,
         name: &str,
@@ -122,10 +123,10 @@ impl crate::SemaphorePersistence for SqliteTaskStore {
     ) -> std::result::Result<String, crate::AcquireError> {
         crate::SqlUnsupportedSemaphorePersistence.get_semaphore_ownership_by_token(
             domain_id, name, bucket, token_id,
-        )
+        ).await
     }
 
-    fn grant_semaphore_token(
+    async fn grant_semaphore_token(
         &self,
         domain_id: &str,
         name: &str,
@@ -135,7 +136,7 @@ impl crate::SemaphorePersistence for SqliteTaskStore {
     ) -> std::result::Result<crate::GrantOutcome, crate::AcquireError> {
         crate::SqlUnsupportedSemaphorePersistence.grant_semaphore_token(
             domain_id, name, bucket, token_id, owner_id,
-        )
+        ).await
     }
 }
 

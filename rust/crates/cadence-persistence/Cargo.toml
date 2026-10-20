@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = "1"
+async-trait = "0.1"
+scylla = { version = "=1.9.0", features = ["chrono-04", "uuid-1"] }
 cadence-thrift = { path = "../cadence-thrift" }
 cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
@@ -21,7 +24,7 @@ mysql_async = { version = "=0.37.1", default-features = false, features = ["mini
 postgres = { version = "0.19", default-features = false }
 farmhash = "1.1.5"
 snap = "1.1.1"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 
 [dev-dependencies]
 tempfile = "3"

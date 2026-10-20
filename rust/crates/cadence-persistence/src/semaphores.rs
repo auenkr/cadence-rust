@@ -82,28 +82,29 @@ pub enum AcquireError {
 /// Embedded mode uses the in-memory adapter; configured SQL preserves Go's
 /// explicit unsupported-backend behavior. A Cassandra adapter can implement
 /// this contract using Go's semaphore_metadata and semaphore_tokens tables.
+#[async_trait::async_trait]
 pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
-    fn create_semaphore(
+    async fn create_semaphore(
         &self,
         domain: &str,
         name: &str,
         size: i32,
         bucket_size: i32,
     ) -> Result<SemaphoreMetadata, SemaphoreError>;
-    fn scan_semaphore_bucket(
+    async fn scan_semaphore_bucket(
         &self,
         domain_id: &str,
         name: &str,
         bucket: i32,
     ) -> Result<Vec<SemaphoreRow>, AcquireError>;
-    fn get_semaphore_ownership_by_token(
+    async fn get_semaphore_ownership_by_token(
         &self,
         domain_id: &str,
         name: &str,
         bucket: i32,
         token_id: i32,
     ) -> Result<String, AcquireError>;
-    fn grant_semaphore_token(
+    async fn grant_semaphore_token(
         &self,
         domain_id: &str,
         name: &str,
@@ -122,8 +123,9 @@ impl SqlUnsupportedSemaphorePersistence {
         "distributed semaphore is not supported on the SQL persistence backend";
 }
 
+#[async_trait::async_trait]
 impl SemaphorePersistence for SqlUnsupportedSemaphorePersistence {
-    fn create_semaphore(
+    async fn create_semaphore(
         &self,
         _domain: &str,
         _name: &str,
@@ -133,7 +135,7 @@ impl SemaphorePersistence for SqlUnsupportedSemaphorePersistence {
         Err(SemaphoreError::UnsupportedBackend)
     }
 
-    fn scan_semaphore_bucket(
+    async fn scan_semaphore_bucket(
         &self,
         _domain_id: &str,
         _name: &str,
@@ -142,7 +144,7 @@ impl SemaphorePersistence for SqlUnsupportedSemaphorePersistence {
         Err(AcquireError::Invalid(Self::MESSAGE.into()))
     }
 
-    fn get_semaphore_ownership_by_token(
+    async fn get_semaphore_ownership_by_token(
         &self,
         _domain_id: &str,
         _name: &str,
@@ -152,7 +154,7 @@ impl SemaphorePersistence for SqlUnsupportedSemaphorePersistence {
         Err(AcquireError::Invalid(Self::MESSAGE.into()))
     }
 
-    fn grant_semaphore_token(
+    async fn grant_semaphore_token(
         &self,
         _domain_id: &str,
         _name: &str,
@@ -455,8 +457,9 @@ impl super::InMemoryExecutionStore {
     }
 }
 
+#[async_trait::async_trait]
 impl SemaphorePersistence for super::InMemoryExecutionStore {
-    fn create_semaphore(
+    async fn create_semaphore(
         &self,
         domain: &str,
         name: &str,
@@ -466,7 +469,7 @@ impl SemaphorePersistence for super::InMemoryExecutionStore {
         super::InMemoryExecutionStore::create_semaphore(self, domain, name, size, bucket_size)
     }
 
-    fn scan_semaphore_bucket(
+    async fn scan_semaphore_bucket(
         &self,
         domain_id: &str,
         name: &str,
@@ -475,7 +478,7 @@ impl SemaphorePersistence for super::InMemoryExecutionStore {
         super::InMemoryExecutionStore::scan_semaphore_bucket(self, domain_id, name, bucket)
     }
 
-    fn get_semaphore_ownership_by_token(
+    async fn get_semaphore_ownership_by_token(
         &self,
         domain_id: &str,
         name: &str,
@@ -487,7 +490,7 @@ impl SemaphorePersistence for super::InMemoryExecutionStore {
         )
     }
 
-    fn grant_semaphore_token(
+    async fn grant_semaphore_token(
         &self,
         domain_id: &str,
         name: &str,
@@ -570,25 +573,25 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn sql_backend_matches_go_unsupported_error_for_metadata_and_token_operations() {
+    #[tokio::test]
+    async fn sql_backend_matches_go_unsupported_error_for_metadata_and_token_operations() {
         let sql = SqlUnsupportedSemaphorePersistence;
         assert!(matches!(
-            sql.create_semaphore("d", "s", 1, 1),
+            sql.create_semaphore("d", "s", 1, 1).await,
             Err(SemaphoreError::UnsupportedBackend)
         ));
         assert_eq!(
-            sql.scan_semaphore_bucket("d", "s", 0).unwrap_err().to_string(),
+            sql.scan_semaphore_bucket("d", "s", 0).await.unwrap_err().to_string(),
             SqlUnsupportedSemaphorePersistence::MESSAGE
         );
         assert_eq!(
-            sql.get_semaphore_ownership_by_token("d", "s", 0, 1)
+            sql.get_semaphore_ownership_by_token("d", "s", 0, 1).await
                 .unwrap_err()
                 .to_string(),
             SqlUnsupportedSemaphorePersistence::MESSAGE
         );
         assert_eq!(
-            sql.grant_semaphore_token("d", "s", 0, 1, "owner")
+            sql.grant_semaphore_token("d", "s", 0, 1, "owner").await
                 .unwrap_err()
                 .to_string(),
             SqlUnsupportedSemaphorePersistence::MESSAGE

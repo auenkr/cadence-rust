@@ -2212,8 +2212,9 @@ impl m::matching_api_server::MatchingApi for Matching {
         let manager = self
             .semaphores
             .get_or_create(identifier)
+            .await
             .map_err(semaphore_status)?;
-        let result = manager.acquire(&r.owner_id).map_err(semaphore_status)?;
+        let result = manager.acquire(&r.owner_id).await.map_err(semaphore_status)?;
         let outcome = match result.outcome {
             SemaphoreAcquireOutcome::Acquired => 1,
             SemaphoreAcquireOutcome::NoSlot => 2,

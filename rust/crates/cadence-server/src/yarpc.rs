@@ -1154,7 +1154,7 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
         &req.semaphore_name,
         req.capacity,
         req.bucket_capacity,
-    ) {
+    ).await {
         Ok(meta) => Ok(wrap_success(&CreateSemaphoreResponse {
             semaphore: Some(Semaphore {
                 semaphore_name: req.semaphore_name.clone(),
