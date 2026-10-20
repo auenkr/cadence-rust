@@ -248,3 +248,39 @@ target /home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target retained;
 obsolete17GB cache target removed after process check; about48GB free.
 Matching remains incomplete; production provider/history assembly and actual
 mixed Go/Rust SDK/recovery acceptance still outstanding.
+
+## Healer accepted; configured-store capture pending
+
+Accepted healer chain d782a11ed..4721fb465 cherry-picked to rootc9c1f4f5b,
+pushed. Root provider/node sources equal tested worker source. Corrected run
+memory/evidence/ringpop-healer-validation-20261019T215532Z has all11 command
+exits0, actual Go fixture comparison, Rust live partition/reverse-sync,
+blocked real JOIN response proves stop waits, provider/discovery/memberlist
+regressions and strict common/server Clippy. Initial missing-helper compile
+failure215112Z retained. This remains component evidence, no full service claim.
+
+Configured-store candidate through0d3406fd4 remains unmerged. Frozen Rust
+961913605 passed8 SQLite/4 factory tests/build/strict lint; final native Go
+probe220052Z passed legitimate Go lease1/task2 -> Rust lease2/task100001
+transition, Go readback of Rust task/blob, delivery+GC, native Thrift transports,
+TLS/drain/failover/private production database assertion. Earlier live insertion
+beyond writer read bound was invalid fixture in both Go and Rust; embedded
+startup directory reuse caused a false private-DB assertion. Both corrected.
+Final probe output was consumed interactively: parent requires captured rerun
+before accepting evidence. Worker owns sole lane for raw stdout/stderr+exit
+rerun, then source-only production main assembly on separate commits. Candidate
+small evidence package distinguishes historical failed results from passing
+Rust gates. Exact defaultStore lookup differs: Rust trims name in task/cache
+factory, Go keys exact name. Recorded unresolved config parity gap.
+
+History worker now implements outbound Matching History TChannel path,
+source-only branch t3/matching-history-tchannel in t3-83afa06b. Committed typed
+container codec638004c68, transport7af33eea6+43f4441e6; all5 operation adapters/
+error mapping/integration remain incomplete. Parent narrowed next checkpoint
+GetMutableState+VersionHistories field-preserving converters. Temporary nested
+schema child finished/released so runtime owner could resume; no new spawning.
+
+SWIM next source-only rebase/review unvalidated SD clienteecb1a1c9+2e713ebed
+onto rootc9c1f4f5b; no build until cache releases. Runtime owns main assembly;
+SD registry callbacks/config integration remain later. Sole warmed target stays
+t3-6f14baa6/rust/target jobs1,47GB free. User AGENTS edits untouched.
