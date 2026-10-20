@@ -90,7 +90,13 @@ function callRpc(service, method, request) {
   metadata.set('rpc-encoding', 'proto');
   metadata.set('rpc-caller', 'cadence-service-compat');
   return new Promise((resolve, reject) => clients[service][method](request, metadata,
-    { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
+    { deadline: Date.now() + 20000 }, (error, response) => {
+      if (error) {
+        error.message = `${service}.${method} failed${taskListName ? ` for task list ${taskListName}` : ''}: ${error.message}`;
+        return reject(error);
+      }
+      resolve(response);
+    }));
 }
 const payload = data => ({ data: Buffer.from(data) });
 async function run() {
