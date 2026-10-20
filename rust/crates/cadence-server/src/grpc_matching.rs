@@ -1257,6 +1257,7 @@ impl Matching {
                             partition_config,
                         });
                         request.set_timeout(timeout);
+                        crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
                         client
                             .add_decision_task(request)
                             .await
@@ -1275,6 +1276,7 @@ impl Matching {
                             activity_task_dispatch_info: None,
                         });
                         request.set_timeout(timeout);
+                        crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
                         client
                             .add_activity_task(request)
                             .await
@@ -2020,6 +2022,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 request.set_timeout(
                                     deadline.saturating_duration_since(tokio::time::Instant::now()),
                                 );
+                                crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
                                 return m::matching_api_client::MatchingApiClient::new(channel)
                                     .query_workflow(request)
                                     .await;

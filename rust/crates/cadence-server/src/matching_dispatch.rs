@@ -130,6 +130,7 @@ impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTa
                         .await
                 }
                 Parent::Remote(channel) => {
+                    matching_yarpc_grpc_metadata(&mut request);
                     m::matching_api_client::MatchingApiClient::new(channel)
                         .poll_for_decision_task(request)
                         .await
@@ -179,6 +180,7 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
                         .await
                 }
                 Parent::Remote(channel) => {
+                    matching_yarpc_grpc_metadata(&mut request);
                     m::matching_api_client::MatchingApiClient::new(channel)
                         .poll_for_activity_task(request)
                         .await
@@ -190,6 +192,25 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
             .map(tonic::Response::into_inner)
         })
     }
+}
+
+/// Go Matching's generated YARPC gRPC client sends these routing headers on
+/// every outbound Matching call. Preserve them when Rust forwards a worker poll
+/// to a remote parent, alongside the remaining caller deadline above.
+pub(crate) fn matching_yarpc_grpc_metadata<T>(request: &mut tonic::Request<T>) {
+    let metadata = request.metadata_mut();
+    metadata.insert(
+        "rpc-service",
+        tonic::metadata::MetadataValue::from_static("cadence-matching"),
+    );
+    metadata.insert(
+        "rpc-caller",
+        tonic::metadata::MetadataValue::from_static("cadence-matching"),
+    );
+    metadata.insert(
+        "rpc-encoding",
+        tonic::metadata::MetadataValue::from_static("proto"),
+    );
 }
 #[cfg(test)]
 impl<R: Send + 'static> ForwardPollRequest<R> for () {
@@ -934,6 +955,96 @@ mod tests {
         assert_eq!(activity.identity, "worker");
         assert!(activity.domain.is_empty());
         assert!(activity.task_list_metadata.is_none());
+    }
+    #[tokio::test]
+    async fn matching_remote_forward_reaches_go_yarpc_peer() {
+        let Ok(address) = std::env::var("CADENCE_MATCHING_GO_PEER") else {
+            return;
+        };
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
+        let target = || ForwardPoll {
+            target: Parent::Remote(channel.clone()),
+            domain_id: "00000000-0000-0000-0000-000000000001".into(),
+            parent_name: "parent".into(),
+            forwarded_from: "child".into(),
+            poller_id: "oracle-poller".into(),
+            isolation_group: "oracle-group".into(),
+            deadline: tokio::time::Instant::now() + Duration::from_secs(8),
+        };
+        let decision = p::PollForDecisionTaskRequest {
+            identity: "oracle-worker".into(),
+            ..Default::default()
+        }
+        .forward(target())
+        .await
+        .unwrap();
+        let decision_observation = std::str::from_utf8(&decision.task_token).unwrap();
+        assert!(decision_observation.starts_with("go-yarpc-decision|"));
+        assert!(decision_observation.contains("|cadence-matching|cadence-matching|true|proto"));
+        assert_eq!(decision.started_event_id, 17);
+        assert_eq!(
+            decision.workflow_execution.unwrap().workflow_id,
+            "go-peer-workflow"
+        );
+        let activity = p::PollForActivityTaskRequest {
+            identity: "oracle-worker".into(),
+            ..Default::default()
+        }
+        .forward(target())
+        .await
+        .unwrap();
+        let activity_observation = std::str::from_utf8(&activity.task_token).unwrap();
+        assert!(activity_observation.starts_with("go-yarpc-activity|"));
+        assert!(activity_observation.contains("|cadence-matching|cadence-matching|true|proto"));
+        assert_eq!(activity.activity_id, "go-peer-activity");
+        assert_eq!(
+            activity.workflow_execution.unwrap().workflow_id,
+            "go-peer-workflow"
+        );
+
+        let mut decision_add = tonic::Request::new(m::AddDecisionTaskRequest::default());
+        decision_add.set_timeout(Duration::from_secs(8));
+        matching_yarpc_grpc_metadata(&mut decision_add);
+        let decision_add = m::matching_api_client::MatchingApiClient::new(channel.clone())
+            .add_decision_task(decision_add)
+            .await
+            .unwrap();
+        assert_eq!(decision_add.partition_config.unwrap().version, 19);
+        assert_go_yarpc_observation(decision_add.metadata());
+
+        let mut activity_add = tonic::Request::new(m::AddActivityTaskRequest::default());
+        activity_add.set_timeout(Duration::from_secs(8));
+        matching_yarpc_grpc_metadata(&mut activity_add);
+        let activity_add = m::matching_api_client::MatchingApiClient::new(channel.clone())
+            .add_activity_task(activity_add)
+            .await
+            .unwrap();
+        assert_eq!(activity_add.partition_config.unwrap().version, 23);
+        assert_go_yarpc_observation(activity_add.metadata());
+
+        let mut query = tonic::Request::new(m::QueryWorkflowRequest::default());
+        query.set_timeout(Duration::from_secs(8));
+        matching_yarpc_grpc_metadata(&mut query);
+        let query = m::matching_api_client::MatchingApiClient::new(channel)
+            .query_workflow(query)
+            .await
+            .unwrap();
+        assert_eq!(query.query_result.unwrap().data, b"go-yarpc-query");
+        assert_go_yarpc_observation(query.metadata());
+    }
+    fn assert_go_yarpc_observation(metadata: &tonic::metadata::MetadataMap) {
+        for (key, value) in [
+            ("observed-rpc-service", "cadence-matching"),
+            ("observed-rpc-caller", "cadence-matching"),
+            ("observed-rpc-encoding", "proto"),
+        ] {
+            assert_eq!(metadata.get(key).unwrap(), value);
+        }
+        assert!(metadata.get("observed-deadline").is_some());
     }
     fn fixture(
         count: usize,

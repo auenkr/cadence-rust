@@ -1,0 +1,7 @@
+# Matching remote gRPC forwarding checkpoint (2026-10-20)
+
+Source-only update on the isolated `t3/matching-runtime-owner` worktree. Rust has five Matching outbound gRPC paths: decision/activity poll forwarding in `matching_dispatch.rs`; decision/activity add forwarding and query forwarding in `grpc_matching.rs`. The prior implementation preserved caller timeouts but sent none of YARPC's `rpc-service`, `rpc-caller`, or `rpc-encoding` headers. All five remote client call sites now use a shared helper with `cadence-matching`, `cadence-matching`, and `proto`, respectively; timeout budgets remain set from the caller's remaining deadline.
+
+`tests/matching-forward-peer-oracle/` contains a generated Go `MatchingAPIYARPC` gRPC peer, a runner, and usage notes. The Rust test sends decision and activity polls through `Parent::Remote`, and exercises add-decision, add-activity, and query calls. The Go handlers return typed fields and attest observed routing headers/deadlines (poll attestations are encoded in response task tokens; other calls attest through response metadata). The runner is `python3 tests/matching-forward-peer-oracle/run.py`.
+
+Validation is pending because the serialized build lane is owned by SWIM. Only `gofmt` and `git diff --check` were run; no Go build, Rust build, or test was started. Do not treat this as validated until the runner completes. Keep root worktree edits untouched and integrate only after parent review.
