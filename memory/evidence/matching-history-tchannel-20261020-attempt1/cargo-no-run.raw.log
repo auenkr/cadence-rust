@@ -1,0 +1,172 @@
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-proto)
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-server)
+error[E0422]: cannot find struct, variant or union type `Int64Value` in crate `prost_types`
+   --> crates/cadence-server/src/matching_history_tchannel.rs:688:35
+    |
+688 |         .map(|value| prost_types::Int64Value { value });
+    |                                   ^^^^^^^^^^ not found in `prost_types`
+
+error[E0422]: cannot find struct, variant or union type `Int64Value` in crate `prost_types`
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1966:35
+     |
+1966 |         .map(|value| prost_types::Int64Value { value });
+     |                                   ^^^^^^^^^^ not found in `prost_types`
+
+error[E0425]: cannot find function `decode_headers16` in this scope
+    --> crates/cadence-server/src/matching_history_tchannel.rs:2562:39
+     |
+2562 | ...ed_headers = decode_headers16(&metadata).unwrap();
+     |                 ^^^^^^^^^^^^^^^^ not found in this scope
+     |
+note: function `crate::tchannel_json_client::decode_headers16` exists but is inaccessible
+    --> crates/cadence-server/src/tchannel_json_client.rs:335:1
+     |
+ 335 | fn decode_headers16(bytes: &[u8]) -> Result<Vec<(String, String)>> {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not accessible
+
+error[E0422]: cannot find struct, variant or union type `Int64Value` in crate `prost_types`
+    --> crates/cadence-server/src/matching_history_tchannel.rs:2758:58
+     |
+2758 | ...e(prost_types::Int64Value { value: 17 }),
+     |                   ^^^^^^^^^^ not found in `prost_types`
+
+error[E0282]: type annotations needed
+   --> crates/cadence-server/src/matching_history_tchannel.rs:863:9
+    |
+863 |     let points = value
+    |         ^^^^^^
+...
+882 |     let fields = if points.is_empty() {
+    |                     ------ type must be known at this point
+    |
+help: consider giving `points` an explicit type
+    |
+863 |     let points: Vec<_> = value
+    |               ++++++++
+
+error[E0282]: type annotations needed
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1220:13
+     |
+1220 |             Ok(cadence_proto::api::ClusterAttribute {
+     |             ^^ cannot infer type of the type parameter `E` declared on the enum `Result`
+     |
+help: consider specifying the generic arguments
+     |
+1220 |             Ok::<cadence_proto::api::ClusterAttribute, E>(cadence_proto::api::ClusterAttribute {
+     |               +++++++++++++++++++++++++++++++++++++++++++
+
+error[E0282]: type annotations needed
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1364:13
+     |
+1364 |             Ok(cadence_proto::api::ActivityType {
+     |             ^^ cannot infer type of the type parameter `E` declared on the enum `Result`
+     |
+help: consider specifying the generic arguments
+     |
+1364 |             Ok::<cadence_proto::api::ActivityType, E>(cadence_proto::api::ActivityType {
+     |               +++++++++++++++++++++++++++++++++++++++
+
+error[E0609]: no field `value` on type `&f64`
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1502:68
+     |
+1502 | ...TypedValue::F64(maximum.value)));
+     |                            ^^^^^ unknown field
+
+error[E0609]: no field `value` on type `&i64`
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1713:50
+     |
+1713 |         fields.push(field(20, i64_value(previous.value)));
+     |                                                  ^^^^^ unknown field
+
+error[E0282]: type annotations needed
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1821:21
+     |
+1821 |                     Ok(cadence_proto::api::ActivityType {
+     |                     ^^ cannot infer type of the type parameter `E` declared on the enum `Result`
+     |
+help: consider specifying the generic arguments
+     |
+1821 |                     Ok::<cadence_proto::api::ActivityType, E>(cadence_proto::api::ActivityType {
+     |                       +++++++++++++++++++++++++++++++++++++++
+
+error[E0609]: no field `value` on type `&i64`
+    --> crates/cadence-server/src/matching_history_tchannel.rs:2063:50
+     |
+2063 |         fields.push(field(35, i64_value(previous.value)));
+     |                                                  ^^^^^ unknown field
+
+error[E0599]: no associated function or constant named `decode` found for struct `typed_codec_tests::RpcStatus` in the current scope
+    --> crates/cadence-server/src/matching_history_tchannel.rs:2657:33
+     |
+2199 |     struct RpcStatus {
+     |     ---------------- associated function or constant `decode` not found for this struct
+...
+2657 |         let status = RpcStatus::decode(status.details()).unwrap();
+     |                                 ^^^^^^ associated function or constant not found in `typed_codec_tests::RpcStatus`
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: trait `Message` which provides `decode` is implemented but not in scope; perhaps you want to import it
+     |
+2190 +     use prost::Message;
+     |
+help: there is a method `encode` with a similar name
+     |
+2657 -         let status = RpcStatus::decode(status.details()).unwrap();
+2657 +         let status = RpcStatus::encode(status.details()).unwrap();
+     |
+
+error[E0599]: no associated function or constant named `decode` found for struct `cadence_proto::shared::ShardOwnershipLostError` in the current scope
+    --> crates/cadence-server/src/matching_history_tchannel.rs:2664:61
+     |
+2664 | ...ShardOwnershipLostError::decode(detail.value.as_slice())
+     |                             ^^^^^^ associated function or constant not found in `cadence_proto::shared::ShardOwnershipLostError`
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: trait `Message` which provides `decode` is implemented but not in scope; perhaps you want to import it
+     |
+2190 +     use prost::Message;
+     |
+help: there is a method `encode` with a similar name
+     |
+2664 -             cadence_proto::shared::ShardOwnershipLostError::decode(detail.value.as_slice())
+2664 +             cadence_proto::shared::ShardOwnershipLostError::encode(detail.value.as_slice())
+     |
+
+error[E0599]: no associated function or constant named `decode` found for struct `typed_codec_tests::RpcStatus` in the current scope
+    --> crates/cadence-server/src/matching_history_tchannel.rs:2690:33
+     |
+2199 |     struct RpcStatus {
+     |     ---------------- associated function or constant `decode` not found for this struct
+...
+2690 |         let status = RpcStatus::decode(status.details()).unwrap();
+     |                                 ^^^^^^ associated function or constant not found in `typed_codec_tests::RpcStatus`
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: trait `Message` which provides `decode` is implemented but not in scope; perhaps you want to import it
+     |
+2190 +     use prost::Message;
+     |
+help: there is a method `encode` with a similar name
+     |
+2690 -         let status = RpcStatus::decode(status.details()).unwrap();
+2690 +         let status = RpcStatus::encode(status.details()).unwrap();
+     |
+
+error[E0283]: type annotations needed
+   --> crates/cadence-server/src/matching_history_peer_resolver.rs:133:13
+    |
+133 | ...et ring_hosts = hosts.iter().map(|peer| peer.host.clone()).collect();
+    |       ^^^^^^^^^^                                              ------- type must be known at this point
+    |
+    = note: the type must implement `FromIterator<cadence_common::membership::Host>`
+note: required by a bound in `std::iter::Iterator::collect`
+   --> /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library/core/src/iter/traits/iterator.rs:2073:4
+help: consider giving `ring_hosts` an explicit type
+    |
+133 |         let ring_hosts: Vec<_> = hosts.iter().map(|peer| peer.host.clone()).collect();
+    |                       ++++++++
+
+Some errors have detailed explanations: E0282, E0283, E0422, E0425, E0599, E0609.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `cadence-server` (lib test) due to 15 previous errors

@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 4 tests
+test tchannel_json_client::adversarial_tests::accumulated_crc32_and_crc32c_accept_multiple_tcp_fragments ... ok
+test tchannel_json_client::adversarial_tests::every_truncated_call_res_fixed_header_is_an_error ... ok
+test tchannel_json_client::adversarial_tests::malformed_ids_types_boundaries_and_checksums_are_rejected ... ok
+test tchannel_json_client::adversarial_tests::call_ttl_subtracts_connect_and_init_elapsed_time ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 325 filtered out; finished in 0.08s
+
