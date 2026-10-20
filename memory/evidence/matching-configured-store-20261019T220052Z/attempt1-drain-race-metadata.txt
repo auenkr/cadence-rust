@@ -1,0 +1,5 @@
+startedUtc=2026-10-19T22:00:01Z
+commit=0d3406fd48c366896190b262344f3b75dc4410d0
+command=python3 tests/run-matching-thrift-compat.py --server-bin /home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/cadence-server --artifacts-dir artifacts/matching-configured-store-20261019T221700Z
+exitCode=1
+finishedUtc=2026-10-19T22:00:53Z

@@ -333,7 +333,10 @@ with (artifacts / 'server.log').open('w') as log:
                     raise
         # Listener shutdown must cancel connection tasks waiting in sniffing.
         shutdown_probe = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
-        drain_value = base64.b64encode(b'"5s"').decode('ascii')
+        # Keep a wide margin for process scheduling and the Go dispatcher
+        # startup between signal delivery and the health RPC. The second
+        # signal below ends the process after the drain behavior is proved.
+        drain_value = base64.b64encode(b'"30s"').decode('ascii')
         update = urllib.request.Request(
             f'http://127.0.0.1:{http}/api/v1/admin/dynamic-config/update',
             data=json.dumps({

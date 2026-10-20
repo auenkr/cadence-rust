@@ -1,0 +1,61 @@
+=== RUN   TestIsTLSClientHelloRecord
+=== RUN   TestIsTLSClientHelloRecord/non_tls
+=== RUN   TestIsTLSClientHelloRecord/read_error
+=== RUN   TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length
+=== RUN   TestIsTLSClientHelloRecord/tls_header
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_0
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_1
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_2
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_3
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_4
+=== RUN   TestIsTLSClientHelloRecord/e2e_tls
+--- PASS: TestIsTLSClientHelloRecord (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/non_tls (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/read_error (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/tls_header (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_0 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_1 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_2 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_3 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_4 (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/e2e_tls (0.00s)
+PASS
+ok  	go.uber.org/yarpc/transport/internal/tls/muxlistener	0.023s
+ok  	github.com/uber/cadence/common/persistence/sql	1.372s
+ok  	github.com/uber/cadence/common/persistence/sql	1.345s
+=== RUN   TestRustMatchingNativeThrift
+=== RUN   TestRustMatchingNativeThrift/tchannel
+Verified all ten native Matching Thrift methods via tchannel
+=== RUN   TestRustMatchingNativeThrift/http
+Verified all ten native Matching Thrift methods via http
+=== RUN   TestRustMatchingNativeThrift/http-trailing-slash
+Verified all ten native Matching Thrift methods via http-trailing-slash
+--- PASS: TestRustMatchingNativeThrift (2.29s)
+    --- PASS: TestRustMatchingNativeThrift/tchannel (1.61s)
+    --- PASS: TestRustMatchingNativeThrift/http (0.37s)
+    --- PASS: TestRustMatchingNativeThrift/http-trailing-slash (0.30s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	2.349s
+=== RUN   TestRustMatchingSQLiteInterop
+--- PASS: TestRustMatchingSQLiteInterop (1.29s)
+PASS
+ok  	github.com/uber/cadence/common/persistence/sql	1.346s
+=== RUN   TestRustMatchingDrainHealth
+    rust_native_test.go:496: Matching Meta::health during shutdown drain: <nil> code:unknown message:received unknown error calling service: "cadence-matching", procedure: "Meta::health", err: read tcp 127.0.0.1:49750->127.0.0.1:43017: read: connection reset by peer
+--- FAIL: TestRustMatchingDrainHealth (0.00s)
+FAIL
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/tests/run-matching-thrift-compat.py", line 353, in <module>
+    subprocess.run(
+    ~~~~~~~~~~~~~~^
+        [str(drain_probe), '-test.run=^TestRustMatchingDrainHealth$', '-test.count=1', '-test.v'],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cwd=root / 'go', env=env, check=True, timeout=5,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/artifacts/matching-configured-store-20261019T221700Z/matching-drain.test', '-test.run=^TestRustMatchingDrainHealth$', '-test.count=1', '-test.v']' returned non-zero exit status 1.
