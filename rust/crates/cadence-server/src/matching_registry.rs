@@ -443,6 +443,11 @@ impl QueueRegistry {
         owners.iter().map(|qps| qps.qps()).sum()
     }
 
+    #[cfg(test)]
+    pub(crate) fn loaded_owner_count(&self) -> usize {
+        self.state.lock().expect("Matching registry lock").owners.len()
+    }
+
     /// Stop all currently loaded owners for one exact task-list name, across
     /// domains and task types, as Go ManagersByTaskListName does. Detach each
     /// owner before stopping it so a later Get can rebuild from persistence.

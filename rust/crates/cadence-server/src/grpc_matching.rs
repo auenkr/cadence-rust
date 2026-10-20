@@ -78,7 +78,7 @@ pub(crate) fn task_writer_live_provider(
 }
 /// Go `taskListManagerImpl.AddTask` QPS reporting: an arrival counts toward the
 /// root, and toward its isolation group when the task carries one.
-fn report_arrival(
+pub(crate) fn report_arrival(
     queue: &crate::matching_registry::QueueHandle,
     data: &cadence_persistence::matching_blob::TaskData,
 ) {

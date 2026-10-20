@@ -23,6 +23,12 @@ References are the pinned shard-manager module at `github.com/cadence-workflow/s
 
 No new queue, writer, reader, dispatcher, lease, or ownership state is created by the factory. After stop, normal registry access can recreate owner state from persistence once the executor's separate ownership gate permits it.
 
+## Source-only regression tests
+
+`matching_shard_processor.rs` now includes tests for (1) strict TTL equality with a controlled monotonic clock and the original construction-time origin remaining in force after an expired report, (2) live AddTask QPS flowing through `grpc_matching::report_arrival` into the shard report, including the isolation-group tracker, (3) Start creating no owners, (4) exact physical-name stop spanning domains and task types while the root and a sibling partition remain loaded, and (5) reassignment retrieving an owner again through the same registry and SQLite store. The stop test observes old queues stopped and their owners detached before recreation; the implementation path additionally calls `Owner::finish` and awaits `owner_work` reader joins.
+
+QPS source audit: Go `task_list_manager.go:553-567` records one arrival for non-forwarded AddTask calls, using `ReportGroup` for the isolation key and `ReportCounter` otherwise; `:416-418` defines `QueriesPerSecond` as that tracker. Rust `grpc_matching.rs:81-95` has the matching `report_arrival` helper, called under `!forwarded` at the decision and activity AddTask paths (`:1600`, `:1735`); `QueueRegistry::qps_for_task_list_name` sums each matching live owner's existing tracker. The tests and source changes are committed without running builds or tests; execute the focused Rust tests before treating this as validated evidence.
+
 ## Runtime integration responsibility
 
 The runtime owner supplies the existing `QueueRegistry` and `ShardDistributorMatchingConfig::report_ttl_nanos()` to `QueueRegistryShardProcessorFactory`, passes the factory to `ShardDistributorExecutor`, and retains the existing registry as the single owner of queue state. The executor remains responsible for assignment callbacks; the Matching RPC path remains responsible for consulting that assignment before using the queue registry. This branch does not wire `main.rs`, `matching_runtime.rs`, or config.
