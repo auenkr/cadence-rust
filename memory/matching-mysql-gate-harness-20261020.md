@@ -59,10 +59,15 @@ SDK scenarios complete, the probe waits (bounded, 90 seconds) until:
    and the task list name, both task types);
 2. the control task, which was never acknowledged, is still present;
 3. the persisted acknowledgement in Go's `task_lists` blob (decoded with the
-   ThriftRW decoder) covers the removed task id of every queue
+   ThriftRW decoder) covers the removed task id of every queue whose
+   persisted row was observed before its delivery
    (`ack >= max observed task id`). A Matching queue skips task ids that were
    allocated but never completed, so the gate does not assume an upper bound
-   for the acknowledgement;
+   for the acknowledgement. A queue without an observed persisted row has no
+   durable garbage collection evidence; its acknowledgement is only bounded
+   by the value Go persists for a queue that never acknowledged a task, which
+   is `0` (`go/common/persistence/sql/sql_task_store.go`, `LeaseTaskList`
+   writes `AckLevel: 0` for a new task list);
 4. the persisted range and the live task-list block are read as one
    snapshot and must describe the same range. A lease renewal between the two
    reads is resolved by reading both again inside the bounded retry, not by
@@ -77,6 +82,20 @@ The harness additionally asserts that the shared database holds Go's schema
 only: every table must exist in `go/schema/mysql/v8/cadence/schema.sql` or
 be one of Go's own admin tables (`schema_version`, `schema_update_history`).
 A private Rust table fails the gate.
+
+## The task list shard
+
+The gate reads the task-list metadata with the task list shard, not with Go's
+domain shard. Go computes the task list shard with
+`sqlplugin.GetDBShardIDFromDomainIDAndTasklist`, which hashes the domain
+UUID and the task list name modulo the number of database shards, and the
+Rust task store computes the same value. With the single database
+configuration of this gate every task list is stored in shard 0. The
+`domains` table keeps Go's domain shard 54321.
+
+A missing metadata row is reported immediately, with the exact statement,
+because that is a defect of the observation and not a slow acknowledgement.
+Only a missing acknowledgement waits for the bounded retry.
 
 The full observation document, including the snapshot history, is kept in
 `db-observations.json` and copied into the evidence directory.

@@ -17,11 +17,26 @@ const { decodeTaskListBlob, verifyTaskListBlobDecoder } = require('./matching-th
 
 function sqlText(value) { return String(value).replaceAll("'", "''"); }
 
+// The task list shard is the database shard of the task list key, not the
+// domain shard of Go's `domains` table. Go computes it with
+// `sqlplugin.GetDBShardIDFromDomainIDAndTasklist`, which hashes the domain
+// UUID and the task list name modulo the number of database shards. A single
+// database configuration stores every task list in shard 0, and the Rust
+// task store computes the same value.
+const TASK_LIST_SHARD_ID = 0;
+
+function taskListRowsSql(domainHex, taskListName) {
+  return `SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=${TASK_LIST_SHARD_ID} AND domain_id=UNHEX('${domainHex}') AND name='${sqlText(taskListName)}' ORDER BY task_type`;
+}
+
+function taskRowsSql(domainHex, taskListName, taskType) {
+  const type = taskType === undefined ? '' : ` AND task_type=${taskType}`;
+  return `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex}') AND task_list_name='${sqlText(taskListName)}'${type}`;
+}
+
 // Read the task-list metadata rows Go's schema defines for one task list.
 function readTaskListRows(query, domainHex, taskListName) {
-  return query(
-    `SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=54321 AND domain_id=UNHEX('${domainHex}') AND name='${sqlText(taskListName)}' ORDER BY task_type`
-  ).map(([taskType, rangeId, hex, encoding]) => {
+  return query(taskListRowsSql(domainHex, taskListName)).map(([taskType, rangeId, hex, encoding]) => {
     const blob = decodeTaskListBlob(hex);
     return {
       taskType: Number(taskType),
@@ -38,9 +53,7 @@ function readTaskListRows(query, domainHex, taskListName) {
 
 // Count the persisted task rows of one task list and task type.
 function countTaskRows(query, domainHex, taskListName, taskType) {
-  const type = taskType === undefined ? '' : ` AND task_type=${taskType}`;
-  return Number(query(
-    `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex}') AND task_list_name='${sqlText(taskListName)}'${type}`)[0][0]);
+  return Number(query(taskRowsSql(domainHex, taskListName, taskType))[0][0]);
 }
 
 // Bounded production GC verification against Go's real MySQL schema.
@@ -51,7 +64,15 @@ function countTaskRows(query, domainHex, taskListName, taskType) {
 //   taskType          0 for a decision queue, 1 for an activity queue
 //   observedMaxTaskId the highest task id that was observed in Go's tasks
 //                     table while the task was persisted and undelivered
-//   minAck            the lowest acknowledgement the queue must reach
+//   minAck            the lowest acknowledgement the queue must reach. Go
+//                     persists the acknowledgement 0 for a task list that
+//                     never acknowledged a task, so 0 is the valid lower
+//                     bound of a queue without an observed durable task id.
+//   durableGcEvidence false when no persisted task row of the queue was
+//                     observed before its delivery. The removed rows are
+//                     still asserted to be gone, but the acknowledgement of
+//                     such a queue carries no durable garbage collection
+//                     evidence, because no durable task id is known.
 //   label             the name used in the evidence
 //
 // The acknowledgement of a Matching queue is the highest continuously
@@ -71,6 +92,20 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
     assert(expectation.observedMaxTaskId !== undefined || expectation.minAck !== undefined,
       `the gate expectation ${expectation.label} needs an observed watermark or a minimum acknowledgement`);
   }
+  // A missing metadata row is a defect of the observation, not a slow
+  // acknowledgement. The gate reports it immediately with the exact
+  // statement instead of waiting for the acknowledgement to converge.
+  const statements = [];
+  for (const expectation of taskLists) {
+    const statement = taskListRowsSql(domainHex, expectation.name);
+    statements.push(statement);
+    const rows = readTaskListRows(query, domainHex, expectation.name)
+      .filter(row => row.taskType === expectation.taskType);
+    if (rows.length !== 1) {
+      throw new Error(`Go's task_lists table does not hold exactly one ${expectation.taskType} row for ${expectation.name}: ${JSON.stringify({ statement, rows })}`);
+    }
+  }
+  statements.push(taskRowsSql(domainHex, pendingListName));
   const deadline = Date.now() + deadlineMs;
   const snapshots = [];
   let observation = null;
@@ -121,14 +156,18 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
     await sleep(500);
   }
   assert(observation.pendingTasks >= 1, 'a task that was never acknowledged must survive task garbage collection');
-  const evidence = { pendingTaskRows: observation.pendingTasks, snapshots: observation.snapshots, queues: {} };
+  const evidence = { pendingTaskRows: observation.pendingTasks, statements, snapshots: observation.snapshots, queues: {} };
   for (const expectation of taskLists) {
     const entry = observation.state[expectation.label];
     const row = entry.rows[0];
     assert(entry.taskRows === 0, `the acknowledged task rows of ${expectation.label} must be removed from Go's tasks table`);
     assert(row, `Go's task_lists table is missing the ${expectation.taskType} row for ${expectation.name}`);
     assert(row.dataEncoding === 'thriftrw', `unexpected task-list blob encoding ${row.dataEncoding}`);
-    if (expectation.observedMaxTaskId !== undefined) {
+    if (expectation.durableGcEvidence === false) {
+      // No durable task id of this queue was observed, so its acknowledgement
+      // carries no durable garbage collection evidence. The removed rows are
+      // still asserted to be gone.
+    } else if (expectation.observedMaxTaskId !== undefined) {
       assert(row.ackLevel >= expectation.observedMaxTaskId,
         `the persisted ack level ${row.ackLevel} of ${expectation.label} does not cover removed task ${expectation.observedMaxTaskId}`);
     } else {
@@ -152,6 +191,10 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
       liveBlock: entry.live,
       dataEncoding: row.dataEncoding,
     };
+    if (expectation.durableGcEvidence === false) {
+      evidence.queues[expectation.label].durableGcEvidence = false;
+      evidence.queues[expectation.label].note = 'no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery';
+    }
   }
   evidence.rangeSize = rangeSize;
   return evidence;
@@ -181,4 +224,4 @@ function observeProductionMySqlDomain({ query, domain, domainId }) {
   };
 }
 
-module.exports = { countTaskRows, observeProductionMySqlDomain, readTaskListRows, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder };
+module.exports = { TASK_LIST_SHARD_ID, countTaskRows, observeProductionMySqlDomain, readTaskListRows, taskListRowsSql, taskRowsSql, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder };

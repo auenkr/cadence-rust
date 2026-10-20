@@ -128,10 +128,13 @@ async function main() {
   ]);
   await expectFailure('a mismatched range', wrongRange, /did not converge/);
 
-  // The task-list row disappeared instead of being collected.
+  // The task-list row disappeared instead of being collected. The gate
+  // reports a missing metadata row immediately, with the exact statement,
+  // because that is a defect of the observation and not a slow
+  // acknowledgement.
   const missingRow = convergedState();
   missingRow.taskLists.set(TASK_LIST, []);
-  await expectFailure('a missing task-list row', missingRow, /did not converge/);
+  await expectFailure('a missing task-list row', missingRow, /does not hold exactly one 0 row for gate-tasks/);
 
   // The acknowledgement is ahead of the removed task. A Matching queue may
   // skip task ids that were allocated but never completed, so this must pass.
@@ -146,7 +149,27 @@ async function main() {
   });
   assert.equal(aheadEvidence.queues.decision.ackLevel, 9, 'an acknowledgement ahead of the removed task is allowed');
 
-  console.log(`Matching MySQL gate self-check passed (${fixtureCases} blob fixtures, 4 failure cases, 1 allowed high acknowledgement)`);
+  // A queue without an observed durable task id carries no durable garbage
+  // collection evidence. Its acknowledgement is only bounded by the value Go
+  // persists for a queue that never acknowledged a task, which is 0.
+  const noDurableEvidence = convergedState();
+  noDurableEvidence.taskLists.set(TASK_LIST, [
+    { taskType: 0, rangeId: 1, hex: blobFor(2), encoding: 'thriftrw' },
+    { taskType: 1, rangeId: 1, hex: blobFor(0), encoding: 'thriftrw' },
+  ]);
+  const noDurable = await verifyProductionMySqlTaskGc({
+    query: fakeQuery(noDurableEvidence), domainId: DOMAIN_ID,
+    taskLists: [
+      { label: 'decision', name: TASK_LIST, taskType: 0, observedMaxTaskId: 2 },
+      { label: 'activity', name: TASK_LIST, taskType: 1, minAck: 0, durableGcEvidence: false },
+    ],
+    pendingListName: PENDING_LIST, liveBlockProvider, rangeSize: RANGE_SIZE, deadlineMs: 0, sleep,
+  });
+  assert.equal(noDurable.queues.activity.durableGcEvidence, false, 'the activity queue must be labelled without durable evidence');
+  assert.equal(noDurable.queues.activity.ackLevel, 0, 'the activity queue must report its persisted acknowledgement');
+  assert.equal(noDurable.queues.decision.durableGcEvidence, undefined, 'the decision queue keeps its durable evidence');
+
+  console.log(`Matching MySQL gate self-check passed (${fixtureCases} blob fixtures, 4 failure cases, 1 allowed high acknowledgement, 1 queue without durable evidence)`);
 }
 
 main().catch(error => {

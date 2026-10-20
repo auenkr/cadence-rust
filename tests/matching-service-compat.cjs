@@ -474,13 +474,21 @@ async function run() {
     const mainDecisionMax = Math.max(mainDecisionWatermark?.maxTaskId ?? 0, finalWatermark?.maxTaskId ?? 0);
     const gateExpectations = [
       { label: 'backlogDecision', name: backlogList.name, taskType: 0, observedMaxTaskId: backlogWatermark.maxTaskId },
-      { label: 'backlogActivity', name: backlogList.name, taskType: 1, minAck: 1 },
+      // The activity row of the backlog was created and completed by the SDK
+      // without an observation, so this queue has no durable task id. Go
+      // persists the acknowledgement 0 for a queue that never acknowledged a
+      // task, so 0 is the valid lower bound and the queue carries no durable
+      // garbage collection evidence.
+      { label: 'backlogActivity', name: backlogList.name, taskType: 1, minAck: 0, durableGcEvidence: false },
       { label: 'mainDecision', name: taskList.name, taskType: 0, observedMaxTaskId: mainDecisionMax },
       { label: 'mainActivity', name: taskList.name, taskType: 1, observedMaxTaskId: mainActivityWatermark?.maxTaskId ?? 1 },
     ];
     if (restartMode && restartState.watermark && restartState.watermark.maxTaskId !== null) {
       gateExpectations.push({ label: 'restartDecision', name: restartState.taskList, taskType: 0, observedMaxTaskId: restartState.watermark.maxTaskId });
-      gateExpectations.push({ label: 'restartActivity', name: restartState.taskList, taskType: 1, minAck: 1 });
+      // The restart activity row was created and completed by the SDK without
+      // an observation, so this queue carries no durable garbage collection
+      // evidence and the valid lower bound of its acknowledgement is 0.
+      gateExpectations.push({ label: 'restartActivity', name: restartState.taskList, taskType: 1, minAck: 0, durableGcEvidence: false });
     }
     const taskGarbageCollection = await verifyProductionMySqlTaskGc({
       query: mysqlRows,
