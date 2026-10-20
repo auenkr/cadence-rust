@@ -39,6 +39,16 @@ impl MySqlDomainMetadataStore {
         })
     }
 
+    pub(crate) fn from_shared_pool(
+        pool: Arc<crate::matching_mysql::SyncConnectionPool>,
+        active_cluster_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            pool,
+            active_cluster_name: active_cluster_name.into(),
+        }
+    }
+
     /// Read the cluster-wide notification version from Go's single metadata row.
     pub fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
         self.get_metadata_version_with_timeout(GO_DOMAIN_PERSISTENCE_TIMEOUT)

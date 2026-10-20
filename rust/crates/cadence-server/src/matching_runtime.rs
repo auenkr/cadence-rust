@@ -6,7 +6,7 @@
 //! cache-aware constructors; membership discovery/eviction remains a separate
 //! adapter, so this owner does not represent complete Go Matching parity.
 use crate::{admin::DynamicConfigOverlay, grpc_matching::Matching};
-use cadence_persistence::matching_sqlite::SqliteTaskStore;
+use cadence_persistence::matching_task_store::MatchingTaskStore;
 use std::{
     future::Future,
     num::NonZeroU32,
@@ -148,7 +148,7 @@ impl MatchingRuntime {
     /// injected so the owner never assumes a loopback address implicitly.
     pub fn with_durable_queues(
         state: crate::handlers::AppState,
-        store: Arc<SqliteTaskStore>,
+        store: Arc<dyn MatchingTaskStore>,
         history: crate::matching_history::MatchingHistoryClient,
         task_id_range: NonZeroU32,
         poll_expiration: Duration,
@@ -410,7 +410,7 @@ impl MatchingRuntime {
 
     pub async fn with_durable_queues_and_domain_cache(
         state: crate::handlers::AppState,
-        store: Arc<SqliteTaskStore>,
+        store: Arc<dyn MatchingTaskStore>,
         history: crate::matching_history::MatchingHistoryClient,
         task_id_range: NonZeroU32,
         poll_expiration: Duration,
@@ -612,6 +612,7 @@ pub fn live_shutdown_drain_duration(overlay: Arc<Mutex<DynamicConfigOverlay>>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cadence_persistence::matching_sqlite::SqliteTaskStore;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn empty_membership() -> crate::matching_membership::Membership {

@@ -438,6 +438,40 @@ impl MySqlTaskStore {
             )));
         }
         let pool = Self::create_mysql_pool(&config)?;
+        Self::connect_with_pool(config, pool)
+    }
+
+    /// Construct the task adapter and metadata reader over one shared pool,
+    /// keeping their combined connections within Go's configured maxConns.
+    pub fn connect_with_domain_metadata(
+        config: MySqlTaskStoreConfig,
+        active_cluster_name: impl Into<String>,
+    ) -> Result<(Self, crate::matching_domain_mysql::MySqlDomainMetadataStore)> {
+        if config.use_multiple_databases {
+            return Err(StorageError::BackendConfiguration(
+                "MySQL Matching multipleDatabasesConfig is not supported by this single-database adapter".into(),
+            ));
+        }
+        if config.n_shards == 0 || config.n_shards > i32::MAX as usize {
+            return Err(StorageError::BackendConfiguration(format!(
+                "MySQL Matching nShards must be in 1..={}, got {}",
+                i32::MAX,
+                config.n_shards
+            )));
+        }
+        let pool = Self::create_mysql_pool(&config)?;
+        let store = Self::connect_with_pool(config, pool.clone())?;
+        let metadata = crate::matching_domain_mysql::MySqlDomainMetadataStore::from_shared_pool(
+            pool,
+            active_cluster_name,
+        );
+        Ok((store, metadata))
+    }
+
+    fn connect_with_pool(
+        config: MySqlTaskStoreConfig,
+        pool: Arc<SyncConnectionPool>,
+    ) -> Result<Self> {
         let store = Self {
             pool,
             n_shards: config.n_shards,
@@ -862,6 +896,7 @@ impl MatchingTaskStore for MySqlTaskStore {
 }
 
 pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
+    validate_mysql_tls_config(config)?;
     let mut builder = OptsBuilder::default()
         .user(Some(config.user.clone()))
         .pass(Some(config.password.clone()))
@@ -902,7 +937,8 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
             "timeout" => connect_timeout = Some(parse_go_duration(value)?),
             "readtimeout" => read_timeout = Some(parse_go_duration(value)?),
             "writetimeout" => write_timeout = Some(parse_go_duration(value)?),
-            "tls" => tls_mode = Some(value.to_ascii_lowercase()),
+            "tls" if !value.is_empty() => tls_mode = Some(value.to_ascii_lowercase()),
+            "tls" => {}
             // Go forces these attributes true in the MySQL DSN. parseTime has
             // no impact here because this task store reads only binary blobs;
             // `clientFoundRows` is mapped to the client capability above.
@@ -991,6 +1027,7 @@ pub(crate) fn mysql_options(config: &MySqlTaskStoreConfig) -> Result<Opts> {
 /// the caller enforces its monotonic deadline by dropping this connection's
 /// in-flight future.
 fn mysql_async_options(config: &MySqlTaskStoreConfig) -> Result<mysql_async::Opts> {
+    validate_mysql_tls_config(config)?;
     let mut builder = mysql_async::OptsBuilder::default()
         .user(Some(config.user.clone()))
         .pass(Some(config.password.clone()))
@@ -1038,6 +1075,7 @@ fn mysql_async_options(config: &MySqlTaskStoreConfig) -> Result<mysql_async::Opt
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case("tls"))
         .map(|(_, value)| value.to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
         .unwrap_or_else(|| {
             if let Some(tls) = config.tls.as_ref().filter(|tls| tls.enabled) {
                 if tls.ssl_mode.is_empty() {
@@ -1092,6 +1130,54 @@ fn mysql_async_options(config: &MySqlTaskStoreConfig) -> Result<mysql_async::Opt
         builder = builder.ssl_opts(Some(ssl));
     }
     Ok(mysql_async::Opts::from(builder))
+}
+
+fn validate_mysql_tls_config(config: &MySqlTaskStoreConfig) -> Result<()> {
+    let Some(tls) = config.tls.as_ref().filter(|tls| tls.enabled) else {
+        if config.connect_attributes.iter().any(|(key, value)| {
+            key.eq_ignore_ascii_case("tls") && value.eq_ignore_ascii_case("tls-custom")
+        }) {
+            return Err(StorageError::BackendConfiguration(
+                "MySQL tls-custom requires an enabled SQL TLS configuration".into(),
+            ));
+        }
+        return Ok(());
+    };
+    let protocol = if config.connect_protocol.is_empty() {
+        "tcp"
+    } else {
+        config.connect_protocol.as_str()
+    };
+    if protocol != "tcp" {
+        return Err(StorageError::BackendConfiguration(
+            "Go MySQL TLS configuration requires TCP connectProtocol".into(),
+        ));
+    }
+    let address = config.connect_addr.as_str();
+    let Some((host, port)) = address.rsplit_once(':') else {
+        return Err(StorageError::BackendConfiguration(format!(
+            "Go MySQL TLS configuration requires connectAddr host:port, got {address:?}"
+        )));
+    };
+    if host.is_empty() || port.is_empty() || port.parse::<u16>().is_err() {
+        return Err(StorageError::BackendConfiguration(format!(
+            "Go MySQL TLS configuration requires connectAddr host:port, got {address:?}"
+        )));
+    }
+    if host.contains(':') && !(host.starts_with('[') && host.ends_with(']')) {
+        return Err(StorageError::BackendConfiguration(format!(
+            "Go MySQL TLS configuration requires bracketed IPv6 connectAddr, got {address:?}"
+        )));
+    }
+    if !tls.ca_file.is_empty() {
+        std::fs::read(&tls.ca_file).map_err(|error| {
+            StorageError::BackendConfiguration(format!(
+                "could not read MySQL CA file {:?}: {error}",
+                tls.ca_file
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 fn configured_isolation(
