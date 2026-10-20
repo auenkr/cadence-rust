@@ -45,12 +45,11 @@ async function run() {
   const rustConfig = process.env.CADENCE_RUST_MATCHING_PRODUCTION_CONFIG;
   const rustTChannel = process.env.CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL;
   const rustGrpcPort = process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT;
-  const rustHttpPort = process.env.CADENCE_RUST_MATCHING_PRODUCTION_HTTP_PORT;
   const historyGrpcPort = process.env.CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT;
   const rustDataDir = process.env.CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR;
   let testBinary;
   if (productionMode) {
-    if (!productionBinary || !rustConfig || !rustTChannel || !rustGrpcPort || !rustHttpPort || !historyGrpcPort || !rustDataDir) throw new Error('production Matching mode requires the Rust binary, config, HTTP/gRPC/TChannel ports and data directory');
+    if (!productionBinary || !rustConfig || !rustTChannel || !rustGrpcPort || !historyGrpcPort || !rustDataDir) throw new Error('production Matching mode requires the Rust binary, config, gRPC/TChannel ports and data directory');
     if (!fs.existsSync(productionBinary)) throw new Error(`Rust production server binary does not exist: ${productionBinary}`);
   } else {
     if (!reportedTestBinary) throw new Error('CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE must identify the executable reported by Cargo');
@@ -64,7 +63,7 @@ async function run() {
     for (const file of [ready, stop]) if (fs.existsSync(file)) fs.unlinkSync(file);
     const output = fs.openSync(path.join(work, `rust-server-${label}.log`), 'w');
     const command = productionMode ? [productionBinary, [
-      'start', '--config', rustConfig, '--services', 'matching', '--port', rustHttpPort,
+      'start', '--config', rustConfig, '--services', 'matching', '--port', '0',
       '--history-grpc-port', historyGrpcPort, '--matching-grpc-port', rustGrpcPort,
       '--matching-tchannel-port', rustTChannel, '--data-dir', rustDataDir,
     ], { ...process.env }] : [testBinary,
@@ -99,27 +98,10 @@ async function run() {
     }
     throw new Error(`Rust Matching ${label} did not become discoverable through Go Frontend; see ${work}/rust-server-${label}.log`);
   }
-  async function configureRustIsolation() {
-    if (!productionMode) return;
-    const endpoint = `http://127.0.0.1:${rustHttpPort}/api/v1/admin/dynamic-config/update`;
-    for (const [configName, value] of [
-      ['system.enableTasklistIsolation', 'true'],
-      ['system.allIsolationGroups', JSON.stringify(['zone-a', 'zone-b'])],
-    ]) {
-      const response = await fetch(endpoint, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ configName, configValues: [{ value: {
-          EncodingType: 1, Data: Buffer.from(value).toString('base64'),
-        } }] }),
-      });
-      if (!response.ok) throw new Error(`Rust Matching dynamic config ${configName} update failed: HTTP ${response.status}`);
-    }
-  }
   let exited;
   let rust = startRust('before-restart');
   try {
     await waitForRustReady('before-restart');
-    await configureRustIsolation();
   const startRequest = {
     domain, workflowId: id, workflowType: { name: 'ServiceCompatibility' }, taskList,
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
@@ -156,7 +138,6 @@ async function run() {
     if (goServicesPid) process.kill(goServicesPid, 0);
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
-    await configureRustIsolation();
     const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
     fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
     if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
@@ -232,7 +213,6 @@ async function run() {
     if (goServicesPid) process.kill(goServicesPid, 0);
     rust = startRust('after-graceful-drain');
     await waitForRustReady('after-graceful-drain');
-    await configureRustIsolation();
     const drainSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
       ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
       CADENCE_MIXED_RESTART_WORKFLOW_ID: drainID, CADENCE_MIXED_RESTART_TASK_LIST: drainTaskList,

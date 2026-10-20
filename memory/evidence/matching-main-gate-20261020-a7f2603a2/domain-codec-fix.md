@@ -23,11 +23,15 @@ SDK after a SIGKILL/restart, and completed its graceful-drain recovery SDK
 workflow. The broader compatibility script still failed later at its isolated
 poller registration stage; the production harness did not configure the Rust
 instance's `system.enableTasklistIsolation` and `system.allIsolationGroups`
-dynamic config, unlike the adapter fixture. The harness now configures those
-same values through the Rust admin HTTP API before each process stage so the
-isolation assertion remains active in production mode.
+dynamic config, unlike the adapter fixture. An attempted test-only setup via
+the Rust Matching HTTP port returned HTTP 400 because Matching-only mode serves
+the health router there; the public admin HTTP router is attached only when the
+Rust Frontend role runs. That harness change was reverted rather than adding a
+Rust Frontend or weakening the production isolation assertion.
 
-See `mixed-artifacts-codec-fix/` for the failed first full run and
-`mixed-domain-codec-restart.log` for its exit status. A rerun with the harness
-configuration change is required before recording the full mixed gate as
-passed.
+See `mixed-artifacts-codec-fix/` for the restart/SDK recovery run and its later
+isolation failure, `mixed-artifacts-codec-fix-rerun2/` for the unreachable
+admin HTTP attempt, and `mixed-domain-codec-restart-rerun2.log` for that exit
+status. The full mixed gate remains incomplete; it requires a service-correct
+way to provide Rust Matching's dynamic configuration before its isolation
+check can pass.

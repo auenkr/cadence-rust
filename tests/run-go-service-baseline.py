@@ -84,7 +84,6 @@ if args.rust_matching or args.matching_restart:
     keys.append('RUST_MATCHING_PORT_GRPC')
 if production_matching:
     keys.append('RUST_MATCHING_PORT')
-    keys.append('RUST_MATCHING_HTTP_PORT')
 reservations = [socket.socket() for _ in keys]
 try:
     for listener in reservations:
@@ -142,7 +141,7 @@ if production_matching:
     rust_config.write_text(rust_text)
     (work / 'rust-matching-command.json').write_text(json.dumps([
         str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config),
-        '--services', 'matching', '--port', ports['RUST_MATCHING_HTTP_PORT'], '--history-grpc-port', ports['HISTORY_PORT_GRPC'],
+        '--services', 'matching', '--port', '0', '--history-grpc-port', ports['HISTORY_PORT_GRPC'],
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
         '--data-dir', str(work / 'rust-matching-data')], indent=2) + '\n')
@@ -191,7 +190,6 @@ with (work / 'server.log').open('w') as log:
                 probe_environment = {**os.environ,
                     'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(args.rust_production_binary.resolve()),
                     'CADENCE_RUST_MATCHING_PRODUCTION_CONFIG': str(rust_config),
-                    'CADENCE_RUST_MATCHING_PRODUCTION_HTTP_PORT': ports['RUST_MATCHING_HTTP_PORT'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL': ports['RUST_MATCHING_PORT'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
