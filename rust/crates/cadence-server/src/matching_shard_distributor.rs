@@ -349,42 +349,39 @@ impl TonicSpectator {
                     continue;
                 }
             };
-            match stream {
-                Ok(response) => {
-                    let mut stream = response.into_inner();
-                    let stream_timeout = tokio::time::sleep(SPECTATOR_STREAM_TIMEOUT);
-                    tokio::pin!(stream_timeout);
-                    loop {
-                        tokio::select! {
-                            _ = &mut stream_timeout => break,
-                            _ = stop.changed() => {
-                                if *stop.borrow_and_update() { return; }
-                            }
-                            item = stream.message() => match item {
-                                Ok(Some(snapshot)) => {
-                                    let mut owners = HashMap::new();
-                                    for executor in snapshot.executors {
-                                        let owner = ShardOwner {
-                                            executor_id: executor.executor_id,
-                                            metadata: executor.metadata,
-                                        };
-                                        for shard in executor.shards {
-                                            owners.insert(shard.shard_key, owner.clone());
-                                        }
-                                    }
-                                    *self.owners.write().expect("SD spectator owners lock") = Some(owners);
-                                    let _ = self.first_state_tx.send(true);
-                                }
-                                Ok(None) | Err(_) => break,
-                            }
+            if let Ok(response) = stream {
+                let mut stream = response.into_inner();
+                let stream_timeout = tokio::time::sleep(SPECTATOR_STREAM_TIMEOUT);
+                tokio::pin!(stream_timeout);
+                loop {
+                    tokio::select! {
+                        _ = &mut stream_timeout => break,
+                        _ = stop.changed() => {
+                            if *stop.borrow_and_update() { return; }
                         }
-                        if !(self.enabled)() {
-                            self.reset_first_state();
-                            break;
+                        item = stream.message() => match item {
+                            Ok(Some(snapshot)) => {
+                                let mut owners = HashMap::new();
+                                for executor in snapshot.executors {
+                                    let owner = ShardOwner {
+                                        executor_id: executor.executor_id,
+                                        metadata: executor.metadata,
+                                    };
+                                    for shard in executor.shards {
+                                        owners.insert(shard.shard_key, owner.clone());
+                                    }
+                                }
+                                *self.owners.write().expect("SD spectator owners lock") = Some(owners);
+                                let _ = self.first_state_tx.send(true);
+                            }
+                            Ok(None) | Err(_) => break,
                         }
                     }
+                    if !(self.enabled)() {
+                        self.reset_first_state();
+                        break;
+                    }
                 }
-                Err(_) => {}
             }
             tokio::select! {
                 _ = tokio::time::sleep(jitter(SPECTATOR_RETRY_INTERVAL)) => {},
@@ -731,17 +728,16 @@ impl ShardDistributorExecutor {
             .lock()
             .expect("SD processors lock")
             .iter()
-            .filter_map(|(key, managed)| {
-                (managed.state.load(Ordering::Acquire) == PROCESSOR_STARTED).then(|| {
-                    let report = managed.processor.report();
-                    (
-                        key.clone(),
-                        sd::ShardStatusReport {
-                            status: report.status as i32,
-                            shard_load: report.load,
-                        },
-                    )
-                })
+            .filter(|&(_, managed)| managed.state.load(Ordering::Acquire) == PROCESSOR_STARTED)
+            .map(|(key, managed)| {
+                let report = managed.processor.report();
+                (
+                    key.clone(),
+                    sd::ShardStatusReport {
+                        status: report.status as i32,
+                        shard_load: report.load,
+                    },
+                )
             })
             .collect();
         sd::HeartbeatRequest {
@@ -782,8 +778,8 @@ impl ShardDistributorExecutor {
             .processors
             .lock()
             .expect("SD processors lock")
-            .iter()
-            .filter_map(|(key, _managed)| {
+            .keys()
+            .filter_map(|key| {
                 let ready = assignments.get(key).is_some_and(|assignment| {
                     assignment.status == sd::AssignmentStatus::Ready as i32
                 });
