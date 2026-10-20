@@ -84,12 +84,20 @@ pub enum MatchingDomainMetadataError {
     UnsupportedEncoding(String),
     #[error("Go domain metadata database error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("Go MySQL domain metadata database error: {0}")]
+    MySql(#[from] mysql::Error),
+    #[error("Go MySQL async domain metadata database error: {0}")]
+    MySqlAsync(#[from] mysql_async::Error),
+    #[error("Go MySQL domain metadata connection pool error: {0}")]
+    MySqlPool(String),
     #[error("domain page size must be positive")]
     InvalidPageSize,
     #[error("domain metadata persistence operation timed out")]
     OperationTimedOut,
     #[error("invalid SQLite domain metadata reader configuration: {0}")]
     InvalidSqliteConfiguration(String),
+    #[error("invalid MySQL domain metadata reader configuration: {0}")]
+    InvalidMySqlConfiguration(String),
 }
 
 /// Read-only access to the Go `domains` and `domain_metadata` tables.
@@ -417,11 +425,42 @@ impl MatchingDomainMetadataStore {
         &self,
         row: SqlDomainRow,
     ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
-        let uuid = uuid::Uuid::from_slice(&row.id)
-            .map_err(|error| MatchingDomainMetadataError::InvalidBlob(error.to_string()))?;
-        let thrift = decode_domain_info_blob(&row.data, &row.data_encoding)?;
-        thrift_to_metadata(thrift, uuid.to_string(), row, &self.active_cluster_name)
+        decode_go_sql_domain_metadata(
+            row.id,
+            row.name,
+            row.is_global,
+            row.data,
+            row.data_encoding,
+            &self.active_cluster_name,
+        )
     }
+}
+
+/// Shared conversion used by SQLite and MySQL readers so both expose the same
+/// Go UUID, ThriftRW, blob encoding, and current-cluster semantics.
+pub(crate) fn decode_go_sql_domain_metadata(
+    id: Vec<u8>,
+    name: String,
+    is_global: bool,
+    data: Vec<u8>,
+    data_encoding: String,
+    current_cluster: &str,
+) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+    let uuid = uuid::Uuid::from_slice(&id)
+        .map_err(|error| MatchingDomainMetadataError::InvalidBlob(error.to_string()))?;
+    let thrift = decode_domain_info_blob(&data, &data_encoding)?;
+    thrift_to_metadata(
+        thrift,
+        uuid.to_string(),
+        SqlDomainRow {
+            id,
+            name,
+            is_global,
+            data,
+            data_encoding,
+        },
+        current_cluster,
+    )
 }
 
 struct SqlDomainRow {

@@ -1008,13 +1008,37 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            let matching_domain_cache = if run_matching && !embedded_development {
+            let configured_matching_stores = if run_matching && !embedded_development {
+                let persistence = cfg.persistence.clone();
+                let cluster_name = state.current_cluster_name.clone();
                 Some(
-                    cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store(
+                    tokio::task::spawn_blocking(move || {
+                        cadence_server::matching_task_store::open_configured_default_store(
+                            &persistence,
+                            &cluster_name,
+                        )
+                    })
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!("joining Matching store startup: {error}")
+                    })??,
+                )
+            } else {
+                None
+            };
+            let matching_domain_cache = if run_matching && !embedded_development {
+                let stores = configured_matching_stores
+                    .as_ref()
+                    .expect("configured Matching stores are opened for production");
+                Some(match stores.domain_metadata_source.clone() {
+                    Some(source) => std::sync::Arc::new(
+                        cadence_server::matching_domain_cache::MatchingDomainCache::new(source),
+                    ),
+                    None => cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store(
                         &cfg.persistence,
                         &state.current_cluster_name,
                     )?,
-                )
+                })
             } else {
                 None
             };
@@ -1031,7 +1055,11 @@ async fn main() -> anyhow::Result<()> {
                 );
                 Some(match source {
                     cadence_server::matching_task_store::MatchingTaskStoreSource::ConfiguredDefaultStore => {
-                        let store = cadence_server::matching_task_store::SqliteTaskStoreConfig::from_default_store(&cfg.persistence)?.open_store()?;
+                        let store = configured_matching_stores
+                            .as_ref()
+                            .expect("configured Matching stores are opened for production")
+                            .task_store
+                            .clone();
                         let history = matching_history
                             .clone()
                             .expect("Matching history client is constructed when Matching runs");

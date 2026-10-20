@@ -1,0 +1,25 @@
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-persistence)
+error[E0422]: cannot find struct, variant or union type `TaskData` in this scope
+   --> crates/cadence-persistence/src/matching_sqlite.rs:730:23
+    |
+730 |                 data: TaskData {
+    |                       ^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct
+    |
+650 +     use crate::matching_blob::TaskData;
+    |
+
+error[E0422]: cannot find struct, variant or union type `TaskData` in this scope
+   --> crates/cadence-persistence/src/matching_sqlite.rs:781:19
+    |
+781 |             data: TaskData {
+    |                   ^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct
+    |
+650 +     use crate::matching_blob::TaskData;
+    |
+
+For more information about this error, try `rustc --explain E0422`.
+error: could not compile `cadence-persistence` (lib test) due to 2 previous errors

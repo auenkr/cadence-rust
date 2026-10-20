@@ -1,0 +1,98 @@
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-common)
+    Checking h2 v0.4.20
+    Checking hyper v1.12.0
+    Checking hyper-util v0.1.21
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-api)
+   Compiling tempfile v3.27.0
+    Checking tower v0.5.3
+   Compiling prost-build v0.13.5
+    Checking tokio-rustls v0.26.6
+    Checking axum v0.7.9
+    Checking tokio-postgres v0.7.18
+    Checking mysql_common v0.35.5
+    Checking mysql_common v0.37.3
+    Checking tower v0.4.13
+   Compiling tonic-build v0.12.3
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-thrift)
+    Checking hyper-timeout v0.5.2
+    Checking mysql v26.0.1
+    Checking tonic v0.12.3
+    Checking mysql_async v0.37.1 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/vendor/mysql_async-0.37.1)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-proto)
+    Checking postgres v0.19.14
+    Checking hickory-proto v0.24.4
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-persistence)
+error: this loop never actually loops
+   --> crates/cadence-persistence/src/matching_mysql.rs:195:13
+    |
+195 | / ...   while let Some(idle) = state.idle.pop() {
+196 | | ...       let expired = self
+197 | | ...           .max_lifetime
+198 | | ...           .is_some_and(|lifetime| idle.created_at.elapsed() >= li...
+...   |
+211 | | ...       });
+212 | | ...   }
+    | |_______^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#never_loop
+    = note: `#[deny(clippy::never_loop)]` on by default
+
+error: this loop never actually loops
+   --> crates/cadence-persistence/src/matching_postgres.rs:100:13
+    |
+100 | / ...   while let Some(idle) = state.idle.pop() {
+101 | | ...       let expired = self
+102 | | ...           .max_lifetime
+103 | | ...           .is_some_and(|lifetime| idle.created_at.elapsed() >= li...
+...   |
+116 | | ...       });
+117 | | ...   }
+    | |_______^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#never_loop
+
+error: redundant closure
+   --> crates/cadence-persistence/src/matching_postgres.rs:394:22
+    |
+394 |             .map_err(|error| normalize_postgres_error(error))?;
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself: `normalize_postgres_error`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#redundant_closure
+    = note: `-D clippy::redundant-closure` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::redundant_closure)]`
+
+error: redundant closure
+   --> crates/cadence-persistence/src/matching_postgres.rs:443:22
+    |
+443 |             .map_err(|error| normalize_postgres_error(error))?;
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself: `normalize_postgres_error`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#redundant_closure
+
+error: redundant closure
+   --> crates/cadence-persistence/src/matching_postgres.rs:480:22
+    |
+480 |             .map_err(|error| normalize_postgres_error(error))?;
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself: `normalize_postgres_error`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#redundant_closure
+
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> crates/cadence-persistence/src/matching_domain_mysql.rs:118:18
+    |
+118 |         let row: Option<(Vec<u8>, String, bool, Vec<u8>, String)> = self
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity
+    = note: `-D clippy::type-complexity` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> crates/cadence-persistence/src/matching_domain_mysql.rs:156:19
+    |
+156 |         let rows: Vec<(Vec<u8>, String, bool, Vec<u8>, String)> = self
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity
+
+error: could not compile `cadence-persistence` (lib) due to 7 previous errors

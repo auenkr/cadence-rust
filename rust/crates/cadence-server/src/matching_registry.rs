@@ -3,7 +3,7 @@ use crate::{matching_dispatch::TaskDispatcher, matching_history::MatchingHistory
 use cadence_persistence::{
     matching_blob::TaskData,
     matching_queue::DurableTaskQueue,
-    matching_sqlite::{AllocatedTask, SqliteTaskStore, TaskListKey},
+    matching_task_store::{AllocatedTask, MatchingTaskStore, TaskListKey},
 };
 use cadence_proto::matching as m;
 use std::{
@@ -113,7 +113,7 @@ struct State {
 /// an RPC while its lease is acquired cannot orphan or duplicate that lease.
 #[derive(Clone)]
 pub struct QueueRegistry {
-    store: Arc<SqliteTaskStore>,
+    store: Arc<dyn MatchingTaskStore>,
     history: MatchingHistoryClient,
     range_size: NonZeroU32,
     state: Arc<Mutex<State>>,
@@ -552,7 +552,7 @@ impl QueueRegistry {
         response
     }
     pub fn new(
-        store: Arc<SqliteTaskStore>,
+        store: Arc<dyn MatchingTaskStore>,
         history: MatchingHistoryClient,
         range_size: NonZeroU32,
     ) -> Self {
@@ -1819,6 +1819,7 @@ async fn resolve_parent_dispatcher(
 mod tests {
     use super::*;
     use cadence_persistence::matching_blob::BlobEncoding;
+    use cadence_persistence::matching_sqlite::SqliteTaskStore;
     use std::time::Duration;
     #[test]
     fn writer_owner_closure_keeps_registry_key_and_observes_provider_updates() {

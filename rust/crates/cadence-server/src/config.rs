@@ -421,8 +421,14 @@ pub struct SqlConfig {
     pub plugin_name: String,
     #[serde(default, rename = "databaseName")]
     pub database_name: String,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
     #[serde(default, rename = "connectAddr")]
     pub connect_addr: String,
+    #[serde(default, rename = "connectProtocol")]
+    pub connect_protocol: String,
     #[serde(default, rename = "connectAttributes")]
     pub connect_attributes: HashMap<String, String>,
     /// Go SQL persistence uses this for physical database routing. Matching's
@@ -431,6 +437,34 @@ pub struct SqlConfig {
     pub n_shards: i32,
     #[serde(default, rename = "useMultipleDatabases")]
     pub use_multiple_databases: bool,
+    #[serde(default, rename = "multipleDatabasesConfig")]
+    pub multiple_databases_config: Vec<MultipleDatabasesConfigEntry>,
+    #[serde(default, rename = "maxConns")]
+    pub max_conns: i64,
+    #[serde(default, rename = "maxIdleConns")]
+    pub max_idle_conns: i64,
+    #[serde(
+        default,
+        rename = "maxConnLifetime",
+        deserialize_with = "de_go_duration"
+    )]
+    pub max_conn_lifetime_nanos: i64,
+    #[serde(default, rename = "encodingType")]
+    pub encoding_type: String,
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultipleDatabasesConfigEntry {
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default, rename = "databaseName")]
+    pub database_name: String,
+    #[serde(default, rename = "connectAddr")]
+    pub connect_addr: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -652,7 +686,10 @@ mod tests {
         assert_eq!(provider.filepath, "modern.yaml");
         assert_eq!(provider.poll_interval, "7s");
         let legacy = Config::from_yaml("dynamicConfigClient:\n  filepath: legacy.yaml\n").unwrap();
-        assert_eq!(legacy.selected_dynamic_config_client().unwrap().1.filepath, "legacy.yaml");
+        assert_eq!(
+            legacy.selected_dynamic_config_client().unwrap().1.filepath,
+            "legacy.yaml"
+        );
         assert_eq!(parse_go_duration("2s").unwrap(), 2_000_000_000);
     }
 
@@ -732,6 +769,26 @@ clusterMetadata:
             "active"
         );
         cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_go_sql_pool_and_tls_config_for_matching() {
+        let cfg = Config::from_yaml(
+            "persistence:\n  defaultStore: primary\n  datastores:\n    primary:\n      sql:\n        pluginName: mysql\n        user: cadence\n        password: secret\n        databaseName: cadence\n        connectProtocol: tcp\n        connectAddr: db.internal:3306\n        nShards: 4\n        maxConns: 32\n        maxIdleConns: 8\n        maxConnLifetime: 7m\n        encodingType: thriftrw\n        tls:\n          enabled: true\n          caFiles: [/ca/a.pem, /ca/b.pem]\n          certFile: /client/cert.pem\n          keyFile: /client/key.pem\n          enableHostVerification: true\n",
+        )
+        .unwrap();
+        let sql = cfg.persistence.datastores["primary"].sql.as_ref().unwrap();
+        assert_eq!(sql.user, "cadence");
+        assert_eq!(sql.connect_protocol, "tcp");
+        assert_eq!(sql.max_conns, 32);
+        assert_eq!(sql.max_idle_conns, 8);
+        assert_eq!(sql.max_conn_lifetime_nanos, 420_000_000_000);
+        let tls = sql.tls.as_ref().unwrap();
+        assert_eq!(
+            tls.ca_files,
+            vec!["/ca/a.pem".to_owned(), "/ca/b.pem".to_owned()]
+        );
+        assert!(tls.enable_host_verification);
     }
 
     #[test]
@@ -881,22 +938,20 @@ shard-distributor-matching:
     fn shard_distributor_rejects_invalid_namespace_and_heartbeat_interval() {
         let mut cfg = Config::development().unwrap();
         cfg.shard_distributor_matching.namespaces[0].heartbeat_interval_nanos = 0;
-        assert!(
-            cfg.validate()
-                .unwrap_err()
-                .to_string()
-                .contains("heartbeat_interval")
-        );
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("heartbeat_interval"));
         cfg.shard_distributor_matching.namespaces[0].heartbeat_interval_nanos = 1;
         cfg.shard_distributor_matching.namespaces[0]
             .namespace
             .clear();
-        assert!(
-            cfg.validate()
-                .unwrap_err()
-                .to_string()
-                .contains("cannot be empty")
-        );
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be empty"));
     }
 
     #[test]
@@ -927,24 +982,21 @@ shard-distributor-matching:
         let err = Config::from_yaml("ringpop: {name: x, bootstrapMode: custom}")
             .unwrap()
             .ringpop;
-        assert!(
-            err.clone()
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("custom is not supported")
-        );
+        assert!(err
+            .clone()
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("custom is not supported"));
         let missing = Config::from_yaml("ringpop: {name: x, bootstrapMode: hosts}")
             .unwrap()
             .ringpop;
-        assert!(
-            missing
-                .clone()
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("boostrap hosts")
-        );
+        assert!(missing
+            .clone()
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("boostrap hosts"));
         assert!(Config::from_yaml("ringpop: {name: x, bootstrapMode: weird}").is_err());
     }
 }
