@@ -27,6 +27,23 @@ fn domain_name_for(
         .and_then(|response| response.domain_info.map(|info| info.name))
         .filter(|name| !name.is_empty())
 }
+fn matching_host_name() -> &'static str {
+    static HOSTNAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HOSTNAME.get_or_init(|| {
+        let mut hostname = [0 as libc::c_char; 256];
+        // SAFETY: the array is writable for its full length and is explicitly
+        // terminated before converting the result to a C string.
+        let result = unsafe { libc::gethostname(hostname.as_mut_ptr(), hostname.len()) };
+        if result != 0 {
+            return String::new();
+        }
+        hostname[hostname.len() - 1] = 0;
+        // SAFETY: the buffer was zero-initialized and its final byte is NUL.
+        unsafe { std::ffi::CStr::from_ptr(hostname.as_ptr()) }
+            .to_string_lossy()
+            .into_owned()
+    })
+}
 fn task_delete_batch_size_provider(
     domains: cadence_persistence::InMemoryDomainStore,
     overlay: Arc<Mutex<crate::admin::DynamicConfigOverlay>>,
@@ -1607,6 +1624,20 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .unwrap_or_default(),
         )?;
         let domain = self.domain_name(&r.domain_id)?;
+        self.metrics.add_task_request(
+            &domain,
+            r.task_list
+                .as_ref()
+                .map(|task_list| task_list.name.as_str())
+                .unwrap_or_default(),
+            r.task_list
+                .as_ref()
+                .map(|task_list| task_list.kind)
+                .unwrap_or_default(),
+            !r.forwarded_from.is_empty(),
+            "decision_task",
+            matching_host_name(),
+        );
         if self.queues.is_some() {
             let list = r
                 .task_list
@@ -1751,6 +1782,20 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .unwrap_or_default(),
         )?;
         let domain = self.domain_name(&r.domain_id)?;
+        self.metrics.add_task_request(
+            &domain,
+            r.task_list
+                .as_ref()
+                .map(|task_list| task_list.name.as_str())
+                .unwrap_or_default(),
+            r.task_list
+                .as_ref()
+                .map(|task_list| task_list.kind)
+                .unwrap_or_default(),
+            !r.forwarded_from.is_empty(),
+            "activity_task",
+            matching_host_name(),
+        );
         if self.queues.is_some() {
             let list = r
                 .task_list

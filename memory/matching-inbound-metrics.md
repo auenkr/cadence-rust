@@ -10,6 +10,10 @@ Source tests exercise gRPC trait invocation with caller metadata, Thrift dispatc
 
 No service-completion or parity claim follows from these source tests. Production sink injection through runtime configuration and an executable mixed-cluster Go/Rust comparison remain outside this isolated source slice.
 
+## AddTask traffic counter
+
+The Rust AddDecisionTask and AddActivityTask paths now emit Go's `cadence_tasklist_request` at the engine-equivalent point: after task-list/domain validation and domain-name resolution, before task-list manager lookup. It is emitted only for normal, non-forwarded requests. The `AddTask` scope tags are `domain`, sanitized `tasklist`, `tasklistType` (`decision_task` or `activity_task`), and `matching_host`; the host value comes from the OS hostname, matching Go's default `HostName`. A no-op sink stays the default; callers with `Matching::with_metrics` receive the event. The recorder unit test checks the event/tag set and verifies sticky and forwarded exclusions. This source-only test was not run; there is no captured Rust-vs-Go metric oracle comparison yet.
+
 ## Remaining Go Matching metric inventory
 
 The non-test Go call sites in `go/service/matching` contain additional telemetry families beyond the inbound handler scopes. The Rust sink currently emits inbound RPC events and History-client events. Queue QPS, poller snapshots, and partition/status responses are business data and do not establish parity for these metric families.

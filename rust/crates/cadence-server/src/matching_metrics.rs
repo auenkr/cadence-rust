@@ -73,10 +73,15 @@ pub const IS_RETRY_TAG: &str = "is_retry";
 pub const HISTORY_CLIENT_ROLE: &str = "history_client";
 pub const CADENCE_REQUESTS_PER_TASK_LIST: &str = "cadence_requests_per_tl";
 pub const CADENCE_FAILURES_PER_TASK_LIST: &str = "cadence_errors_per_tl";
+pub const CADENCE_TASKLIST_REQUEST: &str = "cadence_tasklist_request";
+pub const TASKLIST_MANAGERS: &str = "tasklist_managers";
 pub const CADENCE_LATENCY_PER_TASK_LIST: &str = "cadence_latency_per_tl";
 pub const CADENCE_LATENCY_PER_TASK_LIST_NS: &str = "cadence_latency_per_tl_ns";
 pub const DOMAIN_TAG: &str = "domain";
 pub const TASK_LIST_TAG: &str = "task_list";
+pub const GO_TASK_LIST_TAG: &str = "tasklist";
+pub const TASK_LIST_TYPE_TAG: &str = "tasklistType";
+pub const MATCHING_HOST_TAG: &str = "matching_host";
 pub const SEMAPHORE_NAME_TAG: &str = "semaphore_name";
 pub const CALLER_TAG: &str = "caller";
 pub const TRANSPORT_TAG: &str = "transport";
@@ -261,6 +266,73 @@ impl MatchingMetrics {
         INBOUND_METRIC_CONTEXT.scope(context, future).await
     }
 
+    /// Go `matchingEngine.Add{Decision,Activity}Task` traffic counter. The
+    /// handler calls this only after domain resolution and before manager
+    /// lookup, and Go excludes sticky and forwarded traffic.
+    pub fn add_task_request(
+        &self,
+        domain: &str,
+        task_list: &str,
+        task_list_kind: i32,
+        forwarded: bool,
+        task_list_type: &'static str,
+        host: &str,
+    ) {
+        if task_list_kind != 0 || forwarded {
+            return;
+        }
+        self.0.record(MetricEvent {
+            name: CADENCE_TASKLIST_REQUEST,
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            tags: BTreeMap::from([
+                (OPERATION_TAG.to_owned(), "AddTask".to_owned()),
+                (
+                    DOMAIN_TAG.to_owned(),
+                    if domain.is_empty() {
+                        "_unknown_"
+                    } else {
+                        domain
+                    }
+                    .to_owned(),
+                ),
+                (
+                    GO_TASK_LIST_TAG.to_owned(),
+                    if task_list.is_empty() {
+                        "_unknown_".to_owned()
+                    } else {
+                        go_sanitize_metric_value(task_list)
+                    },
+                ),
+                (
+                    TASK_LIST_TYPE_TAG.to_owned(),
+                    if task_list_type.is_empty() {
+                        "_unknown_".to_owned()
+                    } else {
+                        task_list_type.to_owned()
+                    },
+                ),
+                (
+                    MATCHING_HOST_TAG.to_owned(),
+                    if host.is_empty() { "_unknown_" } else { host }.to_owned(),
+                ),
+            ]),
+            histogram: None,
+        });
+    }
+
+    /// Go `MatchingTaskListMgrScope.UpdateGauge` uses only the static scope
+    /// operation tag; manager count is the registry's current membership.
+    pub fn task_list_managers_gauge(&self, count: usize) {
+        self.0.record(MetricEvent {
+            name: TASKLIST_MANAGERS,
+            kind: MetricKind::Gauge,
+            value: MetricValue::Number(count as f64),
+            tags: BTreeMap::from([(OPERATION_TAG.to_owned(), "TaskListMgr".to_owned())]),
+            histogram: None,
+        });
+    }
+
     /// Record one complete inbound Matching RPC. This is called at the shared
     /// MatchingAPI trait boundary, which Thrift dispatch also invokes.
     pub async fn matching_request<F, T, E>(
@@ -408,6 +480,34 @@ impl MatchingMetrics {
 #[cfg(test)]
 mod inbound_tests {
     use super::*;
+
+    #[test]
+    fn add_task_counter_matches_go_dimensions_and_exclusions() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        metrics.add_task_request(
+            "domain-a",
+            "root/child",
+            0,
+            false,
+            "decision_task",
+            "host-a",
+        );
+        metrics.add_task_request("domain-a", "sticky", 1, false, "activity_task", "host-a");
+        metrics.add_task_request("domain-a", "forwarded", 0, true, "activity_task", "host-a");
+
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.name, CADENCE_TASKLIST_REQUEST);
+        assert_eq!(event.kind, MetricKind::Counter);
+        assert_eq!(event.value, MetricValue::Count(1));
+        assert_eq!(event.tags[OPERATION_TAG], "AddTask");
+        assert_eq!(event.tags[DOMAIN_TAG], "domain-a");
+        assert_eq!(event.tags[GO_TASK_LIST_TAG], "root_child");
+        assert_eq!(event.tags[TASK_LIST_TYPE_TAG], "decision_task");
+        assert_eq!(event.tags[MATCHING_HOST_TAG], "host-a");
+    }
 
     #[tokio::test]
     async fn inbound_rpc_records_request_latency_and_failure_once() {
