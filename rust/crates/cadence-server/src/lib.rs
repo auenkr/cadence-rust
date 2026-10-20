@@ -73,3 +73,5 @@ pub mod matching_peer_provider;
 pub mod matching_shard_distributor;
 #[allow(clippy::result_large_err)]
 pub mod matching_shard_processor;
+#[allow(clippy::result_large_err)]
+pub mod matching_shard_routing;

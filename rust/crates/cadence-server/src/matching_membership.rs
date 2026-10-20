@@ -62,6 +62,33 @@ impl Membership {
             .cloned()
             .ok_or_else(|| Status::internal("Not enough hosts to serve the request"))
     }
+    /// Ring-only multi-host lookup used by Matching's shard-distributor
+    /// resolver, whose Go `LookupN` deliberately does not use the spectator.
+    pub(crate) fn owners_n(&self, key: &str, count: usize) -> Vec<Host> {
+        self.ring
+            .read()
+            .expect("Matching membership lock")
+            .lookup_n(key, count)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+    pub(crate) fn owner_by_address(&self, address: &str) -> Option<Host> {
+        self.ring
+            .read()
+            .expect("Matching membership lock")
+            .hosts()
+            .iter()
+            .find(|host| host.address.as_str() == address)
+            .cloned()
+    }
+    pub(crate) fn hosts(&self) -> Vec<Host> {
+        self.ring
+            .read()
+            .expect("Matching membership lock")
+            .hosts()
+            .to_vec()
+    }
     pub fn owns(&self, key: &str) -> Result<bool, Status> {
         Ok(self.owner(key)?.identity() == self.identity.as_ref())
     }
