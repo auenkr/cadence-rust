@@ -17,6 +17,7 @@ if args.idle_check_seconds < 1:
 args.artifacts_dir.mkdir(parents=True, exist_ok=True)
 command = [
     sys.executable, str(ROOT / 'tests/run-go-service-baseline.py'),
+    '--rust-matching',
     '--rust-production-binary', str(args.rust_production_binary.resolve()),
     '--history-transport', args.history_transport,
     '--matching-failure-recovery',
