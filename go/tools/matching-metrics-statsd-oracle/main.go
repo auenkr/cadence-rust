@@ -36,7 +36,7 @@ func main() {
 		panic(err)
 	}
 	reporter := cadencestatsd.NewReporter(client, tallystatsd.Options{})
-	root, _ := tally.NewRootScope(tally.ScopeOptions{
+	root, closer := tally.NewRootScope(tally.ScopeOptions{
 		Prefix: scopePrefix, Tags: map[string]string{"zone": zone, "cadence_service": "cadence-matching"}, Reporter: reporter,
 	}, 100*time.Millisecond)
 	defer client.Close()
@@ -54,7 +54,7 @@ func main() {
 	scope.Histogram("latency", buckets).RecordDuration(20 * time.Millisecond)
 	scope.Histogram("latency", buckets).RecordDuration(21 * time.Millisecond)
 	time.Sleep(140 * time.Millisecond) // cross one Tally reporting boundary
-	root.Close()
+	_ = closer.Close()
 	_ = client.Close() // flush the buffered UDP client at the explicit boundary
 	_ = listener.SetReadDeadline(time.Now().Add(60 * time.Millisecond))
 	var lines []string

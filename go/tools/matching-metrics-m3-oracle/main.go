@@ -52,7 +52,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	root, _ := tally.NewRootScope(tally.ScopeOptions{
+	root, closer := tally.NewRootScope(tally.ScopeOptions{
 		Prefix: "cadence", Tags: map[string]string{"cadence_service": "cadence-matching"}, CachedReporter: reporter,
 	}, time.Hour)
 	tags := map[string]string{"cadence_role": "history_client", "operation": "HistoryClientGetMutableState"}
@@ -66,7 +66,7 @@ func main() {
 	}
 	scope.Histogram("cadence_client_latency_ns", buckets).RecordDuration(20 * time.Millisecond)
 	scope.Histogram("cadence_client_latency_ns", buckets).RecordDuration(21 * time.Millisecond)
-	if err := root.Close(); err != nil { // scope close reports and closes the M3 reporter
+	if err := closer.Close(); err != nil { // scope close reports and closes the M3 reporter
 		panic(err)
 	}
 	for _, listener := range []net.PacketConn{left, right} {
