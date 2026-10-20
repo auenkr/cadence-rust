@@ -969,10 +969,7 @@ mod tests {
         assert_eq!(events[2].name, "cadence_client_latency_ns");
         assert_eq!(
             events[2].histogram,
-            Some(crate::matching_metrics::HistogramSpec::Exponential {
-                minimum: Duration::from_millis(1),
-                maximum: Duration::from_secs(100),
-            })
+            Some(crate::matching_metrics::HistogramSpec::GoLow1ms100s)
         );
         for event in &events {
             assert_eq!(event.tags["operation"], "HistoryClientGetMutableState");

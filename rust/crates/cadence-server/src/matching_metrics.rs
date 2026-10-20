@@ -26,10 +26,9 @@ pub enum MetricValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HistogramSpec {
-    Exponential {
-        minimum: Duration,
-        maximum: Duration,
-    },
+    /// Go `common/metrics.Low1ms100s`: 1 ms to 100 s intent, scale 1,
+    /// with the same 40 sampled exponential buckets (plus sentinel bounds).
+    GoLow1ms100s,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,10 +140,7 @@ impl MatchingMetrics {
             kind: MetricKind::Histogram,
             value: MetricValue::Duration(elapsed),
             tags,
-            histogram: Some(HistogramSpec::Exponential {
-                minimum: Duration::from_millis(1),
-                maximum: Duration::from_secs(100),
-            }),
+            histogram: Some(HistogramSpec::GoLow1ms100s),
         });
     }
 }
