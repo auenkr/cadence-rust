@@ -461,6 +461,42 @@ fn workflow_type(value: &cadence_proto::api::WorkflowType) -> TypedValue {
     struct_value(vec![field(10, string(&value.name))])
 }
 
+/// Convert the two-level RefreshWorkflowTasks wrapper. The outer IDL misspells
+/// domainUUID as `domainUIID`; the inner request is shared.thrift's request.
+pub(crate) fn refresh_workflow_tasks_request(
+    value: &cadence_proto::history::RefreshWorkflowTasksRequest,
+) -> TypedStruct {
+    let mut inner = vec![field(10, string(&value.domain))];
+    if let Some(execution) = &value.workflow_execution {
+        inner.push(field(20, workflow_execution(execution)));
+    }
+    finish(vec![
+        field(10, string(&value.domain_id)),
+        field(20, TypedValue::Struct(finish(inner))),
+    ])
+}
+
+pub(crate) fn refresh_workflow_tasks_request_from_thrift(
+    value: &TypedStruct,
+) -> cadence_thrift::Result<cadence_proto::history::RefreshWorkflowTasksRequest> {
+    let inner = field_struct(value, 20)?;
+    let domain = inner
+        .map(|request| field_string(request, 10))
+        .transpose()?
+        .unwrap_or_default();
+    let workflow_execution = inner
+        .map(|request| field_struct(request, 20))
+        .transpose()?
+        .flatten()
+        .map(workflow_execution_from_thrift)
+        .transpose()?;
+    Ok(cadence_proto::history::RefreshWorkflowTasksRequest {
+        domain,
+        domain_id: field_string(value, 10)?,
+        workflow_execution,
+    })
+}
+
 fn task_list(value: &cadence_proto::api::TaskList) -> TypedValue {
     let mut fields = vec![field(10, string(&value.name))];
     if (1..=3).contains(&value.kind) {
@@ -781,6 +817,30 @@ mod typed_codec_tests {
         assert_eq!(
             get_mutable_state_response_from_thrift(&decoded).unwrap(),
             expected
+        );
+    }
+
+    #[test]
+    fn refresh_workflow_tasks_matches_nested_thrift_request_fixture() {
+        let request = cadence_proto::history::RefreshWorkflowTasksRequest {
+            domain: "name".into(),
+            domain_id: "id".into(),
+            workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                workflow_id: "wf".into(),
+                run_id: "run".into(),
+            }),
+        };
+        let encoded = encode_typed_struct(&refresh_workflow_tasks_request(&request));
+        let expected = vec![
+            11, 0, 10, 0, 0, 0, 2, b'i', b'd', 12, 0, 20, 11, 0, 10, 0, 0, 0, 4, b'n', b'a', b'm',
+            b'e', 12, 0, 20, 11, 0, 10, 0, 0, 0, 2, b'w', b'f', 11, 0, 20, 0, 0, 0, 3, b'r', b'u',
+            b'n', 0, 0, 0,
+        ];
+        assert_eq!(encoded, expected);
+        let decoded = decode_typed_struct(&encoded).unwrap();
+        assert_eq!(
+            refresh_workflow_tasks_request_from_thrift(&decoded).unwrap(),
+            request
         );
     }
 }
