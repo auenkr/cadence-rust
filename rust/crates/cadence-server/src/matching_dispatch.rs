@@ -328,7 +328,7 @@ impl TaskDispatcher {
                 .ok_or(ClaimError::Queue(QueueError::Stopped));
         }
         let queue = self.queue.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::matching_blocking::run(move || {
             queue.read_batch_with_clock(100000, NonZeroU32::new(1).unwrap(), now)
         })
         .await
@@ -363,7 +363,7 @@ impl TaskDispatcher {
     async fn rewrite(&self, task: i64) {
         if let Some(writer) = &self.writer {
             let queue = self.queue.clone();
-            let data = tokio::task::spawn_blocking(move || queue.retry_data(task)).await;
+            let data = crate::matching_blocking::run(move || queue.retry_data(task)).await;
             let result = match data {
                 Ok(Ok(data)) => writer
                     .append_rewrite(crate::matching_writer::WriteTask {
@@ -387,7 +387,7 @@ impl TaskDispatcher {
             return;
         }
         let queue = self.queue.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = crate::matching_blocking::run(move || {
             if let Err(error) = queue.rewrite_failed(task, now()) {
                 queue.stop();
                 return Err(error);
@@ -408,7 +408,7 @@ impl TaskDispatcher {
     }
     async fn complete(&self, task: i64) {
         let queue = self.queue.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = crate::matching_blocking::run(move || {
             queue.complete(task)?;
             queue.run_garbage_collection(false)?;
             Ok::<_, QueueError>(())

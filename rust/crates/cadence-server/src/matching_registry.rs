@@ -353,7 +353,7 @@ impl QueueHandle {
         now: i64,
     ) -> Result<Vec<AllocatedTask>, Status> {
         let handle = self.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::matching_blocking::run(move || {
             handle.liveness.mark_alive(registry_now());
             let tasks = handle
                 .queue
@@ -372,7 +372,7 @@ impl QueueHandle {
         now: i64,
     ) -> Result<Vec<AllocatedTask>, Status> {
         let handle = self.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::matching_blocking::run(move || {
             handle.liveness.mark_alive(registry_now());
             let tasks = handle
                 .queue
@@ -415,7 +415,7 @@ async fn owner_work<T: Send + 'static>(
         + Send
         + 'static,
 ) -> Result<T, Status> {
-    let (result, readers) = tokio::task::spawn_blocking(move || {
+    let (result, readers) = crate::matching_blocking::run(move || {
         let mut readers = Vec::new();
         let result = operation(&mut readers);
         (result, readers)
@@ -1469,7 +1469,7 @@ impl QueueRegistry {
         now: i64,
     ) -> Result<(), Status> {
         let registry = self.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::matching_blocking::run(move || {
             let Some((old, new)) = handle.partitions.update(&handle.queue, config, now)? else {
                 return Ok(());
             };
@@ -1506,7 +1506,7 @@ impl QueueRegistry {
         config: Option<cadence_persistence::StoredPartitionConfig>,
     ) -> Result<(), Status> {
         let store = self.store.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::matching_blocking::run(move || {
             if let Some(config) = config {
                 handle.partitions.push(&config);
                 return Ok(());
