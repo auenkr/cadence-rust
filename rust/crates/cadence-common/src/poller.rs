@@ -200,4 +200,20 @@ mod tests {
         }
         assert_eq!(Value::Array(snapshots), expected);
     }
+
+    #[test]
+    fn history_size_counts_unique_identities_and_evicts_expired_entries() {
+        let mut manager = Manager::default();
+        let info = |identity: &str| Info {
+            identity: identity.into(),
+            rate_per_second: 1.0,
+            isolation_group: String::new(),
+        };
+        manager.start("poll-1", info("same-worker"), 10);
+        manager.start("poll-2", info("same-worker"), 20);
+        manager.start("poll-3", info("other-worker"), 20);
+        assert_eq!(manager.count_at(20), 2);
+        assert_eq!(manager.count_at(20 + TTL), 2);
+        assert_eq!(manager.count_at(21 + TTL), 0);
+    }
 }

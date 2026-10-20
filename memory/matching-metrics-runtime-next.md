@@ -53,8 +53,27 @@ Go emit sites are `tasklist/matcher.go:465,494,527,548` for local poll match,
 forward failure; each writes both timer and `_ns` histogram. Rust's
 `TaskDispatcher::delivery_loop` has the decision point where a claimed task can
 be classified, but needs a poll-start timestamp that survives forwarding and
-is retained through queue waits. Remaining telemetry gaps to audit against
-`matcher.go` and `task_reader.go` include matcher timing branches, dispatch
-attempts/latency, throttling counters, and queue backlog gauge
-(`queue.levels().2`). These remain source-only findings; no build or mixed
-Go/Rust runtime test was run in this lane.
+is retained through queue waits. Remaining Go callsites are now mapped to
+concrete gaps:
+
+* `matcher.go:155,256` emits `sync_throttle_count_per_tl`; `:231` emits
+  `sync_forward_task_throttle_errors_per_tl`.
+* `matcher.go:339-419` emits async local/forward counters, attempt timer and
+  integer histogram pairs, latency timer and duration histogram pairs, and
+  forward throttle errors. Rust `matching_dispatch.rs` has delivery and poll
+  outcomes but does not yet emit these matcher/reader attempt families.
+* `matcher.go:444` emits invalid-isolation-group count.
+* `matcher.go:465-639` emits the local/forward/after-forward-failure poll
+  timing pairs described above; Rust builders exist, but dispatch wiring is
+  open.
+* `task_reader.go:231,273,395` updates backlog, task-count, and task-lag
+  gauges. The durable queue exposes `levels().2` for backlog, but Rust's
+  `matching_reader.rs` currently has no metrics context or gauge emissions.
+* `task_reader.go:365,490` emits expired-task counters; `:503-506` emits async
+  match latency timer/histogram; `:537` emits async dispatch timeout; `:544`
+  emits buffer throttle; and `:568` emits unknown dispatch error. None are yet
+  emitted by Rust's `matching_reader.rs`.
+
+Metric definitions and rollups are in `go/common/metrics/defs.go` around
+3060-3134. Rust source formatting and `git diff --check` pass; no build or
+mixed Go/Rust runtime test was run in this lane.
