@@ -348,3 +348,33 @@ loads. No worker modifies root. History source candidate685cca4c8 includes5
 transport adapters/integration, coherent TChannel named endpoints, Args/Result
 wrappers, prepared Go fixture generator/consumer and native fake-peer tests.
 Actual Go fixture and builds pending main lane; no parity claim.
+
+## Continuation checkpoint, 2026-10-20
+
+Root94ff64a6d retains exactly the user's AGENTS.md, matching_registry.rs and
+untracked matching_shard_processor.rs edits; explicit user instruction is to
+preserve them. No root implementation edits authorized to workers.
+
+Main candidate eb06a3e99 fixes nested Go domain codec prefix after optional
+Snappy; actual pinned Go serializer fixtures and12 metadata tests pass. Mixed
+existing SDK workflows completed after SIGKILL/restart and graceful restart.
+Full mixed gate still fails isolated poller registration: production needs
+Go-shaped dynamic configuration, not a test admin endpoint. Runtime worker
+source-only implementation now includes modern/legacy file selection, ordered
+values/constraints, startup load and owned reload lifecycle. Path/poll semantics
+and tests remain under review; no build lane yet. Focused configured native
+harness still needs real discoverable History peer. Main remains unmerged.
+
+History worker owns sole heavy lane. Pinned Go1.25.14 oracle exit0,25 entries,
+observed/expected SHA256 de22e106 prefix equal. First Rust no-run failed15
+candidate compatibility errors; fixing wrappers, inference, imports and local
+metadata decode. Subsequent gates must include real generated Go YARPC History
+peer for all five operations, including caller transport headers; fake peer
+and wire fixtures alone cannot establish interoperability.
+
+SD callback tests align to user snapshot in isolated commit50ce04f1b; not yet
+built or merged. SD routing source in progress in separate worker, no main
+edits: async spectator plus existing Ring snapshot fallback, dynamic policy
+closure, named endpoint results. Source-only while History builds. Shared
+CARGO_BUILD_JOBS=1 target remains t3-6f14baa6/rust/target; all shell work must
+set explicit workdir because resumed workers can inherit root cwd.
