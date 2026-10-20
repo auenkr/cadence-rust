@@ -61,9 +61,9 @@ func TestFileBasedOracleNullMissingAndIntegerType(t *testing.T) {
 - constraints: null
 - value: null
 `)
-	value, err = client.GetValue(dynamicproperties.TestGetBoolPropertyKey)
-	if err != nil || value != nil {
-		t.Fatalf("explicit null value result = %#v, %v; want nil without error", value, err)
+	valueAny, err := client.GetValue(dynamicproperties.TestGetBoolPropertyKey)
+	if err != nil || valueAny != nil {
+		t.Fatalf("explicit null value result = %#v, %v; want nil without error", valueAny, err)
 	}
 	for _, content := range []string{"null\n", "emptyValues: null\n"} {
 		path := filepath.Join(t.TempDir(), "empty.yaml")

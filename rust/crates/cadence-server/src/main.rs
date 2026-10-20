@@ -951,6 +951,11 @@ async fn main() -> anyhow::Result<()> {
                 println!("Cadence internal matching Thrift/TChannel listening on {matching_tchannel_addr}");
             }
             let matching_history = if run_matching {
+                let grpc_outbound = dynamic_bool_property(
+                    state.admin.dynamic_config.clone(),
+                    "system.enableGRPCOutbound",
+                    true,
+                );
                 let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
                 let history_channel =
                     tonic::transport::Endpoint::from_shared(history_peer)?.connect_lazy();
@@ -960,13 +965,11 @@ async fn main() -> anyhow::Result<()> {
                     32 * 1024 * 1024,
                 );
                 if let Some(provider) = matching_ringpop_provider.as_ref() {
-                    if !dynamic_bool_property(
-                        state.admin.dynamic_config.clone(),
-                        "system.enableGRPCOutbound",
-                        true,
-                    ) {
-                        anyhow::bail!("Matching History routing currently requires system.enableGRPCOutbound=true; TChannel History outbound is not yet implemented");
-                    }
+                    let named_port = if grpc_outbound {
+                        cadence_server::matching_history_peer_resolver::NamedPort::Grpc
+                    } else {
+                        cadence_server::matching_history_peer_resolver::NamedPort::Tchannel
+                    };
                     let history_membership = std::sync::Arc::new(
                         cadence_server::matching_history_membership::RingpopHistoryMembership::new(
                             std::sync::Arc::new(provider.node().clone()),
@@ -975,11 +978,17 @@ async fn main() -> anyhow::Result<()> {
                     let history_resolver = std::sync::Arc::new(
                         cadence_server::matching_history_peer_resolver::MatchingHistoryPeerResolver::new(
                             num_history_shards as u32,
-                            cadence_server::matching_history_peer_resolver::NamedPort::Grpc,
+                            named_port,
                             history_membership,
                         )?,
                     );
-                    Some(history.with_peer_resolver(history_resolver))
+                    Some(if grpc_outbound {
+                        history.with_peer_resolver(history_resolver)
+                    } else {
+                        history.with_tchannel_outbound(history_resolver)
+                    })
+                } else if !grpc_outbound {
+                    anyhow::bail!("system.enableGRPCOutbound=false requires live Ringpop membership for Matching History TChannel routing");
                 } else {
                     Some(history)
                 }
@@ -1130,7 +1139,8 @@ async fn main() -> anyhow::Result<()> {
                         "matching.percentageOnboardedToShardManager",
                         0,
                     )
-                }) as std::sync::Arc<dyn Fn() -> i64 + Send + Sync>;
+                })
+                    as std::sync::Arc<dyn Fn() -> i64 + Send + Sync>;
                 let overlay = state.admin.dynamic_config.clone();
                 let exclude_short_lived = std::sync::Arc::new(move || {
                     dynamic_bool_property(
@@ -1138,7 +1148,8 @@ async fn main() -> anyhow::Result<()> {
                         "matching.excludeShortLivedTaskListsFromShardManager",
                         true,
                     )
-                }) as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
+                })
+                    as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
                 matching_runtime = Some(
                     runtime
                         .with_shard_distributor(
