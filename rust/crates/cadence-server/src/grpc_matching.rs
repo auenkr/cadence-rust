@@ -1347,7 +1347,7 @@ impl Matching {
         let mut handle = entry.clone();
         let mut ancestor = false;
         let mut permits = Vec::new();
-        let mut in_process_forward_metrics = Vec::new();
+        let mut in_process_forward_metrics: Vec<(tokio::time::Instant, crate::matching_metrics::PollMetricContext)> = Vec::new();
         loop {
             let outcome = if ancestor || forwarded {
                 if handle
@@ -1433,7 +1433,7 @@ impl Matching {
             };
             permits.push(permit);
             let forwarded_from = list.name.clone();
-            list.name = parent;
+            list.name = parent.clone();
             if let Some(channel) = self.remote_channel_for_task_list(&list.name).await? {
                 let execution = Some(p::WorkflowExecution {
                     workflow_id: data.workflow_id.clone(),
@@ -1559,7 +1559,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
-        let r = request.into_inner();
+        let r = request.get_ref().clone();
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -1666,7 +1666,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     // does not carry the task-isolation partition metadata.
                     if let Some(context) = query_lifecycle.metric_context.as_ref() {
                         query_lifecycle.metrics.poll_success(context, true);
-                        query_lifecycle.metrics.poll_match(false, false, None);
+                        query_lifecycle.metrics.poll_match(context, false, false, None);
                     }
                     let execution=query.request.workflow_execution.clone().unwrap_or_default();
                     let query_state = queue
@@ -1776,7 +1776,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
-        let r = request.into_inner();
+        let r = request.get_ref().clone();
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -1974,7 +1974,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 ),
                 async {
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     task_list_name(
                         r.task_list
                             .as_ref()
@@ -2169,7 +2169,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 ),
                 async {
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     task_list_name(
                         r.task_list
                             .as_ref()
@@ -2358,7 +2358,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 ),
                 async {
                     let incoming_deadline = crate::matching_sync::request_deadline(&request);
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     let mut payload = r
                         .request
                         .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -2424,7 +2424,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         let mut list = task_list.clone();
                         let mut handle = queue;
                         let mut permits = Vec::new();
-                        let mut in_process_forward_metrics = Vec::new();
+                        let mut in_process_forward_metrics: Vec<(tokio::time::Instant, crate::matching_metrics::PollMetricContext)> = Vec::new();
                         let mut force_local = false;
                         loop {
                             let query = crate::matching_query::PendingQuery {
@@ -2500,7 +2500,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                             task_type: "decision_task",
                                             poller_isolation_group: String::new(),
                                         };
-                                    list.name = parent;
+                                    list.name = parent.clone();
                                     if let Some(channel) =
                                         self.remote_channel_for_task_list(&list.name).await?
                                     {
@@ -2536,7 +2536,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                             poller_isolation_group: String::new(),
                                         },
                                     ));
-                                    list.name = parent;
+                                    list.name = parent.clone();
                                     handle = match self.durable_queue(&r.domain_id, &list, 0).await
                                     {
                                         Ok(handle) => handle,
@@ -2590,7 +2590,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     if let Some(queues) = &self.queues {
                         let domain = self
                             .frontend
@@ -2708,7 +2708,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     let task_list = r.task_list.unwrap_or_default();
                     // Go resolves `request.GetDomain()` through the domain cache; the
                     // single-process store is keyed by name and yields the UUID.
@@ -2759,7 +2759,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 async {
                     use crate::matching_semaphore::Identifier;
                     use cadence_api::enums::SemaphoreAcquireOutcome;
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     // Owner parsing mirrors Go's `ParseRequestOwner`.
                     cadence_common::semaphore::parse_owner(&r.owner_id)
                         .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
@@ -2819,7 +2819,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
                     let task_list = r
                         .task_list
@@ -2957,7 +2957,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
                     let task_list = r
                         .task_list
@@ -3042,7 +3042,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     self.domain_name(&r.domain_id)?;
                     if !matches!(r.task_list_type, 1 | 2) {
                         return Err(Status::invalid_argument("TaskListType is invalid."));
@@ -3083,7 +3083,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
         use crate::grpc_convert as cv;
-        let r = request.into_inner();
+        let r = request.get_ref().clone();
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -3185,7 +3185,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
-                    let r = request.into_inner();
+                    let r = request.get_ref().clone();
                     let mut payload = r
                         .request
                         .ok_or_else(|| Status::invalid_argument("Request is not set."))?;

@@ -454,7 +454,7 @@ impl MatchingMetrics {
             0 if !context.task_list.is_empty() => context.task_list.as_str(),
             _ => "_unknown_",
         };
-        let mut tags = BTreeMap::from([
+        let tags = BTreeMap::from([
             (
                 DOMAIN_TAG.to_owned(),
                 if context.domain.is_empty() {
@@ -1028,7 +1028,7 @@ impl MatchingMetrics {
         } else {
             (POLL_LOCAL_MATCH_LATENCY, POLL_LOCAL_MATCH_LATENCY_NS)
         };
-        let mut tags = BTreeMap::from([
+        let tags = BTreeMap::from([
             (
                 DOMAIN_TAG.to_owned(),
                 if context.domain.is_empty() {
@@ -1056,7 +1056,7 @@ impl MatchingMetrics {
                     MetricKind::Histogram
                 },
                 value: MetricValue::Duration(elapsed),
-                tags: std::mem::take(&mut tags),
+                tags: tags.clone(),
                 histogram: (name == histogram).then_some(HistogramSpec::GoLow1ms100s),
             });
         }
@@ -1247,7 +1247,7 @@ mod inbound_tests {
         assert_eq!(event.value, MetricValue::Count(1));
         assert_eq!(event.tags[OPERATION_TAG], "AddTask");
         assert_eq!(event.tags[DOMAIN_TAG], "matching-test");
-        assert_eq!(event.tags[GO_TASK_LIST_TAG], "metric-task");
+        assert_eq!(event.tags[GO_TASK_LIST_TAG], "metric_task");
         assert_eq!(event.tags[TASK_LIST_TYPE_TAG], "decision_task");
         assert_eq!(event.tags[MATCHING_HOST_TAG], "oracle-host");
     }

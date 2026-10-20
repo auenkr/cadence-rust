@@ -293,9 +293,12 @@ mod tests {
         );
         assert_eq!(limiter.report_limit(8.0), Some(8.0));
         assert_eq!(limiter.report_limit(50.0), None);
+        // Refresh the low value just before expiry. Go retains it on the TTL
+        // path when the lower report is still recent, while emitting the
+        // aggregate gauge again.
+        now.store(TASK_DISPATCH_RPS_TTL_NANOS - 1, Ordering::SeqCst);
+        assert_eq!(limiter.report_limit(8.0), None);
         now.store(TASK_DISPATCH_RPS_TTL_NANOS + 1, Ordering::SeqCst);
-        // Go emits the gauge again on the TTL path, even when a higher report
-        // keeps the current aggregate rate.
         assert_eq!(limiter.report_limit(50.0), Some(8.0));
     }
     #[test]

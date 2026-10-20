@@ -205,9 +205,9 @@ impl PrometheusMetricSink {
         root_tags: BTreeMap<String, String>,
     ) -> Result<Self, PrometheusConfigError> {
         let handler_path = if config.handler_path.trim().is_empty() {
-            "/metrics"
+            "/metrics".to_owned()
         } else {
-            config.handler_path.trim()
+            config.handler_path.trim().to_owned()
         };
         if !handler_path.starts_with('/') {
             return Err(PrometheusConfigError::InvalidHandlerPath(
@@ -238,7 +238,7 @@ impl PrometheusMetricSink {
         let mut root_tags = root_tags;
         root_tags.insert(CADENCE_SERVICE_TAG.to_owned(), MATCHING_SERVICE.to_owned());
         let mut sink_config = config;
-        sink_config.handler_path = handler_path.to_owned();
+        sink_config.handler_path = handler_path;
 
         Ok(Self {
             inner: Arc::new(SinkInner {
@@ -697,6 +697,7 @@ impl PrometheusListener {
 fn spawn_listener<L>(listener: L, router: Router) -> PrometheusListener
 where
     L: axum::serve::Listener,
+    L::Addr: std::fmt::Debug,
 {
     let (shutdown, receiver) = oneshot::channel();
     let task = tokio::spawn(async move {

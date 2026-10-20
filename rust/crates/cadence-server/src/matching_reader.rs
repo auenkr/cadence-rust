@@ -291,6 +291,18 @@ pub type DispatchCheck = Arc<
         + Sync,
 >;
 impl TaskReader {
+    pub fn with_metric_context(
+        &self,
+        metrics: crate::matching_metrics::MatchingMetrics,
+        context: crate::matching_metrics::PollMetricContext,
+    ) {
+        *self
+            .inner
+            .metric_context
+            .lock()
+            .expect("matching reader metrics lock") =
+            Some(ReaderMetricContext { metrics, context });
+    }
     pub fn new(queue: Arc<DurableTaskQueue>, wake: Arc<Notify>, config: ReaderConfig) -> Self {
         Self::with_domain_activity(queue, wake, config, Arc::new(|| true))
     }

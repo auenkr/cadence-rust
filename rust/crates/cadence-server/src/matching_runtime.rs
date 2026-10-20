@@ -128,7 +128,7 @@ impl MatchingRuntime {
     /// work reached through either retained runtime handle shares one reporter.
     pub fn with_metrics(mut self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
         let metrics = crate::matching_metrics::MatchingMetrics::new(sink.clone());
-        self.matching = self.matching.with_metrics(sink);
+        self.matching = self.matching.clone().with_metrics(sink);
         if let Some(registry) = self.registry.take() {
             self.registry = Some(registry.with_metrics(metrics));
         }
@@ -415,7 +415,7 @@ impl MatchingRuntime {
     ) -> anyhow::Result<Self> {
         Self::start_domain_cache(state.domains.clone(), cache.clone()).await?;
         let mut runtime = Self::in_memory(state, drain_duration);
-        runtime.matching = runtime.matching.with_domain_cache(cache.clone());
+        runtime.matching = runtime.matching.clone().with_domain_cache(cache.clone());
         runtime.domain_cache = Some(cache);
         Ok(runtime)
     }
@@ -438,7 +438,7 @@ impl MatchingRuntime {
             poll_expiration,
             drain_duration,
         );
-        runtime.matching = runtime.matching.with_domain_cache(cache.clone());
+        runtime.matching = runtime.matching.clone().with_domain_cache(cache.clone());
         runtime.domain_cache = Some(cache);
         Ok(runtime)
     }

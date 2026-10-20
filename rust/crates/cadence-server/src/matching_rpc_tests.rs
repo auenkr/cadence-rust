@@ -2488,7 +2488,7 @@ async fn matching_rpc_live_rps_override_matches_go_precedence() {
         }]);
         for task_type in [0, 1] {
             let limiter = crate::matching_limiter::TaskListLimiter::with_defaults();
-            assert_eq!(matching.poll_rate(&domain, &key.name, task_type, worker, &limiter), expected);
+            assert_eq!(matching.poll_rate(&domain, &key.name, 0, task_type, worker, &limiter), expected);
             if expected != crate::matching_limiter::TASK_DISPATCH_RPS {
                 assert_eq!(limiter.limit(), expected);
             }
@@ -2528,7 +2528,7 @@ async fn matching_rpc_report_limit_does_not_hold_the_admin_overlay() {
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.overrideTaskListRps", vec![cadence_api::admin::DynamicConfigValue {
         value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, b"200".to_vec())), filters: vec![],
     }]);
-    assert_eq!(matching.poll_rate(&domain, &key.name, 1, Some(25.0), &limiter), 200.0);
+    assert_eq!(matching.poll_rate(&domain, &key.name, 0, 1, Some(25.0), &limiter), 200.0);
     // Two read partitions, so the accepted report halves the backing limit.
     assert_eq!(limiter.partitions(), 2);
     assert_eq!(limiter.limit(), 100.0);
@@ -2537,7 +2537,7 @@ async fn matching_rpc_report_limit_does_not_hold_the_admin_overlay() {
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.overrideTaskListRps", vec![cadence_api::admin::DynamicConfigValue {
         value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, b"0".to_vec())), filters: vec![],
     }]);
-    assert_eq!(matching.poll_rate(&domain, &key.name, 1, Some(25.0), &limiter), 25.0);
+    assert_eq!(matching.poll_rate(&domain, &key.name, 0, 1, Some(25.0), &limiter), 25.0);
     assert_eq!(limiter.limit(), 12.5);
 }
 

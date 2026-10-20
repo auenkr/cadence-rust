@@ -367,7 +367,7 @@ impl MetricSink for M3MetricSink {
                     timestamp,
                     tags,
                     bucket: Some((
-                        format!("{index:04}"),
+                    format!("{:04}", index + 1),
                         format!("{}-{}", duration_string(lower), duration_string(upper)),
                     )),
                 });
@@ -791,7 +791,7 @@ mod tests {
             .iter()
             .position(|bound| 20_000_000_u128 <= u128::from(*bound))
             .unwrap();
-        assert_eq!(index, 11);
+        assert_eq!(index + 1, 11);
         assert_eq!(duration_string(bounds[index - 1] as i64), "16ms");
         assert_eq!(duration_string(bounds[index] as i64), "22.627416ms");
     }
