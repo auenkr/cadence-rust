@@ -378,3 +378,32 @@ edits: async spectator plus existing Ring snapshot fallback, dynamic policy
 closure, named endpoint results. Source-only while History builds. Shared
 CARGO_BUILD_JOBS=1 target remains t3-6f14baa6/rust/target; all shell work must
 set explicit workdir because resumed workers can inherit root cwd.
+
+### Review continuation
+
+History candidate4d1b8bc6b passed no-run attempt2,25-fixture consumer
+attempt3, and attempt4 focused fake-peer all5, TChannel redirect/deadline,
+15 History regression tests and4 TChannel adversarial tests. Real pinned
+YARPC source review found candidate uses History::Method instead of generated
+HistoryService::Method and lacks cn caller transport header, placing reserved
+caller/service in app headers. Real generated Go peer validation/fix is next;
+do not merge from fake-peer results alone. History retains build lane.
+
+Runtime source checkpoint2de12942c adds filebased dynamic config and exact
+defaultStore lookup. Unbuilt. Parent review requests initial-load completion
+time passed into watcher (avoid losing bootstrap-time updates), real Go null
+root/property and malformed constraints oracle, and typed diagnostic parity.
+Watcher lifecycle review fixed mutable receiver, Drop abort and cleanup error
+aggregation. Main/mixed harness still pending.
+
+SD router3ece21e23 plus18c9edce9 corrects partial move and Go unsigned port
+parsing (plus signs rejected). c67b43457 adds isolated advisory cached-owner
+probe. None built/merged. Full integration audit found registry get checks
+Ring both before reuse and publication, maintenance evicts by Ring, and remote
+forward/query/partition routes use Ring directly. Must integrate shared async
+routing and local executor assignment policy coherently across these surfaces;
+preflight alone is insufficient. Runtime and swim coordinating async assignment
+refresh plus sync processor snapshot validation for publication and unload.
+Root user source hashes remain d5d9f593 (registry),d7ae805e (processor); isolated
+worker baselines include test seams and differ, so extract reviewed additive
+diffs, never blindly import user snapshot commits. Disk39GB free.
