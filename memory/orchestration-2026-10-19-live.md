@@ -440,3 +440,44 @@ candidate discovery already implemented elsewhere. No History service
 migration started. Root remains exactly user AGENTS/registry/processor edits.
 Runtime resumed in root read-only once; corrected before edits. Explicit
 absolute paths/workdir remain mandatory.
+
+### Accepted History transport and next frozen runtime
+
+Accepted/pushed full History transport source+evidence to rootfdb3b971a.
+All62 changed files byte-equal validated worker10ff059f9; root user registry
+and processor hashes unchanged. Source55e641fb1, evidence9b84238d4/10ff059f9.
+Actual Go peer final test and exact all-target strict Clippy pass; evidence
+at memory/evidence/matching-history-tchannel-20261020-attempt6/README.md.
+
+Runtime owns sole build lane. Initial candidate omitted accepted SD config and
+user callback dependencies; fixed only in isolated worktree. A duplicate local
+cache1.6GB was accidentally created; all further builds require shared target.
+First logged compile failed String-to-anyhow conversion. Runtime merged full
+accepted rootfdb3b971a, coherent checkpoint7070bfaf3, post-merge no-run passed
+exit0 in tmux sd-dns-norun (6m37s). Evidence matching-dns-build-20261020.
+Focused config pass,10 SD tests pass; routing9/10 initially with incorrect
+expected spectator calls4 vs actual3; parent reviewed and accepted test-only
+correction, rerun pending. Processor filter matched0; extract prior isolated
+50ce04f1b test seams/cases, not evidence of coverage. Dynamic Go oracle and
+actual SD Go interop/mixed production SDK gate still pending. Production static
+TChannel selection still needs wiring after accepted transport merge.
+
+Runtime source75d334913 separately imports user processor snapshot;2ac06b995
+main/executor assembly;b68e183ff peer TTL routing cache;bef46add3 cleanup fixes.
+Explicit full config merge required, not selected struct copies. Root user files
+remain preserved. Do not release lane before planned focused/mixed validation.
+
+Swim new worktree matching-task-store-abstraction, branch
+codex/matching-task-store-abstraction:03524be3f backend-neutral sync trait,
+32a240b7f MySQL task adapter source,1c234e2d MySQL domain reader source.
+No compile/tests/lock resolution. mysql26.0.1 minimal-rust/rustls-ring proposed;
+Cargo.lock deliberately unchanged. Per-call timeout/config scope still open.
+Real MySQL Go/Rust interop harness source underway; Docker available/no MySQL
+container running. Avoid stale original worktree paths for next agent task.
+
+History worker now matching-telemetry isolated worktree:9a137f96a sink+outer
+History instrumentation,a64c4bb0b cancellation guard,d4d3715db Prometheus sink.
+Source-only unbuilt. Real Go Tally reporter oracle and summary timer support
+underway; actual Go default is summary (config comment wrong). StatsD/M3 and
+production metrics injection/instrumentation remain required. All new slices
+serve Matching only; no next-service migration.
