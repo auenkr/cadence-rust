@@ -13,6 +13,7 @@ use crate::{
     },
 };
 use postgres::{config::SslMode, types::ToSql, Client, Config, NoTls};
+use crate::SemaphorePersistence;
 use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, Condvar, Mutex},
@@ -633,6 +634,57 @@ impl MatchingTaskStore for PostgresTaskStore {
             return Err(StorageError::DeleteCount(affected as usize));
         }
         Ok(())
+    }
+}
+
+impl crate::SemaphorePersistence for PostgresTaskStore {
+    fn create_semaphore(
+        &self,
+        domain: &str,
+        name: &str,
+        size: i32,
+        bucket_size: i32,
+    ) -> std::result::Result<crate::SemaphoreMetadata, crate::SemaphoreError> {
+        crate::SqlUnsupportedSemaphorePersistence.create_semaphore(
+            domain,
+            name,
+            size,
+            bucket_size,
+        )
+    }
+
+    fn scan_semaphore_bucket(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+    ) -> std::result::Result<Vec<crate::SemaphoreRow>, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.scan_semaphore_bucket(domain_id, name, bucket)
+    }
+
+    fn get_semaphore_ownership_by_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+    ) -> std::result::Result<String, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.get_semaphore_ownership_by_token(
+            domain_id, name, bucket, token_id,
+        )
+    }
+
+    fn grant_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> std::result::Result<crate::GrantOutcome, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.grant_semaphore_token(
+            domain_id, name, bucket, token_id, owner_id,
+        )
     }
 }
 
