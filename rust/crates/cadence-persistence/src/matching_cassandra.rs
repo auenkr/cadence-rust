@@ -261,6 +261,10 @@ fn task_ttl(data: &TaskData) -> Option<i32> {
     (seconds > 0).then(|| seconds.min(630_720_000) as i32)
 }
 
+fn task_not_expired(data: &TaskData, now_nanos: i64) -> bool {
+    data.expiry_nanos <= 0 || data.expiry_nanos > now_nanos
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +282,8 @@ mod tests {
         assert!(literal.contains("workflow_id: 'worker''s workflow'"));
         assert!(literal.contains("partition_config: {'group': 'blue'}"));
         assert_eq!(task_ttl(&task), Some(2), "Go truncates TTL seconds");
+        assert!(!task_not_expired(&task, task.expiry_nanos));
+        assert!(task_not_expired(&task, task.expiry_nanos - 1));
         let subsecond = TaskData {
             expiry_nanos: 1_900_000_000,
             ..task
@@ -473,7 +479,11 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
             Some((_, task)) => task.data.created_nanos,
             None => self.get_task_list(key)?.data.last_updated_nanos,
         };
+        let mut inserted = 0;
         for (_, task) in tasks {
+            if !task_not_expired(&task.data, now_nanos) {
+                continue;
+            }
             let ttl = task_ttl(&task.data)
                 .map(|ttl| format!(" USING TTL {ttl}"))
                 .unwrap_or_default();
@@ -482,12 +492,13 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 key.domain_id, cql_text(&key.name), key.task_type, TASK_ROW, task.task_id,
                 task_literal(key.domain_id, &task.data)?, task.data.created_nanos.div_euclid(1_000_000)
             ) + &ttl));
+            inserted += 1;
         }
         batch.append_statement(Statement::new(format!(
             "UPDATE tasks SET range_id={}, last_updated_time={} WHERE domain_id={} AND task_list_name={} AND task_list_type={} AND type={} AND task_id={} IF range_id={}",
             range, now_nanos.div_euclid(1_000_000), key.domain_id, cql_text(&key.name), key.task_type, LIST_ROW, LIST_SENTINEL, range)));
         let values = std::iter::repeat(())
-            .take(tasks.len() + 1)
+            .take(inserted + 1)
             .collect::<Vec<_>>();
         let session = self.session();
         let result = self
