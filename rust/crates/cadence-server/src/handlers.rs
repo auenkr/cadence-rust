@@ -94,13 +94,17 @@ impl AppState {
     pub fn semaphore_store_for_domain(
         &self,
         domain: &str,
-    ) -> Result<Arc<dyn cadence_persistence::SemaphorePersistence>, EntityNotExistsError> {
+    ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError> {
+        let metadata = self.domains.describe(&cadence_api::service_types::DescribeDomainRequest {
+            name: Some(domain.to_string()), uuid: None,
+        })?;
+        let domain_id = metadata.domain_info.map(|info| info.uuid).unwrap_or_default();
         if let Some(store) = &self.semaphore_persistence {
             // Preserve the frontend metadata lookup before calling persistence.
             self.execution_store(domain)?;
-            return Ok(store.clone());
+            return Ok((store.clone(), domain_id));
         }
-        Ok(Arc::new(self.execution_store(domain)?))
+        Ok((Arc::new(self.execution_store(domain)?), domain_id))
     }
 
     pub fn domain_policy(&self, domain: &str) -> cadence_persistence::domain_update::DomainPolicy {
@@ -353,12 +357,12 @@ async fn create_semaphore(
             ),
         );
     }
-    let semaphores = match state.semaphore_store_for_domain(&req.domain) {
+    let (semaphores, domain_id) = match state.semaphore_store_for_domain(&req.domain) {
         Ok(store) => store,
         Err(error) => return entity_not_exists(error),
     };
     match semaphores.create_semaphore(
-        &req.domain,
+        &domain_id,
         &req.semaphore_name,
         req.capacity,
         req.bucket_capacity,
@@ -391,6 +395,9 @@ async fn create_semaphore(
             cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE,
         ),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::SemaphoreError::Internal(message)) => error_response(
+            "InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message,
+        ),
     }
 }
 

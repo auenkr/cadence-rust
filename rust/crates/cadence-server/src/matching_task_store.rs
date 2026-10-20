@@ -20,6 +20,32 @@ pub struct ConfiguredMatchingStores {
     pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
 }
 
+/// Open the configured default store's semaphore adapter. SQL deliberately
+/// returns Go's unsupported implementation; Cassandra uses the same async
+/// session primitives as the task/domain adapters.
+pub async fn open_configured_semaphore_store(
+    persistence: &crate::config::PersistenceConfig,
+) -> anyhow::Result<Arc<dyn cadence_persistence::SemaphorePersistence>> {
+    let name = persistence.default_store.as_str();
+    let datastore = persistence.datastores.get(name).ok_or_else(|| {
+        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
+    })?;
+    if let Some(nosql) = datastore.nosql.as_ref() {
+        if nosql.plugin_name != "cassandra" {
+            anyhow::bail!("Matching NoSQL persistence does not support plugin {:?}; supported plugin is cassandra", nosql.plugin_name);
+        }
+        let config = cadence_persistence::cassandra::CassandraSessionConfig::from_parts(
+            nosql.hosts_list(), nosql.port, nosql.user.clone(), nosql.password.clone(), nosql.keyspace.clone(),
+        )?;
+        let session = std::sync::Arc::new(config.connect().await?);
+        return Ok(Arc::new(cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session)));
+    }
+    if datastore.sql.is_some() {
+        return Ok(Arc::new(cadence_persistence::SqlUnsupportedSemaphorePersistence));
+    }
+    anyhow::bail!("Matching defaultStore {name:?} has neither SQL nor NoSQL configuration")
+}
+
 /// Open Matching's configured default SQL store. MySQL task and domain reads
 /// share one pool so their combined connections obey Go's maxConns setting.
 pub fn open_configured_default_store(

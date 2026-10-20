@@ -1146,11 +1146,11 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
     semaphore_gate(state, &req.domain)?;
     validation::validate_create_semaphore_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    let semaphores = state
+    let (semaphores, domain_id) = state
         .semaphore_store_for_domain(&req.domain)
         .map_err(|e| AppError::entity_not_exists(e.message))?;
     match semaphores.create_semaphore(
-        &req.domain,
+        &domain_id,
         &req.semaphore_name,
         req.capacity,
         req.bucket_capacity,
@@ -1174,6 +1174,10 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
         )),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
+        }
+        Err(cadence_persistence::SemaphoreError::Internal(message)) => {
+            let error = cadence_api::errors::InternalServiceError::new(message.clone());
+            Err(AppError { exc_name: "InternalServiceError", value: error.to_thrift(), message })
         }
     }
 }

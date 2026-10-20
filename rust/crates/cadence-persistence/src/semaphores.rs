@@ -61,6 +61,8 @@ pub enum SemaphoreError {
     Invalid(String),
     #[error("{0}")]
     Exists(String),
+    #[error("{0}")]
+    Internal(String),
     /// The Go SQL metadata/token stores deliberately do not implement these
     /// operations. Do not invent a Rust-only schema in an existing database.
     #[error("distributed semaphore is not supported on the SQL persistence backend")]
@@ -76,6 +78,8 @@ pub enum AcquireError {
     NotFound(#[from] cadence_api::errors::EntityNotExistsError),
     #[error("{0}")]
     Invalid(String),
+    #[error("{0}")]
+    Internal(String),
 }
 
 /// Persistence boundary for Matching's semaphore metadata and bucket rows.
@@ -86,11 +90,16 @@ pub enum AcquireError {
 pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
     async fn create_semaphore(
         &self,
-        domain: &str,
+        domain_id: &str,
         name: &str,
         size: i32,
         bucket_size: i32,
     ) -> Result<SemaphoreMetadata, SemaphoreError>;
+    async fn get_semaphore_metadata(
+        &self,
+        domain_id: &str,
+        name: &str,
+    ) -> Result<SemaphoreMetadata, AcquireError>;
     async fn scan_semaphore_bucket(
         &self,
         domain_id: &str,
@@ -104,6 +113,15 @@ pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
         bucket: i32,
         token_id: i32,
     ) -> Result<String, AcquireError>;
+    async fn get_semaphore_ownership_by_owner(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        owner_id: &str,
+    ) -> Result<i32, AcquireError> {
+        Err(AcquireError::Invalid(SqlUnsupportedSemaphorePersistence::MESSAGE.into()))
+    }
     async fn grant_semaphore_token(
         &self,
         domain_id: &str,
@@ -112,6 +130,16 @@ pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
         token_id: i32,
         owner_id: &str,
     ) -> Result<GrantOutcome, AcquireError>;
+    async fn release_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> Result<bool, AcquireError> {
+        Err(AcquireError::Invalid(SqlUnsupportedSemaphorePersistence::MESSAGE.into()))
+    }
 }
 
 /// Go's SQL metadata and token stores return this BadRequest for every call.
@@ -135,6 +163,14 @@ impl SemaphorePersistence for SqlUnsupportedSemaphorePersistence {
         Err(SemaphoreError::UnsupportedBackend)
     }
 
+    async fn get_semaphore_metadata(
+        &self,
+        _domain_id: &str,
+        _name: &str,
+    ) -> Result<SemaphoreMetadata, AcquireError> {
+        Err(AcquireError::Invalid(Self::MESSAGE.into()))
+    }
+
     async fn scan_semaphore_bucket(
         &self,
         _domain_id: &str,
@@ -154,6 +190,16 @@ impl SemaphorePersistence for SqlUnsupportedSemaphorePersistence {
         Err(AcquireError::Invalid(Self::MESSAGE.into()))
     }
 
+    async fn get_semaphore_ownership_by_owner(
+        &self,
+        _domain_id: &str,
+        _name: &str,
+        _bucket: i32,
+        _owner_id: &str,
+    ) -> Result<i32, AcquireError> {
+        Err(AcquireError::Invalid(Self::MESSAGE.into()))
+    }
+
     async fn grant_semaphore_token(
         &self,
         _domain_id: &str,
@@ -164,9 +210,20 @@ impl SemaphorePersistence for SqlUnsupportedSemaphorePersistence {
     ) -> Result<GrantOutcome, AcquireError> {
         Err(AcquireError::Invalid(Self::MESSAGE.into()))
     }
+
+    async fn release_semaphore_token(
+        &self,
+        _domain_id: &str,
+        _name: &str,
+        _bucket: i32,
+        _token_id: i32,
+        _owner_id: &str,
+    ) -> Result<bool, AcquireError> {
+        Err(AcquireError::Invalid(Self::MESSAGE.into()))
+    }
 }
 
-pub(crate) fn bucket_budget(bucket_size: i32) -> i32 {
+pub fn bucket_budget(bucket_size: i32) -> i32 {
     if bucket_size <= 0 {
         DEFAULT_BUCKET_SIZE
     } else {
@@ -195,12 +252,33 @@ impl super::InMemoryExecutionStore {
                 "BucketSize must not exceed {MAX_BUCKET_SIZE}, got {bucket_size}"
             )));
         }
+        let namespace = self.inner.read().expect("execution store lock").domain_id(domain);
+        self.create_semaphore_by_id(&namespace, name, size, bucket_size)
+    }
+
+    /// Persist metadata after the frontend has resolved a domain name through
+    /// its domain cache. Cassandra keys metadata by domain UUID, as Go does.
+    pub fn create_semaphore_by_id(
+        &self,
+        domain_id: &str,
+        name: &str,
+        size: i32,
+        bucket_size: i32,
+    ) -> Result<SemaphoreMetadata, SemaphoreError> {
+        if size <= 0 {
+            return Err(SemaphoreError::Invalid(format!("Size must be positive, got {size}")));
+        }
+        if !(0..=MAX_BUCKET_SIZE).contains(&bucket_size) {
+            return Err(SemaphoreError::Invalid(format!(
+                "BucketSize must not exceed {MAX_BUCKET_SIZE}, got {bucket_size}"
+            )));
+        }
         let mut inner = self.inner.write().expect("execution store lock");
-        let namespace = inner.domain_id(domain);
+        let namespace = domain_id.to_string();
         let key = (namespace, name.to_string());
         if inner.semaphores.contains_key(&key) {
             return Err(SemaphoreError::Exists(format!(
-                "semaphore {name:?} already exists in domain {domain:?}"
+                "semaphore {name:?} already exists in domain {domain_id:?}"
             )));
         }
         let metadata = SemaphoreMetadata {
@@ -213,6 +291,19 @@ impl super::InMemoryExecutionStore {
         };
         inner.semaphores.insert(key, metadata.clone());
         Ok(metadata)
+    }
+
+    pub fn get_semaphore_metadata(
+        &self,
+        domain_id: &str,
+        name: &str,
+    ) -> Result<SemaphoreMetadata, AcquireError> {
+        self.inner.read().expect("execution store lock")
+            .semaphores.get(&(domain_id.to_string(), name.to_string()))
+            .cloned()
+            .ok_or_else(|| AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(
+                format!("semaphore {name:?} does not exist in domain {domain_id:?}"),
+            )))
     }
 
     /// Grant a token slot immediately or report `NoSlot`, mirroring Go's
@@ -395,6 +486,24 @@ impl super::InMemoryExecutionStore {
             .unwrap_or_default())
     }
 
+    pub fn get_semaphore_ownership_by_owner(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        owner_id: &str,
+    ) -> Result<i32, AcquireError> {
+        let inner = self.inner.read().expect("execution store lock");
+        Self::semaphore_budget(&inner, domain_id, name)?;
+        inner.semaphore_holds
+            .get(&(domain_id.to_string(), name.to_string(), bucket))
+            .and_then(|holds| holds.iter().find(|hold| hold.owner_id == owner_id))
+            .map(|hold| hold.token_id)
+            .ok_or_else(|| AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(
+                format!("semaphore owner {owner_id:?} does not hold a token in bucket {bucket}"),
+            )))
+    }
+
     /// Conditional grant of one token to an owner, mirroring
     /// `GrantSemaphoreToken`. Returns `AlreadyHeld(held_token)` when the
     /// owner already holds a token, `SlotTaken` when another owner holds the
@@ -432,6 +541,26 @@ impl super::InMemoryExecutionStore {
         Ok(GrantOutcome::Applied)
     }
 
+    pub fn release_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> Result<bool, AcquireError> {
+        let mut inner = self.inner.write().expect("execution store lock");
+        Self::semaphore_budget(&inner, domain_id, name)?;
+        let Some(holds) = inner.semaphore_holds.get_mut(&(
+            domain_id.to_string(), name.to_string(), bucket,
+        )) else {
+            return Ok(false);
+        };
+        let before = holds.len();
+        holds.retain(|hold| !(hold.owner_id == owner_id && hold.token_id == token_id));
+        Ok(holds.len() != before)
+    }
+
     /// Release one owner's hold of a token, mirroring
     /// `ReleaseSemaphoreToken`. Returns whether the row was cleared.
     pub fn release_semaphore_token(
@@ -461,12 +590,20 @@ impl super::InMemoryExecutionStore {
 impl SemaphorePersistence for super::InMemoryExecutionStore {
     async fn create_semaphore(
         &self,
-        domain: &str,
+        domain_id: &str,
         name: &str,
         size: i32,
         bucket_size: i32,
     ) -> Result<SemaphoreMetadata, SemaphoreError> {
-        super::InMemoryExecutionStore::create_semaphore(self, domain, name, size, bucket_size)
+        super::InMemoryExecutionStore::create_semaphore_by_id(self, domain_id, name, size, bucket_size)
+    }
+
+    async fn get_semaphore_metadata(
+        &self,
+        domain_id: &str,
+        name: &str,
+    ) -> Result<SemaphoreMetadata, AcquireError> {
+        super::InMemoryExecutionStore::get_semaphore_metadata(self, domain_id, name)
     }
 
     async fn scan_semaphore_bucket(
@@ -490,6 +627,18 @@ impl SemaphorePersistence for super::InMemoryExecutionStore {
         )
     }
 
+    async fn get_semaphore_ownership_by_owner(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        owner_id: &str,
+    ) -> Result<i32, AcquireError> {
+        super::InMemoryExecutionStore::get_semaphore_ownership_by_owner(
+            self, domain_id, name, bucket, owner_id,
+        )
+    }
+
     async fn grant_semaphore_token(
         &self,
         domain_id: &str,
@@ -499,6 +648,19 @@ impl SemaphorePersistence for super::InMemoryExecutionStore {
         owner_id: &str,
     ) -> Result<GrantOutcome, AcquireError> {
         super::InMemoryExecutionStore::grant_semaphore_token(
+            self, domain_id, name, bucket, token_id, owner_id,
+        )
+    }
+
+    async fn release_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> Result<bool, AcquireError> {
+        super::InMemoryExecutionStore::release_semaphore_token(
             self, domain_id, name, bucket, token_id, owner_id,
         )
     }

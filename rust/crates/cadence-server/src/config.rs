@@ -397,8 +397,32 @@ pub struct NosqlConfig {
     pub user: String,
     #[serde(default)]
     pub password: String,
+    #[serde(default, rename = "allowedAuthenticators")]
+    pub allowed_authenticators: Vec<String>,
     #[serde(default)]
     pub keyspace: String,
+    #[serde(default)]
+    pub region: String,
+    #[serde(default)]
+    pub datacenter: String,
+    #[serde(default, rename = "maxConns")]
+    pub max_conns: i32,
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
+    #[serde(default, rename = "protoVersion")]
+    pub proto_version: i32,
+    #[serde(default, rename = "connectTimeout", deserialize_with = "de_go_duration")]
+    pub connect_timeout_nanos: i64,
+    #[serde(default, rename = "timeout", deserialize_with = "de_go_duration")]
+    pub timeout_nanos: i64,
+    #[serde(default)]
+    pub consistency: String,
+    #[serde(default, rename = "serialConsistency")]
+    pub serial_consistency: String,
+    #[serde(default, rename = "connectAttributes")]
+    pub connect_attributes: HashMap<String, String>,
+    #[serde(default, rename = "hostSelectionPolicy")]
+    pub host_selection_policy: String,
 }
 
 impl NosqlConfig {

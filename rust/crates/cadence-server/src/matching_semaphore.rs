@@ -98,6 +98,7 @@ impl From<AcquireError> for ManagerError {
         match error {
             AcquireError::NotFound(error) => ManagerError::NotFound(error.message),
             AcquireError::Invalid(message) => ManagerError::BadRequest(message),
+            AcquireError::Internal(message) => ManagerError::Internal(message),
         }
     }
 }
@@ -175,18 +176,25 @@ impl Manager {
     }
 
     async fn load(&self) -> Result<(), ManagerError> {
+        let metadata = self.store.get_semaphore_metadata(
+            &self.id.domain_id,
+            &self.id.semaphore_name,
+        ).await?;
         let rows = self.store.scan_semaphore_bucket(
             &self.id.domain_id,
             &self.id.semaphore_name,
             self.id.bucket,
         ).await?;
-        let mut free: HashMap<i32, ()> = HashMap::new();
+        let budget = cadence_persistence::semaphores::bucket_budget(metadata.bucket_size);
+        let mut free: HashMap<i32, ()> = (1..=budget).map(|token_id| (token_id, ())).collect();
         let mut held: HashMap<String, i32> = HashMap::new();
         for row in rows {
             match row {
                 SemaphoreRow::Token { token_id, holder } => {
                     if holder.is_empty() && token_id > 0 {
                         free.insert(token_id, ());
+                    } else {
+                        free.remove(&token_id);
                     }
                 }
                 SemaphoreRow::Owner {
