@@ -230,6 +230,8 @@ fn contains_uuid(value: &str) -> bool {
 }
 
 fn resolved_from_ring_host(host: Host) -> ResolvedHost {
+    // Read the derived identity before moving the address fields out of Host.
+    let identity = host.identity().to_owned();
     let mut named_ports = HashMap::new();
     if let Some(port) = endpoint_port(&host.address) {
         named_ports.insert(PORT_TCHANNEL.to_owned(), port);
@@ -239,7 +241,7 @@ fn resolved_from_ring_host(host: Host) -> ResolvedHost {
     }
     ResolvedHost {
         address: host.address,
-        identity: host.identity().to_owned(),
+        identity,
         named_ports,
         grpc_address: host.grpc_address,
     }
@@ -275,13 +277,12 @@ fn resolved_from_shard_owner(owner: ShardOwner) -> Result<ResolvedHost, RoutingE
 }
 
 fn parse_port(value: &str) -> Option<u16> {
-    // strconv.ParseUint accepts a single leading plus sign, but no whitespace
-    // or minus sign.
-    let digits = value.strip_prefix('+').unwrap_or(value);
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+    // Go strconv.ParseUint(s, 10, 16) accepts decimal digits only: no sign,
+    // whitespace, or base-0 underscore syntax.
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    digits.parse::<u16>().ok()
+    value.parse::<u16>().ok()
 }
 
 fn endpoint_port(endpoint: &str) -> Option<u16> {
@@ -553,8 +554,12 @@ mod tests {
         assert!(route.named_ports.is_empty());
         assert!(route.grpc_address.is_empty());
 
-        assert_eq!(parse_port("+07833"), Some(7833));
+        assert_eq!(parse_port("07833"), Some(7833));
+        assert_eq!(parse_port("+7833"), None);
         assert_eq!(parse_port("-1"), None);
+        assert_eq!(parse_port(" 7833"), None);
+        assert_eq!(parse_port("7_833"), None);
+        assert_eq!(parse_port("65536"), None);
     }
 
     #[tokio::test]
