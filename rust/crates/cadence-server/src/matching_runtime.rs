@@ -50,6 +50,17 @@ pub struct MatchingRuntime {
 }
 
 impl MatchingRuntime {
+    /// Install the production sink on the handler and maintenance registry so
+    /// work reached through either retained runtime handle shares one reporter.
+    pub fn with_metrics(mut self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
+        let metrics = crate::matching_metrics::MatchingMetrics::new(sink.clone());
+        self.matching = self.matching.with_metrics(sink);
+        if let Some(registry) = self.registry.take() {
+            self.registry = Some(registry.with_metrics(metrics));
+        }
+        self
+    }
+
     pub fn in_memory(state: crate::handlers::AppState, drain_duration: DrainDuration) -> Self {
         Self {
             matching: Matching::new(state),

@@ -42,6 +42,11 @@ pub struct MetricEvent {
 
 pub trait MetricSink: Send + Sync + 'static {
     fn record(&self, event: MetricEvent);
+
+    /// Flush buffered reporter state after Matching has drained traffic.
+    fn flush(&self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]

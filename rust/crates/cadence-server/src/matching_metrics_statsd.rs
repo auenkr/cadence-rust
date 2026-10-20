@@ -17,7 +17,7 @@ use std::{
 };
 
 const CADENCE_SERVICE_TAG: &str = "cadence_service";
-const MATCHING_SERVICE: &str = "cadence_matching";
+const MATCHING_SERVICE: &str = "cadence-matching";
 const DEFAULT_PACKET_BYTES: usize = 1432;
 const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_millis(300);
 const DEFAULT_REPORTING_INTERVAL: Duration = Duration::from_secs(1);
@@ -337,6 +337,10 @@ impl MetricSink for StatsdMetricSink {
             _ => {}
         }
     }
+
+    fn flush(&self) -> io::Result<()> {
+        StatsdMetricSink::flush(self)
+    }
 }
 
 impl Drop for StatsdMetricSink {
@@ -572,7 +576,7 @@ mod tests {
         let mut packet = [0; 1024];
         let size = receiver.recv(&mut packet).unwrap();
         let line = std::str::from_utf8(&packet[..size]).unwrap();
-        assert_eq!(line, "agent.cadence.cadence_client_requests.cadence_role.history_client.cadence_service.cadence_matching.operation.HistoryClientGetMutableState.zone.west:1|c\n");
+        assert_eq!(line, "agent.cadence.cadence_client_requests.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientGetMutableState.zone.west:1|c\n");
     }
 
     #[test]
@@ -630,15 +634,15 @@ mod tests {
         let timer = receiver.recv(&mut packet).unwrap();
         assert!(std::str::from_utf8(&packet[..timer])
             .unwrap()
-            .contains("scope.elapsed.cadence_service.cadence_matching:7|ms"));
+            .contains("scope.elapsed.cadence_service.cadence-matching:7|ms"));
         sink.flush().unwrap();
         let size = receiver.recv(&mut packet).unwrap();
         let lines: std::collections::BTreeSet<_> = std::str::from_utf8(&packet[..size])
             .unwrap()
             .lines()
             .collect();
-        assert!(lines.contains("scope.requests.cadence_service.cadence_matching:5|c"));
-        assert!(lines.contains("scope.queue.cadence_service.cadence_matching:9|g"));
-        assert!(lines.contains("scope.latency.cadence_service.cadence_matching.10ms-25ms:2|c"));
+        assert!(lines.contains("scope.requests.cadence_service.cadence-matching:5|c"));
+        assert!(lines.contains("scope.queue.cadence_service.cadence-matching:9|g"));
+        assert!(lines.contains("scope.latency.cadence_service.cadence-matching.10ms-25ms:2|c"));
     }
 }

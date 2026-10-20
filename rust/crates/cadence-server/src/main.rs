@@ -748,6 +748,25 @@ async fn main() -> anyhow::Result<()> {
                     .unwrap_or(7935),
             );
             let run_matching = wanted.contains(&service::ServiceName::Matching);
+            let default_matching_metrics = config::MetricsConfig::default();
+            let matching_service_config = cfg.services.get("matching");
+            let matching_metrics_config = matching_service_config
+                .map(|service| &service.metrics)
+                .unwrap_or(&default_matching_metrics);
+            let mut matching_metrics_runtime = if run_matching {
+                let mut runtime =
+                    cadence_server::matching_metrics_runtime::MatchingMetricsRuntime::new(
+                        matching_metrics_config,
+                        matching_service_config.map(|service| &service.pprof),
+                    )?;
+                runtime.start().await?;
+                Some(runtime)
+            } else {
+                None
+            };
+            let matching_metric_sink = matching_metrics_runtime
+                .as_ref()
+                .map(|runtime| runtime.sink());
             let matching_http_addr = if run_matching {
                 matching_rpc
                     .as_ref()
@@ -806,6 +825,11 @@ async fn main() -> anyhow::Result<()> {
                             std::time::Duration::from_secs(1),
                             32 * 1024 * 1024,
                         );
+                        let history = if let Some(sink) = matching_metric_sink.as_ref() {
+                            history.with_metrics(sink.clone())
+                        } else {
+                            history
+                        };
                         let cache = matching_domain_cache.clone().ok_or_else(|| {
                             anyhow::anyhow!("configured Matching persistence requires its production domain cache")
                         })?;
@@ -842,6 +866,11 @@ async fn main() -> anyhow::Result<()> {
                             std::time::Duration::from_secs(1),
                             32 * 1024 * 1024,
                         );
+                        let history = if let Some(sink) = matching_metric_sink.as_ref() {
+                            history.with_metrics(sink.clone())
+                        } else {
+                            history
+                        };
                         match matching_domain_cache.clone() {
                             Some(cache) => cadence_server::matching_runtime::MatchingRuntime::with_durable_queues_and_domain_cache(
                                 state.clone(),
@@ -874,10 +903,20 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
+            if let Some(sink) = matching_metric_sink.as_ref() {
+                matching_runtime = matching_runtime
+                    .take()
+                    .map(|runtime| runtime.with_metrics(sink.clone()));
+            }
             let matching_service = matching_runtime
                 .as_ref()
                 .map(|runtime| runtime.matching().clone())
                 .unwrap_or_else(|| cadence_server::grpc_matching::Matching::new(state.clone()));
+            let matching_service = matching_metric_sink
+                .as_ref()
+                .map_or(matching_service.clone(), |sink| {
+                    matching_service.with_metrics(sink.clone())
+                });
             let app = if run_matching {
                 if matching_http_addr.is_some() {
                     app
@@ -1029,6 +1068,9 @@ async fn main() -> anyhow::Result<()> {
                 result?;
             }
             shutdown?;
+            if let Some(metrics) = matching_metrics_runtime.as_mut() {
+                metrics.shutdown().await?;
+            }
             println!("shutting down");
         }
         Command::Version => {

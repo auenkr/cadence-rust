@@ -35,6 +35,7 @@ pub mod matching_metrics;
 pub mod matching_metrics_prometheus;
 pub mod matching_metrics_statsd;
 pub mod matching_metrics_m3;
+pub mod matching_metrics_runtime;
 // The resolver carries tonic Status through matching placement call paths.
 #[allow(clippy::result_large_err)]
 pub mod matching_history_peer_resolver;

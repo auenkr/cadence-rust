@@ -374,6 +374,10 @@ impl MetricSink for M3MetricSink {
             _ => {}
         }
     }
+
+    fn flush(&self) -> io::Result<()> {
+        M3MetricSink::flush(self)
+    }
 }
 
 impl Drop for M3MetricSink {
@@ -734,7 +738,7 @@ mod tests {
                 ..Default::default()
             },
             "scope",
-            BTreeMap::from([("cadence_service".into(), "cadence_matching".into())]),
+            BTreeMap::from([("cadence_service".into(), "cadence-matching".into())]),
             Duration::from_secs(60),
         )
         .unwrap()

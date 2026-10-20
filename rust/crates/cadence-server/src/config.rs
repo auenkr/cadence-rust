@@ -11,7 +11,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// Mirrors Go dynamic config `worker.enableScheduler` (default false):
     /// schedule APIs are rejected until the operator enables them.
@@ -43,6 +43,45 @@ pub struct Config {
     /// Matching's shard-manager namespace/executor settings.
     #[serde(default, rename = "shard-distributor-matching")]
     pub shard_distributor_matching: ShardDistributorMatchingConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricsConfig {
+    #[serde(default)]
+    pub m3: Option<crate::matching_metrics_m3::M3MetricsConfig>,
+    #[serde(default)]
+    pub statsd: Option<crate::matching_metrics_statsd::StatsdMetricsConfig>,
+    #[serde(default)]
+    pub prometheus: Option<crate::matching_metrics_prometheus::PrometheusMetricsConfig>,
+    #[serde(default)]
+    pub tags: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub prefix: String,
+    #[serde(
+        default,
+        deserialize_with = "de_go_duration",
+        rename = "reportingInterval"
+    )]
+    pub reporting_interval_nanos: i64,
+}
+
+impl MetricsConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        let mut active_reporter = self.m3.is_some();
+        if let Some(statsd) = &self.statsd {
+            if active_reporter {
+                anyhow::bail!("metrics: cannot configure more than one reporter type (m3, statsd, prometheus)");
+            }
+            active_reporter = !statsd.host_port.trim().is_empty();
+        }
+        if self.prometheus.is_some() && active_reporter {
+            anyhow::bail!(
+                "metrics: cannot configure more than one reporter type (m3, statsd, prometheus)"
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -417,10 +456,22 @@ impl Default for LogConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ServiceConfig {
     #[serde(default)]
     pub rpc: RpcConfig,
+    #[serde(default, skip_serializing)]
+    pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub pprof: PProfConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PProfConfig {
+    #[serde(default, deserialize_with = "de_flex_u16")]
+    pub port: u16,
+    #[serde(default)]
+    pub host: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -832,22 +883,20 @@ shard-distributor-matching:
     fn shard_distributor_rejects_invalid_namespace_and_heartbeat_interval() {
         let mut cfg = Config::development().unwrap();
         cfg.shard_distributor_matching.namespaces[0].heartbeat_interval_nanos = 0;
-        assert!(
-            cfg.validate()
-                .unwrap_err()
-                .to_string()
-                .contains("heartbeat_interval")
-        );
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("heartbeat_interval"));
         cfg.shard_distributor_matching.namespaces[0].heartbeat_interval_nanos = 1;
         cfg.shard_distributor_matching.namespaces[0]
             .namespace
             .clear();
-        assert!(
-            cfg.validate()
-                .unwrap_err()
-                .to_string()
-                .contains("cannot be empty")
-        );
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be empty"));
     }
 
     #[test]
@@ -878,24 +927,59 @@ shard-distributor-matching:
         let err = Config::from_yaml("ringpop: {name: x, bootstrapMode: custom}")
             .unwrap()
             .ringpop;
-        assert!(
-            err.clone()
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("custom is not supported")
-        );
+        assert!(err
+            .clone()
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("custom is not supported"));
         let missing = Config::from_yaml("ringpop: {name: x, bootstrapMode: hosts}")
             .unwrap()
             .ringpop;
-        assert!(
-            missing
-                .clone()
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("boostrap hosts")
-        );
+        assert!(missing
+            .clone()
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("boostrap hosts"));
         assert!(Config::from_yaml("ringpop: {name: x, bootstrapMode: weird}").is_err());
+    }
+
+    #[test]
+    fn metrics_configuration_preserves_single_reporter_selection() {
+        let parsed = Config::from_yaml(
+            "services: {matching: {metrics: {prefix: cadence, reportingInterval: 250ms, tags: {zone: west}, statsd: {hostPort: ''}}}}",
+        )
+        .unwrap();
+        let parsed = &parsed.services["matching"].metrics;
+        assert_eq!(parsed.prefix, "cadence");
+        assert_eq!(parsed.reporting_interval_nanos, 250_000_000);
+        assert_eq!(parsed.tags.get("zone").map(String::as_str), Some("west"));
+        parsed.validate().unwrap();
+        let multiple =
+            Config::from_yaml("services: {matching: {metrics: {statsd: {hostPort: '127.0.0.1:8125'}, prometheus: {}}}}")
+                .unwrap();
+        assert!(multiple.services["matching"]
+            .metrics
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("more than one reporter"));
+        let empty_statsd_plus_prom = Config::from_yaml(
+            "services: {matching: {metrics: {statsd: {hostPort: ''}, prometheus: {}}}}",
+        )
+        .unwrap();
+        empty_statsd_plus_prom.services["matching"]
+            .metrics
+            .validate()
+            .unwrap();
+        let m3_plus_empty_statsd = Config::from_yaml(
+            "services: {matching: {metrics: {m3: {hostPort: '127.0.0.1:8125', service: cadence, env: dev}, statsd: {hostPort: ''}}}}",
+        )
+        .unwrap();
+        assert!(m3_plus_empty_statsd.services["matching"]
+            .metrics
+            .validate()
+            .is_err());
     }
 }
