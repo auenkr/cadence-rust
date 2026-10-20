@@ -644,9 +644,19 @@ func (s *matchingEngineSuite) TestAddTaskTrafficMetricOracle() {
 	s.Equal(errRemoteSyncMatchFailed, err)
 
 	counters := scope.Snapshot().Counters()
-	s.EqualValues(1, counters["oracle.cadence_tasklist_request+domain=matching-test,matching_host=oracle-host,operation=AddTask,tasklist=metric-task,tasklistType=decision_task"])
-	s.EqualValues(1, counters["oracle.cadence_tasklist_request+domain=matching-test,matching_host=oracle-host,operation=AddTask,tasklist=metric-task,tasklistType=activity_task"])
-	s.Len(counters, 2, "forwarded traffic is excluded from the AddTask counter")
+	decisionCounter := counters["oracle.cadence_tasklist_request+domain=matching-test,matching_host=oracle-host,operation=AddTask,tasklist=metric_task,tasklistType=decision_task"]
+	activityCounter := counters["oracle.cadence_tasklist_request+domain=matching-test,matching_host=oracle-host,operation=AddTask,tasklist=metric_task,tasklistType=activity_task"]
+	s.NotNil(decisionCounter)
+	s.NotNil(activityCounter)
+	s.EqualValues(1, decisionCounter.Value())
+	s.EqualValues(1, activityCounter.Value())
+	addTaskCounters := 0
+	for name := range counters {
+		if strings.HasPrefix(name, "oracle.cadence_tasklist_request+") {
+			addTaskCounters++
+		}
+	}
+	s.Equal(2, addTaskCounters, "forwarded traffic is excluded from the AddTask counter")
 }
 
 func (s *matchingEngineSuite) AddTasksTest(taskType int, isForwarded bool) {
