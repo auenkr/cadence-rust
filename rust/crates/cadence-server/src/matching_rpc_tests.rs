@@ -8,6 +8,20 @@ use cadence_proto::history as h;
 use m::matching_api_server::MatchingApi;
 use std::{num::NonZeroU32, time::Duration};
 use uuid::Uuid;
+
+struct FailingShardOwnerLookup;
+impl crate::matching_shard_routing::ShardOwnerLookup for FailingShardOwnerLookup {
+    fn get_shard_owner(
+        &self,
+        _shard_key: String,
+        _deadline: tokio::time::Instant,
+    ) -> crate::matching_shard_distributor::BoxFuture<
+        Result<crate::matching_shard_distributor::ShardOwner, String>,
+    > {
+        Box::pin(async { Err("spectator unavailable".into()) })
+    }
+}
+
 fn fixture() -> (
     tempfile::TempDir,
     Arc<SqliteTaskStore>,
@@ -69,6 +83,143 @@ fn execution() -> Option<p::WorkflowExecution> {
         run_id: Uuid::from_u128(2).to_string(),
     })
 }
+
+#[tokio::test]
+async fn matching_remote_routing_propagates_spectator_failure_without_ring_fallback() {
+    use cadence_common::membership::Host;
+
+    let (_dir, _store, matching, _key) = fixture();
+    let router = crate::matching_shard_routing::MatchingShardRouter::new(
+        crate::matching_membership::Membership::new(
+            "self",
+            vec![Host {
+                address: "self:7935".into(),
+                identity: "self".into(),
+                grpc_address: "self:7835".into(),
+            }],
+        ),
+        Some(Arc::new(FailingShardOwnerLookup)),
+        Arc::new(|| 100),
+        Arc::new(|| false),
+    );
+    let matching = matching.with_shard_router(router);
+    let error = matching
+        .remote_channel_for_task_list("eligible-task-list")
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert!(error.message().contains("spectator unavailable"));
+}
+
+#[tokio::test]
+async fn durable_queue_runs_ownership_preflight_before_registry_and_propagates_transient_error() {
+    use cadence_common::membership::Host;
+    use std::sync::Mutex;
+
+    let (_dir, _store, matching, key) = fixture();
+    let membership = crate::matching_membership::Membership::new(
+        "self",
+        vec![Host {
+            address: "self:7935".into(),
+            identity: "self".into(),
+            grpc_address: "self:7835".into(),
+        }],
+    );
+    let matching = matching.with_membership(membership);
+    let list = p::TaskList {
+        name: key.name.clone(),
+        kind: 1,
+        ..Default::default()
+    };
+    matching
+        .durable_queue(&key.domain_id.to_string(), &list, 0)
+        .await
+        .unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let check = {
+        let seen = seen.clone();
+        Arc::new(move |name: String, cached: bool| {
+            seen.lock().unwrap().push((name, cached));
+            Box::pin(async { Err(tonic::Status::unavailable("SD heartbeat failed")) })
+                as std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send>,
+                >
+        })
+    };
+    let matching = matching.with_task_list_ownership(check);
+    let error = matching
+        .durable_queue(&key.domain_id.to_string(), &list, 0)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert_eq!(*seen.lock().unwrap(), vec![(key.name.clone(), true)]);
+    assert!(matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .contains_cached(&key));
+}
+
+#[tokio::test]
+async fn durable_queue_preserves_typed_not_owned_error_from_shutdown_policy() {
+    use cadence_common::membership::Host;
+
+    let (_dir, _store, matching, key) = fixture();
+    let membership = crate::matching_membership::Membership::new(
+        "self",
+        vec![Host {
+            address: "self:7935".into(),
+            identity: "self".into(),
+            grpc_address: "self:7835".into(),
+        }],
+    );
+    let error_membership = membership.clone();
+    let check: crate::grpc_matching::TaskListOwnershipCheck =
+        Arc::new(move |name: String, _cached: bool| {
+            let error_membership = error_membership.clone();
+            Box::pin(async move {
+                Err(error_membership.task_list_not_owned_by(&name, "not known"))
+            })
+                as std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<Output = Result<(), tonic::Status>> + Send,
+                    >,
+                >
+        });
+    let matching = matching
+        .with_membership(membership)
+        .with_task_list_ownership(check);
+    let list = p::TaskList {
+        name: key.name.clone(),
+        kind: 1,
+        ..Default::default()
+    };
+    let error = matching
+        .durable_queue(&key.domain_id.to_string(), &list, 0)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), tonic::Code::Aborted);
+    use prost::Message;
+    #[derive(prost::Message)]
+    struct Details {
+        #[prost(message, repeated, tag = "3")]
+        errors: Vec<prost_types::Any>,
+    }
+    let detail = Details::decode(error.details()).unwrap().errors.remove(0);
+    assert_eq!(
+        detail.type_url,
+        "type.googleapis.com/uber.cadence.shared.v1.TaskListNotOwnedByHostError"
+    );
+    assert!(!matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .contains_cached(&key));
+}
+
 fn list() -> Option<p::TaskList> {
     Some(p::TaskList {
         name: "queue".into(),

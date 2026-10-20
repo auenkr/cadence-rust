@@ -9,7 +9,7 @@ use cadence_proto::matching as m;
 use std::{
     collections::HashMap,
     num::NonZeroU32,
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, RwLock, Weak},
 };
 use tonic::Status;
 use uuid::Uuid;
@@ -23,6 +23,28 @@ fn registry_now() -> i64 {
 type Key = (Uuid, String, i32);
 type StartupGates = HashMap<Key, Weak<Mutex<()>>>;
 type LocalPollFactory = Arc<dyn Fn(QueueRegistry) -> crate::grpc_matching::Matching + Send + Sync>;
+
+/// Synchronous snapshot policy used while the queue registry lock is held.
+/// The RPC path refreshes assignment asynchronously before calling `get`;
+/// this policy closes races with assignment drain and startup publication.
+#[derive(Clone)]
+pub struct QueueOwnershipPolicy {
+    is_shard_distributor_eligible: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    has_local_processor: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+}
+
+impl QueueOwnershipPolicy {
+    #[must_use]
+    pub fn new(
+        is_shard_distributor_eligible: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+        has_local_processor: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    ) -> Self {
+        Self {
+            is_shard_distributor_eligible,
+            has_local_processor,
+        }
+    }
+}
 struct Owner {
     queue: Arc<DurableTaskQueue>,
     dispatcher: TaskDispatcher,
@@ -97,6 +119,8 @@ pub struct QueueRegistry {
     state: Arc<Mutex<State>>,
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
+    ownership_policy: Arc<RwLock<Option<QueueOwnershipPolicy>>>,
+    shard_router: Arc<RwLock<Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>>>,
     standby_enabled: Option<crate::matching_standby::Enabled>,
     membership: Option<crate::matching_membership::Membership>,
     local_poll_service: Option<LocalPollFactory>,
@@ -504,6 +528,8 @@ impl QueueRegistry {
             state: Arc::new(Mutex::new(State::default())),
             changed: Arc::new(tokio::sync::Notify::new()),
             startups: Arc::new(Mutex::new(HashMap::new())),
+            ownership_policy: Arc::new(RwLock::new(None)),
+            shard_router: Arc::new(RwLock::new(None)),
             domain_metadata: None,
             standby_enabled: None,
             membership: None,
@@ -535,6 +561,53 @@ impl QueueRegistry {
         self.membership = Some(membership);
         self
     }
+    /// Bind the shard-distributor ownership policy after executor construction.
+    /// Clones share this slot, so runtime wiring also affects internal readers.
+    pub fn set_ownership_policy(&self, policy: QueueOwnershipPolicy) {
+        *self
+            .ownership_policy
+            .write()
+            .expect("Matching ownership policy lock") = Some(policy);
+    }
+
+    pub fn set_shard_router(
+        &self,
+        router: Arc<crate::matching_shard_routing::MatchingShardRouter>,
+    ) {
+        *self
+            .shard_router
+            .write()
+            .expect("Matching shard router lock") = Some(router);
+    }
+
+    fn check_task_list_ownership(&self, name: &str, cached: bool) -> Result<(), Status> {
+        let policy = self
+            .ownership_policy
+            .read()
+            .expect("Matching ownership policy lock")
+            .clone();
+        let Some(policy) = policy else {
+            return self.membership.as_ref().map_or(Ok(()), |membership| {
+                membership.check_task_list(name)
+            });
+        };
+        if (policy.is_shard_distributor_eligible)(name) {
+            if (policy.has_local_processor)(name) {
+                return Ok(());
+            }
+            return Err(self.membership.as_ref().map_or_else(
+                || Status::internal("Matching membership is not configured."),
+                |membership| membership.task_list_not_owned_by(name, "not known"),
+            ));
+        }
+        if cached {
+            return Ok(());
+        }
+        self.membership.as_ref().map_or(Ok(()), |membership| {
+            membership.check_task_list(name)
+        })
+    }
+
     /// Like Go's membership watcher, detach obsolete owners before doing I/O.
     /// Unknown placement leaves existing readers intact until membership recovers.
     pub async fn unload_non_owned(&self, now: i64) -> Result<(), Status> {
@@ -545,9 +618,21 @@ impl QueueRegistry {
         owner_work(move |readers| {
             let candidates = {
                 let state = registry.state.lock().expect("Matching registry lock");
+                let policy = registry
+                    .ownership_policy
+                    .read()
+                    .expect("Matching ownership policy lock")
+                    .clone();
                 let mut candidates = Vec::new();
                 for (key, owner) in &state.owners {
-                    if !membership.owns(&key.1)? {
+                    let owned = policy
+                        .as_ref()
+                        .filter(|policy| (policy.is_shard_distributor_eligible)(&key.1))
+                        .map_or_else(
+                            || membership.owns(&key.1),
+                            |policy| Ok((policy.has_local_processor)(&key.1)),
+                        )?;
+                    if !owned {
                         candidates.push((key.clone(), owner.clone()));
                     }
                 }
@@ -718,13 +803,15 @@ impl QueueRegistry {
                 }
             };
             let _starting = startup.lock().expect("Matching queue startup lock");
-                if let Some(membership) = &registry.membership {
-                    membership.check_task_list(&key.name)?;
-                }
             let mut state = registry.state.lock().expect("Matching registry lock");
             if state.stopped {
                 return Err(Status::unavailable("Matching registry stopped."));
             }
+            let cached = state
+                .owners
+                .get(&lookup)
+                .is_some_and(|owner| !owner.queue.is_stopped());
+            registry.check_task_list_ownership(&key.name, cached)?;
             if state
                 .owners
                 .get(&lookup)
@@ -1108,12 +1195,10 @@ impl QueueRegistry {
                         }
                         return Err(Status::unavailable("Matching registry stopped."));
                     }
-                    if let Some(membership) = &registry.membership {
-                        if let Err(error) = membership.check_task_list(&key.name) {
-                            drop(state);
-                            let _ = owner.finish(now, readers);
-                            return Err(error);
-                        }
+                    if let Err(error) = registry.check_task_list_ownership(&key.name, false) {
+                        drop(state);
+                        let _ = owner.finish(now, readers);
+                        return Err(error);
                     }
                     // Reconcile publication with concurrent root updates. A
                     // nonroot startup may have read SQL before the root wrote
@@ -1661,7 +1746,22 @@ async fn resolve_parent_dispatcher(
     key: TaskListKey,
     kind: i16,
 ) -> Option<crate::matching_dispatch::Parent> {
-    if let Some(membership) = &registry.membership {
+    let router = {
+        registry
+            .shard_router
+            .read()
+            .expect("Matching shard router lock")
+            .clone()
+    };
+    if let Some(router) = router {
+        match router.remote_channel(&key.name).await {
+            Ok((Some(channel), _path)) => {
+                return Some(crate::matching_dispatch::Parent::Remote(channel));
+            }
+            Ok((None, _path)) => {}
+            Err(_) => return None,
+        }
+    } else if let Some(membership) = &registry.membership {
         if let Some(channel) = membership.remote_channel(&key.name).ok()? {
             return Some(crate::matching_dispatch::Parent::Remote(channel));
         }
@@ -1781,6 +1881,118 @@ mod tests {
         assert!(!Arc::ptr_eq(&old.queue, &replacement.queue));
         registry.shutdown(7).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn shard_policy_accepts_local_assignment_and_rechecks_before_publish() {
+        use cadence_common::membership::Host;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (_dir, _store, registry, key) = fixture();
+        let host = Host {
+            address: "other:7935".into(),
+            identity: "other".into(),
+            grpc_address: "other:7835".into(),
+        };
+        let registry = registry.with_membership(
+            crate::matching_membership::Membership::new("self", vec![host]),
+        );
+        let checks = Arc::new(AtomicUsize::new(0));
+        let policy = QueueOwnershipPolicy::new(
+            Arc::new(|_| true),
+            {
+                let checks = checks.clone();
+                Arc::new(move |_| checks.fetch_add(1, Ordering::SeqCst) == 0)
+            },
+        );
+        registry.set_ownership_policy(policy);
+
+        let error = registry.get(key, 0, 1).await.err().unwrap();
+        assert_eq!(error.code(), tonic::Code::Aborted);
+        assert_eq!(checks.load(Ordering::SeqCst), 2);
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+
+    #[tokio::test]
+    async fn excluded_cached_owner_skips_ring_check_but_new_owner_does_not() {
+        use cadence_common::membership::Host;
+
+        let (_dir, _store, registry, key) = fixture();
+        let host = |identity: &str| Host {
+            address: format!("{identity}:7935"),
+            identity: identity.into(),
+            grpc_address: format!("{identity}:7835"),
+        };
+        let membership = crate::matching_membership::Membership::new("self", vec![host("self")]);
+        let registry = registry.with_membership(membership.clone());
+        registry.set_ownership_policy(QueueOwnershipPolicy::new(
+            Arc::new(|_| false),
+            Arc::new(|_| false),
+        ));
+        let cached = registry.get(key.clone(), 0, 1).await.unwrap();
+
+        membership.replace(vec![host("other")]);
+        let reused = registry.get(key.clone(), 0, 2).await.unwrap();
+        assert!(Arc::ptr_eq(&cached.queue, &reused.queue));
+
+        let mut uncached_key = key;
+        uncached_key.name = "uncached-excluded".into();
+        assert_eq!(
+            registry
+                .get(uncached_key, 0, 3)
+                .await
+                .err()
+                .unwrap()
+                .code(),
+            tonic::Code::Aborted
+        );
+    }
+
+    #[tokio::test]
+    async fn assigned_eligible_owner_unloads_when_local_processor_snapshot_is_lost() {
+        use cadence_common::membership::Host;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (_dir, _store, registry, key) = fixture();
+        let membership = crate::matching_membership::Membership::new(
+            "self",
+            vec![Host {
+                address: "other:7935".into(),
+                identity: "other".into(),
+                grpc_address: "other:7835".into(),
+            }],
+        );
+        let registry = registry.with_membership(membership);
+        let assigned = Arc::new(AtomicBool::new(true));
+        registry.set_ownership_policy(QueueOwnershipPolicy::new(
+            Arc::new(|_| true),
+            {
+                let assigned = assigned.clone();
+                Arc::new(move |_| assigned.load(Ordering::SeqCst))
+            },
+        ));
+        let handle = registry.get(key, 0, 1).await.unwrap();
+        assigned.store(false, Ordering::SeqCst);
+        assert_eq!(
+            registry
+                .get(
+                    TaskListKey {
+                        domain_id: Uuid::from_u128(1),
+                        name: "queue".into(),
+                        task_type: 0,
+                    },
+                    0,
+                    2,
+                )
+                .await
+                .err()
+                .unwrap()
+                .code(),
+            tonic::Code::Aborted
+        );
+        registry.unload_non_owned(3).await.unwrap();
+        assert!(handle.queue.is_stopped());
+    }
+
     #[tokio::test]
     async fn slow_startup_does_not_block_loaded_owner_or_shutdown() {
         let (directory, _store, registry, key) = fixture();

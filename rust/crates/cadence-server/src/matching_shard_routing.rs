@@ -46,6 +46,8 @@ pub enum RoutingError {
     ShardDistributor(String),
     #[error("hostIP not found in shard distributor owner metadata")]
     MissingHostIp,
+    #[error("could not connect to selected Matching owner: {0}")]
+    Endpoint(String, RoutingPath),
 }
 
 impl RoutingError {
@@ -55,6 +57,7 @@ impl RoutingError {
         match self {
             Self::RingUnavailable(_) => RoutingPath::HashRing,
             Self::ShardDistributor(_) | Self::MissingHostIp => RoutingPath::ShardDistributor,
+            Self::Endpoint(_, path) => *path,
         }
     }
 }
@@ -190,6 +193,20 @@ impl MatchingShardRouter {
     #[must_use]
     pub fn member_count(&self) -> usize {
         self.ring.hosts().len()
+    }
+
+    /// Resolve a task-list key through the Go-compatible resolver and obtain
+    /// the matching gRPC channel to the selected owner.
+    pub async fn remote_channel(
+        &self,
+        task_list_name: &str,
+    ) -> Result<(Option<tonic::transport::Channel>, RoutingPath), RoutingError> {
+        let (owner, path) = self.resolve(task_list_name).await?;
+        let channel = self
+            .ring
+            .remote_channel_for_owner(&owner.identity, &owner.grpc_address)
+            .map_err(|error| RoutingError::Endpoint(error.to_string(), path))?;
+        Ok((channel, path))
     }
 
     fn resolve_from_ring(
@@ -484,6 +501,11 @@ mod tests {
             Arc::new(|| 100),
             Arc::new(|| false),
         );
+        let channel_error = match router.remote_channel("queue").await {
+            Err(error) => error,
+            Ok(_) => panic!("spectator error must not fall back to Ringpop"),
+        };
+        assert_eq!(channel_error.path(), RoutingPath::ShardDistributor);
         let error = router.resolve("queue").await.unwrap_err();
         assert_eq!(
             error,
@@ -494,7 +516,7 @@ mod tests {
         let error = router.resolve("queue").await.unwrap_err();
         assert_eq!(error, RoutingError::MissingHostIp);
         assert_eq!(error.path(), RoutingPath::ShardDistributor);
-        assert_eq!(spectator.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(spectator.calls.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
