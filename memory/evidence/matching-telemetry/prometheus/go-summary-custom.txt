@@ -1,0 +1,56 @@
+# HELP matching_custom_cadence_client_latency matching_custom_cadence_client_latency summary
+# TYPE matching_custom_cadence_client_latency summary
+matching_custom_cadence_client_latency{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",quantile="0.5"} 0.002
+matching_custom_cadence_client_latency{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",quantile="0.9"} 0.002
+matching_custom_cadence_client_latency_sum{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west"} 0.002
+matching_custom_cadence_client_latency_count{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west"} 1
+# HELP matching_custom_cadence_client_latency_ns matching_custom_cadence_client_latency_ns histogram
+# TYPE matching_custom_cadence_client_latency_ns histogram
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0"} 0
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.001"} 0
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.001414213"} 0
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.002"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.002828427"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.004"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.005656854"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.008"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.011313708"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.016"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.022627416"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.032"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.045254833"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.064"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.090509667"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.128"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.181019335"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.256"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.362038671"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.512"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="0.724077343"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="1.024"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="1.448154687"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="2.048"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="2.896309375"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="4.096"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="5.792618751"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="8.192"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="11.585237502"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="16.384"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="23.170475005"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="32.768"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="46.340950011"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="65.536"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="92.681900023"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="131.072"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="185.363800047"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="262.144"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="370.727600094"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="524.288"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="741.455200189"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="1048.576"} 1
+matching_custom_cadence_client_latency_ns_bucket{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west",le="+Inf"} 1
+matching_custom_cadence_client_latency_ns_sum{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west"} 0.002
+matching_custom_cadence_client_latency_ns_count{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west"} 1
+# HELP matching_custom_cadence_client_requests matching_custom_cadence_client_requests counter
+# TYPE matching_custom_cadence_client_requests counter
+matching_custom_cadence_client_requests{cadence_role="history_client",cadence_service="cadence_matching",deployment="canary_v2",operation="HistoryClientGetMutableState",zone="north_west"} 1
