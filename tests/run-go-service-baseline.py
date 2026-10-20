@@ -30,6 +30,8 @@ parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default
 parser.add_argument('--matching-shard-distributor-address', help='configure production Rust Matching to use this shard-manager gRPC endpoint')
 parser.add_argument('--matching-shard-distributor-namespace', help='configure one production Matching shard-manager namespace')
 parser.add_argument('--matching-onboarding-percentage', type=int, help='set matching.percentageOnboardedToShardManager in Rust dynamic config')
+parser.add_argument('--matching-failure-recovery', action='store_true', help='run a two-instance production Matching failure/recovery probe')
+parser.add_argument('--matching-idle-check-seconds', type=int, help='override the Matching idle-task-list check interval in seconds')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
@@ -51,6 +53,12 @@ if any(value is not None for value in sd_options) and not all(value is not None 
     parser.error('shard-distributor address, namespace, and onboarding percentage must be configured together')
 if args.matching_onboarding_percentage is not None and not 0 <= args.matching_onboarding_percentage <= 100:
     parser.error('--matching-onboarding-percentage must be between 0 and 100')
+if args.matching_failure_recovery and not production_matching:
+    parser.error('--matching-failure-recovery requires --rust-production-binary')
+if args.matching_idle_check_seconds is not None and args.matching_idle_check_seconds < 1:
+    parser.error('--matching-idle-check-seconds must be positive')
+if args.matching_idle_check_seconds is not None and not production_matching:
+    parser.error('--matching-idle-check-seconds requires --rust-production-binary')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
@@ -107,6 +115,11 @@ if args.matching_onboarding_percentage is not None:
         '\nmatching.percentageOnboardedToShardManager:\n'
         f'  - value: {args.matching_onboarding_percentage}\n'
     )
+if args.matching_idle_check_seconds is not None:
+    dynamic_text += (
+        '\nmatching.idleTasklistCheckInterval:\n'
+        f'  - value: {args.matching_idle_check_seconds}s\n'
+    )
 dynamic_config.write_text(dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
         'FRONTEND_PORT_GRPC', 'MATCHING_PORT_GRPC', 'HISTORY_PORT_GRPC',
@@ -115,6 +128,8 @@ if args.rust_matching or args.matching_restart:
     keys.append('RUST_MATCHING_PORT_GRPC')
 if production_matching:
     keys.append('RUST_MATCHING_PORT')
+    if args.matching_failure_recovery:
+        keys.extend(['RUST_MATCHING_SECONDARY_PORT', 'RUST_MATCHING_SECONDARY_PORT_GRPC'])
 reservations = [socket.socket() for _ in keys]
 try:
     for listener in reservations:
@@ -172,6 +187,9 @@ if production_matching:
         raise RuntimeError('could not replace Rust Matching persistence config')
     seeds = ', '.join(json.dumps(f'127.0.0.1:{ports[key]}') for key in
                       ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT'])
+    if args.matching_failure_recovery:
+        seeds += ', ' + ', '.join(json.dumps(f'127.0.0.1:{ports[key]}') for key in
+                                  ['RUST_MATCHING_PORT', 'RUST_MATCHING_SECONDARY_PORT'])
     rust_text, replaced = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rust_text, count=1)
     if replaced != 1:
         raise RuntimeError('could not configure Rust Ringpop bootstrap hosts')
@@ -257,6 +275,12 @@ with (work / 'server.log').open('w') as log:
                     'CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL': os.environ.get('CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL', ''),
                     'CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE': args.matching_shard_distributor_namespace or '',
                     'CADENCE_MATCHING_ONBOARDING_PERCENTAGE': str(args.matching_onboarding_percentage if args.matching_onboarding_percentage is not None else '')}
+            if production_matching and args.matching_failure_recovery:
+                probe_environment.update({
+                    'CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL': ports['RUST_MATCHING_SECONDARY_PORT'],
+                    'CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT': ports['RUST_MATCHING_SECONDARY_PORT_GRPC'],
+                    'CADENCE_MATCHING_FAILURE_RECOVERY': '1',
+                })
             result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
                 env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,

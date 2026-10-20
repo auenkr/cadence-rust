@@ -16,13 +16,16 @@ const schema = grpc.loadPackageDefinition(loader.loadSync(files, {
   includeDirs: [root, internalRoot], enums: String, longs: String, bytes: Buffer, defaults: true, oneofs: true,
 })).uber.cadence;
 const api = schema.api.v1;
+const matchingApi = schema.matching.v1;
 const peer = process.argv[2] || '127.0.0.1:7833';
 const restartMode = process.argv[7] === 'restart';
 const goServicesPid = Number(process.argv[8] || 0);
 const productionMode = process.argv[9] === 'production';
+const failureRecoveryMode = process.env.CADENCE_MATCHING_FAILURE_RECOVERY === '1';
 const shardManagerControl = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL;
 const shardManagerNamespace = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE || 'matching';
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
+clients.Matching = new schema.matching.v1.MatchingAPI(peer, grpc.credentials.createInsecure());
 let managedShardNames = new Set();
 let assignedExecutorId = '';
 let shardAssignmentLock = Promise.resolve();
@@ -134,6 +137,32 @@ async function run() {
     exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
     return child;
   }
+  function startSecondaryRust() {
+    const output = fs.openSync(path.join(work, 'rust-server-secondary.log'), 'w');
+    const child = spawn(productionBinary, [
+      'start', '--config', rustConfig, '--services', 'matching', '--port', '0',
+      '--history-grpc-port', historyGrpcPort,
+      '--matching-grpc-port', process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT,
+      '--matching-tchannel-port', process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL,
+      '--data-dir', path.join(path.dirname(rustDataDir), 'rust-matching-secondary-data'),
+    ], { cwd: path.resolve(__dirname, '..'), env: process.env, stdio: ['ignore', output, output] });
+    fs.closeSync(output);
+    return child;
+  }
+  function directMatchingClient(address) {
+    return new matchingApi.MatchingAPI(address, grpc.credentials.createInsecure());
+  }
+  function directDecisionPoll(client, domainId, taskListName, suffix) {
+    const metadata = new grpc.Metadata();
+    metadata.set('rpc-service', 'cadence-matching');
+    metadata.set('rpc-caller', 'cadence-matching-failure-recovery');
+    metadata.set('rpc-encoding', 'proto');
+    return new Promise((resolve, reject) => client.PollForDecisionTask({
+      domainId, pollerId: `failure-probe-${suffix}`, request: {
+        domain, taskList: { name: taskListName }, identity: `failure-probe-${suffix}`,
+      },
+    }, metadata, { deadline: Date.now() + 10000 }, (error, response) => error ? reject(error) : resolve(response)));
+  }
   async function waitForRustReady(label) {
     const deadline = Date.now() + 180000;
     while (Date.now() < deadline) {
@@ -160,6 +189,7 @@ async function run() {
   }
   let exited;
   let rust = startRust('before-restart');
+  let secondaryRust;
   try {
     await waitForRustReady('before-restart');
   const startRequest = {
@@ -167,6 +197,185 @@ async function run() {
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
     taskStartToCloseTimeout: { seconds: '10' }, input: payload('start'),
   };
+  if (productionMode && failureRecoveryMode) {
+    if (!process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT || !process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL) {
+      throw new Error('two-instance failure recovery requires secondary Matching ports');
+    }
+    secondaryRust = startSecondaryRust();
+    const convergenceDeadline = Date.now() + 30000;
+    while (Date.now() < convergenceDeadline) {
+      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) throw new Error(`secondary Rust Matching exited; see ${work}/rust-server-secondary.log`);
+      try {
+        await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-ready-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+        break;
+      } catch (_) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    if (Date.now() >= convergenceDeadline) throw new Error('second Rust Matching instance did not join the original Ringpop cluster');
+    const idleList = { name: `production-idle-${id}` };
+    const pendingIdlePoll = call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: idleList, identity: 'production-idle-probe' });
+    const idleDeadline = Date.now() + 10000;
+    for (;;) {
+      const info = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+      if (info.pollers.some(poller => poller.identity === 'production-idle-probe')) break;
+      if (Date.now() > idleDeadline) throw new Error('production idle probe poll was not registered');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    const evictionDeadline = Date.now() + 30000;
+    const idleResult = await Promise.race([pendingIdlePoll, new Promise(resolve => setTimeout(() => resolve(null), evictionDeadline - Date.now()))]);
+    if (!idleResult) throw new Error('production Matching idle manager did not evict and release its long poll');
+    assert.equal(idleResult.taskToken.length, 0, 'production idle manager eviction must release its long poll with an empty successful response');
+    const idleRecoveryID = `production-idle-recovery-${id}`;
+    await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: idleRecoveryID, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: idleList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const idleSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: idleRecoveryID, CADENCE_MIXED_RESTART_TASK_LIST: idleList.name,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'production-idle-recovery-sdk.log'), `${idleSdk.stdout || ''}\n${idleSdk.stderr || ''}`);
+    if (idleSdk.status !== 0) throw new Error(`existing SDK could not complete work after production idle eviction: ${idleSdk.error || idleSdk.status}; see ${work}/production-idle-recovery-sdk.log`);
+    const idleHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: idleRecoveryID } });
+    assert.equal(idleHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1, 'production idle eviction recovery must complete exactly once');
+
+    const crashList = `production-crash-${id}`;
+    const crashProbeID = `production-crash-owner-probe-${id}`;
+    const crashTaskList = { name: crashList };
+    const probeStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: crashProbeID, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: crashTaskList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const directPeers = [
+      directMatchingClient(`127.0.0.1:${rustGrpcPort}`),
+      directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`),
+    ];
+    let directPolls;
+    const directDeadline = Date.now() + 30000;
+    while (Date.now() < directDeadline) {
+      directPolls = await Promise.allSettled(directPeers.map((client, index) =>
+        directDecisionPoll(client, domainId, crashList, `${index}-${randomUUID()}`)));
+      if (directPolls.some(result => result.status === 'fulfilled' && result.value.taskToken?.length > 0)) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const ownerIndex = directPolls?.findIndex(result => result.status === 'fulfilled' && result.value.taskToken?.length > 0) ?? -1;
+    assert(ownerIndex >= 0, 'neither production Rust Matching instance delivered the queued owner-probe task');
+    const staleResult = directPolls[1 - ownerIndex];
+    assert.equal(staleResult.status, 'rejected', 'direct request to non-owner must be rejected with Go-compatible typed ownership');
+    assert.equal(staleResult.reason.code, grpc.status.ABORTED, 'non-owner must return the typed TaskListNotOwnedByHost status');
+    assert.match(staleResult.reason.details || '', /task list is not owned by this host/i);
+    const ownerProbeTask = directPolls[ownerIndex].value;
+    await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
+      taskToken: ownerProbeTask.taskToken,
+      identity: 'production-owner-probe',
+      decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('owner-probe') } }],
+    });
+    const probeHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: crashProbeID, runId: probeStart.runId } });
+    assert.equal(probeHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1, 'ownership probe must complete exactly once');
+
+    const crashID = `production-crash-recovery-${id}`;
+    const crashStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: crashID, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: crashTaskList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
+    const queuedCount = () => spawnSync('python3', ['-c',
+      'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])',
+      database, crashList], { encoding: 'utf8' });
+    const queuedDeadline = Date.now() + 20000;
+    let queued;
+    while (Date.now() < queuedDeadline) {
+      queued = queuedCount();
+      if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(queued?.status, 0, `could not read shared Matching persistence before crash: ${queued?.stderr}`);
+    assert(Number(queued.stdout.trim()) > 0, 'decision task was not persisted before production owner crash');
+    const beforeCrash = await call('WorkflowAPI', 'DescribeTaskList', {
+      domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+    });
+    const beforeAck = Number(beforeCrash.taskListStatus.ackLevel);
+    const beforeEnd = Number(beforeCrash.taskListStatus.taskIdBlock.endId);
+    const rangeID = () => spawnSync('python3', ['-c',
+      'import sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1], timeout=30); row=c.execute("select range_id from task_lists where shard_id=0 and domain_id=? and name=? and task_type=0", (uuid.UUID(sys.argv[2]).bytes,sys.argv[3])).fetchone(); print(row[0] if row else -1)',
+      database, domainId, crashList], { encoding: 'utf8' });
+    const rangeBeforeResult = rangeID();
+    assert.equal(rangeBeforeResult.status, 0, `could not read persisted task-list range before crash: ${rangeBeforeResult.stderr}`);
+    const rangeBefore = Number(rangeBeforeResult.stdout.trim());
+    assert(rangeBefore > 0, 'task-list range was not leased before the owner crash');
+    const failedPid = ownerIndex === 0 ? rust.pid : secondaryRust.pid;
+    const secondaryExited = new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal })));
+    if (ownerIndex === 0) rust.kill('SIGKILL');
+    else secondaryRust.kill('SIGKILL');
+    const failedExit = ownerIndex === 0 ? await exited : await secondaryExited;
+    assert.equal(failedExit.signal, 'SIGKILL', 'selected Rust Matching owner did not crash');
+    const survivorDeadline = Date.now() + 45000;
+    let survivorVisible = false;
+    while (Date.now() < survivorDeadline) {
+      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) throw new Error(`surviving Rust Matching exited; see ${work}/rust-server-secondary.log`);
+      try {
+        await call('WorkflowAPI', 'DescribeTaskList', {
+          domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+        });
+        survivorVisible = true;
+        break;
+      } catch (_) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+    assert(survivorVisible, 'Go Frontend did not converge to the surviving Rust Matching host after primary loss');
+    const crashSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: crashID, CADENCE_MIXED_RESTART_TASK_LIST: crashList,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'production-crash-recovery-sdk.log'), `${crashSdk.stdout || ''}\n${crashSdk.stderr || ''}`);
+    if (crashSdk.status !== 0) throw new Error(`existing SDK could not finish work recovered after Rust owner crash: ${crashSdk.error || crashSdk.status}; see ${work}/production-crash-recovery-sdk.log`);
+    const crashHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: crashID, runId: crashStart.runId } });
+    const crashCompletions = crashHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(crashCompletions, 1, 'crash-recovered workflow must have exactly one visible completion');
+    const recoveredStatus = await call('WorkflowAPI', 'DescribeTaskList', {
+      domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+    });
+    assert(Number(recoveredStatus.taskListStatus.taskIdBlock.endId) >= beforeEnd, 'task ID range moved backwards after Matching owner crash');
+    const ackDeadline = Date.now() + 30000;
+    let afterAck = Number(recoveredStatus.taskListStatus.ackLevel);
+    while (afterAck <= beforeAck && Date.now() < ackDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const status = await call('WorkflowAPI', 'DescribeTaskList', {
+        domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+      });
+      afterAck = Number(status.taskListStatus.ackLevel);
+    }
+    assert(afterAck > beforeAck, 'recovered task acknowledgement did not advance beyond the pre-crash level');
+    const rangeAfterResult = rangeID();
+    assert.equal(rangeAfterResult.status, 0, `could not read persisted task-list range after recovery: ${rangeAfterResult.stderr}`);
+    const rangeAfter = Number(rangeAfterResult.stdout.trim());
+    assert(rangeAfter > rangeBefore, 'surviving Rust Matching did not acquire a higher persisted task-list range');
+    const emptyDeadline = Date.now() + 30000;
+    let afterCount = Number(queuedCount().stdout.trim());
+    while (afterCount !== 0 && Date.now() < emptyDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      afterCount = Number(queuedCount().stdout.trim());
+    }
+    assert.equal(afterCount, 0, 'recovered task remained queued after SDK completion');
+    if (ownerIndex === 0) {
+      rust = startRust('after-failure-recovery');
+      await waitForRustReady('after-failure-recovery');
+    } else {
+      secondaryRust = startSecondaryRust();
+      const secondaryReadyDeadline = Date.now() + 30000;
+      let secondaryReady = false;
+      while (Date.now() < secondaryReadyDeadline) {
+        try {
+          await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-restarted-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+          secondaryReady = true;
+          break;
+        } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
+      }
+      assert(secondaryReady, 'restarted Rust Matching member did not rejoin Go discovery');
+    }
+  }
   let restartEvidence;
   if (restartMode) {
     const restartID = `restart-${id}`, restartTaskList = `restart-tasks-${id}`;
@@ -440,6 +649,15 @@ async function run() {
     clearTimeout(shutdownTimer);
     if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
     if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
+    if (secondaryRust && secondaryRust.exitCode === null && secondaryRust.signalCode === null) {
+      secondaryRust.kill('SIGTERM');
+      const secondaryExit = await Promise.race([
+        new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal }))),
+        new Promise(resolve => setTimeout(() => resolve(null), 20000)),
+      ]);
+      if (secondaryExit === null) { secondaryRust.kill('SIGKILL'); throw new Error('secondary Rust Matching did not stop'); }
+      if (secondaryExit.code !== 0) throw new Error(`secondary Rust Matching exited ${JSON.stringify(secondaryExit)}; see ${work}/rust-server-secondary.log`);
+    }
   }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));
