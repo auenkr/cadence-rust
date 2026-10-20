@@ -454,7 +454,7 @@ impl MatchingMetrics {
             0 if !context.task_list.is_empty() => context.task_list.as_str(),
             _ => "_unknown_",
         };
-        let tags = BTreeMap::from([
+        let mut tags = BTreeMap::from([
             (
                 DOMAIN_TAG.to_owned(),
                 if context.domain.is_empty() {
