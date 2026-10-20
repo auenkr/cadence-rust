@@ -407,3 +407,36 @@ refresh plus sync processor snapshot validation for publication and unload.
 Root user source hashes remain d5d9f593 (registry),d7ae805e (processor); isolated
 worker baselines include test seams and differ, so extract reviewed additive
 diffs, never blindly import user snapshot commits. Disk39GB free.
+
+### Native peer and SD integration continuation
+
+History actual generated Go YARPC peer passed all5 nonempty request/response
+checks, caller/service/procedure/encoding metadata, typed errors/redirect in
+attempt6 after fixing empty redirect test fixture. Corrected procedure
+HistoryService::Method, cn transport caller cadence-matching, app headers empty.
+Current source uncommitted; unused helper removed, exact all-target strict
+Clippy -D warnings and final peer rerun pending. Parent rejected blanket
+-A dead_code lint as strict evidence. Keep attempt failure logs/provenance.
+
+Runtime checkpoints348831585 (dynamic loader/harness fixes) andd801180a4
+(unrun Go filebased oracle), routing cherry-picks through4ae464b80. Initial
+load completion timestamp now passed to watcher, null/empty semantics and
+constraints conversion reviewed. Diagnostics sample first/every1000 with
+known generic/process-global limitation vs Go Collection context. Main SD
+executor/factory/client construction still being implemented source-only.
+
+Swim coherent routing/ownership641188049 includes async handler preflight,
+sync local processor rechecks before cached reuse/publication, SD-aware
+eviction and remote forwarding/query/parent poll/partition routing. Parent
+reviewed lock order: executor releases processor mutex before Stop callbacks,
+no reverse held registry lock. Rejected post-open owners use existing finish
+cleanup. Unbuilt. ff6e10f8b adds actual Go handler/generated gRPC fixture plus
+ignored executor/spectator callback integration gate, unbuilt/unrun.
+
+Refreshed backend audit confirms configured task+domain stores remain SQLite
+only; MySQL/Postgres/Cassandra and durable semaphore state/telemetry remain
+Matching gaps. Audit based on swim branch must account for newer runtime
+candidate discovery already implemented elsewhere. No History service
+migration started. Root remains exactly user AGENTS/registry/processor edits.
+Runtime resumed in root read-only once; corrected before edits. Explicit
+absolute paths/workdir remain mandatory.
