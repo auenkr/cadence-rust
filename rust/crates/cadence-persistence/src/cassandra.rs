@@ -22,6 +22,7 @@ use std::{
     fmt,
     num::NonZeroUsize,
     path::PathBuf,
+    sync::atomic::{AtomicUsize, Ordering},
     sync::Arc,
     time::Duration,
 };
@@ -490,6 +491,7 @@ pub struct CassandraSessionConfig {
     pub region: String,
     pub tls: Option<CassandraTlsConfig>,
     pub allowed_authenticators: Vec<String>,
+    pub host_selection_policy: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -672,6 +674,7 @@ impl CassandraSessionConfig {
             region: String::new(),
             tls: None,
             allowed_authenticators: Vec::new(),
+            host_selection_policy: String::new(),
         })
     }
 
@@ -698,16 +701,17 @@ impl CassandraSessionConfig {
         self.region = options.region;
         self.tls = options.tls;
         self.allowed_authenticators = options.allowed_authenticators;
+        self.host_selection_policy = options.host_selection_policy;
         if options.proto_version != 0 && options.proto_version != 4 {
             anyhow::bail!("Cassandra protoVersion {} cannot be selected by the Scylla Rust driver (only negotiated protocol is supported)", options.proto_version);
         }
         // Go carries connectAttributes in NoSQL config but does not forward them
         // into gocql ClusterConfig, so intentionally leave them unused here too.
         if !matches!(
-            options.host_selection_policy.as_str(),
-            "" | "tokenaware,roundrobin"
+            self.host_selection_policy.as_str(),
+            "" | "tokenaware,roundrobin" | "roundrobin"
         ) {
-            anyhow::bail!("Cassandra hostSelectionPolicy {:?} has no equivalent in the Scylla Rust driver; supported policy is tokenaware,roundrobin", options.host_selection_policy);
+            anyhow::bail!("Cassandra hostSelectionPolicy {:?} has no Scylla equivalent; supported values are tokenaware,roundrobin and roundrobin", self.host_selection_policy);
         }
         Ok(self)
     }
@@ -732,10 +736,16 @@ impl CassandraSessionConfig {
                 }
             })
             .collect();
+        let host_selection_policy: Arc<dyn scylla::policies::load_balancing::LoadBalancingPolicy> =
+            Arc::new(CassandraRoundRobinPolicy {
+                token_aware: self.host_selection_policy != "roundrobin",
+                next: AtomicUsize::default(),
+            });
         let profile = ExecutionProfile::builder()
             .consistency(self.consistency)
             .serial_consistency(self.serial_consistency)
             .request_timeout(Some(self.request_timeout))
+            .load_balancing_policy(host_selection_policy)
             .build()
             .into_handle();
         let mut builder = SessionBuilder::new()
@@ -754,7 +764,15 @@ impl CassandraSessionConfig {
             ));
         }
         if let Some(tls) = &self.tls {
-            builder = builder.tls_context(Some(build_rustls_client_config(tls)?));
+            let client_config = build_rustls_client_config(tls)?;
+            let context = match tls.server_name.as_deref().filter(|name| !name.is_empty()) {
+                Some(server_name) => scylla::client::session::TlsContext::Rustls023ServerName(
+                    client_config,
+                    server_name.to_string(),
+                ),
+                None => client_config.into(),
+            };
+            builder = builder.tls_context(Some(context));
         }
         if !self.user.is_empty() && !self.password.is_empty() {
             builder = builder.authenticator_provider(Arc::new(GoPasswordAuthenticator {
@@ -764,6 +782,107 @@ impl CassandraSessionConfig {
             }));
         }
         Ok(builder.build().await?)
+    }
+}
+
+/// gocql round-robin semantics: rotate the first available host per request,
+/// then try the remaining available hosts in the same rotation.
+#[derive(Debug, Default)]
+struct CassandraRoundRobinPolicy {
+    token_aware: bool,
+    next: AtomicUsize,
+}
+
+impl scylla::policies::load_balancing::LoadBalancingPolicy for CassandraRoundRobinPolicy {
+    fn pick<'a>(
+        &'a self,
+        request: &'a scylla::policies::load_balancing::RoutingInfo<'a>,
+        cluster: &'a scylla::cluster::ClusterState,
+    ) -> Option<(scylla::cluster::NodeRef<'a>, Option<scylla::routing::Shard>)> {
+        let routed = self.routed_nodes(request, cluster);
+        if let Some(node) = routed.first() {
+            return Some((*node, None));
+        }
+        let connected = self.connected_nodes(cluster);
+        if connected.is_empty() {
+            return None;
+        }
+        let start = self.next.fetch_add(1, Ordering::Relaxed) % connected.len();
+        Some((connected[start], None))
+    }
+
+    fn fallback<'a>(
+        &'a self,
+        request: &'a scylla::policies::load_balancing::RoutingInfo<'a>,
+        cluster: &'a scylla::cluster::ClusterState,
+    ) -> scylla::policies::load_balancing::FallbackPlan<'a> {
+        let routed = self.routed_nodes(request, cluster);
+        let connected = self.connected_nodes(cluster);
+        let mut plan: Vec<_> = routed.iter().skip(1).copied().collect();
+        let routed_ids: std::collections::HashSet<_> =
+            routed.iter().map(|node| node.host_id).collect();
+        // gocql's token-aware wrapper asks its round-robin fallback for a
+        // cursor only after all available replicas fail.
+        let start = if routed.is_empty() {
+            self.next.load(Ordering::Relaxed)
+        } else {
+            self.next.fetch_add(1, Ordering::Relaxed)
+        } % connected.len().max(1);
+        plan.extend(
+            connected
+                .iter()
+                .cycle()
+                .skip(start)
+                .take(connected.len())
+                .filter(|node| !routed_ids.contains(&node.host_id))
+                .copied(),
+        );
+        Box::new(plan.into_iter().map(|node| (node, None)))
+    }
+
+    fn name(&self) -> String {
+        if self.token_aware {
+            "CadenceTokenAwareRoundRobinHostPolicy".to_string()
+        } else {
+            "CadenceRoundRobinHostPolicy".to_string()
+        }
+    }
+}
+
+impl CassandraRoundRobinPolicy {
+    fn connected_nodes<'a>(
+        &self,
+        cluster: &'a scylla::cluster::ClusterState,
+    ) -> Vec<scylla::cluster::NodeRef<'a>> {
+        cluster
+            .get_nodes_info()
+            .iter()
+            .filter(|node| node.is_connected())
+            .collect()
+    }
+
+    fn routed_nodes<'a>(
+        &self,
+        request: &scylla::policies::load_balancing::RoutingInfo<'_>,
+        cluster: &'a scylla::cluster::ClusterState,
+    ) -> Vec<scylla::cluster::NodeRef<'a>> {
+        if !self.token_aware {
+            return Vec::new();
+        }
+        let (Some(token), Some(table)) = (request.token, request.table) else {
+            return Vec::new();
+        };
+        let replicas = cluster.get_token_endpoints(table.ks_name(), table.table_name(), token);
+        replicas
+            .iter()
+            .filter(|(replica, _)| replica.is_connected())
+            .filter_map(|(replica, _)| {
+                cluster
+                    .get_nodes_info()
+                    .iter()
+                    .find(|node| Arc::ptr_eq(node, replica))
+            })
+            .collect()
     }
 }
 
@@ -815,15 +934,6 @@ impl scylla::policies::host_filter::HostFilter for CassandraRegionHostFilter {
 fn build_rustls_client_config(
     tls: &CassandraTlsConfig,
 ) -> anyhow::Result<Arc<rustls::ClientConfig>> {
-    if tls
-        .server_name
-        .as_ref()
-        .is_some_and(|name| !name.is_empty())
-    {
-        anyhow::bail!(
-            "Cassandra TLS serverName override is not supported by the Scylla Rust driver"
-        );
-    }
     if tls.cert_file.is_some() != tls.key_file.is_some() {
         anyhow::bail!("Cassandra TLS client certFile and keyFile must be configured together");
     }
@@ -1014,6 +1124,33 @@ mod session_config_tests {
             })
             .unwrap();
         assert_eq!(configured.allowed_authenticators, vec!["custom"]);
+    }
+
+    #[test]
+    fn round_robin_host_policy_is_supported_but_hostpool_is_rejected() {
+        let config = CassandraSessionConfig::from_parts(
+            ["127.0.0.1".to_string()],
+            9042,
+            "".to_string(),
+            "".to_string(),
+            "cadence".to_string(),
+        )
+        .unwrap();
+        assert!(config
+            .clone()
+            .with_go_options(CassandraSessionOptions {
+                host_selection_policy: "roundrobin".into(),
+                ..Default::default()
+            })
+            .is_ok());
+        assert!(config
+            .with_go_options(CassandraSessionOptions {
+                host_selection_policy: "hostpool-epsilon-greedy".into(),
+                ..Default::default()
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("hostSelectionPolicy"));
     }
 }
 

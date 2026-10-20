@@ -16,3 +16,4 @@ repository = "https://github.com/auenkr/cadence-rust"
 
 [patch.crates-io]
 mysql_async = { path = "vendor/mysql_async-0.37.1" }
+scylla = { path = "vendor/scylla-1.9.0" }
