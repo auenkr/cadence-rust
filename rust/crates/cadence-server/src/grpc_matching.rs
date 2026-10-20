@@ -1366,6 +1366,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                 biased;
                 query=queue.queries.next()=>{
                     let _wait=query_lifecycle.begin();
+                    // Go treats a query delivered from queryTaskC as a
+                    // successful synchronous poll. It is a local match and
+                    // does not carry the task-isolation partition metadata.
+                    if let Some(context) = query_lifecycle.metric_context.as_ref() {
+                        query_lifecycle.metrics.poll_success(context, true);
+                        query_lifecycle.metrics.poll_match(false, false, None);
+                    }
                     let execution=query.request.workflow_execution.clone().unwrap_or_default();
                     let query_state = queue
                         .dispatcher
