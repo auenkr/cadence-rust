@@ -404,6 +404,19 @@ async fn owner_work<T: Send + 'static>(
     result
 }
 impl QueueRegistry {
+    /// Report whether this exact queue manager is currently reusable without
+    /// loading or mutating registry state. This is advisory: callers must
+    /// still perform their normal ownership check and call `get`, which
+    /// rechecks the owner under the startup gate.
+    pub fn contains_cached(&self, key: &TaskListKey) -> bool {
+        let lookup = (key.domain_id, key.name.clone(), key.task_type);
+        let state = self.state.lock().expect("Matching registry lock");
+        state
+            .owners
+            .get(&lookup)
+            .is_some_and(|owner| !owner.queue.is_stopped())
+    }
+
     /// Go's domain failover callback releases blocked normal decision/activity
     /// pollers and sticky decision pollers. Owners and their manager state stay
     /// installed so later polls can immediately reuse the same queues.
