@@ -37,8 +37,8 @@ defect above: the broken probe is reported as
 - Matching's task garbage collector removed every acknowledged row of the
   completed workflow's queues, while the task of the never polled control
   list survived (`db-observations-manual.json`).
-- The persisted acknowledgement of a queue lags the in-memory
-  acknowledgement, because it is written by the lease renewal and the
-  acknowledgement timer instead of by the completion. Go writes it inside
-  `taskListDB.CompleteTask`. This is a candidate Matching parity gap and is
-  reported separately.
+- The persisted acknowledgement of a queue can lag the in-memory
+  acknowledgement, because it is written by the acknowledgement timer and
+  not by the completion. The later audit of the Go source
+  (`memory/matching-mysql-ack-persistence-audit-20261020.md`) showed that Go
+  behaves the same way, so this is not a parity gap.

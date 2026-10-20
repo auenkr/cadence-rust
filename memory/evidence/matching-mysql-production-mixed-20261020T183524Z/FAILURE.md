@@ -26,14 +26,14 @@ removed its row, so the query matched nothing and no watermark was recorded.
 - Matching's task garbage collector removed every acknowledged row of the
   completed workflow's decision and activity queues, while the task of the
   never polled control list survived (`db-observations-manual.json`).
-- The persisted acknowledgement of a queue lags the in-memory
+- The persisted acknowledgement of a queue can lag the in-memory
   acknowledgement: the drained decision queue of the completed workflow kept
   `ack=0` while its rows were gone, and the same holds for the activity
   queues of the restart and graceful-drain lists. The persisted
-  acknowledgement is written by the lease renewal and the acknowledgement
-  timer, not by the completion itself, so it is observed with a lag. Go
-  persists the acknowledgement inside `taskListDB.CompleteTask`. This is a
-  candidate Matching parity gap and is reported separately.
+  acknowledgement is written by the acknowledgement timer, not by the
+  completion itself, so it is observed with a lag. The later audit of the Go
+  source (`memory/matching-mysql-ack-persistence-audit-20261020.md`) showed
+  that Go behaves the same way, so this is not a parity gap.
 
 ## Harness fix
 
