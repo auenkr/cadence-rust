@@ -2,7 +2,8 @@
 use cadence_persistence::{
     matching_blob::{Partition, PartitionConfig},
     matching_queue::{DurableTaskQueue, QueueError},
-    matching_sqlite::{SqliteTaskStore, StorageError, TaskListKey},
+    matching_sqlite::{StorageError, TaskListKey},
+    matching_task_store::MatchingTaskStore,
     StoredPartitionConfig,
 };
 use std::sync::Mutex;
@@ -85,7 +86,7 @@ pub fn validate(config: &StoredPartitionConfig) -> Result<(), Status> {
 
 impl PartitionCache {
     pub fn load(
-        store: &SqliteTaskStore,
+        store: &dyn MatchingTaskStore,
         queue: &DurableTaskQueue,
         key: &TaskListKey,
         kind: i16,
@@ -127,7 +128,7 @@ impl PartitionCache {
             *cached = Some(config.clone());
         }
     }
-    pub fn refresh(&self, store: &SqliteTaskStore, root: &TaskListKey) -> Result<(), Status> {
+    pub fn refresh(&self, store: &dyn MatchingTaskStore, root: &TaskListKey) -> Result<(), Status> {
         // Explicit reload replaces even a newer cache and can clear it.
         let config = cadence_persistence::matching_retry::persistence(|| store.get_task_list(root))
             .map_err(|error| match error {
@@ -185,6 +186,7 @@ impl PartitionCache {
 mod tests {
     use super::*;
     use cadence_persistence::matching_blob::BlobEncoding;
+    use cadence_persistence::matching_sqlite::SqliteTaskStore;
     #[test]
     fn matching_native_partition_updates_match_original_go_fixtures() {
         let cases: serde_json::Value = serde_json::from_str(include_str!(
@@ -210,7 +212,7 @@ mod tests {
                 1,
             )
             .unwrap();
-            let cache = PartitionCache::load(&store, &queue, &key, 0).unwrap();
+            let cache = PartitionCache::load(store.as_ref(), &queue, &key, 0).unwrap();
             let mut writes = 0;
             for (update, expected) in case["updates"]
                 .as_array()
