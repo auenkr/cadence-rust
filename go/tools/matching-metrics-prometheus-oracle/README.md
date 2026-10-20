@@ -8,6 +8,13 @@ go run ./tools/matching-metrics-prometheus-oracle histogram
 ```
 
 The program records the same counter, tagged timer, and `Low1ms100s` duration
-histogram fixture as `matching_metrics_prometheus.rs`, then prints the pinned
-Tally Prometheus exposition. Use it for parity verification when the Rust
-runtime lane is free; source-only work does not run this program.
+histogram fixture as the Rust example, then prints pinned Tally Prometheus
+exposition. The one-command comparison runs summary and histogram timers with
+default and custom labels, prefixes, objectives, and buckets:
+
+```sh
+./scripts/verify-matching-prometheus-oracle.sh
+```
+
+Run it after the runtime lane is released; source-only work does not build or
+execute either oracle.

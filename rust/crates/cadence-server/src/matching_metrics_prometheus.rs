@@ -28,6 +28,7 @@ use tokio::{
 const CADENCE_SERVICE_TAG: &str = "cadence_service";
 const MATCHING_SERVICE: &str = "cadence_matching";
 const SUMMARY_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+const SUMMARY_STREAM_DURATION: Duration = Duration::from_secs(2 * 60);
 
 /// Field names and defaults correspond to Tally's Go Prometheus `Configuration`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -137,6 +138,7 @@ struct HistogramAggregate {
 
 struct SummaryAggregate {
     objectives: Vec<SummaryObjective>,
+    created: std::time::Instant,
     observations: VecDeque<(std::time::Instant, f64)>,
     count: u64,
     sum_seconds: f64,
@@ -146,6 +148,7 @@ impl SummaryAggregate {
     fn new(objectives: Vec<SummaryObjective>) -> Self {
         Self {
             objectives,
+            created: std::time::Instant::now(),
             observations: VecDeque::new(),
             count: 0,
             sum_seconds: 0.0,
@@ -173,9 +176,22 @@ impl SummaryAggregate {
 
     fn live_samples(&self) -> Vec<f64> {
         let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.created);
+        let rotations = (elapsed.as_nanos() / SUMMARY_STREAM_DURATION.as_nanos()) as u32;
+        // The pinned client rotates the active CKMS stream every 2 minutes.
+        // Each of its five streams receives every observation; a stream is
+        // reset when it leaves the head, so the active stream contains about
+        // 8 to 10 minutes of observations (the age bucket boundary is coarse).
+        let oldest = if rotations < 5 {
+            self.created
+        } else {
+            self.created + SUMMARY_STREAM_DURATION * (rotations - 4)
+        };
         self.observations
             .iter()
-            .filter(|(observed, _)| now.duration_since(*observed) <= SUMMARY_MAX_AGE)
+            .filter(|(observed, _)| {
+                *observed >= oldest && now.duration_since(*observed) <= SUMMARY_MAX_AGE
+            })
             .map(|(_, value)| *value)
             .collect()
     }

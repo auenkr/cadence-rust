@@ -20,10 +20,16 @@ func main() {
 	if len(os.Args) > 1 {
 		timerType = os.Args[1]
 	}
+	custom := len(os.Args) > 2 && os.Args[2] == "custom"
 	registry := prom.NewRegistry()
 	opts := tallyprom.Options{Registerer: registry}
-	for _, bucket := range cadenceprom.DefaultHistogramBuckets() {
-		opts.DefaultHistogramBuckets = append(opts.DefaultHistogramBuckets, bucket.Upper)
+	if custom {
+		opts.DefaultHistogramBuckets = []float64{0.003, 0.01}
+		opts.DefaultSummaryObjectives = map[float64]float64{0.5: 0.05, 0.9: 0.01}
+	} else {
+		for _, bucket := range cadenceprom.DefaultHistogramBuckets() {
+			opts.DefaultHistogramBuckets = append(opts.DefaultHistogramBuckets, bucket.Upper)
+		}
 	}
 	if timerType == "histogram" {
 		opts.DefaultTimerType = tallyprom.HistogramTimerType
@@ -37,9 +43,15 @@ func main() {
 		value := float64(time.Millisecond) * powSqrt2(i)
 		buckets[i+1] = time.Duration(value)
 	}
+	prefix := "cadence"
+	rootTags := map[string]string{"zone": "north-west", "cadence_service": "cadence_matching"}
+	if custom {
+		prefix = "matching-custom"
+		rootTags["deployment"] = "canary.v2"
+	}
 	scope, _ := tally.NewRootScope(tally.ScopeOptions{
-		Prefix:    "cadence",
-		Tags:      map[string]string{"zone": "north-west", "cadence_service": "cadence_matching"},
+		Prefix:    prefix,
+		Tags:      rootTags,
 		Separator: tallyprom.DefaultSeparator,
 		SanitizeOptions: &tally.SanitizeOptions{
 			NameCharacters:       tally.ValidCharacters{Ranges: tally.AlphanumericRange, Characters: []rune{'_'}},
