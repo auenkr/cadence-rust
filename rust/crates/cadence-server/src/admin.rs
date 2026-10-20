@@ -61,17 +61,21 @@ impl DynamicConfigOverlay {
     pub fn from_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path.as_ref())?;
         let root: serde_yaml::Value = serde_yaml::from_str(&text)?;
-        let mapping = root
-            .as_mapping()
-            .ok_or_else(|| anyhow::anyhow!("dynamic config root must be a mapping"))?;
+        // Go's yaml.Unmarshal accepts an empty document or a root `null` as
+        // an empty/nil map.
+        let Some(mapping) = root.as_mapping() else {
+            if root.is_null() { return Ok(Self::default()); }
+            anyhow::bail!("dynamic config root must be a mapping");
+        };
         let mut overlay = Self::default();
         for (key, entries) in mapping {
             let name = key
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("dynamic config keys must be strings"))?;
-            let entries = entries
-                .as_sequence()
-                .ok_or_else(|| anyhow::anyhow!("dynamic config {name:?} must contain a list"))?;
+            let Some(entries) = entries.as_sequence() else {
+                if entries.is_null() { overlay.normal.insert(name.to_string(), Vec::new()); continue; }
+                anyhow::bail!("dynamic config {name:?} must contain a list");
+            };
             let mut values = Vec::with_capacity(entries.len());
             for entry in entries {
                 let fields = entry.as_mapping().ok_or_else(|| {
@@ -98,7 +102,11 @@ impl DynamicConfigOverlay {
                             name: filter_name.to_string(),
                             value: Some(cadence_api::types::DataBlob {
                                 encoding_type: Some(cadence_api::enums::EncodingType::JSON),
-                                data: serde_json::to_vec(&yaml_value_to_json(filter_value)?)?,
+                                // Go does not recursively convert constraints.
+                                // A nested non-string map key therefore stays
+                                // an unusable constraint without invalidating
+                                // the whole file snapshot.
+                                data: serde_json::to_vec(&yaml_value_to_json(filter_value).unwrap_or(serde_json::Value::Null))?,
                             }),
                         });
                     }
@@ -1134,11 +1142,20 @@ mod tests {
             assert_eq!(serde_json::from_slice::<serde_json::Value>(&value.data).unwrap(), serde_json::Value::Null);
         }
         assert!(overlay.property_values("nullConstraints")[0].filters.is_empty());
+        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-null-list.yaml")).unwrap();
+        let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
+        assert!(overlay.property_values("emptyValues").is_empty());
+        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-constraint-key.yaml")).unwrap();
+        assert!(DynamicConfigOverlay::from_file(&path).is_ok(), "Go does not recursively convert constraint values");
         std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-integer-key.yaml")).unwrap();
         assert!(DynamicConfigOverlay::from_file(&path).unwrap_err().to_string().contains("not a string"));
         std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-boolean-key.yaml")).unwrap();
         assert!(DynamicConfigOverlay::from_file(&path).unwrap_err().to_string().contains("not a string"));
         std::fs::remove_file(path).unwrap();
+        let empty_path = std::env::temp_dir().join(format!("cadence-dynamic-config-empty-{}.yaml", std::process::id()));
+        std::fs::write(&empty_path, include_str!("../tests/fixtures/dynamic-config-go-empty.yaml")).unwrap();
+        assert!(DynamicConfigOverlay::from_file(&empty_path).unwrap().property_values("absent").is_empty());
+        std::fs::remove_file(empty_path).unwrap();
     }
 
     #[test]

@@ -77,6 +77,15 @@ if args.matching_delivery or ((args.rust_matching or args.matching_restart) and 
         raise RuntimeError(f'Cargo-reported matching_delivery test executable is missing or not executable: {matching_test_executable}')
 config = work / 'config'
 config.mkdir(exist_ok=True)
+dynamic_config = work / 'dynamic-config.yaml'
+dynamic_text = (root / 'go/config/dynamicconfig/development.yaml').read_text()
+dynamic_text += (
+    '\nsystem.enableTasklistIsolation:\n'
+    '  - value: true\n'
+    'system.allIsolationGroups:\n'
+    '  - value: ["zone-a", "zone-b"]\n'
+)
+dynamic_config.write_text(dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
         'FRONTEND_PORT_GRPC', 'MATCHING_PORT_GRPC', 'HISTORY_PORT_GRPC',
         'FRONTEND_PORT_PPROF', 'MATCHING_PORT_PPROF', 'HISTORY_PORT_PPROF', 'WORKER_PORT_PPROF']
@@ -100,7 +109,7 @@ for key, value in ports.items():
 text = text.replace('"127.0.0.1:7933", "127.0.0.1:7934", "127.0.0.1:7935"',
     ', '.join(f'"127.0.0.1:{ports[key]}"' for key in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT' if args.rust_matching or args.matching_restart else 'MATCHING_PORT']))
 text = text.replace('localhost:7833', f'localhost:{ports["FRONTEND_PORT_GRPC"]}')
-text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(root / 'go/config/dynamicconfig/development.yaml')))
+text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(dynamic_config)))
 # Keep archival outputs in this baseline's artifacts directory as well.
 text = text.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
@@ -138,9 +147,10 @@ if production_matching:
     rust_text, replaced = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rust_text, count=1)
     if replaced != 1:
         raise RuntimeError('could not configure Rust Ringpop bootstrap hosts')
+    rust_text = rust_text.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: "dynamic-config.yaml"')
     rust_config.write_text(rust_text)
     (work / 'rust-matching-command.json').write_text(json.dumps([
-        str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config),
+        str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config), '--root', str(work),
         '--services', 'matching', '--port', '0', '--history-grpc-port', ports['HISTORY_PORT_GRPC'],
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],

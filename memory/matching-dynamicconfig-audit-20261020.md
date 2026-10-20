@@ -32,8 +32,9 @@ Rust now parses Go's modern `dynamicconfig.client` and legacy
 `dynamicConfigClient` fields, resolves relative paths against `--root` (default
 cwd), loads a file snapshot before constructing Matching, and owns its watcher
 through `MatchingRuntime`. The watcher uses the Go five-second minimum and
-configured interval, swaps only a fully parsed new snapshot, and retains the
-last good snapshot on reload errors. Invalid file configuration warns and uses
+configured interval, starts after one full interval, uses the initial-load
+completion timestamp for its first mtime check, swaps only a fully parsed new
+snapshot, and retains the last good snapshot on reload errors. Invalid file configuration warns and uses
 the Go Fx NOP fallback. Modern `configstore`, `openfeature`, and unknown
 providers fail explicitly as scoped unsupported-provider limitations.
 `DynamicConfigOverlay::from_file` parses ordered JSON values and constraints;
@@ -41,12 +42,23 @@ the existing admin overlay API remains separate. Focused parser coverage is
 added, but no build or test command has yet run due to the active no-Cargo lane.
 Fixtures cover the repository's actual Go `testConfig.yaml`, plus Go-shaped
 missing/null values and constraints and nested integer/boolean map keys (which
-Go's recursive conversion rejects). Runtime property readers currently return
-their configured fallback on typed decode errors instead of surfacing the
-file-client's typed error; that API-level discrepancy remains part of the
-Matching parity audit. Filebased `UpdateValue`, `RestoreValue`, and `ListValue`
+Go's recursive value conversion rejects). Go does not recursively convert
+constraint values; an unconvertible nested constraint value remains an
+unmatchable constraint without rejecting the full file. Empty/null root maps
+and null property lists also load as empty snapshots. Typed Matching reads now
+retain the configured default and emit a bounded generic diagnostic on the
+first and each 1,000th process-wide read failure; integer reads reject
+floating YAML numbers even when their numeric value is integral. Go throttles
+per Collection and includes key/filter/error details, while this Rust path has
+no property context at the shared typed-reader seam; detailed per-key logging
+remains a parity limitation. Filebased
+`UpdateValue`, `RestoreValue`, and `ListValue`
 are not exposed through the Matching service's existing overlay handlers and
-remain unsupported in this scoped port.
+remain unsupported in this scoped port. The mixed Go/Rust harness now generates
+one shared dynamic-config YAML enabling the isolated poller groups and points
+Go services at its absolute path while Rust Matching resolves the same file
+relative to explicit `--root`. The fixture expectations still need execution
+against the Go YAML implementation once a Go/Cargo lane is granted.
 
 Matching persistence factories previously trimmed `persistence.defaultStore`
 before lookup. Go uses the configured name as an exact map key, so both task

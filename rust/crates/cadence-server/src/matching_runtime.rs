@@ -115,11 +115,12 @@ impl MatchingRuntime {
         mut self,
         path: std::path::PathBuf,
         poll_interval: Duration,
+        initial_load_finished: std::time::SystemTime,
     ) -> Self {
         let overlay = self.matching.state.admin.dynamic_config.clone();
         let (stop, mut stopped) = oneshot::channel();
         let task = tokio::spawn(async move {
-            let mut last_poll = std::time::SystemTime::now();
+            let mut last_poll = initial_load_finished;
             let poll_interval = poll_interval.max(Duration::from_secs(5));
             let mut interval = tokio::time::interval_at(
                 tokio::time::Instant::now() + poll_interval,

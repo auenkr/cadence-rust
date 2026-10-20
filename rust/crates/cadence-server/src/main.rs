@@ -606,6 +606,7 @@ async fn main() -> anyhow::Result<()> {
                 num_history_shards,
                 ..Default::default()
             };
+            let mut dynamic_config_loaded_at = None;
             let dynamic_config_loaded = if let Some(path) = dynamic_config_path.as_ref() {
                 match cadence_server::admin::DynamicConfigOverlay::from_file(path) {
                     Ok(snapshot) => {
@@ -614,6 +615,7 @@ async fn main() -> anyhow::Result<()> {
                             .dynamic_config
                             .lock()
                             .expect("dynamic config lock") = snapshot;
+                        dynamic_config_loaded_at = Some(std::time::SystemTime::now());
                         true
                     }
                     Err(error) => {
@@ -1026,8 +1028,14 @@ async fn main() -> anyhow::Result<()> {
                 if let (Some(runtime), Some(path)) =
                     (matching_runtime.take(), dynamic_config_path.clone())
                 {
-                    matching_runtime =
-                        Some(runtime.with_dynamic_config_file(path, dynamic_config_poll));
+                    matching_runtime = Some(
+                        runtime.with_dynamic_config_file(
+                            path,
+                            dynamic_config_poll,
+                            dynamic_config_loaded_at
+                                .expect("successful initial dynamic-config load has timestamp"),
+                        ),
+                    );
                 }
             }
             if let Some(membership) = matching_membership.clone() {
