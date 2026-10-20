@@ -1361,6 +1361,15 @@ impl m::matching_api_server::MatchingApi for Matching {
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
+        if !r.forwarded_from.is_empty() {
+            self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
+                domain: payload.domain.clone(),
+                task_list: payload.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
+                task_list_kind: payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                task_type: "decision_task",
+                poller_isolation_group: r.isolation_group.clone(),
+            });
+        }
         let task_list = payload
             .task_list
             .as_ref()
@@ -1556,6 +1565,15 @@ impl m::matching_api_server::MatchingApi for Matching {
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
+        if !r.forwarded_from.is_empty() {
+            self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
+                domain: payload.domain.clone(),
+                task_list: payload.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
+                task_list_kind: payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                task_type: "activity_task",
+                poller_isolation_group: r.isolation_group.clone(),
+            });
+        }
         let task_list = payload
             .task_list
             .as_ref()
@@ -1729,6 +1747,15 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .unwrap_or_default(),
         )?;
         let domain = self.domain_name(&r.domain_id)?;
+        if !r.forwarded_from.is_empty() {
+            self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
+                domain: domain.clone(),
+                task_list: r.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
+                task_list_kind: r.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
+            });
+        }
         self.metrics.add_task_request(
             &domain,
             r.task_list
@@ -1887,6 +1914,15 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .unwrap_or_default(),
         )?;
         let domain = self.domain_name(&r.domain_id)?;
+        if !r.forwarded_from.is_empty() {
+            self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
+                domain: domain.clone(),
+                task_list: r.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
+                task_list_kind: r.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                task_type: "activity_task",
+                poller_isolation_group: String::new(),
+            });
+        }
         self.metrics.add_task_request(
             &domain,
             r.task_list
@@ -2035,6 +2071,15 @@ impl m::matching_api_server::MatchingApi for Matching {
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         payload.domain = self.domain_name(&r.domain_id)?;
+        if !r.forwarded_from.is_empty() {
+            self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
+                domain: payload.domain.clone(),
+                task_list: r.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
+                task_list_kind: r.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
+            });
+        }
         // Go `waitForQueryResult(..., consistencyLevel == Strong, ...)`: the
         // strong-consistency gate only applies to the local durable path.
         let strong = payload.query_consistency_level == p::QueryConsistencyLevel::Strong as i32;

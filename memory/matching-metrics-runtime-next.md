@@ -116,3 +116,30 @@ now mapped to concrete gaps:
 Metric definitions and rollups are in `go/common/metrics/defs.go` around
 3060-3134. Rust source formatting and `git diff --check` pass; no build or
 mixed Go/Rust runtime test was run in this lane.
+
+## Remaining runtime callsite audit (unvalidated source)
+
+Rust now also emits Go `ForwardedPerTaskListCounter` (`forwarded_per_tl`) for
+nonempty `ForwardedFrom` on AddActivityTask, AddDecisionTask,
+PollForActivityTask, PollForDecisionTask, and QueryWorkflow. The shared metric
+helper applies Go task-list and domain tags, including the sticky/ephemeral
+task-list labels. These events were added to the gRPC Matching handlers after
+domain resolution and before their core operation, like Go's handler callsites
+in `handler/handler.go:167,200,233,273,314`.
+
+The next metrics parity gaps confirmed by the Go callsite audit are the
+root/non-sticky partition mismatch gauges in
+`task_list_manager.go:960+` (`tasklist_read_write_partition_mismatch` and
+`tasklist_poller_partition_mismatch`) and task isolation leak cause events at
+`:917-946`. The Rust isolation selector currently returns only selected group
+and timeout, so emitting cause-tagged leak metrics requires extending its
+outcome while preserving selection behavior. Go's task-list partition config
+version/read/write gauges at `task_list_manager.go:372-380,492` also need a
+Rust callsite audit against cache loads, updates, and refreshes. These gaps
+remain open; no metric is emitted absent an equivalent Rust behavior path.
+
+Terminal unknown dispatch error parity remains unimplemented: Go emits from
+`task_reader.go:568`; a source scan of Rust `matching_dispatch.rs` found no
+equivalent classified terminal error callback yet. No Cargo or Go build/test
+was run for this checkpoint; formatting and `git diff --check` are the only
+validation permitted in the occupied build lane.

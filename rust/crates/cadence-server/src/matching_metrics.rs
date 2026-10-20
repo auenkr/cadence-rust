@@ -105,6 +105,7 @@ pub const POLL_DECISION_ALREADY_STARTED: &str = "poll_decision_task_already_star
 pub const POLL_ACTIVITY_ALREADY_STARTED: &str = "poll_activity_task_already_started_per_tl";
 pub const POLLER_PER_TASK_LIST: &str = "poller_count_per_tl";
 pub const POLLER_INVALID_ISOLATION_GROUP: &str = "poller_invalid_isolation_group_per_tl";
+pub const FORWARDED_PER_TASK_LIST: &str = "forwarded_per_tl";
 pub const FORWARD_POLL_LATENCY: &str = "forward_poll_latency_per_tl";
 pub const FORWARD_POLL_LATENCY_NS: &str = "forward_poll_latency_per_tl_ns";
 pub const FORWARD_TASK_LATENCY: &str = "forward_task_latency_per_tl";
@@ -475,6 +476,12 @@ impl MatchingMetrics {
 
     pub fn invalid_isolation_group(&self, context: &PollMetricContext) {
         self.task_list_counter(POLLER_INVALID_ISOLATION_GROUP, context, BTreeMap::new());
+    }
+
+    /// Go Matching handlers count every request forwarded from another
+    /// partition, including add-task and query RPCs.
+    pub fn forwarded_per_task_list(&self, context: &PollMetricContext) {
+        self.task_list_counter(FORWARDED_PER_TASK_LIST, context, BTreeMap::new());
     }
 
     pub fn poll_match(
