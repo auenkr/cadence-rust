@@ -444,6 +444,7 @@ impl TaskDispatcher {
         deliver: &'a mut F,
         budget: (tokio::time::Instant, tokio::sync::OwnedSemaphorePermit),
         lifecycle: Option<PollLifecycle>,
+        poll_started: tokio::time::Instant,
     ) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + 'a>>
     where
         Q: ForwardPollRequest<R> + 'a,
@@ -496,6 +497,19 @@ impl TaskDispatcher {
                     };
                     return match result {
                         Ok(value) => {
+                            if let (Some(lifecycle), Some(context)) = (
+                                lifecycle.as_ref(),
+                                lifecycle
+                                    .as_ref()
+                                    .and_then(|poll| poll.metric_context.as_ref()),
+                            ) {
+                                lifecycle.metrics.poll_match_latency(
+                                    context,
+                                    poll_started.elapsed(),
+                                    true,
+                                    false,
+                                );
+                            }
                             if let Some(sender) = sender.take() {
                                 let _ = sender.send(Ok(value));
                             }
@@ -525,6 +539,7 @@ impl TaskDispatcher {
                     deliver,
                     lifecycle,
                     deadline,
+                    poll_started,
                 )
                 .await;
             true
@@ -691,9 +706,10 @@ impl TaskDispatcher {
             .and_then(|l| Some((l.metrics.clone(), l.metric_context.clone()?)));
         let worker = self.clone();
         let deadline = tokio::time::Instant::now() + expiration;
+        let poll_started = tokio::time::Instant::now();
         tokio::spawn(async move {
             worker
-                .delivery_worker(poll, sender, deliver, lifecycle, deadline)
+                .delivery_worker(poll, sender, deliver, lifecycle, deadline, poll_started)
                 .await;
         });
         match tokio::time::timeout(expiration, receiver).await {
@@ -714,6 +730,7 @@ impl TaskDispatcher {
         mut deliver: F,
         lifecycle: Option<PollLifecycle>,
         deadline: tokio::time::Instant,
+        poll_started: tokio::time::Instant,
     ) where
         Q: ForwardPollRequest<R>,
         R: Default + Send,
@@ -721,8 +738,15 @@ impl TaskDispatcher {
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         let mut sender = Some(sender);
-        self.delivery_loop(poll, &mut sender, &mut deliver, lifecycle, deadline)
-            .await;
+        self.delivery_loop(
+            poll,
+            &mut sender,
+            &mut deliver,
+            lifecycle,
+            deadline,
+            poll_started,
+        )
+        .await;
     }
     /// The loop borrows the response channel and the History starter so a
     /// forwarded parent poll can deliver through this same poll: the parent
@@ -735,6 +759,7 @@ impl TaskDispatcher {
         deliver: &mut F,
         lifecycle: Option<PollLifecycle>,
         deadline: tokio::time::Instant,
+        poll_started: tokio::time::Instant,
     ) where
         Q: ForwardPollRequest<R>,
         R: Default + Send,
@@ -809,6 +834,7 @@ impl TaskDispatcher {
                             deliver,
                             (deadline, permit),
                             lifecycle.clone(),
+                            poll_started,
                         )
                         .await
                     {
@@ -886,6 +912,12 @@ impl TaskDispatcher {
             if let Some(lifecycle) = lifecycle.as_ref() {
                 if let Some(context) = lifecycle.metric_context.as_ref() {
                     lifecycle.metrics.poll_success(context, task.sync.is_some());
+                    lifecycle.metrics.poll_match_latency(
+                        context,
+                        poll_started.elapsed(),
+                        lifecycle.forwarded,
+                        forward_failed,
+                    );
                     lifecycle.metrics.poll_match(
                         context,
                         task.forwarded,
@@ -1474,6 +1506,20 @@ mod tests {
             assert!(events
                 .iter()
                 .any(|e| e.name == crate::matching_metrics::POLL_SUCCESS_SYNC));
+            let latency = if poll_forwarded {
+                crate::matching_metrics::POLL_FORWARD_MATCH_LATENCY
+            } else {
+                crate::matching_metrics::POLL_LOCAL_MATCH_LATENCY
+            };
+            assert!(events.iter().any(|event| event.name == latency));
+            assert!(events.iter().any(|event| {
+                event.name
+                    == if poll_forwarded {
+                        crate::matching_metrics::POLL_FORWARD_MATCH_LATENCY_NS
+                    } else {
+                        crate::matching_metrics::POLL_LOCAL_MATCH_LATENCY_NS
+                    }
+            }));
             assert_eq!(
                 events
                     .iter()

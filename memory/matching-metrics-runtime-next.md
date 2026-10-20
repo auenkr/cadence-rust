@@ -47,14 +47,13 @@ Go invokes the gauge callback from history updates in
 `poller/manager.go:StartPoll` and `EndPoll`; task-list manager wires that
 callback to `task_list_manager.go:213`.
 
-The three latency builders are not yet connected to dispatcher timing. Their
-Go emit sites are `tasklist/matcher.go:465,494,527,548` for local poll match,
-`:590` for successful forwarded poll, and `:617,638` for local matching after
-forward failure; each writes both timer and `_ns` histogram. Rust's
-`TaskDispatcher::delivery_loop` has the decision point where a claimed task can
-be classified, but needs a poll-start timestamp that survives forwarding and
-is retained through queue waits. Remaining Go callsites are now mapped to
-concrete gaps:
+The three latency builders are now connected to dispatcher timing using a
+poll-start timestamp carried through forward retries. Go emit sites are
+`tasklist/matcher.go:465,494,527,548` for local poll match, `:590` for a
+successful forwarded poll, and `:617,638` for local matching after forward
+failure; each writes both timer and `_ns` histogram. Rust classifies the
+successful task claim or successful direct forward. Remaining Go callsites are
+now mapped to concrete gaps:
 
 * `matcher.go:155,256` emits `sync_throttle_count_per_tl`; `:231` emits
   `sync_forward_task_throttle_errors_per_tl`.
