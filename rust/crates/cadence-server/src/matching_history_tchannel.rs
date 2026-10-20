@@ -31,22 +31,22 @@ impl TChannelHistoryClient {
         body: &TypedStruct,
         timeout: Duration,
     ) -> Result<TypedStruct, Status> {
-        let procedure = format!("History::{method}");
+        let procedure = format!("HistoryService::{method}");
         // YARPC Thrift methods receive an Args struct whose first field is
         // the single IDL argument. The method-specific request mappers above
         // produce that nested argument value.
         let arguments = TypedStruct {
             fields: vec![field(1, TypedValue::Struct(body.clone()))],
         };
-        let headers = vec![
-            ("$rpc$-caller".to_owned(), "internal".to_owned()),
-            ("$rpc$-service".to_owned(), HISTORY_SERVICE.to_owned()),
-        ];
+        // These are TChannel transport headers. YARPC places the caller name
+        // in `cn` and the selected encoder in `as`; RPC service metadata is
+        // carried by the TChannel call itself, not in application headers.
         let response = crate::tchannel_json_client::call_thrift(
             &self.address,
             HISTORY_SERVICE,
             &procedure,
-            &headers,
+            "cadence-matching",
+            &[],
             &encode_typed_struct(&arguments),
             timeout,
         )
@@ -427,6 +427,7 @@ fn version_history_item(value: &cadence_proto::admin::VersionHistoryItem) -> Typ
     ])
 }
 
+#[cfg(test)]
 fn version_history_item_list(values: &[cadence_proto::admin::VersionHistoryItem]) -> TypedValue {
     TypedValue::List(
         TType::Struct,
@@ -434,6 +435,7 @@ fn version_history_item_list(values: &[cadence_proto::admin::VersionHistoryItem]
     )
 }
 
+#[cfg(test)]
 fn version_history(value: &cadence_proto::admin::VersionHistory) -> TypedValue {
     let mut fields = Vec::new();
     if !value.branch_token.is_empty() {
@@ -445,6 +447,7 @@ fn version_history(value: &cadence_proto::admin::VersionHistory) -> TypedValue {
     struct_value(fields)
 }
 
+#[cfg(test)]
 fn version_histories(value: &cadence_proto::shared::VersionHistories) -> TypedValue {
     let mut fields = vec![field(
         10,
@@ -462,6 +465,7 @@ fn version_histories(value: &cadence_proto::shared::VersionHistories) -> TypedVa
     TypedValue::Struct(finish(fields))
 }
 
+#[cfg(test)]
 fn workflow_state_to_thrift(proto: i32) -> Option<i32> {
     // proto reserves INVALID=0; Thrift uses persistence's zero-based enum.
     match proto {
@@ -475,6 +479,7 @@ fn workflow_state_from_thrift(value: i32) -> i32 {
         _ => 0,
     }
 }
+#[cfg(test)]
 fn close_state_to_thrift(proto: i32) -> Option<i32> {
     // proto reserves INVALID=0; Thrift starts at COMPLETED=0.
     match proto {
@@ -571,6 +576,7 @@ fn version_history_item_from_thrift(
         version: field_i64(s, 20)?,
     })
 }
+#[cfg(test)]
 pub(crate) fn get_mutable_state_request_from_thrift(
     s: &TypedStruct,
 ) -> cadence_thrift::Result<cadence_proto::history::GetMutableStateRequest> {
@@ -726,6 +732,7 @@ pub(crate) fn get_mutable_state_request(
     finish(fields)
 }
 
+#[cfg(test)]
 fn workflow_type(value: &cadence_proto::api::WorkflowType) -> TypedValue {
     struct_value(vec![field(10, string(&value.name))])
 }
@@ -745,6 +752,7 @@ pub(crate) fn refresh_workflow_tasks_request(
     ])
 }
 
+#[cfg(test)]
 pub(crate) fn refresh_workflow_tasks_request_from_thrift(
     value: &TypedStruct,
 ) -> cadence_thrift::Result<cadence_proto::history::RefreshWorkflowTasksRequest> {
@@ -787,6 +795,7 @@ pub(crate) fn describe_workflow_execution_request(
     finish(fields)
 }
 
+#[cfg(test)]
 pub(crate) fn describe_workflow_execution_request_from_thrift(
     value: &TypedStruct,
 ) -> cadence_thrift::Result<cadence_proto::history::DescribeWorkflowExecutionRequest> {
@@ -813,17 +822,21 @@ pub(crate) fn describe_workflow_execution_request_from_thrift(
     })
 }
 
+#[cfg(test)]
 fn timestamp_nanos(value: &prost_types::Timestamp) -> i64 {
     (i128::from(value.seconds) * 1_000_000_000 + i128::from(value.nanos)) as i64
 }
+#[cfg(test)]
 fn timestamp_field(id: i16, value: Option<&prost_types::Timestamp>) -> Option<(i16, TypedValue)> {
     value.map(|value| field(id, i64_value(timestamp_nanos(value))))
 }
+#[cfg(test)]
 fn enum_field(id: i16, value: i32, proto_max: i32) -> Option<(i16, TypedValue)> {
     (1..=proto_max)
         .contains(&value)
         .then(|| field(id, TypedValue::I32(value - 1)))
 }
+#[cfg(test)]
 fn string_map(value: &std::collections::HashMap<String, String>) -> TypedValue {
     TypedValue::Map(
         TType::String,
@@ -831,6 +844,7 @@ fn string_map(value: &std::collections::HashMap<String, String>) -> TypedValue {
         value.iter().map(|(k, v)| (string(k), string(v))).collect(),
     )
 }
+#[cfg(test)]
 fn payload_map(
     value: &std::collections::HashMap<String, cadence_proto::api::Payload>,
 ) -> TypedValue {
@@ -843,6 +857,7 @@ fn payload_map(
             .collect(),
     )
 }
+#[cfg(test)]
 fn optional_payload_map_field(
     id: i16,
     value: Option<&std::collections::HashMap<String, cadence_proto::api::Payload>>,
@@ -856,6 +871,7 @@ fn optional_payload_map_field(
         field(id, struct_value(fields))
     })
 }
+#[cfg(test)]
 fn reset_points(value: &cadence_proto::api::ResetPoints) -> TypedValue {
     let points: Vec<TypedValue> = value
         .points
@@ -883,6 +899,7 @@ fn reset_points(value: &cadence_proto::api::ResetPoints) -> TypedValue {
     };
     struct_value(fields)
 }
+#[cfg(test)]
 fn active_cluster_selection_policy(
     value: &cadence_proto::api::ActiveClusterSelectionPolicy,
 ) -> TypedValue {
@@ -898,6 +915,7 @@ fn active_cluster_selection_policy(
     }
     struct_value(fields)
 }
+#[cfg(test)]
 fn workflow_execution_info(value: &cadence_proto::api::WorkflowExecutionInfo) -> TypedValue {
     let mut fields = Vec::new();
     if let Some(execution) = &value.workflow_execution {
@@ -966,6 +984,7 @@ fn workflow_execution_info(value: &cadence_proto::api::WorkflowExecutionInfo) ->
     ));
     TypedValue::Struct(finish(fields))
 }
+#[cfg(test)]
 fn workflow_execution_configuration(
     value: &cadence_proto::api::WorkflowExecutionConfiguration,
 ) -> TypedValue {
@@ -985,9 +1004,11 @@ fn workflow_execution_configuration(
     TypedValue::Struct(finish(fields))
 }
 
+#[cfg(test)]
 fn activity_type(value: &cadence_proto::api::ActivityType) -> TypedValue {
     struct_value(vec![field(10, string(&value.name))])
 }
+#[cfg(test)]
 fn failure_options(value: &cadence_proto::api::FailureOptions) -> TypedValue {
     let mut fields = Vec::new();
     fields.extend(enum_field(10, value.failure_category, 3));
@@ -997,6 +1018,7 @@ fn failure_options(value: &cadence_proto::api::FailureOptions) -> TypedValue {
     }
     struct_value(finish(fields).fields)
 }
+#[cfg(test)]
 fn pending_activity(value: &cadence_proto::api::PendingActivityInfo) -> TypedValue {
     let mut fields = vec![
         field(10, string(&value.activity_id)),
@@ -1032,6 +1054,7 @@ fn pending_activity(value: &cadence_proto::api::PendingActivityInfo) -> TypedVal
     }
     TypedValue::Struct(finish(fields))
 }
+#[cfg(test)]
 fn pending_child(value: &cadence_proto::api::PendingChildExecutionInfo) -> TypedValue {
     let mut fields = vec![
         field(1, string(&value.domain)),
@@ -1050,6 +1073,7 @@ fn pending_child(value: &cadence_proto::api::PendingChildExecutionInfo) -> Typed
     fields.extend(enum_field(50, value.parent_close_policy, 3));
     TypedValue::Struct(finish(fields))
 }
+#[cfg(test)]
 fn pending_decision(value: &cadence_proto::api::PendingDecisionInfo) -> TypedValue {
     let mut fields = vec![
         field(40, i64_value(i64::from(value.attempt))),
@@ -1062,6 +1086,7 @@ fn pending_decision(value: &cadence_proto::api::PendingDecisionInfo) -> TypedVal
     TypedValue::Struct(finish(fields))
 }
 
+#[cfg(test)]
 pub(crate) fn describe_workflow_execution_response(
     value: &cadence_proto::api::DescribeWorkflowExecutionResponse,
 ) -> TypedStruct {
@@ -1793,6 +1818,7 @@ fn task_list(value: &cadence_proto::api::TaskList) -> TypedValue {
 
 /// Convert every field in GetMutableStateResponse, including optional
 /// nested version histories. Field IDs are from history.thrift/shared.thrift.
+#[cfg(test)]
 pub(crate) fn get_mutable_state_response(
     value: &cadence_proto::history::GetMutableStateResponse,
 ) -> TypedStruct {
@@ -2278,13 +2304,6 @@ mod typed_codec_tests {
         value
     }
 
-    fn take_s16(bytes: &[u8], offset: &mut usize) -> String {
-        let len = take_u16(bytes, offset);
-        let value = String::from_utf8(bytes[*offset..*offset + len].to_vec()).unwrap();
-        *offset += len;
-        value
-    }
-
     #[tokio::test]
     async fn native_tchannel_peer_exercises_all_five_history_methods_and_wrappers() {
         use tokio::net::TcpListener;
@@ -2322,19 +2341,14 @@ mod typed_codec_tests {
                 assert!(headers
                     .iter()
                     .any(|(key, value)| key == "as" && value == "thrift"));
+                assert!(headers
+                    .iter()
+                    .any(|(key, value)| key == "cn" && value == "cadence-matching"));
                 cursor += 1; // checksum type
                 let method = String::from_utf8(take_arg(&payload, &mut cursor)).unwrap();
-                assert_eq!(method, format!("History::{expected_method}"));
+                assert_eq!(method, format!("HistoryService::{expected_method}"));
                 let metadata = take_arg(&payload, &mut cursor);
-                let mut header_cursor = 0;
-                let header_count = take_u16(&metadata, &mut header_cursor);
-                let mut service_header_seen = false;
-                for _ in 0..header_count {
-                    let key = take_s16(&metadata, &mut header_cursor);
-                    let value = take_s16(&metadata, &mut header_cursor);
-                    service_header_seen |= key == "$rpc$-service" && value == "cadence-history";
-                }
-                assert!(service_header_seen);
+                assert_eq!(metadata, [0, 0]); // no application headers
                 let request = decode_typed_struct(&take_arg(&payload, &mut cursor)).unwrap();
                 assert!(matches!(
                     typed_field(&request, 1),
@@ -2368,6 +2382,247 @@ mod typed_codec_tests {
             assert!(response.fields.is_empty(), "{method}");
         }
         peer.await.unwrap();
+    }
+
+    // Build `go/tools/cadence-rust-history-peer` with GOTOOLCHAIN=go1.25.14,
+    // then run this ignored test with CADENCE_HISTORY_PEER_BIN=/path/to/binary.
+    // Keeping it opt-in avoids making the normal Rust unit suite depend on Go.
+    #[tokio::test]
+    #[ignore = "mixed Go/Rust wire gate; requires CADENCE_HISTORY_PEER_BIN"]
+    async fn generated_go_history_server_accepts_native_tchannel_calls() {
+        use std::{
+            io::{BufRead, BufReader, Read},
+            net::TcpListener,
+            process::{Child, ChildStdout, Command, Stdio},
+        };
+
+        struct GoPeer {
+            child: Child,
+            output: BufReader<ChildStdout>,
+        }
+        impl Drop for GoPeer {
+            fn drop(&mut self) {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+            }
+        }
+        impl GoPeer {
+            fn start(mode: &str) -> (Self, String) {
+                let binary = std::env::var("CADENCE_HISTORY_PEER_BIN")
+                    .expect("set CADENCE_HISTORY_PEER_BIN to the built Go peer");
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let address = listener.local_addr().unwrap().to_string();
+                drop(listener);
+                let mut child = Command::new(binary)
+                    .args(["-address", &address, "-mode", mode])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .unwrap();
+                let mut output = BufReader::new(child.stdout.take().unwrap());
+                let mut ready = String::new();
+                output.read_line(&mut ready).unwrap();
+                assert_eq!(ready.trim(), format!("READY {address}"));
+                (Self { child, output }, address)
+            }
+            fn stop_and_read(mut self) -> String {
+                self.child.kill().unwrap();
+                self.child.wait().unwrap();
+                let mut rest = String::new();
+                self.output.read_to_string(&mut rest).unwrap();
+                rest
+            }
+        }
+
+        let (peer, address) = GoPeer::start("success");
+        let client = TChannelHistoryClient::new(address);
+        let execution = cadence_proto::api::WorkflowExecution {
+            workflow_id: "workflow-id".into(),
+            run_id: "run-id".into(),
+        };
+        client
+            .refresh_workflow_tasks(
+                &cadence_proto::history::RefreshWorkflowTasksRequest {
+                    domain: "domain".into(),
+                    domain_id: "domain-id".into(),
+                    workflow_execution: Some(execution.clone()),
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        let described = client
+            .describe_workflow_execution(
+                &cadence_proto::history::DescribeWorkflowExecutionRequest {
+                    domain_id: "domain-id".into(),
+                    request: Some(cadence_proto::api::DescribeWorkflowExecutionRequest {
+                        domain: "domain".into(),
+                        workflow_execution: Some(execution.clone()),
+                        ..Default::default()
+                    }),
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_eq!(described.pending_decision.unwrap().attempt, 3);
+        let mutable = client
+            .get_mutable_state(
+                &cadence_proto::history::GetMutableStateRequest {
+                    domain_id: "domain-id".into(),
+                    workflow_execution: Some(execution.clone()),
+                    expected_next_event_id: 9,
+                    current_branch_token: b"input-branch".to_vec(),
+                    ..Default::default()
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_eq!(mutable.next_event_id, 17);
+        assert_eq!(mutable.client_library_version, "go-peer");
+        assert_eq!(mutable.current_branch_token, b"branch");
+        let decision = client
+            .record_decision_task_started(
+                &cadence_proto::history::RecordDecisionTaskStartedRequest {
+                    domain_id: "domain-id".into(),
+                    workflow_execution: Some(execution.clone()),
+                    schedule_id: 51,
+                    task_id: 52,
+                    request_id: "decision-request".into(),
+                    ..Default::default()
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_eq!(decision.started_event_id, 22);
+        assert_eq!(decision.branch_token, b"decision");
+        let activity = client
+            .record_activity_task_started(
+                &cadence_proto::history::RecordActivityTaskStartedRequest {
+                    domain_id: "domain-id".into(),
+                    workflow_execution: Some(execution),
+                    schedule_id: 61,
+                    task_id: 62,
+                    request_id: "activity-request".into(),
+                    ..Default::default()
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_eq!(activity.workflow_domain, "go-domain");
+        assert_eq!(activity.heartbeat_details.unwrap().data, b"beat");
+        drop(client);
+        let calls = peer.stop_and_read();
+        let calls: Vec<serde_json::Value> = calls
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(calls.len(), 5, "Go peer output: {calls:?}");
+        let methods = [
+            "HistoryService::RefreshWorkflowTasks",
+            "HistoryService::DescribeWorkflowExecution",
+            "HistoryService::GetMutableState",
+            "HistoryService::RecordDecisionTaskStarted",
+            "HistoryService::RecordActivityTaskStarted",
+        ];
+        for (call, procedure) in calls.iter().zip(methods) {
+            assert_eq!(call["caller"], "cadence-matching");
+            assert_eq!(call["service"], "cadence-history");
+            assert_eq!(call["transport"], "tchannel");
+            assert_eq!(call["encoding"], "thrift");
+            assert_eq!(call["procedure"], procedure);
+        }
+
+        let (peer, address) = GoPeer::start("redirect");
+        let client = TChannelHistoryClient::new(address);
+        let redirect_execution = cadence_proto::api::WorkflowExecution {
+            workflow_id: "workflow-id".into(),
+            run_id: "run-id".into(),
+        };
+        let error = client
+            .describe_workflow_execution(
+                &cadence_proto::history::DescribeWorkflowExecutionRequest {
+                    domain_id: "domain-id".into(),
+                    request: Some(cadence_proto::api::DescribeWorkflowExecutionRequest {
+                        domain: "domain".into(),
+                        workflow_execution: Some(redirect_execution),
+                        ..Default::default()
+                    }),
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.code(),
+            Code::Aborted,
+            "unexpected typed redirect error: {error:?}"
+        );
+        assert_eq!(error.message(), "wrong owner");
+        let rpc_status = RpcStatus::decode(error.details()).unwrap();
+        assert!(rpc_status.details.iter().any(|detail| {
+            detail.type_url == "type.googleapis.com/uber.cadence.shared.v1.ShardOwnershipLostError"
+        }));
+        let _ = peer.stop_and_read();
+
+        let (peer, address) = GoPeer::start("typed");
+        let client = TChannelHistoryClient::new(address);
+        let execution = cadence_proto::api::WorkflowExecution {
+            workflow_id: "workflow-id".into(),
+            run_id: "run-id".into(),
+        };
+        let mutable_error = client
+            .get_mutable_state(
+                &cadence_proto::history::GetMutableStateRequest {
+                    domain_id: "domain-id".into(),
+                    workflow_execution: Some(execution.clone()),
+                    expected_next_event_id: 9,
+                    current_branch_token: b"input-branch".to_vec(),
+                    ..Default::default()
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(mutable_error.code(), Code::NotFound);
+        assert_eq!(mutable_error.message(), "mutable missing");
+        let decision_error = client
+            .record_decision_task_started(
+                &cadence_proto::history::RecordDecisionTaskStartedRequest {
+                    domain_id: "domain-id".into(),
+                    workflow_execution: Some(execution.clone()),
+                    schedule_id: 51,
+                    task_id: 52,
+                    request_id: "decision-request".into(),
+                    ..Default::default()
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(decision_error.code(), Code::AlreadyExists);
+        assert_eq!(decision_error.message(), "decision already started");
+        let activity_error = client
+            .record_activity_task_started(
+                &cadence_proto::history::RecordActivityTaskStartedRequest {
+                    domain_id: "domain-id".into(),
+                    workflow_execution: Some(execution),
+                    schedule_id: 61,
+                    task_id: 62,
+                    request_id: "activity-request".into(),
+                    ..Default::default()
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(activity_error.code(), Code::NotFound);
+        assert_eq!(activity_error.message(), "activity missing");
+        let _ = peer.stop_and_read();
     }
 
     #[test]
@@ -2630,13 +2885,15 @@ mod typed_codec_tests {
     #[test]
     fn describe_response_encodes_matching_decision_and_activity_fields() {
         let mut response = cadence_proto::api::DescribeWorkflowExecutionResponse::default();
-        let mut info = cadence_proto::api::WorkflowExecutionInfo::default();
-        info.workflow_execution = Some(cadence_proto::api::WorkflowExecution {
-            workflow_id: "wf".into(),
-            run_id: "run".into(),
-        });
-        info.close_status = cadence_proto::api::WorkflowExecutionCloseStatus::Invalid as i32;
-        info.history_length = 42;
+        let info = cadence_proto::api::WorkflowExecutionInfo {
+            workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                workflow_id: "wf".into(),
+                run_id: "run".into(),
+            }),
+            close_status: cadence_proto::api::WorkflowExecutionCloseStatus::Invalid as i32,
+            history_length: 42,
+            ..Default::default()
+        };
         response.workflow_execution_info = Some(info);
         response.pending_decision = Some(cadence_proto::api::PendingDecisionInfo {
             state: cadence_proto::api::PendingDecisionState::Started as i32,

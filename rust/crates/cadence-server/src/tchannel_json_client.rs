@@ -201,6 +201,7 @@ pub(crate) async fn call_thrift(
     addr: &str,
     service: &str,
     method: &str,
+    caller: &str,
     headers: &[(String, String)],
     request: &[u8],
     deadline: Duration,
@@ -247,7 +248,9 @@ pub(crate) async fn call_thrift(
         );
         head.extend([0u8; 25]);
         s8(&mut head, service)?;
-        head.push(1);
+        head.push(2);
+        s8(&mut head, "cn")?;
+        s8(&mut head, caller)?;
         s8(&mut head, "as")?;
         s8(&mut head, "thrift")?;
         head.push(0); // checksum none
