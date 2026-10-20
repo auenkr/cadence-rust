@@ -360,8 +360,11 @@ try:
             results['probeExitCode'] = result.returncode
             results['goServicesPid'] = server.pid
             results['goServicesAliveAfterProbe'] = server.poll() is None
-            if (work / 'db-observations.json').is_file():
-                observations = json.loads((work / 'db-observations.json').read_text())
+            observations_path = work / 'rust-matching' / 'db-observations.json'
+            if not observations_path.is_file():
+                observations_path = work / 'db-observations.json'
+            if observations_path.is_file():
+                observations = json.loads(observations_path.read_text())
                 results['taskGarbageCollection'] = observations.get('taskGarbageCollection')
                 results['domainMetadata'] = observations.get('domainMetadata')
                 results['decoderFixtureCases'] = observations.get('decoderFixtureCases')

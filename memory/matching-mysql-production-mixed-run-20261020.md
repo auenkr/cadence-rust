@@ -32,6 +32,27 @@ The surviving state of that attempt:
 
 GC verification was not covered by that run and stayed unverified.
 
+## Passing production gate (2026-10-20T194644Z)
+
+A fresh production run with the frozen Rust binary
+(`35e25467dfb6961d41d30565260c6e4afd9ed80b54857a403445cac57131817d`, source
+`df3466479`) and the original Go binary
+(`0ed004a0f68aee07f132d6e9e8b7faa8e71c992ebdecb11eb30d7c9a257b9bb5`, passed
+with `--binary` only) finished with exit code `0` and probe result
+`preliminary-passed`. The evidence is in
+`memory/evidence/matching-mysql-production-mixed-20261020T194644Z/` and the
+summary is in `EVIDENCE.md` of that directory.
+
+It covers the strict task garbage collection of every drained queue against
+the observed durable task ids, the survival of the unacknowledged control
+task, the persisted range against the live task-list block, Go's domain
+metadata row and notification version, the shared database holding Go's
+schema only, the SDK workflows, the SIGKILL restart, the graceful drain
+recovery and the SDK drained garbage collection backlog.
+
+This is production mixed run evidence. It is not Matching service
+completion.
+
 ## Repaired, reproducible evidence
 
 The harness now records its own evidence instead of relying on a manual

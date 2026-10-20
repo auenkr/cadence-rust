@@ -132,6 +132,21 @@ def copy_evidence(destination, *, work, config_files, repository, binaries, resu
             if source.is_file():
                 shutil.copy2(source, destination / source.name)
                 copied.append(source.name)
+    # The probe writes its database observations and its service logs into its
+    # own working directory below the artifacts directory.
+    probe_dir = work / 'rust-matching'
+    if probe_dir.is_dir():
+        for name in ('db-observations.json', 'gc-backlog-sdk.log', 'go-sdk.log',
+                     'graceful-drain-sdk.log', 'restart-sdk.log'):
+            source = probe_dir / name
+            if source.is_file():
+                shutil.copy2(source, destination / name)
+                copied.append(name)
+        server_logs = destination / 'rust-server-logs'
+        for source in sorted(probe_dir.glob('rust-server-*.log')):
+            server_logs.mkdir(exist_ok=True)
+            shutil.copy2(source, server_logs / source.name)
+            copied.append(f'rust-server-logs/{source.name}')
     config_dir = destination / 'config-redacted'
     config_dir.mkdir(exist_ok=True)
     for source in config_files:
