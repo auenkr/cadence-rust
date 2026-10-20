@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix="cadence-matching-go-peer-") as tmp:
         address = json.loads(line)["address"]
         env = {**peer_env, "CADENCE_MATCHING_GO_PEER": address}
         result = subprocess.run(
-            ["cargo", "test", "--locked", "-p", "cadence-server", "matching_remote_", "--", "--nocapture"],
+            ["cargo", "test", "--locked", "-p", "cadence-server", "--lib", "matching_remote_", "--", "--nocapture"],
             cwd=ROOT / "rust",
             env=env,
             check=False,
