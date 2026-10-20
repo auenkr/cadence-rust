@@ -49,6 +49,7 @@ func TestGenerateHistoryTChannelWireOracle(t *testing.T) {
 		encodeHistoryWireFixture(t, "get_mutable_state_request", history.HistoryService_GetMutableState_Helper.Args(FromHistoryGetMutableStateRequest(&testdata.HistoryGetMutableStateRequest))),
 		encodeHistoryWireFixture(t, "get_mutable_state_response", historySuccess(history.HistoryService_GetMutableState_Helper.WrapResponse(FromHistoryGetMutableStateResponse(&testdata.HistoryGetMutableStateResponse), nil))),
 		encodeHistoryWireFixture(t, "refresh_workflow_tasks_request", history.HistoryService_RefreshWorkflowTasks_Helper.Args(FromHistoryRefreshWorkflowTasksRequest(&testdata.HistoryRefreshWorkflowTasksRequest))),
+		encodeHistoryWireFixture(t, "refresh_workflow_tasks_response", historySuccess(history.HistoryService_RefreshWorkflowTasks_Helper.WrapResponse(nil))),
 		encodeHistoryWireFixture(t, "describe_workflow_execution_request", history.HistoryService_DescribeWorkflowExecution_Helper.Args(FromHistoryDescribeWorkflowExecutionRequest(&testdata.HistoryDescribeWorkflowExecutionRequest))),
 		encodeHistoryWireFixture(t, "describe_workflow_execution_response", historySuccess(history.HistoryService_DescribeWorkflowExecution_Helper.WrapResponse(FromDescribeWorkflowExecutionResponse(&testdata.DescribeWorkflowExecutionResponse), nil))),
 		encodeHistoryWireFixture(t, "record_decision_task_started_request", history.HistoryService_RecordDecisionTaskStarted_Helper.Args(FromRecordDecisionTaskStartedRequest(&testdata.HistoryRecordDecisionTaskStartedRequest))),

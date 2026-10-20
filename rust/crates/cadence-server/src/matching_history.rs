@@ -995,6 +995,41 @@ mod tests {
             .unwrap(),
         )
     }
+
+    struct TchannelMembership(Vec<Host>);
+    impl HistoryMembership for TchannelMembership {
+        fn hosts(&self) -> Result<Vec<Host>, Status> {
+            Ok(self.0.clone())
+        }
+        fn named_address(&self, host: &Host, port: NamedPort) -> Result<String, Status> {
+            match port {
+                NamedPort::Tchannel => Ok(host.address.clone()),
+                NamedPort::Grpc => Ok(host.grpc_address.clone()),
+            }
+        }
+    }
+
+    fn tchannel_redirect_resolver() -> Arc<MatchingHistoryPeerResolver> {
+        Arc::new(
+            MatchingHistoryPeerResolver::new(
+                1024,
+                NamedPort::Tchannel,
+                Arc::new(TchannelMembership(vec![
+                    Host {
+                        address: "history-tchannel-a:7934".into(),
+                        identity: "a".into(),
+                        grpc_address: "http://127.0.0.1:1".into(),
+                    },
+                    Host {
+                        address: "history-tchannel-b:7934".into(),
+                        identity: "b".into(),
+                        grpc_address: "http://127.0.0.1:2".into(),
+                    },
+                ])),
+            )
+            .unwrap(),
+        )
+    }
     fn ownership_status(owner: &str) -> Status {
         Status::with_details(
             Code::Aborted,
@@ -1145,6 +1180,50 @@ mod tests {
         assert_eq!(result.unwrap_err().code(), Code::DeadlineExceeded);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert!(start.elapsed() < Duration::from_millis(200));
+    }
+
+    #[tokio::test]
+    async fn tchannel_redirect_uses_owner_endpoint_and_preserves_operation_deadline() {
+        let resolver = tchannel_redirect_resolver();
+        let workflow_id = (0..1000)
+            .map(|n| format!("tchannel-redirect-workflow-{n}"))
+            .find(|id| resolver.workflow(id).unwrap() == "history-tchannel-a:7934")
+            .expect("a workflow should hash to TChannel peer A");
+        let history = client()
+            .with_tchannel_outbound(resolver)
+            .with_history_rpc_timeout(Duration::from_secs(1));
+        let peers = Arc::new(Mutex::new(Vec::new()));
+        let observed_peers = peers.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let attempts = calls.clone();
+        let result = history
+            .execute_with_redirect(
+                (),
+                Some(Duration::from_millis(35)),
+                None,
+                &workflow_id,
+                &mut move |connection, _| {
+                    let debug = match &connection {
+                        HistoryConnection::Tchannel(client, _) => format!("{client:?}"),
+                        HistoryConnection::Grpc(_) => panic!("TChannel resolver selected gRPC"),
+                    };
+                    observed_peers.lock().unwrap().push(debug);
+                    let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        if attempt == 0 {
+                            Err(ownership_status("history-tchannel-b:7934"))
+                        } else {
+                            std::future::pending::<Result<(), Status>>().await
+                        }
+                    }
+                },
+            )
+            .await;
+        assert_eq!(result.unwrap_err().code(), Code::DeadlineExceeded);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let peers = peers.lock().unwrap();
+        assert!(peers[0].contains("history-tchannel-a:7934"), "{peers:?}");
+        assert!(peers[1].contains("history-tchannel-b:7934"), "{peers:?}");
     }
     #[tokio::test]
     async fn caller_deadline_drops_the_redirect_rpc_future() {
