@@ -527,6 +527,34 @@ async function run() {
   assert(decision?.taskToken?.length > 0, `Go Frontend did not return the started workflow task within 30s; task list ${taskList.name}`);
   assert.equal(decision.workflowExecution?.runId, started.runId, 'Go Frontend returned a decision task for a different workflow run');
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+  if (!described.pollers.some(poller => poller.identity === 'service-probe') && productionMode && failureRecoveryMode) {
+    const diagnosticPeers = [
+      { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { name: 'secondary', address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const diagnostics = {
+      taskList: taskList.name,
+      frontendVisiblePollers: (described.pollers || []).map(poller => poller.identity),
+      frontendTaskIdBlock: described.taskListStatus?.taskIdBlock || null,
+      rustViews: [],
+    };
+    for (const peer of diagnosticPeers) {
+      const matching = directMatchingClient(`127.0.0.1:${peer.grpc}`);
+      const entry = { member: peer.name, address: peer.address };
+      try { entry.reportedOwner = await directPartitionOwner(matching, domain, taskList.name); }
+      catch (error) { entry.ownerError = error.details || error.message; }
+      try {
+        const response = await new Promise((resolve, reject) => matching.DescribeTaskList({
+          domainId, request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true },
+        }, (error, value) => error ? reject(error) : resolve(value)));
+        entry.pollers = (response.pollers || []).map(poller => poller.identity);
+        entry.taskIdBlock = response.taskListStatus?.taskIdBlock || null;
+      } catch (error) { entry.describeError = { code: error.code, details: error.details || error.message }; }
+      diagnostics.rustViews.push(entry);
+      matching.close();
+    }
+    fs.writeFileSync(path.join(work, 'production-poller-owner-diagnostics.json'), JSON.stringify(diagnostics, null, 2) + '\n');
+  }
   assert(described.pollers.some(poller => poller.identity === 'service-probe'));
   const decisionBlock = described.taskListStatus.taskIdBlock;
   const decisionBlockStart = Number(decisionBlock.startId), decisionBlockEnd = Number(decisionBlock.endId);
