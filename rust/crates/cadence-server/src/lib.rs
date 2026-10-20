@@ -47,6 +47,7 @@ pub mod matching_partition;
 #[allow(clippy::result_large_err)]
 pub mod matching_registry;
 pub mod matching_runtime;
+mod matching_blocking;
 pub mod matching_scaler;
 pub mod matching_semaphore;
 pub mod matching_sync;

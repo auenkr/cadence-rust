@@ -241,7 +241,7 @@ impl TaskWriter {
                     .collect::<Vec<_>>();
                 let queue_copy = queue.clone();
                 let result =
-                    tokio::task::spawn_blocking(move || queue_copy.append_pending(&data)).await;
+                    crate::matching_blocking::run(move || queue_copy.append_pending(&data)).await;
                 let result = match result {
                     Ok(Ok(tasks)) => Ok(tasks),
                     Ok(Err(error)) => {
@@ -589,7 +589,7 @@ mod tests {
             source_domain: domain,
             schedule_to_start_seconds: 0,
         }).await });
-        tokio::task::spawn_blocking({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
+        crate::matching_blocking::run({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
 
         let busy = writer.append(WriteTask { data: TaskData::default(), source_domain: domain, schedule_to_start_seconds: 0 }).await.unwrap_err();
         assert_eq!(busy.code(), tonic::Code::ResourceExhausted, "no second append is accepted while persistence admission is busy");
@@ -604,7 +604,7 @@ mod tests {
         cancelled.abort();
 
         writer.stop();
-        tokio::task::spawn_blocking({ let release = release.clone(); move || release.wait() }).await.unwrap();
+        crate::matching_blocking::run({ let release = release.clone(); move || release.wait() }).await.unwrap();
         let first_result = tokio::time::timeout(Duration::from_secs(1), first).await.unwrap().unwrap();
         assert!(first_result.is_ok() || first_result.as_ref().unwrap_err().code() == tonic::Code::Unavailable,
             "the accepted write may race its successful response with Stop");
@@ -741,7 +741,7 @@ mod tests {
         };
         let (first, first_rx) = make_request(0);
         writer.inner.sender.send(first).await.unwrap();
-        tokio::task::spawn_blocking({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
+        crate::matching_blocking::run({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
         let mut responses = vec![first_rx];
         for n in 1..5 {
             let (request, response) = make_request(n);
@@ -753,7 +753,7 @@ mod tests {
         overlay.lock().unwrap().update(false, "matching.maxTaskBatchSize", vec![DynamicConfigValue {
             value: Some(DataBlob::new(EncodingType::JSON, b"1".to_vec())), filters: vec![],
         }]);
-        tokio::task::spawn_blocking({ let release = release.clone(); move || release.wait() }).await.unwrap();
+        crate::matching_blocking::run({ let release = release.clone(); move || release.wait() }).await.unwrap();
         for response in responses { response.await.unwrap().unwrap(); }
         assert_eq!(calls.load(Ordering::SeqCst), 6, "one construction-time capacity sample plus Go's per-loop batch samples");
         assert_eq!(store.get_tasks(&key, 0, 10, 10).unwrap().len(), 5);

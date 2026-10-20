@@ -434,7 +434,7 @@ impl MatchingRuntime {
         domains: cadence_persistence::InMemoryDomainStore,
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
     ) -> anyhow::Result<()> {
-        tokio::task::spawn_blocking(move || {
+        crate::matching_blocking::run(move || {
             cache
                 .start()
                 .map_err(|error| anyhow::anyhow!("starting Matching domain cache: {error}"))?;
