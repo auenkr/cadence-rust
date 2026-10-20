@@ -1,0 +1,78 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 36s
+  Executable unittests src/lib.rs (target/debug/deps/cadence_server-38a5878de2feb9ba)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.31s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 7 tests
+test matching_shard_distributor::tests::go_executor_ttl_and_jitter_boundaries_are_preserved ... ok
+test matching_shard_distributor::tests::executor_shutdown_before_start_is_terminal ... ok
+test matching_shard_distributor::tests::spectator_fake_tonic_peer_covers_snapshot_fallback_and_terminal_shutdown ... ok
+test matching_shard_distributor::tests::spectator_initial_snapshot_wait_obeys_caller_deadline ... ok
+test matching_shard_distributor::tests::spectator_shutdown_before_start_is_terminal_and_wakes_waiters ... ok
+test matching_shard_distributor::tests::spectator_waits_for_initial_snapshot_and_returns_cached_owner ... ok
+test matching_shard_distributor::tests::pinned_executor_heartbeat_assignment_and_drain_contract ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 310 filtered out; finished in 0.13s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 12 tests
+test config::tests::embedded_defaults_match_go_development_config ... ok
+test config::tests::parses_cassandra_csv_hosts ... ok
+test config::tests::canonical_and_legacy_cluster_keys_use_go_precedence ... ok
+test config::tests::parses_go_env_templated_ports ... ok
+test config::tests::parses_go_style_config ... ok
+test config::tests::parses_real_go_base_config_subset ... ok
+test config::tests::rejects_negative_shards ... ok
+test config::tests::ringpop_configuration_maps_defaults_validation_and_signed_values ... ok
+test config::tests::shard_distributor_config_matches_go_names_and_duration_semantics ... ok
+test config::tests::parses_real_go_development_config ... ok
+test config::tests::shard_distributor_matching_validation_handles_zero_one_and_multiple_namespaces ... ok
+test config::tests::shard_distributor_rejects_invalid_namespace_and_heartbeat_interval ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 305 filtered out; finished in 0.01s
+
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 33.35s
+=== RUN   TestShardDistributorResolver_Lookup
+--- PASS: TestShardDistributorResolver_Lookup (0.00s)
+=== RUN   TestShardDistributorResolver_Lookup_ExcludedFallsBackToHashRing
+--- PASS: TestShardDistributorResolver_Lookup_ExcludedFallsBackToHashRing (0.00s)
+=== RUN   TestShardDistributorResolver_Lookup_NilSpectatorFallsBackToHashRing
+--- PASS: TestShardDistributorResolver_Lookup_NilSpectatorFallsBackToHashRing (0.00s)
+=== RUN   TestShardDistributorResolver_Lookup_RecordsRoutingPath
+=== RUN   TestShardDistributorResolver_Lookup_RecordsRoutingPath/shard_distributor
+=== RUN   TestShardDistributorResolver_Lookup_RecordsRoutingPath/excluded_task_list
+=== RUN   TestShardDistributorResolver_Lookup_RecordsRoutingPath/missing_spectator
+--- PASS: TestShardDistributorResolver_Lookup_RecordsRoutingPath (0.01s)
+    --- PASS: TestShardDistributorResolver_Lookup_RecordsRoutingPath/shard_distributor (0.00s)
+    --- PASS: TestShardDistributorResolver_Lookup_RecordsRoutingPath/excluded_task_list (0.00s)
+    --- PASS: TestShardDistributorResolver_Lookup_RecordsRoutingPath/missing_spectator (0.01s)
+=== RUN   TestShardDistributorResolver_Start
+--- PASS: TestShardDistributorResolver_Start (0.00s)
+=== RUN   TestShardDistributorResolver_Stop
+--- PASS: TestShardDistributorResolver_Stop (0.00s)
+=== RUN   TestShardDistributorResolver_Subscribe
+--- PASS: TestShardDistributorResolver_Subscribe (0.00s)
+=== RUN   TestShardDistributorResolver_UnSubscribe
+--- PASS: TestShardDistributorResolver_UnSubscribe (0.00s)
+=== RUN   TestShardDistributorResolver_Members
+--- PASS: TestShardDistributorResolver_Members (0.00s)
+=== RUN   TestShardDistributorResolver_MemberCount
+--- PASS: TestShardDistributorResolver_MemberCount (0.00s)
+=== RUN   TestShardDistributorResolver_Refresh
+--- PASS: TestShardDistributorResolver_Refresh (0.00s)
+=== RUN   TestShardDistributorResolver_AddressToHost
+--- PASS: TestShardDistributorResolver_AddressToHost (0.00s)
+=== RUN   TestShardDistributorResolver_Lookup_ExcludeShortLivedTaskLists
+=== RUN   TestShardDistributorResolver_Lookup_ExcludeShortLivedTaskLists/exclude_enabled_with_UUID_tasklist_uses_hash_ring
+=== RUN   TestShardDistributorResolver_Lookup_ExcludeShortLivedTaskLists/exclude_enabled_without_UUID_tasklist_uses_shard_distributor
+=== RUN   TestShardDistributorResolver_Lookup_ExcludeShortLivedTaskLists/exclude_disabled_with_UUID_tasklist_uses_shard_distributor
+--- PASS: TestShardDistributorResolver_Lookup_ExcludeShortLivedTaskLists (0.00s)
+    --- PASS: TestShardDistributorResolver_Lookup_ExcludeShortLivedTaskLists/exclude_enabled_with_UUID_tasklist_uses_hash_ring (0.00s)
+    --- PASS: TestShardDistributorResolver_Lookup_ExcludeShortLivedTaskLists/exclude_enabled_without_UUID_tasklist_uses_shard_distributor (0.00s)
+    --- PASS: TestShardDistributorResolver_Lookup_ExcludeShortLivedTaskLists/exclude_disabled_with_UUID_tasklist_uses_shard_distributor (0.00s)
+PASS
+ok  	github.com/uber/cadence/common/membership	0.057s

@@ -1,0 +1,166 @@
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-common)
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-api)
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-thrift)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-proto)
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-persistence)
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-server)
+error: function `version_history_item_list` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:430:4
+    |
+430 | fn version_history_item_list(values: &[cadence_proto::admin::VersionHis...
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `-D dead-code` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: function `version_history` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:437:4
+    |
+437 | fn version_history(value: &cadence_proto::admin::VersionHistory) -> Typ...
+    |    ^^^^^^^^^^^^^^^
+
+error: function `version_histories` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:448:4
+    |
+448 | fn version_histories(value: &cadence_proto::shared::VersionHistories) -...
+    |    ^^^^^^^^^^^^^^^^^
+
+error: function `workflow_state_to_thrift` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:465:4
+    |
+465 | fn workflow_state_to_thrift(proto: i32) -> Option<i32> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `close_state_to_thrift` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:478:4
+    |
+478 | fn close_state_to_thrift(proto: i32) -> Option<i32> {
+    |    ^^^^^^^^^^^^^^^^^^^^^
+
+error: function `get_mutable_state_request_from_thrift` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:574:15
+    |
+574 | pub(crate) fn get_mutable_state_request_from_thrift(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `workflow_type` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:729:4
+    |
+729 | fn workflow_type(value: &cadence_proto::api::WorkflowType) -> TypedValue {
+    |    ^^^^^^^^^^^^^
+
+error: function `refresh_workflow_tasks_request_from_thrift` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:748:15
+    |
+748 | pub(crate) fn refresh_workflow_tasks_request_from_thrift(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `describe_workflow_execution_request_from_thrift` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:790:15
+    |
+790 | pub(crate) fn describe_workflow_execution_request_from_thrift(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `timestamp_nanos` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:816:4
+    |
+816 | fn timestamp_nanos(value: &prost_types::Timestamp) -> i64 {
+    |    ^^^^^^^^^^^^^^^
+
+error: function `timestamp_field` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:819:4
+    |
+819 | fn timestamp_field(id: i16, value: Option<&prost_types::Timestamp>) -> ...
+    |    ^^^^^^^^^^^^^^^
+
+error: function `enum_field` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:822:4
+    |
+822 | fn enum_field(id: i16, value: i32, proto_max: i32) -> Option<(i16, Type...
+    |    ^^^^^^^^^^
+
+error: function `string_map` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:827:4
+    |
+827 | fn string_map(value: &std::collections::HashMap<String, String>) -> Typ...
+    |    ^^^^^^^^^^
+
+error: function `payload_map` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:834:4
+    |
+834 | fn payload_map(
+    |    ^^^^^^^^^^^
+
+error: function `optional_payload_map_field` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:846:4
+    |
+846 | fn optional_payload_map_field(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `reset_points` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:859:4
+    |
+859 | fn reset_points(value: &cadence_proto::api::ResetPoints) -> TypedValue {
+    |    ^^^^^^^^^^^^
+
+error: function `active_cluster_selection_policy` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:886:4
+    |
+886 | fn active_cluster_selection_policy(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `workflow_execution_info` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:901:4
+    |
+901 | fn workflow_execution_info(value: &cadence_proto::api::WorkflowExecutio...
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `workflow_execution_configuration` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:969:4
+    |
+969 | fn workflow_execution_configuration(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `activity_type` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:988:4
+    |
+988 | fn activity_type(value: &cadence_proto::api::ActivityType) -> TypedValue {
+    |    ^^^^^^^^^^^^^
+
+error: function `failure_options` is never used
+   --> crates/cadence-server/src/matching_history_tchannel.rs:991:4
+    |
+991 | fn failure_options(value: &cadence_proto::api::FailureOptions) -> Typed...
+    |    ^^^^^^^^^^^^^^^
+
+error: function `pending_activity` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1000:4
+     |
+1000 | fn pending_activity(value: &cadence_proto::api::PendingActivityInfo) -...
+     |    ^^^^^^^^^^^^^^^^
+
+error: function `pending_child` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1035:4
+     |
+1035 | fn pending_child(value: &cadence_proto::api::PendingChildExecutionInfo...
+     |    ^^^^^^^^^^^^^
+
+error: function `pending_decision` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1053:4
+     |
+1053 | fn pending_decision(value: &cadence_proto::api::PendingDecisionInfo) -...
+     |    ^^^^^^^^^^^^^^^^
+
+error: function `describe_workflow_execution_response` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1065:15
+     |
+1065 | pub(crate) fn describe_workflow_execution_response(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: function `get_mutable_state_response` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1796:15
+     |
+1796 | pub(crate) fn get_mutable_state_response(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: could not compile `cadence-server` (lib) due to 26 previous errors

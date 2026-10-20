@@ -288,7 +288,7 @@ impl MatchingRuntime {
         poll_interval: Duration,
         initial_load_finished: std::time::SystemTime,
     ) -> Self {
-        let overlay = self.matching.state.admin.dynamic_config.clone();
+        let overlay = self.matching.frontend.state.admin.dynamic_config.clone();
         let (stop, mut stopped) = oneshot::channel();
         let task = tokio::spawn(async move {
             let mut last_poll = initial_load_finished;

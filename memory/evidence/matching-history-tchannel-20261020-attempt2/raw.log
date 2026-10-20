@@ -1,0 +1,42 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-server)
+warning: function `duration_seconds` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1540:4
+     |
+1540 | fn duration_seconds(value: &prost_types::Duration) -> i32 {
+     |    ^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `api_task_list` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1544:4
+     |
+1544 | fn api_task_list(value: &cadence_proto::api::TaskList) -> cadence_api:...
+     |    ^^^^^^^^^^^^^
+
+warning: function `history_event_to_thrift` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1557:4
+     |
+1557 | fn history_event_to_thrift(value: &cadence_proto::api::HistoryEvent) -...
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `transient_decision_info` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1681:4
+     |
+1681 | fn transient_decision_info(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `record_decision_task_started_response` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1694:15
+     |
+1694 | pub(crate) fn record_decision_task_started_response(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `record_activity_task_started_response` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:1750:15
+     |
+1750 | pub(crate) fn record_activity_task_started_response(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `cadence-server` (lib test) generated 6 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 34s
+  Executable unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)

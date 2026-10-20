@@ -1,0 +1,48 @@
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/crates/cadence-server)
+warning: unused variable: `managed`
+   --> crates/cadence-server/src/matching_shard_distributor.rs:786:32
+    |
+786 |             .filter_map(|(key, managed)| {
+    |                                ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_managed`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-server` (lib test) generated 1 warning (run `cargo fix --lib -p cadence-server --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 51s
+  Executable unittests src/lib.rs (target/debug/deps/cadence_server-38a5878de2feb9ba)
+warning: unused variable: `managed`
+   --> crates/cadence-server/src/matching_shard_distributor.rs:786:32
+    |
+786 |             .filter_map(|(key, managed)| {
+    |                                ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_managed`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-server` (lib test) generated 1 warning (run `cargo fix --lib -p cadence-server --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.23s
+     Running unittests src/lib.rs (target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 7 tests
+test matching_shard_distributor::tests::go_executor_ttl_and_jitter_boundaries_are_preserved ... ok
+test matching_shard_distributor::tests::executor_shutdown_before_start_is_terminal ... ok
+test matching_shard_distributor::tests::spectator_fake_tonic_peer_covers_snapshot_fallback_and_terminal_shutdown ... ok
+test matching_shard_distributor::tests::spectator_initial_snapshot_wait_obeys_caller_deadline ... ok
+test matching_shard_distributor::tests::spectator_shutdown_before_start_is_terminal_and_wakes_waiters ... ok
+
+thread 'matching_shard_distributor::tests::pinned_executor_heartbeat_assignment_and_drain_contract' (2145826) panicked at crates/cadence-server/src/matching_shard_distributor.rs:1290:9:
+assertion `left == right` failed
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test matching_shard_distributor::tests::spectator_waits_for_initial_snapshot_and_returns_cached_owner ... ok
+test matching_shard_distributor::tests::pinned_executor_heartbeat_assignment_and_drain_contract ... FAILED
+
+failures:
+
+failures:
+    matching_shard_distributor::tests::pinned_executor_heartbeat_assignment_and_drain_contract
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 310 filtered out; finished in 0.18s
+
+error: test failed, to rerun pass `-p cadence-server --lib`

@@ -25,6 +25,8 @@ pub mod ringpop_tchannel;
 pub mod service;
 pub mod tchannel;
 pub mod tchannel_json_client;
+#[allow(clippy::result_large_err)]
+pub mod matching_history_tchannel;
 pub mod yarpc;
 
 #[allow(clippy::result_large_err)]

@@ -42,6 +42,100 @@ pub struct Config {
     /// for Go-compatible configuration; runtime wiring is intentionally separate.
     #[serde(default)]
     pub ringpop: RingpopConfig,
+    /// Outbound shard-manager target. This field is intentionally parsed even
+    /// before the Matching runtime wires the client, so Go config cannot be
+    /// silently ignored by the Rust server.
+    #[serde(default, rename = "shardDistributorClient")]
+    pub shard_distributor_client: ShardDistributorClientConfig,
+    /// Matching's shard-manager namespace/executor settings.
+    #[serde(default, rename = "shard-distributor-matching")]
+    pub shard_distributor_matching: ShardDistributorMatchingConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardDistributorClientConfig {
+    #[serde(default, rename = "hostPort")]
+    pub host_port: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardDistributorMatchingConfig {
+    #[serde(default)]
+    pub namespaces: Vec<ShardDistributorNamespaceConfig>,
+    #[serde(default, deserialize_with = "de_go_duration", rename = "peer_ttl")]
+    pub peer_ttl_nanos: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardDistributorNamespaceConfig {
+    #[serde(default)]
+    pub namespace: String,
+    #[serde(
+        default,
+        deserialize_with = "de_go_duration",
+        rename = "heartbeat_interval"
+    )]
+    pub heartbeat_interval_nanos: i64,
+    #[serde(default, deserialize_with = "de_go_duration", rename = "ttl_shard")]
+    pub ttl_shard_nanos: i64,
+    #[serde(default, deserialize_with = "de_go_duration", rename = "ttl_report")]
+    pub ttl_report_nanos: i64,
+}
+
+impl ShardDistributorMatchingConfig {
+    pub const DEFAULT_PEER_TTL_NANOS: i64 = 120_000_000_000;
+    pub const DEFAULT_REPORT_TTL_NANOS: i64 = 60_000_000_000;
+
+    /// Go shard-manager uses a two-minute peer TTL when the configured value
+    /// is non-positive.
+    #[must_use]
+    pub fn effective_peer_ttl_nanos(&self) -> i64 {
+        if self.peer_ttl_nanos <= 0 {
+            Self::DEFAULT_PEER_TTL_NANOS
+        } else {
+            self.peer_ttl_nanos
+        }
+    }
+
+    /// Cadence Matching's processor report TTL defaults to one minute; the
+    /// value is consumed by the processor factory rather than sent on wire.
+    #[must_use]
+    pub fn report_ttl_nanos(&self) -> i64 {
+        self.namespaces
+            .first()
+            .map(|namespace| namespace.ttl_report_nanos)
+            .filter(|ttl| *ttl != 0)
+            .unwrap_or(Self::DEFAULT_REPORT_TTL_NANOS)
+    }
+
+    pub fn validate_for_matching(
+        &self,
+        client: &ShardDistributorClientConfig,
+    ) -> anyhow::Result<()> {
+        if self.namespaces.len() > 1 {
+            anyhow::bail!(
+                "Matching supports at most one shard-distributor namespace (got {})",
+                self.namespaces.len()
+            );
+        }
+        for namespace in &self.namespaces {
+            if namespace.namespace.is_empty() {
+                anyhow::bail!("shard-distributor namespace cannot be empty");
+            }
+            if namespace.heartbeat_interval_nanos <= 0 {
+                anyhow::bail!(
+                    "shard-distributor namespace {} heartbeat_interval must be greater than 0",
+                    namespace.namespace
+                );
+            }
+        }
+        if !self.namespaces.is_empty() && client.host_port.trim().is_empty() {
+            anyhow::bail!(
+                "shardDistributorClient.hostPort is required when Matching shard-distributor namespaces are configured"
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -488,6 +582,8 @@ impl Config {
         if !errors.is_empty() {
             anyhow::bail!(errors.join("; "));
         }
+        self.shard_distributor_matching
+            .validate_for_matching(&self.shard_distributor_client)?;
         Ok(())
     }
 
@@ -694,6 +790,116 @@ clusterMetadata:
     }
 
     #[test]
+    fn shard_distributor_config_matches_go_names_and_duration_semantics() {
+        let yaml = r#"
+clusterMetadata:
+  enableGlobalDomain: false
+  primaryClusterName: active
+  currentClusterName: active
+  failoverVersionIncrement: 10
+  clusterGroup:
+    active: {enabled: true, initialFailoverVersion: 0, rpcAddress: localhost:7933}
+shardDistributorClient: {hostPort: "localhost:7943"}
+shard-distributor-matching:
+  peer_ttl: 3m
+  namespaces:
+    - namespace: cadence-matching-dev
+      heartbeat_interval: 1s
+      ttl_shard: 5m
+      ttl_report: 30s
+"#;
+        let cfg = Config::from_yaml(yaml).unwrap();
+        cfg.validate().unwrap();
+        assert_eq!(cfg.shard_distributor_client.host_port, "localhost:7943");
+        assert_eq!(
+            cfg.shard_distributor_matching.peer_ttl_nanos,
+            180_000_000_000
+        );
+        assert_eq!(cfg.shard_distributor_matching.namespaces.len(), 1);
+        let namespace = &cfg.shard_distributor_matching.namespaces[0];
+        assert_eq!(namespace.namespace, "cadence-matching-dev");
+        assert_eq!(namespace.heartbeat_interval_nanos, 1_000_000_000);
+        assert_eq!(namespace.ttl_shard_nanos, 300_000_000_000);
+        assert_eq!(namespace.ttl_report_nanos, 30_000_000_000);
+        assert_eq!(
+            cfg.shard_distributor_matching.report_ttl_nanos(),
+            30_000_000_000
+        );
+        assert_eq!(
+            cfg.shard_distributor_matching.effective_peer_ttl_nanos(),
+            180_000_000_000
+        );
+    }
+
+    #[test]
+    fn shard_distributor_matching_validation_handles_zero_one_and_multiple_namespaces() {
+        let mut cfg = Config::development().unwrap();
+        cfg.shard_distributor_matching.namespaces.clear();
+        cfg.shard_distributor_client.host_port.clear();
+        cfg.validate().unwrap();
+        assert_eq!(
+            cfg.shard_distributor_matching.report_ttl_nanos(),
+            60_000_000_000
+        );
+        assert_eq!(
+            cfg.shard_distributor_matching.effective_peer_ttl_nanos(),
+            120_000_000_000
+        );
+
+        cfg.shard_distributor_matching.namespaces = vec![ShardDistributorNamespaceConfig {
+            namespace: "matching".into(),
+            heartbeat_interval_nanos: 1,
+            ttl_shard_nanos: 0,
+            ttl_report_nanos: 0,
+        }];
+        assert!(
+            cfg.validate().is_err(),
+            "configured namespace requires client address"
+        );
+        cfg.shard_distributor_client.host_port = "localhost:7943".into();
+        cfg.validate().unwrap();
+        assert_eq!(
+            cfg.shard_distributor_matching.report_ttl_nanos(),
+            60_000_000_000
+        );
+
+        cfg.shard_distributor_matching
+            .namespaces
+            .push(ShardDistributorNamespaceConfig {
+                namespace: "another".into(),
+                heartbeat_interval_nanos: 1,
+                ttl_shard_nanos: 0,
+                ttl_report_nanos: 0,
+            });
+        assert!(
+            cfg.validate().is_err(),
+            "Matching only supports one namespace"
+        );
+    }
+
+    #[test]
+    fn shard_distributor_rejects_invalid_namespace_and_heartbeat_interval() {
+        let mut cfg = Config::development().unwrap();
+        cfg.shard_distributor_matching.namespaces[0].heartbeat_interval_nanos = 0;
+        assert!(
+            cfg.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("heartbeat_interval")
+        );
+        cfg.shard_distributor_matching.namespaces[0].heartbeat_interval_nanos = 1;
+        cfg.shard_distributor_matching.namespaces[0]
+            .namespace
+            .clear();
+        assert!(
+            cfg.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("cannot be empty")
+        );
+    }
+
+    #[test]
     fn rejects_negative_shards() {
         let mut cfg = Config::default();
         cfg.persistence.num_history_shards = -1;
@@ -721,21 +927,24 @@ clusterMetadata:
         let err = Config::from_yaml("ringpop: {name: x, bootstrapMode: custom}")
             .unwrap()
             .ringpop;
-        assert!(err
-            .clone()
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("custom is not supported"));
+        assert!(
+            err.clone()
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("custom is not supported")
+        );
         let missing = Config::from_yaml("ringpop: {name: x, bootstrapMode: hosts}")
             .unwrap()
             .ringpop;
-        assert!(missing
-            .clone()
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("boostrap hosts"));
+        assert!(
+            missing
+                .clone()
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("boostrap hosts")
+        );
         assert!(Config::from_yaml("ringpop: {name: x, bootstrapMode: weird}").is_err());
     }
 }

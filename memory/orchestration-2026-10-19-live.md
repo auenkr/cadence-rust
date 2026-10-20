@@ -284,3 +284,159 @@ SWIM next source-only rebase/review unvalidated SD clienteecb1a1c9+2e713ebed
 onto rootc9c1f4f5b; no build until cache releases. Runtime owns main assembly;
 SD registry callbacks/config integration remain later. Sole warmed target stays
 t3-6f14baa6/rust/target jobs1,47GB free. User AGENTS edits untouched.
+
+## Recovered worker state and configured-store acceptance (2026-10-20)
+
+Worker messages/handoff were stale: actual cache branch had already captured
+passing probe62d9abf21/01a2a3f46/0cdd87e2c and main sourcebbd411812+b850bdc7f.
+Parent inspected raw attempt2 output, metadata exit0, before/after hashes and
+reviewed drain window change5s->30s (RPC must still complete during drain).
+Accepted factory chain through0cdd87e2c into root160fcc6f3, pushed; relevant
+main/factory/config/lib/sqlite/probe files byte-equal tested source. Go task
+readback and lease transition verified. Root now contains both independently
+validated healer and configured factory; combined main validation remains next.
+
+Main candidate is unbuilt. Parent review found taking runtime Option in tuple
+if-let drops embedded runtime when membership absent; worker instructed fix
+before gates. Also verify Go dynamic bool precedence/default and advertising
+gRPC labels before binding gRPC; add rollback/occupied-port coverage. Worker
+rebasing only main2 commits onto accepted root, source-only while SD has lane.
+
+SD worker rebased client+review onto160fcc6f3, tipf83c47fab, sole heavy lane
+started tmux matching-shard-distributor-review at051406UTC. Frozen hashes/raw
+exits initially /tmp/matching-shard-distributor-evidence/attempt-20261020T051406Z.
+Must package evidence before merge. Resolver Go oracle is not executor parity.
+History transport worker actual recovered HEAD58c5b9f5a includes GetMutableState
+and task-start mappings; all5 callable adapters now source-only, production
+retry/redirect/transport selection remains under implementation. No nested
+workers active, no future service migration. Cache pending_init was interrupted
+and resumed; no source lost. Avoid duplicating captured probe work.
+
+## Production main validation and real restart metadata failure
+
+Standalone SD client accepted root5c15c39e6 after7 Rust SD/12 config tests,
+strict Clippy, existing pinned Go resolver suite; executor/spectator live Go
+interop and registry/main wiring remain unproven. Evidence packaged with scope.
+
+Main worker source1a8591566 fixes parent-found embedded runtime take/drop bug,
+prebinds grpc, handles bootstrap signals, adds embedded durable native probe
+and occupiedgrpc check. Build/no-run/runtime/lifecycle/provider pass; initial
+Clippy last() lint fixed equivalently in a7f2603a2; corrected strict lint passes.
+Focused embedded durability probe passes, production focused probe fails empty
+polls because isolated harness only advertises Matching membership, no History.
+Do not add production loopback fallback; fixture needs History Ringpop peer.
+
+Actual mixed Go Frontend/History/Worker (no Go Matching) reached Rust through
+real discovery. First attempt missing node dependencies fixed with explicit
+NODE_PATH to existing root locked cadence-web node_modules. Next attempt got
+through real production startup/task writes and SIGKILL, then Rust restart
+failed valid Go metadata decode unknown ttype89. Root found Go codec version0
+preamble0x59=89 (common/codec/interface.go/version0_thriftrw.go); nested domain
+blob decoder currently reads raw struct. Worker owns sole lane diagnosing exact
+nested-vs-outer serialization boundary, actual Go bytes, version validation and
+regression fixtures; no dropping invalid cache rows/fallback allowed. Root main
+still unmerged until recovered mixed evidence. Raw failures retained in cache
+memory/evidence/matching-main-gate-20261020-a7f2603a2.
+
+User confirmed root uncommitted matching_registry.rs and untracked
+matching_shard_processor.rs are THEIR edits. Preserve alongsideAGENTS; never
+restore/overwrite/blind cherry-pick. SWIM isolated candidate96b297447+f4a3e54b5
+is source-only callback implementation/tests; now comparing read-only user
+snapshot and preparing additive tests preserving their behavior. QPS gap
+hypothesis disproved: existing grpc_matching report_arrival records nonforwarded
+loads. No worker modifies root. History source candidate685cca4c8 includes5
+transport adapters/integration, coherent TChannel named endpoints, Args/Result
+wrappers, prepared Go fixture generator/consumer and native fake-peer tests.
+Actual Go fixture and builds pending main lane; no parity claim.
+
+## Continuation checkpoint, 2026-10-20
+
+Root94ff64a6d retains exactly the user's AGENTS.md, matching_registry.rs and
+untracked matching_shard_processor.rs edits; explicit user instruction is to
+preserve them. No root implementation edits authorized to workers.
+
+Main candidate eb06a3e99 fixes nested Go domain codec prefix after optional
+Snappy; actual pinned Go serializer fixtures and12 metadata tests pass. Mixed
+existing SDK workflows completed after SIGKILL/restart and graceful restart.
+Full mixed gate still fails isolated poller registration: production needs
+Go-shaped dynamic configuration, not a test admin endpoint. Runtime worker
+source-only implementation now includes modern/legacy file selection, ordered
+values/constraints, startup load and owned reload lifecycle. Path/poll semantics
+and tests remain under review; no build lane yet. Focused configured native
+harness still needs real discoverable History peer. Main remains unmerged.
+
+History worker owns sole heavy lane. Pinned Go1.25.14 oracle exit0,25 entries,
+observed/expected SHA256 de22e106 prefix equal. First Rust no-run failed15
+candidate compatibility errors; fixing wrappers, inference, imports and local
+metadata decode. Subsequent gates must include real generated Go YARPC History
+peer for all five operations, including caller transport headers; fake peer
+and wire fixtures alone cannot establish interoperability.
+
+SD callback tests align to user snapshot in isolated commit50ce04f1b; not yet
+built or merged. SD routing source in progress in separate worker, no main
+edits: async spectator plus existing Ring snapshot fallback, dynamic policy
+closure, named endpoint results. Source-only while History builds. Shared
+CARGO_BUILD_JOBS=1 target remains t3-6f14baa6/rust/target; all shell work must
+set explicit workdir because resumed workers can inherit root cwd.
+
+### Review continuation
+
+History candidate4d1b8bc6b passed no-run attempt2,25-fixture consumer
+attempt3, and attempt4 focused fake-peer all5, TChannel redirect/deadline,
+15 History regression tests and4 TChannel adversarial tests. Real pinned
+YARPC source review found candidate uses History::Method instead of generated
+HistoryService::Method and lacks cn caller transport header, placing reserved
+caller/service in app headers. Real generated Go peer validation/fix is next;
+do not merge from fake-peer results alone. History retains build lane.
+
+Runtime source checkpoint2de12942c adds filebased dynamic config and exact
+defaultStore lookup. Unbuilt. Parent review requests initial-load completion
+time passed into watcher (avoid losing bootstrap-time updates), real Go null
+root/property and malformed constraints oracle, and typed diagnostic parity.
+Watcher lifecycle review fixed mutable receiver, Drop abort and cleanup error
+aggregation. Main/mixed harness still pending.
+
+SD router3ece21e23 plus18c9edce9 corrects partial move and Go unsigned port
+parsing (plus signs rejected). c67b43457 adds isolated advisory cached-owner
+probe. None built/merged. Full integration audit found registry get checks
+Ring both before reuse and publication, maintenance evicts by Ring, and remote
+forward/query/partition routes use Ring directly. Must integrate shared async
+routing and local executor assignment policy coherently across these surfaces;
+preflight alone is insufficient. Runtime and swim coordinating async assignment
+refresh plus sync processor snapshot validation for publication and unload.
+Root user source hashes remain d5d9f593 (registry),d7ae805e (processor); isolated
+worker baselines include test seams and differ, so extract reviewed additive
+diffs, never blindly import user snapshot commits. Disk39GB free.
+
+### Native peer and SD integration continuation
+
+History actual generated Go YARPC peer passed all5 nonempty request/response
+checks, caller/service/procedure/encoding metadata, typed errors/redirect in
+attempt6 after fixing empty redirect test fixture. Corrected procedure
+HistoryService::Method, cn transport caller cadence-matching, app headers empty.
+Current source uncommitted; unused helper removed, exact all-target strict
+Clippy -D warnings and final peer rerun pending. Parent rejected blanket
+-A dead_code lint as strict evidence. Keep attempt failure logs/provenance.
+
+Runtime checkpoints348831585 (dynamic loader/harness fixes) andd801180a4
+(unrun Go filebased oracle), routing cherry-picks through4ae464b80. Initial
+load completion timestamp now passed to watcher, null/empty semantics and
+constraints conversion reviewed. Diagnostics sample first/every1000 with
+known generic/process-global limitation vs Go Collection context. Main SD
+executor/factory/client construction still being implemented source-only.
+
+Swim coherent routing/ownership641188049 includes async handler preflight,
+sync local processor rechecks before cached reuse/publication, SD-aware
+eviction and remote forwarding/query/parent poll/partition routing. Parent
+reviewed lock order: executor releases processor mutex before Stop callbacks,
+no reverse held registry lock. Rejected post-open owners use existing finish
+cleanup. Unbuilt. ff6e10f8b adds actual Go handler/generated gRPC fixture plus
+ignored executor/spectator callback integration gate, unbuilt/unrun.
+
+Refreshed backend audit confirms configured task+domain stores remain SQLite
+only; MySQL/Postgres/Cassandra and durable semaphore state/telemetry remain
+Matching gaps. Audit based on swim branch must account for newer runtime
+candidate discovery already implemented elsewhere. No History service
+migration started. Root remains exactly user AGENTS/registry/processor edits.
+Runtime resumed in root read-only once; corrected before edits. Explicit
+absolute paths/workdir remain mandatory.

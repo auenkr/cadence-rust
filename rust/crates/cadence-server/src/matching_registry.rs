@@ -462,6 +462,36 @@ impl QueueRegistry {
         released
     }
 
+    /// Sum current QPS for loaded owners with this exact task-list name.
+    pub(crate) fn qps_for_task_list_name(&self, name: &str) -> f64 {
+        let owners = {
+            let state = self.state.lock().expect("Matching registry lock");
+            state.owners.iter()
+                .filter(|((_, task_list, _), owner)| task_list == name && !owner.queue.is_stopped())
+                .map(|(_, owner)| owner.qps.clone()).collect::<Vec<_>>()
+        };
+        owners.iter().map(|qps| qps.qps()).sum()
+    }
+
+    /// Stop all loaded owners for one exact task-list name so a later Get rebuilds them.
+    pub(crate) async fn stop_task_list_name(&self, name: &str) -> Result<(), Status> {
+        let registry = self.clone();
+        let name = name.to_owned();
+        owner_work(move |readers| {
+            let owners = {
+                let mut state = registry.state.lock().expect("Matching registry lock");
+                let keys = state.owners.keys().filter(|(_, task_list, _)| task_list == &name).cloned().collect::<Vec<_>>();
+                keys.into_iter().filter_map(|key| state.owners.remove(&key)).collect::<Vec<_>>()
+            };
+            let now = registry_now();
+            let mut first_error = None;
+            for owner in owners {
+                if let Err(error) = owner.finish(now, readers) { first_error.get_or_insert(error); }
+            }
+            first_error.map_or(Ok(()), Err)
+        }).await
+    }
+
     /// Snapshot loaded managers only, like Go ManagersByDomainID. This must
     /// neither acquire new leases nor consult frontend workflow state.
     pub fn describe_by_domain(

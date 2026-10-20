@@ -1,0 +1,4 @@
+native-peer	cargo test --locked -p cadence-server --lib matching_history_tchannel::typed_codec_tests::native_tchannel_peer_exercises_all_five_history_methods_and_wrappers
+ tchannel-redirect	cargo test --locked -p cadence-server --lib matching_history::tests::tchannel_redirect_uses_owner_endpoint_and_preserves_operation_deadline
+matching-history-module	cargo test --locked -p cadence-server --lib matching_history::tests::
+tchannel-client-module	cargo test --locked -p cadence-server --lib tchannel_json_client::adversarial_tests::

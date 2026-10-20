@@ -599,7 +599,8 @@ async fn main() -> anyhow::Result<()> {
             let dynamic_config_provider = cfg.selected_dynamic_config_client();
             let dynamic_config_poll = match dynamic_config_provider {
                 Some((_, provider)) if !provider.poll_interval.is_empty() => {
-                    let nanos = cadence_server::config::parse_go_duration(&provider.poll_interval)?;
+                    let nanos = cadence_server::config::parse_go_duration(&provider.poll_interval)
+                        .map_err(anyhow::Error::msg)?;
                     std::time::Duration::from_nanos(nanos.max(5_000_000_000) as u64)
                 }
                 _ => std::time::Duration::from_secs(5),

@@ -1,0 +1,18 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/t3-83afa06b/rust/crates/cadence-server)
+warning: function `take_s16` is never used
+    --> crates/cadence-server/src/matching_history_tchannel.rs:2281:8
+     |
+2281 |     fn take_s16(bytes: &[u8], offset: &mut usize) -> String {
+     |        ^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-server` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 54.19s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 1 test
+test matching_history_tchannel::typed_codec_tests::generated_go_history_server_accepts_native_tchannel_calls ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 329 filtered out; finished in 0.16s
+
