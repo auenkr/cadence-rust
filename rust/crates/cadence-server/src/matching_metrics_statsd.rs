@@ -324,6 +324,7 @@ impl MetricSink for StatsdMetricSink {
             (MetricKind::Histogram, MetricValue::Duration(duration)) => {
                 let bounds = match event.histogram {
                     Some(HistogramSpec::GoLow1ms100s) => go_low_1ms100s_bounds_nanos(),
+                    Some(HistogramSpec::GoMid1To16k) => go_low_1ms100s_bounds_nanos(),
                     None => go_default_duration_bounds_nanos(),
                 };
                 let (lower, upper) = duration_bucket_bounds(duration, &bounds);
@@ -333,6 +334,26 @@ impl MetricSink for StatsdMetricSink {
                     go_duration_string(upper)
                 );
                 self.aggregate(bucket_name, "c", Aggregate::Counter(1));
+            }
+            (MetricKind::Histogram, MetricValue::Count(value))
+                if event.histogram == Some(HistogramSpec::GoMid1To16k) =>
+            {
+                let bounds = go_mid_1_to_16k_bounds();
+                let index = bounds
+                    .iter()
+                    .position(|bound| value <= *bound)
+                    .unwrap_or(bounds.len());
+                let lower = if index == 0 {
+                    i64::MIN
+                } else {
+                    bounds[index - 1]
+                };
+                let upper = bounds.get(index).copied().unwrap_or(i64::MAX);
+                self.aggregate(
+                    format!("{name}.{}-{}", lower, upper),
+                    "c",
+                    Aggregate::Counter(1),
+                );
             }
             _ => {}
         }
@@ -440,6 +461,12 @@ fn go_low_1ms100s_bounds_nanos() -> Vec<u64> {
         bounds.push((1_000_000.0 * 2_f64.powf(exponent)) as u64);
     }
     bounds
+}
+
+fn go_mid_1_to_16k_bounds() -> Vec<i64> {
+    std::iter::once(0)
+        .chain((0..=64).map(|index| (8.0 * 2_f64.powf(index as f64 / 4.0)) as i64))
+        .collect()
 }
 
 fn go_default_duration_bounds_nanos() -> Vec<u64> {

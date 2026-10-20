@@ -435,6 +435,10 @@ impl MetricSink for PrometheusMetricSink {
                     go_low_1ms100s_bucket_bounds_seconds(),
                     Some(go_low_1ms100s_bucket_bounds_nanos()),
                 )),
+                Some(HistogramSpec::GoMid1To16k) => Aggregate::Histogram(HistogramAggregate::new(
+                    go_mid_1_to_16k_bucket_bounds(),
+                    None,
+                )),
                 None => Aggregate::Histogram(HistogramAggregate::new(
                     self.inner.timer_buckets_seconds.clone(),
                     None,
@@ -454,6 +458,9 @@ impl MetricSink for PrometheusMetricSink {
                 MetricValue::Duration(duration),
             ) => {
                 histogram.observe(duration);
+            }
+            (Aggregate::Histogram(histogram), MetricKind::Histogram, MetricValue::Count(value)) => {
+                histogram.observe_value(value as f64);
             }
             (Aggregate::Summary(summary), MetricKind::Timer, MetricValue::Duration(duration)) => {
                 summary.observe(duration);
@@ -636,6 +643,10 @@ impl HistogramAggregate {
         } else {
             seconds
         };
+        self.observe_value(observed_seconds);
+    }
+
+    fn observe_value(&mut self, observed_seconds: f64) {
         self.count += 1;
         self.sum_seconds += observed_seconds;
         for (bound, count) in self
@@ -815,6 +826,12 @@ fn go_low_1ms100s_bucket_bounds_seconds() -> Vec<f64> {
     go_low_1ms100s_bucket_bounds_nanos()
         .into_iter()
         .map(|nanos| nanos as f64 / 1_000_000_000.0)
+        .collect()
+}
+
+fn go_mid_1_to_16k_bucket_bounds() -> Vec<f64> {
+    std::iter::once(0.0)
+        .chain((0..=64).map(|index| (8.0 * 2_f64.powf(index as f64 / 4.0)) as i64 as f64))
         .collect()
 }
 

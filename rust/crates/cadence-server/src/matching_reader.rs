@@ -432,6 +432,8 @@ impl TaskReader {
                         }
                     };
                     let Some(task) = task else { break };
+                    let dispatch_started = std::time::Instant::now();
+                    let mut dispatch_attempt = 0u64;
                     loop {
                         // Go rechecks expiry at each dispatch attempt, including
                         // after a row spent time waiting behind another head.
@@ -578,9 +580,23 @@ impl TaskReader {
                             );
                         }
                         match outcome {
-                            Attempt::Offered => break,
+                            Attempt::Offered => {
+                                if let Some(reader_metrics) = dispatch_metrics
+                                    .lock()
+                                    .expect("matching reader metrics lock")
+                                    .as_ref()
+                                {
+                                    reader_metrics.metrics.async_match_local(
+                                        &reader_metrics.context,
+                                        (dispatch_attempt > 0).then_some(dispatch_attempt),
+                                        dispatch_started.elapsed(),
+                                    );
+                                }
+                                break;
+                            }
                             Attempt::Stopped => break 'dispatch,
                             Attempt::Throttled | Attempt::TimedOut => {
+                                dispatch_attempt = dispatch_attempt.saturating_add(1);
                                 // Go yields before retrying a throttled/timeout head.
                                 tokio::task::yield_now().await;
                                 continue;

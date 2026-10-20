@@ -345,6 +345,7 @@ impl MetricSink for M3MetricSink {
             (MetricKind::Histogram, MetricValue::Duration(value)) => {
                 let bounds = match event.histogram {
                     Some(HistogramSpec::GoLow1ms100s) | None => low_1ms100s_bounds(),
+                    Some(HistogramSpec::GoMid1To16k) => low_1ms100s_bounds(),
                 };
                 let index = bounds
                     .iter()
@@ -369,6 +370,28 @@ impl MetricSink for M3MetricSink {
                         format!("{index:04}"),
                         format!("{}-{}", duration_string(lower), duration_string(upper)),
                     )),
+                });
+            }
+            (MetricKind::Histogram, MetricValue::Count(value))
+                if event.histogram == Some(HistogramSpec::GoMid1To16k) =>
+            {
+                let bounds = mid_1_to_16k_bounds();
+                let index = bounds
+                    .iter()
+                    .position(|bound| value <= *bound)
+                    .unwrap_or(bounds.len());
+                let lower = if index == 0 {
+                    i64::MIN
+                } else {
+                    bounds[index - 1]
+                };
+                let upper = bounds.get(index).copied().unwrap_or(i64::MAX);
+                self.enqueue(M3Metric {
+                    name: self.metric_name(event.name),
+                    value: Value::Counter(1),
+                    timestamp,
+                    tags,
+                    bucket: Some((format!("{index:04}"), format!("{lower}-{upper}"))),
                 });
             }
             _ => {}
@@ -661,6 +684,12 @@ fn low_1ms100s_bounds() -> Vec<u64> {
         bounds.push((1_000_000.0_f64 * 2_f64.powf(index as f64 / 2.0)) as u64);
     }
     bounds
+}
+
+fn mid_1_to_16k_bounds() -> Vec<i64> {
+    std::iter::once(0)
+        .chain((0..=64).map(|index| (8.0 * 2_f64.powf(index as f64 / 4.0)) as i64))
+        .collect()
 }
 
 fn duration_string(nanos: i64) -> String {

@@ -1118,6 +1118,15 @@ impl Matching {
             task_source,
             schedule_to_start_timeout,
         } = add;
+        let metric_context = crate::matching_metrics::PollMetricContext {
+            domain: domain_name_for(&self.frontend.state.domains, domain_id)
+                .unwrap_or_else(|| domain_id.to_owned()),
+            task_list: list.name.clone(),
+            task_list_kind: list.kind,
+            task_type: if task_type == 0 { "decision_task" } else { "activity_task" },
+            poller_isolation_group: String::new(),
+        };
+        let match_started = tokio::time::Instant::now();
         let name = task_list_name(&list.name)?;
         let degree = {
             let config = self
@@ -1148,6 +1157,11 @@ impl Matching {
                 handle.try_sync_match(data, source, deadline).await
             };
             if matched {
+                self.metrics.sync_match_latency(
+                    &metric_context,
+                    ancestor || forwarded,
+                    match_started.elapsed(),
+                );
                 return Ok(Some(
                     entry.partitions.get().map(partition_config_to_internal),
                 ));
@@ -2006,6 +2020,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             let mut list = task_list.clone();
             let mut handle = queue;
             let mut permits = Vec::new();
+            let mut in_process_forward_metrics = Vec::new();
             let mut force_local = false;
             loop {
                 let query = crate::matching_query::PendingQuery {
@@ -2023,7 +2038,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     handle.queries.try_offer(query)
                 };
                 if offered {
-                    return match tokio::time::timeout_at(deadline, receiver).await {
+                    let result = match tokio::time::timeout_at(deadline, receiver).await {
                         Ok(Ok(result)) => {
                             crate::matching_query::query_outcome(result, strong).map(Response::new)
                         }
@@ -2032,6 +2047,10 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 "Query task not completed before the deadline.",
                         )),
                     };
+                    for (started, context) in in_process_forward_metrics {
+                        self.metrics.forward_query_latency(&context, started.elapsed());
+                    }
+                    return result;
                 }
                 // `_registration` withdraws the unoffered entry; Go's
                 // unbuffered send likewise leaves nothing behind on failure.
@@ -2056,9 +2075,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                     Some(permit) => {
                         permits.push(permit);
                         let forwarded_from = list.name.clone();
-                        list.name = parent;
                         if let Some(membership) = &self.membership {
-                            if let Some(channel) = membership.remote_channel(&list.name)? {
+                            let parent_channel = membership.remote_channel(&parent)?;
+                            if let Some(channel) = parent_channel {
+                                let forward_context = crate::matching_metrics::PollMetricContext {
+                                    domain: self.domain_name(&r.domain_id)?,
+                                    task_list: forwarded_from.clone(),
+                                    task_list_kind: list.kind,
+                                    task_type: "decision_task",
+                                    poller_isolation_group: String::new(),
+                                };
                                 let mut request = Request::new(m::QueryWorkflowRequest {
                                     domain_id: r.domain_id.clone(),
                                     request: Some(payload.clone()),
@@ -2068,11 +2094,28 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 request.set_timeout(
                                     deadline.saturating_duration_since(tokio::time::Instant::now()),
                                 );
-                                return m::matching_api_client::MatchingApiClient::new(channel)
+                                let forward_started = tokio::time::Instant::now();
+                                let result = m::matching_api_client::MatchingApiClient::new(channel)
                                     .query_workflow(request)
                                     .await;
+                                self.metrics.forward_query_latency(
+                                    &forward_context,
+                                    forward_started.elapsed(),
+                                );
+                                return result;
                             }
                         }
+                        in_process_forward_metrics.push((
+                            tokio::time::Instant::now(),
+                            crate::matching_metrics::PollMetricContext {
+                                domain: self.domain_name(&r.domain_id)?,
+                                task_list: forwarded_from,
+                                task_list_kind: list.kind,
+                                task_type: "decision_task",
+                                poller_isolation_group: String::new(),
+                            },
+                        ));
+                        list.name = parent;
                         handle = self.durable_queue(&r.domain_id, &list, 0).await?;
                     }
                     // Go blocks on the token while racing a local match; with

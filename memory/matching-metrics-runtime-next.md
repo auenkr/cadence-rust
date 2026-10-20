@@ -56,12 +56,21 @@ successful task claim or successful direct forward. Remaining Go callsites are
 now mapped to concrete gaps:
 
 * `matcher.go:155,256` emits `sync_throttle_count_per_tl`; `:231` emits
-  `sync_forward_task_throttle_errors_per_tl`.
+  `sync_forward_task_throttle_errors_per_tl`. Event builders and sync-match
+  latency pairs are now present, with latency emitted on a successful
+  in-process sync match. Throttle outcomes are not separable from a normal
+  no-waiting-poller result in Rust's current boolean `try_sync_match` interface,
+  so those counters remain unwired.
 * `matcher.go:339-419` emits async local/forward counters, attempt timer and
   integer histogram pairs, latency timer and duration histogram pairs, and
   forward throttle errors. Rust now covers the task-reader async match latency,
-  dispatch timeout and buffer throttle events; the matcher-side counters and
-  attempt timer/integer histogram families remain open.
+  dispatch timeout and buffer throttle events. Async local handoffs now emit
+  local counters and latency pairs; retry cases also emit attempt timer and
+  integer histogram pairs through Prometheus, StatsD and M3 using Go's
+  `Mid1To16k` bounds. Rust currently has no async task-forwarding outcome in the
+  reader dispatch path, so forward and after-forward-failure families remain
+  unwired. Local attempt counts currently count throttled/timeout retries,
+  while Go increments only after a failed task-forward request.
 * `matcher.go:444` emits invalid-isolation-group count.
 * `matcher.go:465-639` emits the local/forward/after-forward-failure poll
   timing pairs described above; Rust emits these from the claimed task or

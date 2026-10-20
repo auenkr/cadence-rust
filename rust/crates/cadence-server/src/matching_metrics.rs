@@ -29,6 +29,8 @@ pub enum HistogramSpec {
     /// Go `common/metrics.Low1ms100s`: 1 ms to 100 s intent, scale 1,
     /// with the same 40 sampled exponential buckets (plus sentinel bounds).
     GoLow1ms100s,
+    /// Go `common/metrics.Mid1To16k`, used for integer attempt counts.
+    GoMid1To16k,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,12 +107,44 @@ pub const POLLER_PER_TASK_LIST: &str = "poller_count_per_tl";
 pub const POLLER_INVALID_ISOLATION_GROUP: &str = "poller_invalid_isolation_group_per_tl";
 pub const FORWARD_POLL_LATENCY: &str = "forward_poll_latency_per_tl";
 pub const FORWARD_POLL_LATENCY_NS: &str = "forward_poll_latency_per_tl_ns";
+pub const FORWARD_TASK_LATENCY: &str = "forward_task_latency_per_tl";
+pub const FORWARD_TASK_LATENCY_NS: &str = "forward_task_latency_per_tl_ns";
+pub const FORWARD_QUERY_LATENCY: &str = "forward_query_latency_per_tl";
+pub const FORWARD_QUERY_LATENCY_NS: &str = "forward_query_latency_per_tl_ns";
+pub const SYNC_MATCH_LOCAL_POLL_LATENCY: &str = "syncmatch_local_poll_latency_per_tl";
+pub const SYNC_MATCH_LOCAL_POLL_LATENCY_NS: &str = "syncmatch_local_poll_latency_per_tl_ns";
+pub const SYNC_MATCH_FORWARD_POLL_LATENCY: &str = "syncmatch_forward_poll_latency_per_tl";
+pub const SYNC_MATCH_FORWARD_POLL_LATENCY_NS: &str = "syncmatch_forward_poll_latency_per_tl_ns";
+pub const SYNC_THROTTLE_COUNT: &str = "sync_throttle_count_per_tl";
+pub const SYNC_FORWARD_TASK_THROTTLE_ERRORS: &str = "sync_forward_task_throttle_errors_per_tl";
 pub const TASK_BACKLOG_PER_TASK_LIST: &str = "task_backlog_per_tl";
 pub const TASK_LAG_PER_TASK_LIST: &str = "task_lag_per_tl";
 pub const TASK_COUNT_PER_TASK_LIST: &str = "task_count_per_tl";
 pub const EXPIRED_TASKS_PER_TASK_LIST: &str = "tasks_expired_per_tl";
 pub const ASYNC_MATCH_LATENCY: &str = "asyncmatch_latency_per_tl";
 pub const ASYNC_MATCH_LATENCY_NS: &str = "asyncmatch_latency_per_tl_ns";
+pub const ASYNC_MATCH_LOCAL_POLL: &str = "asyncmatch_local_poll_per_tl";
+pub const ASYNC_MATCH_LOCAL_POLL_ATTEMPT: &str = "asyncmatch_local_poll_attempt_per_tl";
+pub const ASYNC_MATCH_LOCAL_POLL_ATTEMPT_COUNTS: &str =
+    "asyncmatch_local_poll_attempt_per_tl_counts";
+pub const ASYNC_MATCH_LOCAL_POLL_LATENCY: &str = "asyncmatch_local_poll_latency_per_tl";
+pub const ASYNC_MATCH_LOCAL_POLL_LATENCY_NS: &str = "asyncmatch_local_poll_latency_per_tl_ns";
+pub const ASYNC_MATCH_FORWARD_POLL: &str = "asyncmatch_forward_poll_per_tl";
+pub const ASYNC_MATCH_FORWARD_POLL_ATTEMPT: &str = "asyncmatch_forward_poll_attempt_per_tl";
+pub const ASYNC_MATCH_FORWARD_POLL_ATTEMPT_COUNTS: &str =
+    "asyncmatch_forward_poll_attempt_per_tl_counts";
+pub const ASYNC_MATCH_FORWARD_POLL_LATENCY: &str = "asyncmatch_forward_poll_latency_per_tl";
+pub const ASYNC_MATCH_FORWARD_POLL_LATENCY_NS: &str = "asyncmatch_forward_poll_latency_per_tl_ns";
+pub const ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED: &str =
+    "asyncmatch_local_poll_after_forward_failed_per_tl";
+pub const ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED_ATTEMPT: &str =
+    "asyncmatch_local_poll_after_forward_failed_attempt_per_tl";
+pub const ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED_ATTEMPT_COUNTS: &str =
+    "asyncmatch_local_poll_after_forward_failed_attempt_per_tl_counts";
+pub const ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED_LATENCY: &str =
+    "asyncmatch_local_poll_after_forward_failed_latency_per_tl";
+pub const ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED_LATENCY_NS: &str =
+    "asyncmatch_local_poll_after_forward_failed_latency_per_tl_ns";
 pub const ASYNC_MATCH_DISPATCH_TIMEOUTS: &str = "asyncmatch_dispatch_timeouts_per_tl";
 pub const BUFFER_THROTTLE_COUNT: &str = "buffer_throttle_count_per_tl";
 pub const BUFFER_UNKNOWN_DISPATCH_ERROR: &str = "buffer_unknown_task_dispatch_error_per_tl";
@@ -559,11 +593,172 @@ impl MatchingMetrics {
         }
     }
 
-    pub fn forward_poll_latency(&self, context: &PollMetricContext, elapsed: Duration) {
+    pub fn async_match_local(
+        &self,
+        context: &PollMetricContext,
+        attempt: Option<u64>,
+        elapsed: Duration,
+    ) {
+        self.async_match_handoff(
+            context,
+            ASYNC_MATCH_LOCAL_POLL,
+            ASYNC_MATCH_LOCAL_POLL_ATTEMPT,
+            ASYNC_MATCH_LOCAL_POLL_ATTEMPT_COUNTS,
+            ASYNC_MATCH_LOCAL_POLL_LATENCY,
+            ASYNC_MATCH_LOCAL_POLL_LATENCY_NS,
+            attempt,
+            elapsed,
+        );
+    }
+
+    pub fn async_match_forward(
+        &self,
+        context: &PollMetricContext,
+        attempt: u64,
+        elapsed: Duration,
+    ) {
+        self.async_match_handoff(
+            context,
+            ASYNC_MATCH_FORWARD_POLL,
+            ASYNC_MATCH_FORWARD_POLL_ATTEMPT,
+            ASYNC_MATCH_FORWARD_POLL_ATTEMPT_COUNTS,
+            ASYNC_MATCH_FORWARD_POLL_LATENCY,
+            ASYNC_MATCH_FORWARD_POLL_LATENCY_NS,
+            Some(attempt),
+            elapsed,
+        );
+    }
+
+    pub fn async_match_local_after_forward_failure(
+        &self,
+        context: &PollMetricContext,
+        attempt: u64,
+        elapsed: Duration,
+    ) {
+        self.async_match_handoff(
+            context,
+            ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED,
+            ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED_ATTEMPT,
+            ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED_ATTEMPT_COUNTS,
+            ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED_LATENCY,
+            ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED_LATENCY_NS,
+            Some(attempt),
+            elapsed,
+        );
+    }
+
+    fn async_match_handoff(
+        &self,
+        context: &PollMetricContext,
+        counter: &'static str,
+        attempt_timer: &'static str,
+        attempt_histogram: &'static str,
+        latency_timer: &'static str,
+        latency_histogram: &'static str,
+        attempt: Option<u64>,
+        elapsed: Duration,
+    ) {
+        self.task_list_counter(counter, context, BTreeMap::new());
+        if let Some(attempt) = attempt {
+            self.0.record(MetricEvent {
+                name: attempt_timer,
+                kind: MetricKind::Timer,
+                value: MetricValue::Duration(Duration::from_nanos(attempt)),
+                tags: self.task_list_tags(context),
+                histogram: None,
+            });
+            self.0.record(MetricEvent {
+                name: attempt_histogram,
+                kind: MetricKind::Histogram,
+                value: MetricValue::Count(attempt.min(i64::MAX as u64) as i64),
+                tags: self.task_list_tags(context),
+                histogram: Some(HistogramSpec::GoMid1To16k),
+            });
+        }
         for (name, kind, histogram) in [
-            (FORWARD_POLL_LATENCY, MetricKind::Timer, None),
+            (latency_timer, MetricKind::Timer, None),
             (
-                FORWARD_POLL_LATENCY_NS,
+                latency_histogram,
+                MetricKind::Histogram,
+                Some(HistogramSpec::GoLow1ms100s),
+            ),
+        ] {
+            self.0.record(MetricEvent {
+                name,
+                kind,
+                value: MetricValue::Duration(elapsed),
+                tags: self.task_list_tags(context),
+                histogram,
+            });
+        }
+    }
+
+    pub fn forward_poll_latency(&self, context: &PollMetricContext, elapsed: Duration) {
+        self.duration_pair(
+            context,
+            FORWARD_POLL_LATENCY,
+            FORWARD_POLL_LATENCY_NS,
+            elapsed,
+        );
+    }
+
+    pub fn forward_task_latency(&self, context: &PollMetricContext, elapsed: Duration) {
+        self.duration_pair(
+            context,
+            FORWARD_TASK_LATENCY,
+            FORWARD_TASK_LATENCY_NS,
+            elapsed,
+        );
+    }
+
+    pub fn forward_query_latency(&self, context: &PollMetricContext, elapsed: Duration) {
+        self.duration_pair(
+            context,
+            FORWARD_QUERY_LATENCY,
+            FORWARD_QUERY_LATENCY_NS,
+            elapsed,
+        );
+    }
+
+    pub fn sync_match_latency(
+        &self,
+        context: &PollMetricContext,
+        forwarded: bool,
+        elapsed: Duration,
+    ) {
+        let (timer, histogram) = if forwarded {
+            (
+                SYNC_MATCH_FORWARD_POLL_LATENCY,
+                SYNC_MATCH_FORWARD_POLL_LATENCY_NS,
+            )
+        } else {
+            (
+                SYNC_MATCH_LOCAL_POLL_LATENCY,
+                SYNC_MATCH_LOCAL_POLL_LATENCY_NS,
+            )
+        };
+        self.duration_pair(context, timer, histogram, elapsed);
+    }
+
+    pub fn sync_throttled(&self, context: &PollMetricContext) {
+        self.task_list_counter(SYNC_THROTTLE_COUNT, context, BTreeMap::new());
+    }
+
+    pub fn sync_forward_throttled(&self, context: &PollMetricContext) {
+        self.task_list_counter(SYNC_FORWARD_TASK_THROTTLE_ERRORS, context, BTreeMap::new());
+    }
+
+    fn duration_pair(
+        &self,
+        context: &PollMetricContext,
+        timer: &'static str,
+        histogram: &'static str,
+        elapsed: Duration,
+    ) {
+        for (name, kind, histogram) in [
+            (timer, MetricKind::Timer, None),
+            (
+                histogram,
                 MetricKind::Histogram,
                 Some(HistogramSpec::GoLow1ms100s),
             ),
@@ -1052,6 +1247,26 @@ mod matcher_metric_tests {
         }));
         assert_eq!(events[1].histogram, Some(HistogramSpec::GoLow1ms100s));
         assert_eq!(events[3].histogram, Some(HistogramSpec::GoLow1ms100s));
+    }
+
+    #[test]
+    fn async_local_handoff_emits_attempt_counter_and_go_integer_histogram() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let elapsed = Duration::from_millis(7);
+        metrics.async_match_local(&context(), Some(3), elapsed);
+        let events = sink.events();
+        assert_eq!(events.len(), 5);
+        assert_eq!(events[0].name, ASYNC_MATCH_LOCAL_POLL);
+        assert_eq!(events[1].name, ASYNC_MATCH_LOCAL_POLL_ATTEMPT);
+        assert_eq!(
+            events[1].value,
+            MetricValue::Duration(Duration::from_nanos(3))
+        );
+        assert_eq!(events[2].name, ASYNC_MATCH_LOCAL_POLL_ATTEMPT_COUNTS);
+        assert_eq!(events[2].value, MetricValue::Count(3));
+        assert_eq!(events[2].histogram, Some(HistogramSpec::GoMid1To16k));
+        assert_eq!(events[3].name, ASYNC_MATCH_LOCAL_POLL_LATENCY);
     }
 
     #[test]
