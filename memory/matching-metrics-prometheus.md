@@ -72,3 +72,26 @@ UDP test covers these aggregate semantics with an explicit flush boundary.
 This has not yet been run, and there is not yet a pinned-Go StatsD UDP oracle;
 do not treat the implementation as validated until both are exercised and
 compared semantically.
+
+## M3 design audit
+
+Go M3 metrics are a distinct backend, not StatsD with a different formatter.
+`common/config/metrics.go` builds a Tally cached root scope using the shared
+`reportingInterval` (default 1s), configured scope prefix and tags, then
+`tally/m3.Configuration.NewReporter` creates a reporter that sends M3 Thrift
+`MetricBatch` packets over UDP. It selects one UDP host or a multi-host
+transport; the reporter batches a queue (default 4096), caps datagrams at
+32768 bytes, includes common `service` and `env` tags and optionally the host,
+and closes its reporter with the scope lifecycle. Histogram bucket values
+become `bucketid` and `bucket` tags with default precision 6. The config also
+accepts common tags, queue, packet size and internal tags.
+
+The Tally M3 reporter defaults to the Thrift binary protocol; compact protocol
+is available in Tally's API but is not exposed by Cadence's YAML configuration.
+There is no M3 Rust sink or M3 metric Thrift model in the current Rust tree.
+The Cadence RPC Thrift crate is not an M3 metrics wire implementation. A
+service-scoped port will need M3 batch/metric/tag wire types and Go fixture
+oracle coverage, reporting interval aggregation matching Tally, packet sizing,
+multi-address UDP fan-out, queue/drop behavior, host/service/env/common tags,
+histogram tag formatting, and shutdown flush/close semantics. This is a design
+audit only; no M3 implementation was started.
