@@ -1,6 +1,6 @@
 # Matching shard-distributor candidate source review (2026-10-20)
 
-Review target: branch `t3/matching-shard-distributor-candidate`, commits `8569a9f88` and `9a791267a`, based on accepted root `c9c1f4f5b`. This is source-only review. No build or tests were run because the shared Cargo cache lane was not released. Runtime/config integration remains owned elsewhere and was intentionally excluded.
+Review target: branch `t3/matching-shard-distributor-candidate`, commits `8569a9f88` and `9a791267a`, rebased onto accepted root `160fcc6f3` (configured Matching factory plus accepted healer). This is source-only review. No build or tests were run because the shared Cargo cache lane was not released. Runtime/config integration remains owned elsewhere and was intentionally excluded.
 
 ## Source findings
 
@@ -13,12 +13,10 @@ Review target: branch `t3/matching-shard-distributor-candidate`, commits `8569a9
 
 ## Prepared validation
 
-`tests/run-shard-distributor-review-gates.sh` is a serialized focused runner. It sets `CARGO_BUILD_JOBS=1`, defaults `CARGO_TARGET_DIR` to `rust/target`, then runs the two Rust test filters, strict cadence-server Clippy, and pinned Go resolver tests. Do not invoke until the cache lane is released. It is a gate plan, not evidence of a passing result.
+`tests/run-shard-distributor-review-gates.sh` is a serialized focused runner. It first compiles the `cadence-server` library test target with `--no-run` and fail-fast semantics, then runs focused gates. It sets `CARGO_BUILD_JOBS=1`, defaults `CARGO_TARGET_DIR` to `rust/target`, then runs the two Rust test filters, strict cadence-server Clippy, and pinned Go resolver tests. Do not invoke until the cache lane is released. It is a gate plan, not evidence of a passing result.
 
 After those checks, mixed Go/Rust validation still needs to run with Go Frontend/History/Worker and no Go Matching, exercising assignment, resolver metadata, owner movement, failure, restart and recovery. This note does not claim service parity or completion.
 
 ## Reviewed source hashes
 
-- `rust/crates/cadence-server/src/matching_shard_distributor.rs`: `b45e8e4e37d5f0b5536325266b190de706f39c253323d9a9cc0aea03c7b68250`
-- `rust/crates/cadence-server/src/config.rs`: `54a81669c727ec0d036e388b2fc31cb151dde8a979b4592de8f7f7f07eb3465f`
-- `tests/run-shard-distributor-review-gates.sh`: `2a14a2fc1c385d5908b4eb6fbb91f648b121f3f58aa3db97025fee4dbe87af59`
+- Rust/config/probe/binary before and after hashes will be captured in `memory/evidence/matching-shard-distributor/` with the focused run; no run has been claimed yet.
