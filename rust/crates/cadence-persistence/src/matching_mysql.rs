@@ -913,6 +913,21 @@ fn mysql_async_options(config: &MySqlTaskStoreConfig) -> Result<mysql_async::Opt
         .pass(Some(config.password.clone()))
         .db_name(Some(config.database_name.clone()))
         .client_found_rows(true);
+    let mut connect_timeout = None;
+    let mut read_timeout = None;
+    let mut write_timeout = None;
+    for (key, value) in &config.connect_attributes {
+        match key.to_ascii_lowercase().as_str() {
+            "timeout" => connect_timeout = Some(parse_go_duration(value)?),
+            "readtimeout" => read_timeout = Some(parse_go_duration(value)?),
+            "writetimeout" => write_timeout = Some(parse_go_duration(value)?),
+            _ => {}
+        }
+    }
+    builder = builder
+        .tcp_connect_timeout(connect_timeout.and_then(GoTimeout::connect_timeout))
+        .read_timeout(read_timeout.and_then(GoTimeout::socket_timeout))
+        .write_timeout(write_timeout.and_then(GoTimeout::socket_timeout));
     let protocol = if config.connect_protocol.is_empty() {
         "tcp"
     } else {
