@@ -59,27 +59,29 @@ now mapped to concrete gaps:
   `sync_forward_task_throttle_errors_per_tl`.
 * `matcher.go:339-419` emits async local/forward counters, attempt timer and
   integer histogram pairs, latency timer and duration histogram pairs, and
-  forward throttle errors. Rust `matching_dispatch.rs` has delivery and poll
-  outcomes but does not yet emit these matcher/reader attempt families.
+  forward throttle errors. Rust now covers the task-reader async match latency,
+  dispatch timeout and buffer throttle events; the matcher-side counters and
+  attempt timer/integer histogram families remain open.
 * `matcher.go:444` emits invalid-isolation-group count.
 * `matcher.go:465-639` emits the local/forward/after-forward-failure poll
-  timing pairs described above; Rust builders exist, but dispatch wiring is
-  open.
+  timing pairs described above; Rust emits these from the claimed task or
+  successful direct forward.
 * `task_reader.go:231,273,395` updates backlog, task-count, and task-lag
   gauges. The durable queue exposes `levels().2` for backlog, but Rust's
   acknowledgement manager's `levels().2` is the same outstanding unacked item
   count as Go `AckManager.GetBacklogCount`. Rust now emits this gauge at reader
   pump turns and wires a service metrics/context through queue creation.
-  Task-count still needs a periodic task-store size query; task-lag needs a
-  corresponding max-read minus ack update at acknowledgement persistence.
+  Rust now emits task-count from the matching store's existing `task_list_size`
+  query and task-lag from `max_read_level - ack_level` on each configured ack
+  maintenance update, matching Go's task reader timer and `persistAckLevel`.
 * `task_reader.go:365,490` emits expired-task counters; `:503-506` emits async
   match latency timer/histogram; `:537` emits async dispatch timeout; `:544`
   emits buffer throttle; and `:568` emits unknown dispatch error. Rust now
   emits expiry at the dispatch-time expiry branch, async-match timing around
   each limiter/offer attempt, and timeout/throttle counters at the matching
-  retry outcomes. Initial read-time expiry is handled inside the durable queue,
-  so it still needs a count surfaced to the reader; unknown dispatch errors
-  need classification at the future corresponding terminal dispatch path.
+  retry outcomes. Rust also counts expiry during initial reader admission and
+  expiry while buffered. Unknown dispatch errors still need classification at
+  a corresponding terminal dispatch path.
 
 Metric definitions and rollups are in `go/common/metrics/defs.go` around
 3060-3134. Rust source formatting and `git diff --check` pass; no build or

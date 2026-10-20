@@ -657,6 +657,18 @@ impl TaskReader {
                             break 'pump;
                         }
                     };
+                    let expired = turn.take_expired_count();
+                    if expired > 0 {
+                        if let Some(reader_metrics) = reader_metrics
+                            .lock()
+                            .expect("matching reader metrics lock")
+                            .as_ref()
+                        {
+                            reader_metrics
+                                .metrics
+                                .expired_tasks(&reader_metrics.context, expired);
+                        }
+                    }
                     let task = match result {
                         Ok(Some(task)) => task,
                         Ok(None) => break,
@@ -711,6 +723,36 @@ impl TaskReader {
     }
     pub async fn poll(&self) -> Option<AllocatedTask> {
         self.inner.matcher.poll(self.inner.stop.subscribe()).await
+    }
+    pub(crate) fn record_task_count(&self, task_count: i64) {
+        if let Some(reader_metrics) = self
+            .inner
+            .metric_context
+            .lock()
+            .expect("matching reader metrics lock")
+            .as_ref()
+        {
+            reader_metrics.metrics.task_list_gauge(
+                crate::matching_metrics::TASK_COUNT_PER_TASK_LIST,
+                &reader_metrics.context,
+                task_count as f64,
+            );
+        }
+    }
+    pub(crate) fn record_task_lag(&self, task_lag: i64) {
+        if let Some(reader_metrics) = self
+            .inner
+            .metric_context
+            .lock()
+            .expect("matching reader metrics lock")
+            .as_ref()
+        {
+            reader_metrics.metrics.task_list_gauge(
+                crate::matching_metrics::TASK_LAG_PER_TASK_LIST,
+                &reader_metrics.context,
+                task_lag as f64,
+            );
+        }
     }
     pub fn should_reload(&self) -> bool {
         (self.inner.should_reload)()

@@ -1648,6 +1648,13 @@ impl QueueRegistry {
                 if !owner.queue.is_stopped() && !ack_due {
                     continue;
                 }
+                if let Ok(task_count) = owner.queue.task_list_size() {
+                    owner.reader.record_task_count(task_count);
+                }
+                let (_, ack_level, _) = owner.queue.levels();
+                if ack_level >= 0 {
+                    owner.reader.record_task_lag(owner.queue.task_lag());
+                }
                 let update = owner.queue.persist_ack(now);
                 if let Err(error) = update {
                     failure.get_or_insert_with(|| Status::unavailable(error.to_string()));

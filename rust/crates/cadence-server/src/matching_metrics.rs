@@ -516,6 +516,19 @@ impl MatchingMetrics {
         self.task_list_counter(EXPIRED_TASKS_PER_TASK_LIST, context, BTreeMap::new());
     }
 
+    pub fn expired_tasks(&self, context: &PollMetricContext, count: usize) {
+        if count == 0 {
+            return;
+        }
+        self.0.record(MetricEvent {
+            name: EXPIRED_TASKS_PER_TASK_LIST,
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(count as i64),
+            tags: self.task_list_tags(context),
+            histogram: None,
+        });
+    }
+
     pub fn task_list_counter_event(&self, name: &'static str, context: &PollMetricContext) {
         self.task_list_counter(name, context, BTreeMap::new());
     }

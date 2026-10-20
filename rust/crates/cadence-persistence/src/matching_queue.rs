@@ -93,15 +93,20 @@ pub struct ReaderTurn {
     _permit: ReaderPermit,
     tasks: VecDeque<AllocatedTask>,
     pending: bool,
+    expired: usize,
 }
 impl ReaderTurn {
     pub fn next(&mut self, mut clock: impl FnMut() -> i64) -> Result<Option<AllocatedTask>> {
         while let Some(task) = self.tasks.pop_front() {
-            if let Some(task) = self.queue.register_read(task, &mut clock)? {
-                return Ok(Some(task));
+            match self.queue.register_read(task, &mut clock)? {
+                Some(task) => return Ok(Some(task)),
+                None => self.expired += 1,
             }
         }
         Ok(None)
+    }
+    pub fn take_expired_count(&mut self) -> usize {
+        std::mem::take(&mut self.expired)
     }
     pub fn scan_pending(&self) -> bool {
         self.pending
@@ -410,6 +415,7 @@ impl DurableTaskQueue {
             _permit: permit,
             pending: !scanned.tasks.is_empty() || !scanned.finished,
             tasks: scanned.tasks.into(),
+            expired: 0,
         })
     }
     fn load_reader_turn(
@@ -595,6 +601,17 @@ impl DurableTaskQueue {
     }
     pub fn levels(&self) -> (i64, i64, i64) {
         self.ack.levels()
+    }
+    /// Go task-list reader's task count query, excluding rows at/below the ack watermark.
+    pub fn task_list_size(&self) -> Result<i64> {
+        let (_, ack, _) = self.ack.levels();
+        Ok(self.store.task_list_size(&self.key, ack)?)
+    }
+    /// Estimated queue lag emitted by Go as maxReadLevel minus ackLevel.
+    pub fn task_lag(&self) -> i64 {
+        let state = self.state.lock().expect("matching queue lock");
+        let (_, ack, _) = self.ack.levels();
+        state.max_read_level.saturating_sub(ack)
     }
     /// Queue status fields exposed by Go DescribeTaskList. Rate/isolation/QPS
     /// belong to the task-list controller rather than the persistence reader.
@@ -1131,6 +1148,23 @@ mod tests {
         assert_eq!(read, written[1].task_id);
         assert_eq!(backlog, 1);
         assert!(times.next().is_none());
+    }
+    #[test]
+    fn matching_reader_turn_reports_initially_expired_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = Arc::new(DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap());
+        let mut task = data();
+        task.expiry_nanos = 100;
+        queue.append(&[task], 2).unwrap();
+        let mut turn = queue.reader_turn(100, n(10)).unwrap();
+        assert!(turn.next(|| 101).unwrap().is_none());
+        assert_eq!(turn.take_expired_count(), 1);
+        assert_eq!(turn.take_expired_count(), 0);
+        assert_eq!(queue.levels().2, 0);
     }
     #[test]
     fn matching_queue_original_go_expiry_fixtures() {
