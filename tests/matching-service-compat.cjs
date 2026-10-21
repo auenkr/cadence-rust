@@ -527,6 +527,32 @@ async function run() {
   assert(decision?.taskToken?.length > 0, `Go Frontend did not return the started workflow task within 30s; task list ${taskList.name}`);
   assert.equal(decision.workflowExecution?.runId, started.runId, 'Go Frontend returned a decision task for a different workflow run');
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+  if (productionMode && failureRecoveryMode) {
+    const diagnosticPeers = [
+      { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { name: 'secondary', address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const membershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    let pollOwner;
+    try { pollOwner = await directPartitionOwner(membershipPeer, domain, taskList.name); }
+    finally { membershipPeer.close(); }
+    const ownerPeer = diagnosticPeers.find(peer => peer.address === pollOwner);
+    assert(ownerPeer, `workflow poll task list owner ${pollOwner || '<empty>'} did not match either configured Matching member`);
+    const ownerClient = directMatchingClient(`127.0.0.1:${ownerPeer.grpc}`);
+    try {
+      const ownerDescription = await new Promise((resolve, reject) => ownerClient.DescribeTaskList({
+        domainId, request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true },
+      }, (error, value) => error ? reject(error) : resolve(value)));
+      const ownerPollers = (ownerDescription.pollers || []).map(poller => poller.identity);
+      fs.writeFileSync(path.join(work, 'production-poller-retention-owner.json'), JSON.stringify({
+        taskList: taskList.name, owner: ownerPeer.name, ownerAddress: pollOwner,
+        expectedPollerIdentity: 'service-probe', ownerPollers,
+        frontendPollers: (described.pollers || []).map(poller => poller.identity),
+      }, null, 2) + '\n');
+      assert(ownerPollers.includes('service-probe'),
+        `Matching owner ${ownerPeer.name} did not retain service-probe after completing its decision poll`);
+    } finally { ownerClient.close(); }
+  }
   if (!described.pollers.some(poller => poller.identity === 'service-probe') && productionMode && failureRecoveryMode) {
     const diagnosticPeers = [
       { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },

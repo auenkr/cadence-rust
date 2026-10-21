@@ -63,25 +63,25 @@ not a Matching acceptance audit.
    path and queue a two-host gate for adding/removing remote partition IDs,
    stale/out-of-order versions, owner movement, and refresh after restart. Do
    not conflate this with existing Ringpop task-list routing or the configured
-   shard-distributor gate. Registry/runtime implementation files are protected
-   WIP and were not edited in this source-only pass.
+   shard-distributor gate. The source change now resolves each target through
+   Matching membership and sends refresh RPCs to local or remote gRPC owners.
+   Refresh failures remain best-effort, matching Go's logged-but-not-returned
+   notification errors. A focused two-host source gate covers remote add/remove,
+   write-only exclusion, stale-version rejection, and owner movement; it has not
+   been executed.
 
 3. **Domain failover side effects differ in enumeration, but the core poll
    release path exists.** Go `domainChangeCallback` is triggered by increasing
    failover notification versions on global, non-active-active domains. It
-   lists persisted task lists by domain/kind, loads normal decision/activity
-   managers and sticky decision managers, then releases blocked polls. Rust's
-   matching metadata cache sync establishes a catch-up baseline, detects later
-   global notification-version advances, and signals per-domain watches;
-   blocked poll handlers release loaded registry owners for that domain. This
-   wakes currently loaded blocked polls, but does not enumerate persisted task
-   lists or instantiate managers as Go does. Ordinary config updates do not
-   trigger Go's callback release behavior; no separate unload/clear-poller
-   effect was found in `engine.go:1707-1785`. Queue a mixed failover gate with
-   blocked normal decision/activity polls and a sticky decision poll, plus
-   active-active and non-global controls. Verify catch-up and unloaded task
-   lists separately before changing this path. No source change was made in the
-   protected runtime WIP.
+   enumerates `ManagersByDomainID` (managers already loaded in the process),
+   filters to normal decision/activity and sticky decision managers, then
+   releases blocked polls. It does not enumerate persisted task-list rows or
+   create managers. Rust now tracks the global notification watermark in the
+   domain cache callback and releases the same loaded manager kinds only for
+   newly notified global non-active-active domains. Ordinary config updates do
+   not trigger release; no generic unload/clear-poller effect was found in
+   `engine.go:1707-1785`. A focused eligibility regression was added; mixed
+   failover evidence remains outstanding.
 
 4. **Remaining Matching behavior and lifecycle still require the parity audit.**
    The source includes cross-host poll/add/query forwarding, typed ownership
@@ -112,11 +112,10 @@ not a Matching acceptance audit.
    selected Matching persistence backend. Add conditional-update races,
    restart rebuild, bucket scan, metadata creation, and two-process acquire
    tests. Keep the in-memory adapter for focused unit tests.
-3. After the protected registry/runtime WIP is available for editing, implement
-   cross-host partition config notifications and validate owner movement/reload.
-   In parallel, prepare the domain failover mixed gate above; source inspection
-   does not support the prior claim that ordinary config changes cause Go
-   Matching to unload managers.
+3. Run the added two-host partition notification regression and a mixed Go/Rust
+   failover gate with blocked normal decision/activity polls, sticky decision
+   polls, active-active and non-global controls. Keep the owner-pinned poller
+   retention gate separate from the public Frontend routing assertion.
 4. Complete the service parity audit and reproducible mixed Go/Rust failure,
    restart, and recovery evidence before beginning History migration.
 

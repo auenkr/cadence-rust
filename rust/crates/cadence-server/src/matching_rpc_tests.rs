@@ -2017,6 +2017,97 @@ async fn matching_rpc_native_partition_cache_updates_refreshes_and_recovers() {
 }
 
 #[tokio::test]
+async fn matching_rpc_partition_update_refreshes_remote_read_owner_and_ignores_write_only_owner() {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+
+    let history = start_starting_history().await;
+    let (_first_dir, _first_store, first, key) = fixture_with_history(&history);
+    let (_second_dir, _second_store, second, _) = fixture_with_history(&history);
+    let first_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let second_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: first_listener.local_addr().unwrap().to_string() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: second_listener.local_addr().unwrap().to_string() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let (root_name, root_host) = (0..100)
+        .map(|index| {
+            let name = format!("partition-refresh-root-{index}");
+            let owner = ring.lookup(&name).unwrap().identity().to_owned();
+            (name, owner)
+        })
+        .find(|(_, owner)| owner == "node-0")
+        .unwrap();
+    let read_partition = (1..=100)
+        .find(|partition| ring.lookup(&format!("/__cadence_sys/{root_name}/{partition}" )).unwrap().identity() != root_host)
+        .unwrap();
+    let write_only_partition = (1..=100)
+        .find(|partition| *partition != read_partition
+            && ring.lookup(&format!("/__cadence_sys/{root_name}/{partition}" )).unwrap().identity() != root_host)
+        .unwrap();
+    let first = first.with_membership(Membership::new("node-0", hosts.clone()));
+    let second = second.with_membership(Membership::new("node-1", hosts.clone()));
+    let first_service = first.clone();
+    let first_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(first_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(first_listener))
+            .await.unwrap();
+    });
+    let second_service = second.clone();
+    let second_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(second_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(second_listener))
+            .await.unwrap();
+    });
+    let domain = key.domain_id.to_string();
+    let root_list = p::TaskList { name: root_name.clone(), kind: 1, ..Default::default() };
+    let root = if root_host == "node-0" { first.clone() } else { second.clone() };
+    let read_owner = ring.lookup(&format!("/__cadence_sys/{root_name}/{read_partition}")).unwrap().identity();
+    let remote = if read_owner == "node-0" { first.clone() } else { second.clone() };
+    let update = |read: &[i32], write: &[i32]| Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: domain.clone(), task_list: Some(root_list.clone()), task_list_type: 1,
+        partition_config: Some(native_config(999, read, write)),
+    });
+
+    root.update_task_list_partition_config(update(&[0, read_partition], &[0, write_only_partition])).await.unwrap();
+    let read_name = format!("/__cadence_sys/{root_name}/{read_partition}");
+    let read_queue = remote.durable_queue(&domain, &p::TaskList { name: read_name.clone(), kind: 1, ..Default::default() }, 0).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 1, "old/new read partition notification must load and refresh a remote owner");
+    let write_name = format!("/__cadence_sys/{root_name}/{write_only_partition}");
+    let write_host = ring.lookup(&write_name).unwrap().identity();
+    let write_owner = if write_host == "node-0" { &first } else { &second };
+    assert!(!write_owner.queues.as_ref().unwrap().contains_cached(&TaskListKey {
+        domain_id: key.domain_id, name: write_name.clone(), task_type: 0,
+    }), "Go refresh fanout does not create a manager for write-only partition IDs");
+
+    root.update_task_list_partition_config(update(&[0], &[0])).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 2, "removing a remote read partition sends the new config to the old partition owner");
+    remote.refresh_task_list_partition_config(Request::new(m::RefreshTaskListPartitionConfigRequest {
+        domain_id: domain, task_list: Some(p::TaskList { name: read_name, kind: 1, ..Default::default() }),
+        task_list_type: 1, partition_config: Some(native_config(1, &[0, read_partition], &[0])),
+    })).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 2, "out-of-order older push must be ignored by the owner manager");
+
+    // Remove the old owner from membership. The next root update must resolve
+    // the partition's new owner and refresh it there, including a local
+    // self-RPC that creates the manager if it is not loaded yet.
+    let moved_hosts = vec![hosts[0].clone()];
+    first.membership.as_ref().unwrap().replace(moved_hosts.clone());
+    second.membership.as_ref().unwrap().replace(moved_hosts);
+    root.update_task_list_partition_config(update(&[0, read_partition], &[0])).await.unwrap();
+    let moved_queue = first.durable_queue(&domain, &p::TaskList { name: format!("/__cadence_sys/{root_name}/{read_partition}"), kind: 1, ..Default::default() }, 0).await.unwrap();
+    assert_eq!(moved_queue.partitions.get().unwrap().version, 3, "partition config notification follows owner movement");
+
+    first.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    second.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    first_server.abort();
+    second_server.abort();
+}
+
+#[tokio::test]
 async fn matching_rpc_native_partition_concurrent_versions_and_fencing() {
     let (_dir, store, matching, key) = fixture();
     let registry = matching.queues.as_ref().unwrap();

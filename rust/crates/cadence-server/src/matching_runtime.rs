@@ -83,6 +83,21 @@ fn shard_task_list_ownership_check(
 }
 use tokio::{sync::oneshot, task::JoinHandle};
 
+fn notified_failover_domains(
+    previous_version: i64,
+    entries: impl IntoIterator<Item = (String, bool, bool, i64)>,
+) -> (i64, Vec<String>) {
+    let mut maximum = previous_version;
+    let mut domains = Vec::new();
+    for (domain_id, global, active_active, version) in entries {
+        maximum = maximum.max(version);
+        if global && !active_active && version > previous_version {
+            domains.push(domain_id);
+        }
+    }
+    (maximum, domains)
+}
+
 pub type DrainDuration = Arc<dyn Fn() -> Duration + Send + Sync>;
 pub type EvictFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 pub type EvictSelf = Arc<dyn Fn() -> EvictFuture + Send + Sync>;
@@ -402,8 +417,9 @@ impl MatchingRuntime {
         drain_duration: DrainDuration,
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
     ) -> anyhow::Result<Self> {
-        Self::start_domain_cache(state.domains.clone(), cache.clone()).await?;
+        let domains = state.domains.clone();
         let mut runtime = Self::in_memory(state, drain_duration);
+        Self::start_domain_cache(domains, cache.clone(), None).await?;
         runtime.domain_cache = Some(cache);
         Ok(runtime)
     }
@@ -417,7 +433,7 @@ impl MatchingRuntime {
         drain_duration: DrainDuration,
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
     ) -> anyhow::Result<Self> {
-        Self::start_domain_cache(state.domains.clone(), cache.clone()).await?;
+        let domains = state.domains.clone();
         let mut runtime = Self::with_durable_queues(
             state,
             store,
@@ -426,6 +442,7 @@ impl MatchingRuntime {
             poll_expiration,
             drain_duration,
         );
+        Self::start_domain_cache(domains, cache.clone(), runtime.registry.clone()).await?;
         runtime.domain_cache = Some(cache);
         Ok(runtime)
     }
@@ -433,19 +450,74 @@ impl MatchingRuntime {
     async fn start_domain_cache(
         domains: cadence_persistence::InMemoryDomainStore,
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
+        registry: Option<crate::matching_registry::QueueRegistry>,
     ) -> anyhow::Result<()> {
+        let runtime = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             cache
                 .start()
                 .map_err(|error| anyhow::anyhow!("starting Matching domain cache: {error}"))?;
-            let changed: crate::matching_domain_cache::DomainChangeCallback =
-                Arc::new(move |entries| domains.sync_matching_metadata(entries));
-            let catch_up: crate::matching_domain_cache::CatchUpCallback =
-                Arc::new(|entries, prepare, changed| {
+            let notification_version = Arc::new(std::sync::Mutex::new(None::<i64>));
+            let prepare: crate::matching_domain_cache::PrepareCallback = Arc::new(|| {});
+            let changed: crate::matching_domain_cache::DomainChangeCallback = Arc::new({
+                let notification_version = notification_version.clone();
+                let runtime = runtime.clone();
+                move |entries| {
+                    domains.sync_matching_metadata(entries);
+                    let mut version = notification_version
+                        .lock()
+                        .expect("Matching failover callback version lock");
+                    let previous = *version;
+                    let current = entries
+                        .iter()
+                        .map(|entry| entry.failover_notification_version)
+                        .max()
+                        .unwrap_or_default();
+                    // Registration catch-up establishes Go's engine baseline;
+                    // it must not disconnect any pollers.
+                    if let Some(previous) = previous {
+                        if current > previous {
+                            let (_, notified) = notified_failover_domains(
+                                previous,
+                                entries.iter().map(|entry| (
+                                    entry.info.uuid.clone(),
+                                    entry.is_global_domain,
+                                    entry.replication.is_active_active(),
+                                    entry.failover_notification_version,
+                                )),
+                            );
+                            if let Some(registry) = &registry {
+                                for domain in notified {
+                                    if let Ok(domain) = uuid::Uuid::parse_str(&domain) {
+                                        let registry = registry.clone();
+                                        runtime.spawn(async move {
+                                            registry.release_domain_failover_polls(domain).await;
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    *version = Some(previous.map_or(current, |old| old.max(current)));
+                }
+            });
+            let catch_up: crate::matching_domain_cache::CatchUpCallback = Arc::new({
+                let notification_version = notification_version.clone();
+                move |entries, prepare, changed| {
+                    *notification_version
+                        .lock()
+                        .expect("Matching failover callback version lock") = Some(
+                        entries
+                            .iter()
+                            .map(|entry| entry.failover_notification_version)
+                            .max()
+                            .unwrap_or_default(),
+                    );
                     prepare();
                     changed(entries);
-                });
-            cache.register_callback("matching", catch_up, Arc::new(|| {}), changed);
+                }
+            });
+            cache.register_callback("matching", catch_up, prepare, changed);
             Ok(())
         })
         .await
@@ -613,6 +685,21 @@ pub fn live_shutdown_drain_duration(overlay: Arc<Mutex<DynamicConfigOverlay>>) -
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn domain_failover_callback_only_selects_new_global_non_active_active_domains() {
+        let (maximum, notified) = notified_failover_domains(
+            10,
+            [
+                ("global-new".into(), true, false, 12),
+                ("global-old".into(), true, false, 9),
+                ("local-new".into(), false, false, 13),
+                ("active-active-new".into(), true, true, 14),
+            ],
+        );
+        assert_eq!(maximum, 14, "Go advances its global catch-up version even for non-eligible entries");
+        assert_eq!(notified, vec!["global-new".to_owned()]);
+    }
 
     fn empty_membership() -> crate::matching_membership::Membership {
         crate::matching_membership::Membership::new("local", Vec::new())

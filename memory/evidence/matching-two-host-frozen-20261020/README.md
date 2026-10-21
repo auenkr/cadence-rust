@@ -60,20 +60,20 @@ whether the Rust history manager lost the entry while Go's matching owner
 retained it before changing implementation.
 
 Current Go-source comparison also corrects the previous domain callback note:
-`engine.go:1707-1785` only releases blocked polls for newly notified global,
-non-active-active domains. It lists persisted task lists and loads normal
-decision/activity plus sticky decision managers before release; it does not
-perform generic unload or config-change invalidation. Rust metadata synchronization
-signals the per-domain watch and poll handlers release currently loaded owners,
-so the remaining source gap is persisted task-list enumeration/manager creation.
-No code was changed in the protected runtime/registry WIP.
+`engine.go:1707-1785` uses `ManagersByDomainID`, which enumerates loaded
+managers, then releases normal decision/activity and sticky decision pollers
+for newly notified global non-active-active domains. It does not enumerate
+persisted task-list rows or create managers. Rust now tracks the global
+notification watermark in the cache callback and releases the same loaded
+manager kinds on eligible updates. Ordinary config changes do not trigger
+release or generic manager unload.
 
-The confirmed remote partition refresh gap also needs a mixed two-host gate:
-update the root config so a remote read partition is added, verify its owner's
-direct `DescribeTaskList` advances, remove that partition and verify the owner
-refreshes, deliver an older version after a newer one and verify it is ignored,
-then change owner placement and restart the owner to verify persisted refresh.
-Cover read and write map differences explicitly because Go notifies old/new
-read partition IDs while current Rust local fanout includes read and write IDs.
-This is a queued validation requirement, not a passing gate; no Cargo, Go,
-cluster, or Docker process was run for this source-only review.
+The source adds a two-host partition regression: add/remove a remote read
+partition, verify the remote manager receives both changes, send an older
+version and verify it is ignored, verify write-only IDs do not create managers,
+then move ownership and verify the new owner receives the update. The Go source
+notifies the union of old/new read IDs only; Rust now follows that behavior and
+keeps errors best-effort. The regression is queued, not run. The poller harness
+now resolves the task-list owner, checks `service-probe` directly on that same
+owner, records the direct and Frontend identities, and retains the separate
+public Frontend assertion. No Cargo, Go, cluster, or Docker process was run.

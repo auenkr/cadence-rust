@@ -122,6 +122,49 @@ impl Membership {
         channels.insert(grpc_address.to_owned(), channel.clone());
         Ok(Some(channel))
     }
+    /// Resolve a host through the live ring and return its gRPC channel,
+    /// including when the owner is this process. Internal Matching refreshes
+    /// use the same RPC contract for local and remote partitions so an
+    /// unloaded local partition is created and refreshed just like Go's
+    /// Matching client call.
+    pub(crate) fn channel_for_task_list_owner(
+        &self,
+        key: &str,
+    ) -> Result<(Host, tonic::transport::Channel), Status> {
+        let owner = self.owner(key)?;
+        let grpc_address = if owner.identity() == self.identity.as_ref() {
+            self.ring
+                .read()
+                .expect("Matching membership lock")
+                .hosts()
+                .iter()
+                .find(|host| host.identity() == self.identity.as_ref())
+                .map(|host| host.grpc_address.clone())
+                .filter(|address| !address.is_empty())
+                .ok_or_else(|| Status::unavailable("Local Matching host has no gRPC address"))?
+        } else {
+            owner.grpc_address.clone()
+        };
+        if grpc_address.is_empty() {
+            return Err(Status::unavailable("Matching owner has no gRPC address"));
+        }
+        let mut channels = self.channels.lock().expect("Matching channel cache lock");
+        let channel = if let Some(channel) = channels.get(&grpc_address) {
+            channel.clone()
+        } else {
+            let address = if grpc_address.contains("://") {
+                grpc_address.clone()
+            } else {
+                format!("http://{grpc_address}")
+            };
+            let channel = tonic::transport::Endpoint::from_shared(address)
+                .map_err(|error| Status::internal(error.to_string()))?
+                .connect_lazy();
+            channels.insert(grpc_address, channel.clone());
+            channel
+        };
+        Ok((owner, channel))
+    }
     pub fn check_task_list(&self, name: &str) -> Result<(), Status> {
         let owner = self.owner(name)?;
         if owner.identity() == self.identity.as_ref() {
