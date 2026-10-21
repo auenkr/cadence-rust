@@ -283,6 +283,7 @@ pub struct Matching {
     membership: Option<crate::matching_membership::Membership>,
     shard_router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
     task_list_ownership: Option<TaskListOwnershipCheck>,
+    rpc_quota: Arc<crate::matching_quota::MatchingRpcQuota>,
     pub(crate) poll_expiration: std::time::Duration,
 }
 /// Runtime-provided ownership check. The cached flag is advisory and only
@@ -298,7 +299,17 @@ pub type TaskListOwnershipCheck = Arc<
 >;
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
+        Self::new_with_quota_metric_sink(state, Arc::new(|_| {}))
+    }
+    pub(crate) fn new_with_quota_metric_sink(
+        state: crate::handlers::AppState,
+        metric_sink: crate::matching_quota::QuotaMetricSink,
+    ) -> Self {
         let semaphores = crate::matching_semaphore::Registry::new(state.executions.clone());
+        let rpc_quota = Arc::new(crate::matching_quota::MatchingRpcQuota::with_metric_sink(
+            state.admin.dynamic_config.clone(),
+            metric_sink,
+        ));
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
@@ -309,6 +320,7 @@ impl Matching {
             membership: None,
             shard_router: None,
             task_list_ownership: None,
+            rpc_quota,
             poll_expiration: std::time::Duration::from_secs(60),
         }
     }
@@ -318,6 +330,19 @@ impl Matching {
         state: crate::handlers::AppState,
         queues: crate::matching_registry::QueueRegistry,
         poll_expiration: std::time::Duration,
+    ) -> Self {
+        Self::with_durable_queues_and_quota_metric_sink(
+            state,
+            queues,
+            poll_expiration,
+            Arc::new(|_| {}),
+        )
+    }
+    pub(crate) fn with_durable_queues_and_quota_metric_sink(
+        state: crate::handlers::AppState,
+        queues: crate::matching_registry::QueueRegistry,
+        poll_expiration: std::time::Duration,
+        metric_sink: crate::matching_quota::QuotaMetricSink,
     ) -> Self {
         // Go `cfg.NumTasklistWritePartitions(domain, taskList, type)` reads the
         // dynamic properties `matching.numTasklistWritePartitions` (default 1)
@@ -809,7 +834,7 @@ impl Matching {
             .with_writer_live(writer_live)
             .with_isolation(isolation)
             .with_domain_metadata(state.domains.clone(), state.current_cluster_name.clone());
-        let mut matching = Self::new(state);
+        let mut matching = Self::new_with_quota_metric_sink(state, metric_sink);
         matching.queues = Some(queues);
         matching.partition_count = Some(provider);
         matching.scaler_config = Some(scaler_config);
@@ -1306,6 +1331,30 @@ impl Matching {
         }
         .domain_name(id)
     }
+    fn check_rpc_quota(
+        &self,
+        method: crate::matching_quota::MatchingRpc,
+        domain_id: Option<&str>,
+        domain_name: Option<&str>,
+    ) -> Result<(), Status> {
+        let resolved = domain_name.map(str::to_owned).or_else(|| {
+            // Go's handler asks its shared domain cache for the name and uses
+            // the empty string on a miss, so only the host bucket applies.
+            // Use Matching's same cache-backed resolver here; unlike the
+            // engine path, a cache miss must not preempt the quota decision.
+            domain_id.and_then(|id| self.domain_name(id).ok())
+        });
+        if self.rpc_quota.allow(method, resolved.as_deref()) {
+            Ok(())
+        } else {
+            Err(crate::grpc::detailed_status(
+                tonic::Code::ResourceExhausted,
+                "Matching host rps exceeded",
+                "ServiceBusyError",
+                cadence_proto::api::ServiceBusyError { reason: String::new() },
+            ))
+        }
+    }
     fn register_poll(&self, key: PollKey) -> PollGuard {
         let cancel = Arc::new(Notify::new());
         if let Some(previous) = self
@@ -1331,6 +1380,7 @@ impl m::matching_api_server::MatchingApi for Matching {
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForDecisionTask, Some(&r.domain_id), None)?;
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -1499,6 +1549,7 @@ impl m::matching_api_server::MatchingApi for Matching {
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForActivityTask, Some(&r.domain_id), None)?;
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -1650,6 +1701,7 @@ impl m::matching_api_server::MatchingApi for Matching {
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
         let parent_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddDecisionTask, Some(&r.domain_id), None)?;
         task_list_name(
             r.task_list
                 .as_ref()
@@ -1787,6 +1839,7 @@ impl m::matching_api_server::MatchingApi for Matching {
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
         let parent_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddActivityTask, Some(&r.domain_id), None)?;
         task_list_name(
             r.task_list
                 .as_ref()
@@ -1917,6 +1970,7 @@ impl m::matching_api_server::MatchingApi for Matching {
     ) -> Result<Response<m::QueryWorkflowResponse>, Status> {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::QueryWorkflow, Some(&r.domain_id), None)?;
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -2052,6 +2106,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::GetTaskListsByDomainRequest>,
     ) -> Result<Response<m::GetTaskListsByDomainResponse>, Status> {
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::GetTaskListsByDomain, None, Some(&r.domain))?;
         if let Some(queues) = &self.queues {
             let domain = self
                 .frontend
@@ -2151,6 +2206,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::ListTaskListPartitionsRequest>,
     ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::ListTaskListPartitions, None, Some(&r.domain))?;
         let task_list = r.task_list.unwrap_or_default();
         // Go resolves `request.GetDomain()` through the domain cache; the
         // single-process store is keyed by name and yields the UUID.
@@ -2186,6 +2242,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         use crate::matching_semaphore::Identifier;
         use cadence_api::enums::SemaphoreAcquireOutcome;
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::AcquireSemaphore, Some(&r.domain_id), None)?;
         // Owner parsing mirrors Go's `ParseRequestOwner`.
         cadence_common::semaphore::parse_owner(&r.owner_id)
             .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
@@ -2227,6 +2284,7 @@ impl m::matching_api_server::MatchingApi for Matching {
     ) -> Result<Response<m::UpdateTaskListPartitionConfigResponse>, Status> {
         let caller_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::UpdateTaskListPartitionConfig, Some(&r.domain_id), None)?;
         self.domain_name(&r.domain_id)?;
         let task_list = r
             .task_list
@@ -2308,6 +2366,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::RefreshTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::RefreshTaskListPartitionConfigResponse>, Status> {
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::RefreshTaskListPartitionConfig, Some(&r.domain_id), None)?;
         let domain = self.domain_name(&r.domain_id)?;
         let task_list = r
             .task_list
@@ -2370,6 +2429,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::CancelOutstandingPollRequest>,
     ) -> Result<Response<m::CancelOutstandingPollResponse>, Status> {
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::CancelOutstandingPoll, Some(&r.domain_id), None)?;
         self.domain_name(&r.domain_id)?;
         if !matches!(r.task_list_type, 1 | 2) {
             return Err(Status::invalid_argument("TaskListType is invalid."));
@@ -2402,6 +2462,7 @@ impl m::matching_api_server::MatchingApi for Matching {
     ) -> Result<Response<m::RespondQueryTaskCompletedResponse>, Status> {
         use crate::grpc_convert as cv;
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::RespondQueryTaskCompleted, Some(&r.domain_id), None)?;
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -2472,6 +2533,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::DescribeTaskListRequest>,
     ) -> Result<Response<m::DescribeTaskListResponse>, Status> {
         let r = request.into_inner();
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::DescribeTaskList, Some(&r.domain_id), None)?;
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;

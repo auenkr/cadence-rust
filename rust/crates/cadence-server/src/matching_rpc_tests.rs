@@ -9,6 +9,67 @@ use m::matching_api_server::MatchingApi;
 use std::{num::NonZeroU32, time::Duration};
 use uuid::Uuid;
 
+fn quota_config(value: i64, domain: Option<&str>) -> cadence_api::admin::DynamicConfigValue {
+    use cadence_api::{admin::{DynamicConfigFilter, DynamicConfigValue}, enums::EncodingType, types::DataBlob};
+    let blob = |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+    DynamicConfigValue {
+        value: blob(serde_json::json!(value)),
+        filters: domain.into_iter().map(|name| DynamicConfigFilter {
+            name: "domainName".into(),
+            value: blob(serde_json::json!(name)),
+        }).collect(),
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_quotas_classify_shared_protocol_handlers_and_preserve_count_only_calls() {
+    let mut state = crate::handlers::AppState::default();
+    let domain_id = Uuid::from_u128(9001);
+    state.domains.create(
+        cadence_api::types::DomainInfo { name: "quota-domain".into(), uuid: domain_id.to_string(), ..Default::default() },
+        Default::default(), Default::default(), false,
+    ).unwrap();
+    {
+        let mut config = state.admin.dynamic_config.lock().unwrap();
+        config.update(false, "matching.rps", vec![quota_config(20, None)]);
+        config.update(false, "matching.domainrps", vec![quota_config(1, Some("quota-domain"))]);
+        config.update(false, "matching.workerrps", vec![quota_config(20, None)]);
+        config.update(false, "matching.domainworkerrps", vec![quota_config(1, Some("quota-domain"))]);
+    }
+    let matching = Matching::new(state);
+
+    // `GetTaskListsByDomain` is a user RPC and its domain filter uses the
+    // request's name. The second call is rejected by only the domain bucket.
+    matching.get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+        domain: "quota-domain".into(),
+    })).await.unwrap();
+    let user_error = matching.get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+        domain: "quota-domain".into(),
+    })).await.unwrap_err();
+    assert_eq!(user_error.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(user_error.message(), "Matching host rps exceeded");
+    assert!(user_error.details().len() > 0, "Go-compatible ServiceBusyError detail is required");
+
+    // Go counts these worker control calls but ignores a denied decision.
+    let cancel = || Request::new(m::CancelOutstandingPollRequest {
+        domain_id: domain_id.to_string(),
+        task_list_type: 1,
+        task_list: Some(p::TaskList { name: "queue".into(), ..Default::default() }),
+        poller_id: "poller".into(),
+    });
+    matching.cancel_outstanding_poll(cancel()).await.unwrap();
+    matching.cancel_outstanding_poll(cancel()).await.unwrap();
+
+    // Poll is a rejecting worker RPC and shares the same class/domain bucket.
+    let worker_error = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: domain_id.to_string(),
+        request: None,
+        ..Default::default()
+    })).await.unwrap_err();
+    assert_eq!(worker_error.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(worker_error.message(), "Matching host rps exceeded");
+}
+
 struct FailingShardOwnerLookup;
 impl crate::matching_shard_routing::ShardOwnerLookup for FailingShardOwnerLookup {
     fn get_shard_owner(

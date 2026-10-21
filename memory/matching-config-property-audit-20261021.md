@@ -3,7 +3,11 @@
 Scope: every field constructed by pinned Go `go/service/matching/config/config.go`
 (`NewConfig`, lines 34-119 and 188-256), its actual Matching production consumer,
 and Rust production provider/read point. This is a source audit, not a runtime
-test. No Go, Cargo, build, service, or container command was run.
+test. No Go, Cargo, build, service, or container command was run. User and
+worker RPC quota findings below were implemented in source after this audit;
+see [`matching-rpc-quotas-20261021.md`](matching-rpc-quotas-20261021.md) for
+the exact contract and queued validation. Persistence QPS and throttled logging
+remain separate gaps.
 
 ## Findings that affect behavior
 
@@ -15,12 +19,10 @@ test. No Go, Cargo, build, service, or container command was run.
 | `ThrottledLogRPS` / `matching.throttledLogRPS` | `service.go:69-73` passes the value to `resource.New`; handler receives the resulting throttled logger (`handler.go:54-64`). | No production read/provider for the property in Rust Matching. | Missing operational behavior: Matching throttled log emission is not governed by this setting.
 | `EnableTaskInfoLogByDomainID` / `matching.enableTaskInfoLogByDomainID` | Constructed domain-ID-filtered at `config.go:218`; inspect all Go handler callsites before claiming whether it changes production task logging. | No Rust provider/read. | No behavior claim made here; production effect requires callsite verification.
 
-The four quota gaps are real, but are cross-cutting middleware/resource behavior,
-not safe to “fix” by adding unused config readers. No partial reader was added:
-that would make configuration appear supported while leaving requests and
-persistence unthrottled. They need an implementation that preserves Go's
-separate user/worker request classifications, host and domain fallback
-semantics, cancellation/deadlines, and global persistence limiter scope.
+Persistence QPS and throttled logging remain real resource gaps and require
+separate work. RPC quota behavior is implemented in source; its metrics
+exporter connection and live validation remain pending as described in the
+linked note.
 
 ## Property-by-property inventory
 
@@ -72,19 +74,27 @@ refer to the production constructor/read site, not a test fixture.
 
 ## Queued validation and implementation
 
-No code behavior was changed in this audit because the confirmed RPS/QPS gaps
-span RPC classification and resource-wide persistence limiting, while the
-other candidate fields above either already have production providers or lack
-a confirmed Go consumer. The next implementation should add focused tests for:
+Source regressions now cover RPC classification, filter/fallback behavior,
+dynamic refresh, reservation refund, rejection type, and injected metric
+events. Remaining focused work covers:
 
-1. user and worker RPC classes independently throttled by host limits, then
-   domain-specific limits with the Go fallback semantics;
-2. caller cancellation/deadline while waiting on each quota;
-3. per-host and cluster-wide persistence QPS enforcement across Matching
+1. per-host and cluster-wide persistence QPS enforcement across Matching
    operations, including limiter sharing between stores/clients;
-4. throttled logger max rate.
+2. throttled logger max rate.
 
 After the telemetry lane is released, run the focused Rust Matching tests and
 the mixed Go/Rust Matching SDK/recovery gate. Capture effective configured
 rates, blocked/released RPC class and domain, persisted task outcomes, and
 process restart evidence. This audit does not establish Matching completion.
+
+## RPC quota implementation update (2026-10-21)
+
+The earlier user/worker rows above describe the audit-time state and are
+superseded by [`matching-rpc-quotas-20261021.md`](matching-rpc-quotas-20261021.md).
+Production Go keys are `matching.rps`, `matching.workerrps`,
+`matching.domainrps`, and `matching.domainworkerrps`; method classification,
+5-second sampling, token reservation/refund order, count-only methods,
+ServiceBusy mapping, source regression coverage, and queued tests are recorded
+there. A production tagged metrics exporter remains unavailable in the Rust
+server; quota code has an injectable sink, with production sink wiring still
+pending.
