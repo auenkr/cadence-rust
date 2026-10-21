@@ -9,7 +9,8 @@ Worktree: `/home/ubuntu/.t3/worktrees/cadence-rust/t3-db1d9740`, branch
   through the source candidate merge.
 - PostgreSQL: original candidate `28c062496`, TLS callback/lock checkpoint
   `eeaaf4bb0`, lib/pq behavior correction `58d1d1e32`, and inline TLS/cache
-  source `a8db27ab1` (integrated as `e219c4730`).
+  source `a8db27ab1` (integrated as `e219c4730`), plus multi-database shard
+  routing source `695198be0` (integrated as `ed9254721`).
 - Cassandra/semaphore/QPS: `58fb1a17b`, with TTL parity correction
   `4328b58d4`. Recovery harness commits `219758e37` and `21a7095dd` are not yet
   integrated; the active combined runner requires semantic reconciliation.
@@ -17,6 +18,10 @@ Worktree: `/home/ubuntu/.t3/worktrees/cadence-rust/t3-db1d9740`, branch
   `806067b117273cad6bcc3c49d22aa679a6ce1ee9`.
 
 The PG `sslinline=true` inline PEM connector is incorporated from `a8db27ab1`.
+The committed SQL multi-database routing correction `695198be0` is also
+incorporated; it preserves Go's database hash ordering, metadata on endpoint
+zero, and per-shard MySQL pools/schema configuration. Runtime multi-shard
+configuration behavior still needs a later gate.
 PG owns the only heavy lane. This source composition did not run Cargo, Go,
 containers, databases, or services.
 
@@ -25,8 +30,17 @@ two-parent telemetry/runtime merge (runtime input `806067b1`); `2e4696fa4`
 fixes listener lifetime through drain; `35464aa49` wires quota rejections into
 the configured metrics sink; `799e4770a` incorporates the committed lib/pq
 mode correction; `14fd35c14` removes an unnecessary mutable binding and
-clarifies the listener shutdown comment. The current branch head is
-`0c9fc2d7d55a6cb3ead478f899204b9c3f9e945a`.
+clarifies the listener shutdown comment. `afbc2ca86` exports persistence QPS
+rejections. The current branch incorporates Cassandra owner-crash and
+release/fresh-acquisition harness commits `219758e37` and `21a7095dd`, plus
+multi-database routing `695198be0`. The compatibility runner uses the full
+two-host process setup, owner correlation, survivor/failover and cleanup flow
+from the runtime candidate, as well as telemetry MySQL task-GC/domain/blob
+observers. PG observer/handoff assertions remain pending the PG owner's
+combined harness change; commits `f0d2a51ba` (stdin `psql` variable expansion)
+and `e3cfca7a6` (evidence path correction) are ready to incorporate. The PG
+owner is completing task-type, GC/ack/range, domain/blob, and evidence checks;
+do not claim PG integration complete before that SHA arrives.
 
 ## Integration decisions
 

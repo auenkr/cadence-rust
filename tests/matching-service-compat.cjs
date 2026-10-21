@@ -48,9 +48,10 @@ function sqliteTaskState(domainId, taskList, label) {
   return JSON.parse(result.stdout.trim());
 }
 const taskObserver = createTaskObserver({
-  backend: cassandraGate ? 'cassandra' : 'sqlite',
+  backend: cassandraGate ? 'cassandra' : process.env.CADENCE_MATCHING_MYSQL ? 'mysql' : 'sqlite',
   cassandraCommand: (args, label) => cassandraCommand(args, label),
   sqliteTaskState,
+  mysqlTaskState,
 });
 function acquireSemaphore(client, request) {
   const metadata = new grpc.Metadata();
@@ -134,6 +135,32 @@ function callRpc(service, method, request) {
     }));
 }
 const payload = data => ({ data: Buffer.from(data) });
+function sqlText(value) { return String(value).replaceAll("'", "''"); }
+function domainHex(domainId) { return String(domainId).replace(/-/g, '').toLowerCase(); }
+const MYSQL_OBSERVATION_TIMEOUT_MS = 30000;
+function mysqlQuery(sql) {
+  if (!process.env.CADENCE_MATCHING_MYSQL) return { status: 1, stdout: '', stderr: 'MySQL probe mode is not enabled' };
+  const container = process.env.CADENCE_MYSQL_DOCKER_CONTAINER;
+  const password = process.env.CADENCE_MYSQL_PASSWORD || '';
+  const database = process.env.CADENCE_MYSQL_DATABASE || 'cadence';
+  const command = container
+    ? ['docker', ['exec', container, 'mysql', '--batch', '--skip-column-names', '-uroot', `-p${password}`, database, '-e', sql]]
+    : ['mysql', ['--batch', '--skip-column-names', '--host', process.env.CADENCE_MYSQL_HOST || '127.0.0.1', '--port', process.env.CADENCE_MYSQL_PORT || '3306', '--user', process.env.CADENCE_MYSQL_USER || 'root', `--password=${password}`, database, '-e', sql]];
+  const result = spawnSync(command[0], command[1], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: MYSQL_OBSERVATION_TIMEOUT_MS });
+  if (result.error) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation failed: ${result.error.message}` };
+  if (result.signal) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation was killed by ${result.signal} after ${MYSQL_OBSERVATION_TIMEOUT_MS}ms` };
+  return { status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
+}
+function mysqlRows(sql) {
+  const result = mysqlQuery(sql);
+  if (result.status !== 0) throw new Error(`MySQL query failed: ${(result.stderr || '').trim() || sql}`);
+  return result.stdout.split('\n').map(line => line.trim()).filter(Boolean).map(line => line.split('\t'));
+}
+function mysqlTaskState(domainId, taskList) {
+  const rows = mysqlRows(`SELECT (SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList)}' AND task_type=0), COALESCE((SELECT range_id FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('${domainHex(domainId)}') AND name='${sqlText(taskList)}' AND task_type=0),0)`);
+  return { queued_rows: Number(rows[0][0]), range_id: Number(rows[0][1]) };
+}
+const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder } = require('./matching-mysql-gate.cjs');
 async function run() {
   const id = process.env.CADENCE_MATCHING_TEST_ID || randomUUID();
   const domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
@@ -269,6 +296,18 @@ async function run() {
     domain, workflowId: id, workflowType: { name: 'ServiceCompatibility' }, taskList,
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
     taskStartToCloseTimeout: { seconds: '10' }, input: payload('start'),
+  };
+  const awaitPersistedTask = async (listName, taskType, timeoutMs = 20000) => {
+    if (!process.env.CADENCE_MATCHING_MYSQL) return null;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const rows = mysqlRows(`SELECT COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(listName)}' AND task_type=${taskType}`);
+      const count = Number(rows[0][0]);
+      const maxTaskId = rows[0][1] && rows[0][1] !== 'NULL' ? Number(rows[0][1]) : null;
+      if (count > 0 && maxTaskId !== null && Number.isFinite(maxTaskId)) return { taskType, rows: count, maxTaskId };
+      if (Date.now() >= deadline) return { taskType, rows: count, maxTaskId };
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
   };
   if (productionMode && failureRecoveryMode) {
     if (!process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT || !process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL) {
@@ -687,6 +726,7 @@ async function run() {
     }
   }
   const execution = { workflowId: id, runId: started.runId };
+  const mainDecisionWatermark = await awaitPersistedTask(taskList.name, 0);
   let decision;
   const decisionDeadline = Date.now() + 30000;
   while (Date.now() < decisionDeadline) {
@@ -707,10 +747,12 @@ async function run() {
       startToCloseTimeout: { seconds: '30' }, heartbeatTimeout: { seconds: '10' },
     } }],
   });
+  const mainActivityWatermark = await awaitPersistedTask(taskList.name, 1);
   const activity = await call('WorkerAPI', 'PollForActivityTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(activity.input.data.toString(), 'activity');
   assert.equal((await call('WorkerAPI', 'RecordActivityTaskHeartbeat', { taskToken: activity.taskToken, details: payload('heartbeat') })).cancelRequested, false);
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: activity.taskToken, result: payload('activity-result'), identity: 'service-probe' });
+  const finalWatermark = await awaitPersistedTask(taskList.name, 0);
   const final = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: final.taskToken, identity: 'service-probe', decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('done') } }],
@@ -934,7 +976,72 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), peer, domain, execution, attributes }));
+  let productionDatabaseEvidence;
+  if (productionMode && process.env.CADENCE_MATCHING_POSTGRES) {
+    const pendingWorkflowId = `rust-postgres-pending-${id}`;
+    const pendingTaskList = `rust-postgres-pending-tasks-${id}`;
+    const pending = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: pendingWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: { name: pendingTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const persisted = await taskObserver.observe(domainId, pendingTaskList, 20, 'postgres-task-before-consumption');
+    assert(persisted.queued_rows > 0, 'Go History did not persist a pending PostgreSQL task through Rust Matching');
+    productionDatabaseEvidence = { postgres: { workflowId: pending.workflowId || pendingWorkflowId, runId: pending.runId,
+      taskList: pendingTaskList, taskRowsBeforeConsumption: persisted.queued_rows } };
+    fs.writeFileSync(path.join(work, 'rust-postgres-evidence.json'), JSON.stringify(productionDatabaseEvidence, null, 2) + '\n');
+  }
+  if (productionMode && process.env.CADENCE_MATCHING_MYSQL && !cassandraGate) {
+    const decoderFixtureCases = verifyTaskListBlobDecoder();
+    const backlogList = { name: `gc-backlog-${id}` };
+    const backlogWorkflowId = `gc-backlog-${id}`;
+    const backlogStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: backlogWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: backlogList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const backlogWatermark = await awaitPersistedTask(backlogList.name, 0);
+    assert(backlogWatermark && backlogWatermark.maxTaskId !== null, 'Go History did not persist the dedicated garbage collection backlog task');
+    const backlogSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: backlogWorkflowId, CADENCE_MIXED_RESTART_TASK_LIST: backlogList.name,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'gc-backlog-sdk.log'), `${backlogSdk.stdout || ''}\n${backlogSdk.stderr || ''}`);
+    if (backlogSdk.status !== 0) throw new Error(`Existing SDK did not drain the garbage collection backlog: ${backlogSdk.error || backlogSdk.status}; see ${work}/gc-backlog-sdk.log`);
+    const backlogHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: backlogWorkflowId, runId: backlogStarted.runId } });
+    const backlogCompletions = backlogHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(backlogCompletions, 1, 'the drained garbage collection backlog must have exactly one visible completion');
+    const pendingList = { name: `gc-pending-${id}` };
+    const pendingStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: `gc-pending-${id}`, taskList: pendingList, requestId: randomUUID(),
+    });
+    const pendingWatermark = await awaitPersistedTask(pendingList.name, 0);
+    assert(pendingWatermark && pendingWatermark.maxTaskId !== null, 'Go History did not persist the unacknowledged control task');
+    const liveBlockProvider = async (listName, taskType) => {
+      const taskListType = taskType === 0 ? 'TASK_LIST_TYPE_DECISION' : 'TASK_LIST_TYPE_ACTIVITY';
+      const status = (await call('WorkflowAPI', 'DescribeTaskList', {
+        domain, taskList: { name: listName }, taskListType, includeTaskListStatus: true,
+      })).taskListStatus;
+      return { startId: Number(status.taskIdBlock.startId), endId: Number(status.taskIdBlock.endId) };
+    };
+    const mainDecisionMax = Math.max(mainDecisionWatermark?.maxTaskId ?? 0, finalWatermark?.maxTaskId ?? 0);
+    const taskLists = [
+      { label: 'backlogDecision', name: backlogList.name, taskType: 0, observedMaxTaskId: backlogWatermark.maxTaskId },
+      { label: 'backlogActivity', name: backlogList.name, taskType: 1, minAck: 0, durableGcEvidence: false },
+      { label: 'mainDecision', name: taskList.name, taskType: 0, observedMaxTaskId: mainDecisionMax },
+      { label: 'mainActivity', name: taskList.name, taskType: 1, observedMaxTaskId: mainActivityWatermark?.maxTaskId ?? 1 },
+    ];
+    const taskGarbageCollection = await verifyProductionMySqlTaskGc({
+      query: mysqlRows, domainId, taskLists, pendingListName: pendingList.name, liveBlockProvider,
+      rangeSize: 100000, sleep: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
+    });
+    const domainMetadata = observeProductionMySqlDomain({ query: mysqlRows, domain, domainId });
+    productionDatabaseEvidence = {
+      ...(productionDatabaseEvidence || {}), decoderFixtureCases, taskGarbageCollection, domainMetadata,
+      backlog: { taskList: backlogList.name, workflowId: backlogWorkflowId, watermark: backlogWatermark, completionEvents: backlogCompletions },
+      pendingControl: { taskList: pendingList.name, workflowId: pendingStarted.workflowId || `gc-pending-${id}`, watermark: pendingWatermark },
+    };
+    fs.writeFileSync(path.join(work, 'db-observations.json'), JSON.stringify(productionDatabaseEvidence, null, 2) + '\n');
+  }
+  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), peer, domain, execution, attributes }));
   } finally {
     if (productionMode) rust.kill('SIGTERM');
     else fs.writeFileSync(stop, 'stop');
