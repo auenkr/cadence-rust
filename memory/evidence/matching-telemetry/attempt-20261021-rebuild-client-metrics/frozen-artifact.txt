@@ -1,0 +1,6 @@
+Rust source revision: 1c7f6b6b9e851c84d2274128d89427415c6db10b
+Rust source SHA256 manifest: /home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/memory/evidence/matching-telemetry/attempt-20261021-rebuild-client-metrics/rust-source-sha256.json
+Frozen production binary: /home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/1c7f6b6b/cadence-server
+Frozen production binary SHA256: a863a56e2864a1fa5dfea677f04915ffff559240130980ee54d40e98a741049f
+Build exit: 0
+Strict locked workspace/all-target Clippy exit: 0
