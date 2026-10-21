@@ -1549,7 +1549,7 @@ async fn main() -> anyhow::Result<()> {
                     });
                 }
             }
-            let (mut serving_result, signal_result) = tokio::select! {
+            let (serving_result, signal_result) = tokio::select! {
                 result = serving.join_next() => {
                     let result = match result {
                         Some(Ok((name, Ok(())))) => Err(anyhow::anyhow!("{name} listener stopped unexpectedly")),
@@ -1561,8 +1561,8 @@ async fn main() -> anyhow::Result<()> {
                 },
                 signal = shutdown_signal() => (None, Some(signal)),
             };
-            // On a signal, the listener task remains active while shutdown
-            // drains traffic. Listener errors have already ended that task.
+            // On a signal, or after one listener exits, the remaining listener
+            // tasks stay active while membership withdraws and Matching drains.
             let withdrawal = if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
                 lifecycle.withdraw().await.map_err(anyhow::Error::new)
             } else {
