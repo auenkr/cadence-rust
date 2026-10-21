@@ -480,3 +480,17 @@ SHA256 `a863a56e2864a1fa5dfea677f04915ffff559240130980ee54d40e98a741049f`.
 Evidence and build log are in
 `memory/evidence/matching-telemetry/attempt-20261021-rebuild-client-metrics`.
 The second Prometheus run again had probe exit 0 and SIGTERM exit 0, but gate exit 1 because the same-sample caller check expected the unsanitized `cadence-frontend`. Offline validation of all 340 preserved compressed scrapes now passes using every expected Prometheus label transformed by the pinned Go Tally v3.5.8 sanitizer. It finds the exact positive query series and all four required positive metric families (including 923 `cadence_client_requests` samples). Pinned sanitizer source, exact sample, semantic JSON and raw-scrape hash are in `attempt-20261021-exporters/prometheus-retry-history-metrics`. A fresh full Prometheus gate is required with the corrected validator; StatsD and M3 have not run.
+
+
+### StatsD shutdown failure
+
+The first configured StatsD mixed run reached the SDK/restart/MySQL probe but
+returned exit 1 because Rust's SIGTERM metrics flush failed with
+`Message too long (os error 90)`. The raw UDP capture and all run logs are
+preserved in `attempt-20261021-exporters/statsd`; it contained one 51,376-byte
+datagram and no qualified query line. Investigation traced this to the harness's
+10 MiB `flushBytes` setting, which violates the option's maximum UDP datagram
+meaning. The runner now uses Go's documented safe 1432-byte default and keeps
+aggregates pending until SIGTERM using the one-hour reporting interval. The
+StatsD attempt must pass with zero Rust exit plus required positive post-signal
+metrics and the exact same-sample query label assertion.

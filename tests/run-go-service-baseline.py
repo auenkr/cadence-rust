@@ -427,7 +427,10 @@ if production_matching:
             if args.matching_exporter == 'm3':
                 matching_metrics_yaml += '        service: cadence_matching\n        env: test\n'
             else:
-                matching_metrics_yaml += '        flushInterval: 1h\n        flushBytes: 10485760\n'
+                # Go documents 1432 bytes as its default safe UDP payload for
+                # local traffic. Keep aggregates pending until SIGTERM through
+                # reportingInterval; split their shutdown flush into safe packets.
+                matching_metrics_yaml += '        flushInterval: 1h\n        flushBytes: 1432\n'
         matching_metrics_yaml = matching_metrics_yaml.replace(
             '    metrics:\n', '    metrics:\n      reportingInterval: 1h\n', 1)
         rust_text, replaced_metrics = re.subn(

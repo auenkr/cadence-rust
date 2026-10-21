@@ -1,0 +1,7 @@
+{
+  "/tmp/matching-telemetry-statsd/config/base.yaml": "df4623e35de9684d110fee3b5e42005abda93655437fb18d2ba68b7ae36ec2f6",
+  "/tmp/matching-telemetry-statsd/config/development.yaml": "b92cac329846bd1064e0b76263650aa8374fa327bfc0031210bedd4430619fcd",
+  "/tmp/matching-telemetry-statsd/config/development_mysql.yaml": "e7e4c0549b471005c3eb9c818ca6bf4c10b15638d8e3c310413fa1e114268f67",
+  "/tmp/matching-telemetry-statsd/rust-matching.yaml": "7102719df23ade87a08e5c18ef2f781b8cb27c8e88c6aec3923d19a13fecc6c6",
+  "/tmp/matching-telemetry-statsd/rust-dynamic-config.yaml": "9476788576d2c9fda37ec912f8a5cf0be3d55fe6b638a495ba2a76164b09918c"
+}
