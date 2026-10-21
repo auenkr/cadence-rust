@@ -23,6 +23,33 @@ pub struct ConfiguredMatchingStores {
     pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
 }
 
+fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
+    if sql.use_multiple_databases {
+        if !sql.database_name.is_empty()
+            || !sql.connect_addr.is_empty()
+            || !sql.user.is_empty()
+            || !sql.password.is_empty()
+        {
+            anyhow::bail!("SQL multipleDatabasesConfig requires databaseName, connectAddr, user, and password to be configured per endpoint");
+        }
+        if sql.n_shards <= 1 || sql.multiple_databases_config.len() != sql.n_shards as usize {
+            anyhow::bail!("SQL nShards must be greater than one and equal to the length of multipleDatabasesConfig");
+        }
+        if sql
+            .multiple_databases_config
+            .iter()
+            .any(|entry| entry.database_name.is_empty() || entry.connect_addr.is_empty())
+        {
+            anyhow::bail!(
+                "SQL multipleDatabasesConfig entries require databaseName and connectAddr"
+            );
+        }
+    } else if !sql.multiple_databases_config.is_empty() {
+        anyhow::bail!("SQL multipleDatabasesConfig requires useMultipleDatabases=true");
+    }
+    Ok(())
+}
+
 /// Open Matching's configured default store.
 fn cassandra_config(
     nosql: &crate::config::NosqlConfig,
@@ -155,13 +182,11 @@ pub fn open_configured_default_store(
             })
         }
         "mysql" => {
-            if sql.use_multiple_databases || !sql.multiple_databases_config.is_empty() {
-                anyhow::bail!("Matching MySQL task persistence does not support multipleDatabasesConfig");
-            }
-            if sql.database_name.is_empty() {
+            validate_sql_shards(sql)?;
+            if !sql.use_multiple_databases && sql.database_name.is_empty() {
                 anyhow::bail!("Matching MySQL SQL persistence databaseName cannot be empty");
             }
-            if sql.connect_addr.is_empty() {
+            if !sql.use_multiple_databases && sql.connect_addr.is_empty() {
                 anyhow::bail!("Matching MySQL SQL persistence connectAddr cannot be empty");
             }
             let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
@@ -194,7 +219,10 @@ pub fn open_configured_default_store(
                 max_conn_lifetime: (sql.max_conn_lifetime_nanos > 0)
                     .then(|| Duration::from_nanos(sql.max_conn_lifetime_nanos as u64)),
                 n_shards: n_shards as usize,
-                use_multiple_databases: false,
+                use_multiple_databases: sql.use_multiple_databases,
+                multiple_databases_config: sql.multiple_databases_config.iter().map(|entry| cadence_persistence::matching_mysql::MySqlShardConfig {
+                    user: entry.user.clone(), password: entry.password.clone(), database_name: entry.database_name.clone(), connect_addr: entry.connect_addr.clone(),
+                }).collect(),
                 encoding,
                 tls,
             };
@@ -208,13 +236,11 @@ pub fn open_configured_default_store(
             })
         }
         "postgres" => {
-            if sql.use_multiple_databases || !sql.multiple_databases_config.is_empty() {
-                anyhow::bail!("Matching PostgreSQL task persistence does not support multipleDatabasesConfig");
-            }
-            if sql.database_name.is_empty() {
+            validate_sql_shards(sql)?;
+            if !sql.use_multiple_databases && sql.database_name.is_empty() {
                 anyhow::bail!("Matching PostgreSQL SQL persistence databaseName cannot be empty");
             }
-            if sql.connect_addr.is_empty() {
+            if !sql.use_multiple_databases && sql.connect_addr.is_empty() {
                 anyhow::bail!("Matching PostgreSQL SQL persistence connectAddr cannot be empty");
             }
             let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
@@ -234,16 +260,18 @@ pub fn open_configured_default_store(
                 key_file: tls.key_file.clone(),
             });
             let config = PostgresTaskStoreConfig {
-                shards: vec![PostgresShardConfig {
+                shards: if sql.use_multiple_databases { sql.multiple_databases_config.iter().map(|entry| PostgresShardConfig {
+                    connect_addr: entry.connect_addr.clone(), user: entry.user.clone(), password: entry.password.clone(), database_name: entry.database_name.clone(), connect_attributes: sql.connect_attributes.clone(), tls: tls.clone(),
+                }).collect() } else { vec![PostgresShardConfig {
                     connect_addr: sql.connect_addr.clone(),
                     user: sql.user.clone(),
                     password: sql.password.clone(),
                     database_name: sql.database_name.clone(),
                     connect_attributes: sql.connect_attributes.clone(),
                     tls,
-                }],
+                }] },
                 n_shards: n_shards as usize,
-                use_multiple_databases: false,
+                use_multiple_databases: sql.use_multiple_databases,
                 max_conns: sql.max_conns,
                 max_idle_conns: sql.max_idle_conns,
                 max_conn_lifetime: (sql.max_conn_lifetime_nanos > 0)
@@ -466,18 +494,37 @@ mod tests {
     }
 
     #[test]
-    fn configured_mysql_rejects_multiple_database_routing_before_connecting() {
-        let config = persistence(Some(SqlConfig {
+    fn configured_sql_shards_validate_go_endpoint_count_and_endpoint_fields() {
+        let mut sql = SqlConfig {
             plugin_name: "mysql".into(),
             use_multiple_databases: true,
+            n_shards: 2,
+            multiple_databases_config: vec![
+                crate::config::MultipleDatabasesConfigEntry {
+                    database_name: "cadence0".into(),
+                    connect_addr: "db0:3306".into(),
+                    ..Default::default()
+                },
+                crate::config::MultipleDatabasesConfigEntry {
+                    database_name: "cadence1".into(),
+                    connect_addr: "db1:3306".into(),
+                    ..Default::default()
+                },
+            ],
             ..Default::default()
-        }));
-        let error = open_configured_default_store(&config, "active", Arc::new(|| false))
-            .err()
-            .unwrap();
-        assert!(error
+        };
+        assert!(validate_sql_shards(&sql).is_ok());
+        sql.multiple_databases_config.pop();
+        assert!(validate_sql_shards(&sql)
+            .unwrap_err()
             .to_string()
-            .contains("does not support multipleDatabasesConfig"));
+            .contains("equal to the length"));
+        sql.multiple_databases_config
+            .push(crate::config::MultipleDatabasesConfigEntry::default());
+        assert!(validate_sql_shards(&sql)
+            .unwrap_err()
+            .to_string()
+            .contains("require databaseName and connectAddr"));
     }
 
     #[test]

@@ -5,6 +5,7 @@
 //! behavior; a checked-out connection is only recycled after its transaction
 //! has ended. Production config assembly is a separate server integration.
 
+use crate::SemaphorePersistence;
 use crate::{
     matching_blob::{self as blob, BlobEncoding, TaskListData},
     matching_sqlite::StorageError,
@@ -25,7 +26,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use crate::SemaphorePersistence;
 use uuid::Uuid;
 
 const DEFAULT_MAX_IDLE_CONNS: usize = 2;
@@ -39,6 +39,14 @@ pub struct MySqlTlsConfig {
     pub key_file: String,
     pub enable_host_verification: bool,
     pub require_client_auth: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct MySqlShardConfig {
+    pub user: String,
+    pub password: String,
+    pub database_name: String,
+    pub connect_addr: String,
 }
 
 /// The subset of Cadence SQL connection config accepted by this adapter.
@@ -63,8 +71,32 @@ pub struct MySqlTaskStoreConfig {
     pub n_shards: usize,
     /// Multiple DBs require the separate multi-shard adapter/selector slice.
     pub use_multiple_databases: bool,
+    /// Ordered endpoint entries from Go multipleDatabasesConfig.
+    pub multiple_databases_config: Vec<MySqlShardConfig>,
     pub encoding: BlobEncoding,
     pub tls: Option<MySqlTlsConfig>,
+}
+
+fn validate_mysql_shards(config: &MySqlTaskStoreConfig) -> Result<()> {
+    if config.use_multiple_databases {
+        if config.n_shards <= 1 || config.multiple_databases_config.len() != config.n_shards {
+            return Err(StorageError::BackendConfiguration(format!("MySQL nShards must be greater than one and equal multipleDatabasesConfig length (nShards={}, entries={})", config.n_shards, config.multiple_databases_config.len())));
+        }
+        if config
+            .multiple_databases_config
+            .iter()
+            .any(|entry| entry.database_name.is_empty() || entry.connect_addr.is_empty())
+        {
+            return Err(StorageError::BackendConfiguration(
+                "MySQL multipleDatabasesConfig entries require databaseName and connectAddr".into(),
+            ));
+        }
+    } else if !config.multiple_databases_config.is_empty() {
+        return Err(StorageError::BackendConfiguration(
+            "MySQL multipleDatabasesConfig requires useMultipleDatabases=true".into(),
+        ));
+    }
+    Ok(())
 }
 
 struct IdleConnection {
@@ -418,19 +450,20 @@ impl Drop for ConnectionLease {
 }
 
 pub struct MySqlTaskStore {
-    pool: Arc<SyncConnectionPool>,
+    pools: Vec<Arc<SyncConnectionPool>>,
     n_shards: usize,
     encoding: BlobEncoding,
     isolation: IsolationLevel,
 }
 
 impl MySqlTaskStore {
+    fn pool(&self, key: &TaskListKey) -> &Arc<SyncConnectionPool> {
+        let index = mysql_database_index(self.database_shard(key) as usize, self.pools.len());
+        &self.pools[index]
+    }
+
     pub fn connect(config: MySqlTaskStoreConfig) -> Result<Self> {
-        if config.use_multiple_databases {
-            return Err(StorageError::BackendConfiguration(
-                "MySQL Matching multipleDatabasesConfig is not supported by this single-database adapter".into(),
-            ));
-        }
+        validate_mysql_shards(&config)?;
         if config.n_shards == 0 || config.n_shards > i32::MAX as usize {
             return Err(StorageError::BackendConfiguration(format!(
                 "MySQL Matching nShards must be in 1..={}, got {}",
@@ -438,8 +471,8 @@ impl MySqlTaskStore {
                 config.n_shards
             )));
         }
-        let pool = Self::create_mysql_pool(&config)?;
-        Self::connect_with_pool(config, pool)
+        let pools = Self::create_mysql_pools(&config)?;
+        Self::connect_with_pools(config, pools)
     }
 
     /// Construct the task adapter and metadata reader over one shared pool,
@@ -448,11 +481,7 @@ impl MySqlTaskStore {
         config: MySqlTaskStoreConfig,
         active_cluster_name: impl Into<String>,
     ) -> Result<(Self, crate::matching_domain_mysql::MySqlDomainMetadataStore)> {
-        if config.use_multiple_databases {
-            return Err(StorageError::BackendConfiguration(
-                "MySQL Matching multipleDatabasesConfig is not supported by this single-database adapter".into(),
-            ));
-        }
+        validate_mysql_shards(&config)?;
         if config.n_shards == 0 || config.n_shards > i32::MAX as usize {
             return Err(StorageError::BackendConfiguration(format!(
                 "MySQL Matching nShards must be in 1..={}, got {}",
@@ -460,21 +489,21 @@ impl MySqlTaskStore {
                 config.n_shards
             )));
         }
-        let pool = Self::create_mysql_pool(&config)?;
-        let store = Self::connect_with_pool(config, pool.clone())?;
+        let pools = Self::create_mysql_pools(&config)?;
+        let store = Self::connect_with_pools(config, pools.clone())?;
         let metadata = crate::matching_domain_mysql::MySqlDomainMetadataStore::from_shared_pool(
-            pool,
+            pools[0].clone(),
             active_cluster_name,
         );
         Ok((store, metadata))
     }
 
-    fn connect_with_pool(
+    fn connect_with_pools(
         config: MySqlTaskStoreConfig,
-        pool: Arc<SyncConnectionPool>,
+        pools: Vec<Arc<SyncConnectionPool>>,
     ) -> Result<Self> {
         let store = Self {
-            pool,
+            pools,
             n_shards: config.n_shards,
             encoding: config.encoding,
             isolation: configured_isolation(&config.connect_attributes)?,
@@ -486,11 +515,6 @@ impl MySqlTaskStore {
     pub(crate) fn create_mysql_pool(
         config: &MySqlTaskStoreConfig,
     ) -> Result<Arc<SyncConnectionPool>> {
-        if config.use_multiple_databases {
-            return Err(StorageError::BackendConfiguration(
-                "MySQL Matching multipleDatabasesConfig is not supported by this single-database adapter".into(),
-            ));
-        }
         let max_idle = if config.max_idle_conns > 0 {
             usize::try_from(config.max_idle_conns).unwrap_or(usize::MAX)
         } else {
@@ -517,6 +541,29 @@ impl MySqlTaskStore {
         }))
     }
 
+    fn create_mysql_pools(config: &MySqlTaskStoreConfig) -> Result<Vec<Arc<SyncConnectionPool>>> {
+        validate_mysql_shards(config)?;
+        if !config.use_multiple_databases {
+            return Ok(vec![Self::create_mysql_pool(config)?]);
+        }
+        let mut pools = Vec::with_capacity(config.multiple_databases_config.len());
+        for (index, endpoint) in config.multiple_databases_config.iter().enumerate() {
+            let mut shard = config.clone();
+            shard.user = endpoint.user.clone();
+            shard.password = endpoint.password.clone();
+            shard.database_name = endpoint.database_name.clone();
+            shard.connect_addr = endpoint.connect_addr.clone();
+            shard.use_multiple_databases = false;
+            shard.multiple_databases_config.clear();
+            pools.push(Self::create_mysql_pool(&shard).map_err(|error| {
+                StorageError::BackendConfiguration(format!(
+                    "failed connecting MySQL multipleDatabasesConfig endpoint {index}: {error}"
+                ))
+            })?);
+        }
+        Ok(pools)
+    }
+
     fn database_shard(&self, key: &TaskListKey) -> i32 {
         // Go hashes the canonical UUID string plus underscore plus task-list
         // name. Task rows have no shard_id column; this value only chooses the
@@ -526,45 +573,47 @@ impl MySqlTaskStore {
     }
 
     fn validate_schema(&self) -> Result<()> {
-        let mut connection = self.pool.checkout()?;
-        let discard = connection.discard.clone();
-        connection
+        for pool in &self.pools {
+            let mut connection = pool.checkout()?;
+            let discard = connection.discard.clone();
+            connection
             .exec_drop(
                 "SELECT shard_id, domain_id, name, task_type, range_id, data, data_encoding FROM task_lists LIMIT 0",
                 (),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
-        connection
+            connection
             .exec_drop(
                 "SELECT domain_id, task_list_name, task_type, task_id, data, data_encoding FROM tasks LIMIT 0",
                 (),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
-        for (table, expected) in [
-            (
-                "task_lists",
-                vec!["shard_id", "domain_id", "name", "task_type"],
-            ),
-            (
-                "tasks",
-                vec!["domain_id", "task_list_name", "task_type", "task_id"],
-            ),
-        ] {
-            let columns: Vec<String> = connection
+            for (table, expected) in [
+                (
+                    "task_lists",
+                    vec!["shard_id", "domain_id", "name", "task_type"],
+                ),
+                (
+                    "tasks",
+                    vec!["domain_id", "task_list_name", "task_type", "task_id"],
+                ),
+            ] {
+                let columns: Vec<String> = connection
                 .exec(
                     "SELECT column_name FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND table_name = ? AND constraint_name = 'PRIMARY' ORDER BY ordinal_position",
                     (table,),
                 )
                 .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
-            if columns.len() != expected.len()
-                || columns
-                    .iter()
-                    .zip(expected.iter())
-                    .any(|(actual, expected)| actual.as_str() != *expected)
-            {
-                return Err(StorageError::BackendSchema(format!(
-                    "{table} primary key is {columns:?}, expected {expected:?}"
-                )));
+                if columns.len() != expected.len()
+                    || columns
+                        .iter()
+                        .zip(expected.iter())
+                        .any(|(actual, expected)| actual.as_str() != *expected)
+                {
+                    return Err(StorageError::BackendSchema(format!(
+                        "{table} primary key is {columns:?}, expected {expected:?}"
+                    )));
+                }
             }
         }
         Ok(())
@@ -638,9 +687,17 @@ impl MySqlTaskStore {
     }
 }
 
+fn mysql_database_index(logical_shard: usize, endpoint_count: usize) -> usize {
+    if endpoint_count == 1 {
+        0
+    } else {
+        logical_shard
+    }
+}
+
 impl MatchingTaskStore for MySqlTaskStore {
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         self.read_task_list(&mut connection, key)?
             .ok_or(StorageError::NotFound)
     }
@@ -653,7 +710,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         now_nanos: i64,
     ) -> Result<TaskListRecord> {
         let shard_id = self.database_shard(key);
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         let mut current = match self.read_task_list_row(&mut connection, key)? {
             Some((range_id, bytes, encoding)) => {
@@ -743,7 +800,7 @@ impl MatchingTaskStore for MySqlTaskStore {
             0
         };
         let shard_id = self.database_shard(key);
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         let mut transaction = connection
             .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
@@ -781,7 +838,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()> {
         let shard_id = self.database_shard(key);
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         let mut transaction = connection
             .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
@@ -811,7 +868,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         max_read_level: i64,
         batch_size: i64,
     ) -> Result<Vec<AllocatedTask>> {
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         let rows: Vec<(i64, Vec<u8>, String)> = connection
             .exec(
@@ -831,7 +888,7 @@ impl MatchingTaskStore for MySqlTaskStore {
     }
 
     fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> Result<i64> {
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         let size: Option<i64> = connection
             .exec_first(
@@ -846,7 +903,7 @@ impl MatchingTaskStore for MySqlTaskStore {
     }
 
     fn complete_task(&self, key: &TaskListKey, task_id: i64) -> Result<()> {
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         connection
             .exec_drop(
@@ -865,7 +922,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         if limit == 0 {
             return Err(StorageError::MissingLimit);
         }
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         connection
             .exec_drop(
@@ -881,7 +938,7 @@ impl MatchingTaskStore for MySqlTaskStore {
 
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
         let shard_id = self.database_shard(key);
-        let mut connection = self.pool.checkout()?;
+        let mut connection = self.pool(key).checkout()?;
         let discard = connection.discard.clone();
         connection
             .exec_drop(
@@ -906,12 +963,9 @@ impl crate::SemaphorePersistence for MySqlTaskStore {
         size: i32,
         bucket_size: i32,
     ) -> std::result::Result<crate::SemaphoreMetadata, crate::SemaphoreError> {
-        crate::SqlUnsupportedSemaphorePersistence.create_semaphore(
-            domain,
-            name,
-            size,
-            bucket_size,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .create_semaphore(domain, name, size, bucket_size)
+            .await
     }
 
     async fn scan_semaphore_bucket(
@@ -920,7 +974,9 @@ impl crate::SemaphorePersistence for MySqlTaskStore {
         name: &str,
         bucket: i32,
     ) -> std::result::Result<Vec<crate::SemaphoreRow>, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.scan_semaphore_bucket(domain_id, name, bucket).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .scan_semaphore_bucket(domain_id, name, bucket)
+            .await
     }
 
     async fn get_semaphore_ownership_by_token(
@@ -930,9 +986,9 @@ impl crate::SemaphorePersistence for MySqlTaskStore {
         bucket: i32,
         token_id: i32,
     ) -> std::result::Result<String, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.get_semaphore_ownership_by_token(
-            domain_id, name, bucket, token_id,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .get_semaphore_ownership_by_token(domain_id, name, bucket, token_id)
+            .await
     }
 
     async fn grant_semaphore_token(
@@ -943,9 +999,9 @@ impl crate::SemaphorePersistence for MySqlTaskStore {
         token_id: i32,
         owner_id: &str,
     ) -> std::result::Result<crate::GrantOutcome, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.grant_semaphore_token(
-            domain_id, name, bucket, token_id, owner_id,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .grant_semaphore_token(domain_id, name, bucket, token_id, owner_id)
+            .await
     }
 }
 
@@ -1486,6 +1542,13 @@ fn normalize_mysql_error(error: MySqlError) -> StorageError {
 mod tests {
     use super::*;
 
+    #[test]
+    fn mysql_physical_database_follows_go_logical_shard_index() {
+        assert_eq!(mysql_database_index(0, 2), 0);
+        assert_eq!(mysql_database_index(1, 2), 1);
+        assert_eq!(mysql_database_index(3, 1), 0);
+    }
+
     fn timed_mysql_test_config(max_conns: i64) -> MySqlTaskStoreConfig {
         MySqlTaskStoreConfig {
             user: std::env::var("CADENCE_MYSQL_USER").unwrap_or_else(|_| "root".into()),
@@ -1501,6 +1564,7 @@ mod tests {
             max_conn_lifetime: None,
             n_shards: 1,
             use_multiple_databases: false,
+            multiple_databases_config: Vec::new(),
             encoding: BlobEncoding::ThriftRW,
             tls: None,
         }
@@ -2027,6 +2091,7 @@ mod tests {
             max_conn_lifetime: None,
             n_shards: 1,
             use_multiple_databases: false,
+            multiple_databases_config: Vec::new(),
             encoding: BlobEncoding::ThriftRW,
             tls: None,
         };
