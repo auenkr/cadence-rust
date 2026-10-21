@@ -92,7 +92,8 @@ pub(crate) struct PostgresConnectionPool {
 
 #[derive(Clone)]
 struct PostgresTlsConnectorConfig {
-    mode: SslMode,
+    verify_peer: bool,
+    verify_hostname: bool,
     allow_plaintext_first: bool,
     root_cert: Option<String>,
     cert: Option<String>,
@@ -805,16 +806,16 @@ fn postgres_options(
         }
     }
     let allow_plaintext_first = ssl_mode == "allow";
-    let mode = match ssl_mode.as_str() {
-        "disable" => SslMode::Disable,
+    let (mode, verify_peer, verify_hostname) = match ssl_mode.as_str() {
+        "disable" => (SslMode::Disable, false, false),
         // The synchronous driver has no lib/pq `allow` mode. The pool emulates
         // it by trying plaintext, then retrying TLS only when PostgreSQL
         // explicitly rejects the plaintext connection as SSL-off.
-        "allow" => SslMode::Disable,
-        "prefer" => SslMode::Prefer,
-        "require" => SslMode::Require,
-        "verify-ca" => SslMode::VerifyCa,
-        "verify-full" => SslMode::VerifyFull,
+        "allow" => (SslMode::Disable, false, false),
+        "prefer" => (SslMode::Prefer, false, false),
+        "require" => (SslMode::Require, false, false),
+        "verify-ca" => (SslMode::Require, true, false),
+        "verify-full" => (SslMode::Require, true, true),
         other => {
             return Err(configuration_error(format!(
                 "unsupported PostgreSQL sslmode {other:?}"
@@ -831,10 +832,15 @@ fn postgres_options(
             ));
         }
         Some(PostgresTlsConnectorConfig {
-            mode: if allow_plaintext_first {
-                SslMode::Require
+            verify_peer: if allow_plaintext_first {
+                false
             } else {
-                mode
+                verify_peer
+            },
+            verify_hostname: if allow_plaintext_first {
+                false
+            } else {
+                verify_hostname
             },
             allow_plaintext_first,
             // lib/pq keeps certificate parameters when sslmode=allow is
@@ -867,14 +873,14 @@ fn postgres_tls_connector(config: &PostgresTlsConnectorConfig) -> Result<MakeTls
     }
     if let (Some(cert), Some(key)) = (&config.cert, &config.key) {
         builder
-            .set_certificate_file(cert, openssl::x509::X509FileType::PEM)
+            .set_certificate_file(cert, openssl::ssl::SslFiletype::PEM)
             .map_err(|error| {
                 configuration_error(format!(
                     "loading PostgreSQL client certificate {cert:?}: {error}"
                 ))
             })?;
         builder
-            .set_private_key_file(key, openssl::x509::X509FileType::PEM)
+            .set_private_key_file(key, openssl::ssl::SslFiletype::PEM)
             .map_err(|error| {
                 configuration_error(format!("loading PostgreSQL client key {key:?}: {error}"))
             })?;
@@ -884,22 +890,18 @@ fn postgres_tls_connector(config: &PostgresTlsConnectorConfig) -> Result<MakeTls
             ))
         })?;
     }
-    let verify = matches!(config.mode, SslMode::VerifyCa | SslMode::VerifyFull);
-    if config.mode == SslMode::VerifyCa {
-        // lib/pq verify-ca validates the chain but deliberately skips host
-        // name matching. The OpenSSL connector enables host checks by default;
-        // ignore only that specific verification result.
-        builder.set_verify_callback(SslVerifyMode::PEER, |valid, context| {
-            valid || context.error() == openssl::x509::X509VerifyResult::HOSTNAME_MISMATCH
-        });
+    if config.verify_peer {
+        builder.set_verify(SslVerifyMode::PEER);
     } else {
-        builder.set_verify(if verify {
-            SslVerifyMode::PEER
-        } else {
-            SslVerifyMode::NONE
-        });
+        builder.set_verify(SslVerifyMode::NONE);
     }
-    Ok(MakeTlsConnector::new(builder.build()))
+    let mut connector = MakeTlsConnector::new(builder.build());
+    let verify_hostname = config.verify_hostname;
+    connector.set_callback(move |cfg, _domain| {
+        cfg.set_verify_hostname(verify_hostname);
+        Ok(())
+    });
+    Ok(connector)
 }
 
 fn split_host_port(address: &str) -> Result<(String, u16)> {
@@ -1071,7 +1073,8 @@ mod tests {
         assert_eq!(options.get_ssl_mode(), SslMode::Disable);
         let tls = tls.expect("allow mode needs a TLS retry configuration");
         assert!(tls.allow_plaintext_first);
-        assert_eq!(tls.mode, SslMode::Require);
+        assert!(!tls.verify_peer);
+        assert!(!tls.verify_hostname);
         assert!(tls.root_cert.is_none());
         assert!(tls.cert.is_none());
         assert!(tls.key.is_none());
