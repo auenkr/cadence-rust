@@ -303,6 +303,8 @@ pub struct Matching {
     pub(crate) poll_expiration: std::time::Duration,
     metrics: crate::matching_metrics::MatchingMetrics,
     domain_name_resolver: Option<DomainNameResolver>,
+    /// Go handler `userRateLimiter` / `workerRateLimiter`.
+    host_limits: Arc<HostLimits>,
 }
 type DomainNameResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Runtime-provided ownership check. The cached flag is advisory and only
@@ -316,9 +318,93 @@ pub type TaskListOwnershipCheck = Arc<
         + Send
         + Sync,
 >;
+/// Go handler `userRateLimiter` and `workerRateLimiter`.
+#[derive(Clone, Copy)]
+enum HostLimit {
+    User,
+    Worker,
+}
+struct HostLimits {
+    user: crate::matching_host_limiter::HostRateLimiter,
+    worker: crate::matching_host_limiter::HostRateLimiter,
+}
+impl HostLimits {
+    fn new(overlay: Arc<Mutex<crate::admin::DynamicConfigOverlay>>) -> Self {
+        use crate::matching_config as cfg;
+        use crate::matching_host_limiter::HostRateLimiter;
+        let read = |key: &'static str, overlay: &Arc<Mutex<crate::admin::DynamicConfigOverlay>>| {
+            let overlay = overlay.clone();
+            move |f: &dyn Fn(&[cadence_api::admin::DynamicConfigValue]) -> i64| {
+                f(overlay.lock().expect("admin lock").property_values(key))
+            }
+        };
+        let user = {
+            let global = read("matching.rps", &overlay);
+            let domain = overlay.clone();
+            HostRateLimiter::new(
+                Arc::new(move || global(&cfg::user_rps) as f64),
+                Arc::new(move |name| {
+                    cfg::domain_user_rps(
+                        domain.lock().expect("admin lock").property_values("matching.domainrps"),
+                        name,
+                    )
+                }),
+            )
+        };
+        let worker = {
+            let global = read("matching.workerrps", &overlay);
+            let domain = overlay.clone();
+            HostRateLimiter::new(
+                Arc::new(move || global(&cfg::worker_rps) as f64),
+                Arc::new(move |name| {
+                    cfg::domain_worker_rps(
+                        domain
+                            .lock()
+                            .expect("admin lock")
+                            .property_values("matching.domainworkerrps"),
+                        name,
+                    )
+                }),
+            )
+        };
+        Self { user, worker }
+    }
+}
+/// Go `errMatchingHostThrottle`.
+fn host_throttle_status() -> Status {
+    crate::grpc::detailed_status(
+        tonic::Code::ResourceExhausted,
+        crate::matching_host_limiter::HOST_THROTTLE_MESSAGE,
+        "ServiceBusyError",
+        cadence_proto::api::ServiceBusyError {
+            reason: String::new(),
+        },
+    )
+}
 impl Matching {
+    /// Go handler `limiter.Allow(quotas.Info{Domain: name})`. The domain is the
+    /// resolved name for UUID requests (empty when unknown) and the request's
+    /// own name for `by_name` requests. Go ignores the result for Respond,
+    /// Cancel and Refresh, which still consume a token.
+    fn host_throttle(&self, limit: HostLimit, domain: &str, by_name: bool) -> Result<(), Status> {
+        let name = if by_name {
+            domain.to_owned()
+        } else {
+            self.domain_name(domain).unwrap_or_default()
+        };
+        let limiter = match limit {
+            HostLimit::User => &self.host_limits.user,
+            HostLimit::Worker => &self.host_limits.worker,
+        };
+        if limiter.allow(&name) {
+            Ok(())
+        } else {
+            Err(host_throttle_status())
+        }
+    }
     pub fn new(state: crate::handlers::AppState) -> Self {
         let semaphores = crate::matching_semaphore::Registry::new(state.executions.clone());
+        let host_limits = Arc::new(HostLimits::new(state.admin.dynamic_config.clone()));
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
@@ -332,6 +418,7 @@ impl Matching {
             poll_expiration: std::time::Duration::from_secs(60),
             metrics: crate::matching_metrics::MatchingMetrics::default(),
             domain_name_resolver: None,
+            host_limits,
         }
     }
     /// Install an optional inbound Matching metrics sink.
@@ -1559,6 +1646,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
+        self.host_throttle(HostLimit::Worker, request.get_ref().domain_id.as_str(), false)?;
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.get_ref().clone();
         let mut payload = r
@@ -1776,6 +1864,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
+        self.host_throttle(HostLimit::Worker, request.get_ref().domain_id.as_str(), false)?;
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.get_ref().clone();
         let mut payload = r
@@ -1974,6 +2063,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    self.host_throttle(HostLimit::Worker, request.get_ref().domain_id.as_str(), false)?;
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     task_list_name(
@@ -2169,6 +2259,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    self.host_throttle(HostLimit::Worker, request.get_ref().domain_id.as_str(), false)?;
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     task_list_name(
@@ -2358,6 +2449,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    self.host_throttle(HostLimit::User, request.get_ref().domain_id.as_str(), false)?;
                     let incoming_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     let mut payload = r
@@ -2591,6 +2683,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    self.host_throttle(HostLimit::User, request.get_ref().domain.as_str(), true)?;
                     let r = request.get_ref().clone();
                     if let Some(queues) = &self.queues {
                         let domain = self
@@ -2709,6 +2802,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    self.host_throttle(HostLimit::User, request.get_ref().domain.as_str(), true)?;
                     let r = request.get_ref().clone();
                     let task_list = r.task_list.unwrap_or_default();
                     // Go resolves `request.GetDomain()` through the domain cache; the
@@ -2758,6 +2852,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    self.host_throttle(HostLimit::User, request.get_ref().domain_id.as_str(), false)?;
                     use crate::matching_semaphore::Identifier;
                     use cadence_api::enums::SemaphoreAcquireOutcome;
                     let r = request.get_ref().clone();
@@ -2765,7 +2860,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     cadence_common::semaphore::parse_owner(&r.owner_id)
                         .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
                     // The domain must exist, like Go's domain-cache lookup.
-                    self.domain_name(&r.domain_id)?;
+                    let domain_name = self.domain_name(&r.domain_id)?;
                     if !self.frontend.state.semaphore_enabled {
                         return Err(Status::invalid_argument(
                             "distributed semaphore is not enabled for this domain",
@@ -2780,9 +2875,22 @@ impl m::matching_api_server::MatchingApi for Matching {
                     }
                     // Idle buckets unload like Go's liveness callback.
                     self.semaphores.sweep_idle(semaphore_now());
+                    let idle_ttl = {
+                        let overlay = self
+                            .frontend
+                            .state
+                            .admin
+                            .dynamic_config
+                            .lock()
+                            .expect("admin lock");
+                        crate::matching_config::semaphore_idle_time(
+                            overlay.property_values("matching.semaphoreIdleTime"),
+                            &domain_name,
+                        )
+                    };
                     let manager = self
                         .semaphores
-                        .get_or_create(identifier)
+                        .get_or_create_with_idle_ttl(identifier, idle_ttl)
                         .map_err(semaphore_status)?;
                     let result = manager.acquire(&r.owner_id).map_err(semaphore_status)?;
                     let outcome = match result.outcome {
@@ -2820,6 +2928,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    self.host_throttle(HostLimit::User, request.get_ref().domain_id.as_str(), false)?;
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
                     let task_list = r
@@ -2857,11 +2966,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                         ));
                     }
                     if let Some(registry) = &self.queues {
-                        if !matches!(r.task_list_type, 1 | 2) {
-                            return Err(Status::invalid_argument("TaskListType is invalid."));
-                        }
                         let queue = self
-                            .durable_queue(&r.domain_id, &task_list, r.task_list_type - 1)
+                            .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
                             .await?;
                         let update = registry
                             .update_partition_config(
@@ -2869,7 +2975,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     domain_id: uuid::Uuid::parse_str(&r.domain_id)
                                         .expect("validated domain"),
                                     name: task_list.name.clone(),
-                                    task_type: r.task_list_type - 1,
+                                    task_type: crate::matching_config::persistence_task_list_type(r.task_list_type),
                                 },
                                 queue,
                                 partition_config_from_proto(config),
@@ -2900,7 +3006,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let update = store.update_partition_config(
                         &domain,
                         &task_list.name,
-                        r.task_list_type,
+                        crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
                         kind_is_normal,
                         stored,
                     );
@@ -2958,6 +3064,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    let _ = self.host_throttle(HostLimit::User, request.get_ref().domain_id.as_str(), false);
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
                     let task_list = r
@@ -2978,11 +3085,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                         ));
                     }
                     if let Some(registry) = &self.queues {
-                        if !matches!(r.task_list_type, 1 | 2) {
-                            return Err(Status::invalid_argument("TaskListType is invalid."));
-                        }
                         let queue = self
-                            .durable_queue(&r.domain_id, &task_list, r.task_list_type - 1)
+                            .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
                             .await?;
                         registry
                             .refresh_partition_config(
@@ -2990,7 +3094,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     domain_id: uuid::Uuid::parse_str(&r.domain_id)
                                         .expect("validated domain"),
                                     name: task_list.name,
-                                    task_type: r.task_list_type - 1,
+                                    task_type: crate::matching_config::persistence_task_list_type(r.task_list_type),
                                 },
                                 queue,
                                 r.partition_config.map(partition_config_from_proto),
@@ -3003,7 +3107,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     match store.refresh_partition_config_with(
                         &domain,
                         &task_list.name,
-                        r.task_list_type,
+                        crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
                         pushed,
                     ) {
                         Ok(()) => Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {})),
@@ -3043,11 +3147,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    let _ = self.host_throttle(HostLimit::Worker, request.get_ref().domain_id.as_str(), false);
                     let r = request.get_ref().clone();
                     self.domain_name(&r.domain_id)?;
-                    if !matches!(r.task_list_type, 1 | 2) {
-                        return Err(Status::invalid_argument("TaskListType is invalid."));
-                    }
                     let task_list = r
                         .task_list
                         .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
@@ -3056,7 +3158,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let key = PollKey {
                         domain: r.domain_id,
                         task_list,
-                        task_type: r.task_list_type,
+                        task_type: crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
                         poller: r.poller_id,
                     };
                     let cancel = self
@@ -3083,6 +3185,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
+        let _ = self.host_throttle(HostLimit::Worker, request.get_ref().domain_id.as_str(), false);
         use crate::grpc_convert as cv;
         let r = request.get_ref().clone();
         let mut payload = r
@@ -3186,24 +3289,24 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+                    self.host_throttle(HostLimit::User, request.get_ref().domain_id.as_str(), false)?;
                     let r = request.get_ref().clone();
                     let mut payload = r
                         .request
                         .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
                     payload.domain = self.domain_name(&r.domain_id)?;
                     let task_list = payload.task_list.clone();
-                    let task_list_type = payload.task_list_type;
+                    let task_list_type =
+                        crate::matching_config::persistence_task_list_type(payload.task_list_type) + 1;
+                    payload.task_list_type = task_list_type;
                     let task_list_name = task_list.clone().map(|t| t.name).unwrap_or_default();
                     self::task_list_name(&task_list_name)?;
                     if self.queues.is_some() {
-                        if !matches!(task_list_type, 1 | 2) {
-                            return Err(Status::invalid_argument("TaskListType is invalid."));
-                        }
                         let queue = self
                             .durable_queue(
                                 &r.domain_id,
                                 task_list.as_ref().expect("validated task list"),
-                                task_list_type - 1,
+                                crate::matching_config::persistence_task_list_type(task_list_type),
                             )
                             .await?;
                         let pollers = queue
@@ -3249,7 +3352,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                             .property_values("matching.taskIsolationPollerWindow"),
                                         Some(&payload.domain),
                                         &task_list_name,
-                                        task_list_type - 1,
+                                        crate::matching_config::persistence_task_list_type(task_list_type),
                                         2_000_000_000,
                                     ),
                                 )

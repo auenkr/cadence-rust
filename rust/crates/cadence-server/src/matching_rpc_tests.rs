@@ -2658,3 +2658,134 @@ async fn matching_rpc_poll_auto_config_hint_matches_go_scoping() {
     assert!(matching.auto_config_hint(&domain, "queue", 1, std::time::Instant::now()).enable_auto_config);
     assert!(!matching.auto_config_hint(&domain, "queue", 0, std::time::Instant::now()).enable_auto_config);
 }
+
+fn set_config(matching: &Matching, property: &str, json: &[u8]) {
+    scaler_config_value(matching, property, json);
+}
+
+/// Go builds the handler limiters once from the config; rebuild after tests
+/// change `matching.*rps` so the initial limit reflects them.
+fn rebuild_host_limits(matching: &mut Matching) {
+    matching.host_limits = Arc::new(HostLimits::new(
+        matching.frontend.state.admin.dynamic_config.clone(),
+    ));
+}
+
+const HOST_THROTTLE: &str = "Matching host rps exceeded";
+
+#[tokio::test]
+async fn matching_rpc_host_throttle_returns_go_service_busy_for_worker_limit() {
+    let (_dir, _store, mut matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    // Go `MatchingWorkerRPS` admits one AddDecisionTask, then throttles.
+    set_config(&matching, "matching.workerrps", b"1");
+    rebuild_host_limits(&mut matching);
+    let add = || {
+        MatchingApi::add_decision_task(
+            &matching,
+            Request::new(m::AddDecisionTaskRequest {
+                domain_id: domain.clone(),
+                task_list: list(),
+                ..Default::default()
+            }),
+        )
+    };
+    if let Err(first) = add().await {
+        assert_ne!(first.message(), HOST_THROTTLE);
+    }
+    let second = add().await.unwrap_err();
+    assert_eq!(second.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(second.message(), HOST_THROTTLE);
+}
+
+#[tokio::test]
+async fn matching_rpc_host_throttle_user_limit_and_ignored_result_paths() {
+    let (_dir, _store, mut matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    set_config(&matching, "matching.rps", b"1");
+    rebuild_host_limits(&mut matching);
+    let describe = || {
+        MatchingApi::describe_task_list(
+            &matching,
+            Request::new(m::DescribeTaskListRequest {
+                domain_id: domain.clone(),
+                request: Some(p::DescribeTaskListRequest {
+                    domain: "domain".into(),
+                    task_list: list(),
+                    task_list_type: 1,
+                    ..Default::default()
+                }),
+            }),
+        )
+    };
+    if let Err(first) = describe().await {
+        assert_ne!(first.message(), HOST_THROTTLE);
+    }
+    let second = describe().await.unwrap_err();
+    assert_eq!(second.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(second.message(), HOST_THROTTLE);
+    // The worker limiter is separate and unlimited by default; Go ignores the
+    // result of the worker limiter for CancelOutstandingPoll.
+    let cancel = matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain.clone(),
+            task_list: list(),
+            task_list_type: 1,
+            poller_id: "poller".into(),
+        }))
+        .await;
+    assert!(cancel.is_ok(), "{cancel:?}");
+}
+
+#[tokio::test]
+async fn matching_rpc_ignored_result_calls_never_throttle_but_consume_tokens() {
+    let (_dir, _store, mut matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    set_config(&matching, "matching.workerrps", b"1");
+    rebuild_host_limits(&mut matching);
+    let cancel = || {
+        matching.cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain.clone(),
+            task_list: list(),
+            task_list_type: 1,
+            poller_id: "poller".into(),
+        }))
+    };
+    // Go ignores `Allow` for CancelOutstandingPoll, so it never returns busy...
+    assert!(cancel().await.is_ok());
+    assert!(cancel().await.is_ok());
+    // ...but the first call consumed the only token, so an enforced worker
+    // call is now throttled.
+    let throttled = MatchingApi::add_decision_task(
+        &matching,
+        Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            task_list: list(),
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(throttled.message(), HOST_THROTTLE);
+}
+
+#[tokio::test]
+async fn matching_rpc_task_list_type_non_activity_maps_to_decision() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    // Go `engine.go` treats any type other than Activity as Decision, so an
+    // unset type is accepted instead of failing with "TaskListType is invalid.".
+    let cancel = matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain,
+            task_list: list(),
+            task_list_type: 0,
+            poller_id: "poller".into(),
+        }))
+        .await;
+    assert!(cancel.is_ok(), "{cancel:?}");
+}

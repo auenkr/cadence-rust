@@ -61,6 +61,8 @@ pub mod matching_writer;
 
 pub mod matching_domain_cache;
 pub mod matching_limiter;
+pub mod matching_config;
+pub mod matching_host_limiter;
 pub mod matching_task_store;
 
 #[allow(clippy::result_large_err)]
