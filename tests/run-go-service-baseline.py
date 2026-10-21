@@ -330,7 +330,7 @@ if args.postgres:
     # Start every Go service against the same schema after Rust Matching has
     # exited. This confirms that Go can reopen the schema after Rust has used
     # its task and domain tables, and leaves a second SDK workflow transcript.
-    evidence_file = work / 'rust-postgres-evidence.json'
+    evidence_file = work / 'rust-matching' / 'rust-postgres-evidence.json'
     if not evidence_file.is_file():
         raise RuntimeError(f'Rust probe did not save PostgreSQL evidence: {evidence_file}')
     rust_evidence = json.loads(evidence_file.read_text())
