@@ -171,6 +171,15 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         now.store(REFRESH_NANOS, Ordering::SeqCst);
         logger.error("PollForDecisionTask", "missing deadline");
+        {
+            let bucket = logger.bucket.lock().unwrap();
+            assert_eq!(bucket.last_update, REFRESH_NANOS);
+            assert_eq!(bucket.limiter.limit(), 1.0);
+            assert_eq!(bucket.limiter.burst(), 1);
+        }
+        // The config refresh happened at 5s, but SetLimitAndBurst uses the
+        // limiter's latest call time (5s-1ns), so only 1ns of new-rate refill
+        // has elapsed and an error log still cannot be emitted.
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         // Refresh samples rate=1 at 5s, but the limiter's last recorded time
         // is 1ns before that. It accumulates one token at 5.999999999s.
