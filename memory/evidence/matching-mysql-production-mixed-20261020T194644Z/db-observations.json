@@ -1,0 +1,1897 @@
+{
+  "decoderFixtureCases": 4,
+  "taskGarbageCollection": {
+    "pendingTaskRows": 1,
+    "statements": [
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15ada22977d2d887f19234e4a8cf3') AND name='gc-backlog-30f84b05-fbdf-459c-960c-7f30a8bab7d1' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15ada22977d2d887f19234e4a8cf3') AND name='gc-backlog-30f84b05-fbdf-459c-960c-7f30a8bab7d1' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15ada22977d2d887f19234e4a8cf3') AND name='tasks-30f84b05-fbdf-459c-960c-7f30a8bab7d1' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15ada22977d2d887f19234e4a8cf3') AND name='tasks-30f84b05-fbdf-459c-960c-7f30a8bab7d1' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15ada22977d2d887f19234e4a8cf3') AND name='restart-tasks-30f84b05-fbdf-459c-960c-7f30a8bab7d1' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15ada22977d2d887f19234e4a8cf3') AND name='restart-tasks-30f84b05-fbdf-459c-960c-7f30a8bab7d1' ORDER BY task_type",
+      "SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('01a15ada22977d2d887f19234e4a8cf3') AND task_list_name='gc-pending-30f84b05-fbdf-459c-960c-7f30a8bab7d1'"
+    ],
+    "snapshots": [
+      {
+        "at": "2026-10-20T19:47:15.697Z",
+        "pendingTasks": 1,
+        "converged": false,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 1,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 1,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:17.183Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:18.674Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:20.220Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:21.684Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:23.130Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:24.637Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:26.136Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:27.705Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:29.300Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:31.119Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:32.587Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:34.113Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:36.126Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:37.600Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:39.123Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:40.655Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:42.165Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:43.694Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:45.292Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:46.801Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:48.327Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:49.785Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:51.248Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:52.733Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:54.213Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:55.962Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:57.460Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:47:59.044Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:00.510Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:02.020Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:03.497Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:05.028Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:06.613Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:08.074Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:09.571Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:11.047Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:12.585Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:14.115Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-20T19:48:15.760Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": true,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      }
+    ],
+    "queues": {
+      "backlogDecision": {
+        "taskList": "gc-backlog-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 1,
+        "liveBlock": {
+          "startId": 1,
+          "endId": 100000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "backlogActivity": {
+        "taskList": "gc-backlog-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 0,
+        "observedMaxTaskId": null,
+        "minAck": 0,
+        "persistedRange": 1,
+        "liveBlock": {
+          "startId": 1,
+          "endId": 100000
+        },
+        "dataEncoding": "thriftrw",
+        "durableGcEvidence": false,
+        "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+      },
+      "mainDecision": {
+        "taskList": "tasks-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 2,
+        "observedMaxTaskId": 2,
+        "minAck": null,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "mainActivity": {
+        "taskList": "tasks-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "restartDecision": {
+        "taskList": "restart-tasks-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 3,
+        "liveBlock": {
+          "startId": 200001,
+          "endId": 300000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "restartActivity": {
+        "taskList": "restart-tasks-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 0,
+        "observedMaxTaskId": null,
+        "minAck": 0,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw",
+        "durableGcEvidence": false,
+        "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+      }
+    },
+    "rangeSize": 100000
+  },
+  "domainMetadata": {
+    "domain": "service-compat-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+    "domainId": "01a15ada22977d2d887f19234e4a8cf3",
+    "isGlobal": 0,
+    "dataEncoding": "thriftrw",
+    "dataLength": 597,
+    "notificationVersions": [
+      5
+    ]
+  },
+  "backlog": {
+    "taskList": "gc-backlog-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+    "workflowId": "gc-backlog-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+    "watermark": {
+      "taskType": 0,
+      "rows": 1,
+      "maxTaskId": 1
+    },
+    "completionEvents": 1
+  },
+  "pendingControl": {
+    "taskList": "gc-pending-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+    "workflowId": "gc-pending-30f84b05-fbdf-459c-960c-7f30a8bab7d1",
+    "watermark": {
+      "taskType": 0,
+      "rows": 1,
+      "maxTaskId": 1
+    }
+  }
+}

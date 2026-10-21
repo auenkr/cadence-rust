@@ -1,0 +1,11 @@
+{
+  "repository": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction",
+  "head": "8c253f417d478c601b1ae79e5e014f1fa4541c7b",
+  "branch": "codex/matching-task-store-abstraction",
+  "status": [
+    "M tests/matching-service-compat.cjs",
+    "?? artifacts/",
+    "?? memory/evidence/matching-mysql-production-mixed-20261020T184311Z/",
+    "?? tests/__pycache__/"
+  ]
+}

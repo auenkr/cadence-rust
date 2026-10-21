@@ -135,6 +135,14 @@ impl MatchingRingpopProvider {
         &self.node
     }
 
+    /// Ringpop's self identity is the advertised member address unless the
+    /// provider's `__identity` label is customized. The Matching membership
+    /// ring uses the same identity when deciding whether this process owns a
+    /// task-list key.
+    pub fn local_identity(&self) -> &str {
+        &self.local_address
+    }
+
     /// Install this handler on the same TChannel listener used for Matching.
     pub fn handler(&self) -> crate::ringpop_tchannel::RingpopHandler {
         self.node.handler()

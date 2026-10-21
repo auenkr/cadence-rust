@@ -1,0 +1,4 @@
+badConstraint:
+  - value: fallback
+    constraints:
+      domainName: {1: nested-integer-key}

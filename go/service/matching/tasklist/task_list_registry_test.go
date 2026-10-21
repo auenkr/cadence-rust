@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally"
 	"go.uber.org/mock/gomock"
 
 	"github.com/uber/cadence/common/metrics"
@@ -69,6 +70,33 @@ func TestTaskListRegistry_RegisterLookupAndUnregister(t *testing.T) {
 
 	metricsClient.AssertExpectations(t)
 	metricsScope.AssertExpectations(t)
+}
+
+// This pins the Go registry gauge's exported name and operation tag for the
+// Rust Matching metric comparison. The mock-based test above additionally
+// asserts each UpdateGauge transition, including same-ID reassignment.
+func TestTaskListRegistryManagersGaugeOracle(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	scope := tally.NewTestScope("oracle", nil)
+	registry := NewTaskListRegistry(metrics.NewClient(scope, metrics.Matching, metrics.MigrationConfig{}))
+	id := mustNewIdentifierForTest(t, "domain-a", "task-list-a")
+	initialMgr := newMockManagerWithID(t, ctrl, id)
+	updatedMgr := newMockManagerWithID(t, ctrl, id)
+	const gaugeKey = "oracle.tasklist_managers+operation=TaskListMgr"
+	assertGauge := func(want float64) {
+		gauge, ok := scope.Snapshot().Gauges()[gaugeKey]
+		require.True(t, ok, "missing Go gauge %s", gaugeKey)
+		assert.Equal(t, want, gauge.Value())
+	}
+
+	registry.Register(*id, initialMgr)
+	assertGauge(1)
+	registry.Register(*id, updatedMgr)
+	assertGauge(1)
+	assert.False(t, registry.Unregister(initialMgr))
+	assertGauge(1)
+	assert.True(t, registry.Unregister(updatedMgr))
+	assertGauge(0)
 }
 
 func TestTaskListRegistry_Filters(t *testing.T) {

@@ -1,0 +1,7 @@
+Run exit 1; SDK probe exit 0. Original Go Frontend/History/Worker were alive after the probe and Go Matching was not started. Rust Matching completed final SIGTERM shutdown with exitCode 0; see matching-shutdown.json and rust-server-logs/rust-server-after-graceful-drain.log.
+
+The validator correctly rejected the first capture because `cadence_client_requests` was absent. The scrape did include a positive same-sample `RespondQueryTaskCompleted` request, with caller `cadence_frontend`, transport `grpc`, service `cadence_matching`, and the Prometheus label sanitizer converted domain hyphens to underscores. See qualifying-request-sample.txt and raw scrape hash.
+
+Production source inspection found `MatchingHistoryClient::instrument_history` emits `cadence_client_requests`, but main constructed that client with its no-op default sink while later wiring the configured sink to Matching handlers. This is the real missing instrumentation. The next source candidate attaches the configured Matching sink to the production History client. The retry must retain the positive metric assertion.
+
+The uncompressed Prometheus snapshots were 244,086,291 bytes. They are preserved as prometheus-scrape-samples.jsonl.gz (6,083,165 bytes); decompressed-content SHA256 is recorded in raw-scrape-content.sha256. The runner is being changed to stream directly into this gzip form and validate snapshots incrementally to avoid the prior ~1GB Python RSS.

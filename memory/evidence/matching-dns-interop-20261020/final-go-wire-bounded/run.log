@@ -1,0 +1,11 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.75s
+     Running tests/shard_distributor_go_interop.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/shard_distributor_go_interop-c5fc3658809733de)
+
+running 1 test
+fixture: SubscribeToAssignmentChanges entered
+fixture: SubscribeToAssignmentChanges entered
+test rust_executor_and_spectator_interoperate_with_pinned_go_handlers ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.35s
+

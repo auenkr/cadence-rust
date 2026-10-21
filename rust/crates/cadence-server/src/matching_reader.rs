@@ -76,7 +76,8 @@ impl ReaderConfig {
     }
     /// Batch size for the next bounded read (Go `getTaskBatchWithRange`).
     fn read_batch_size(&self) -> NonZeroU32 {
-        NonZeroU32::new(self.buffer_batch_size()).expect("batch size falls back to a positive default")
+        NonZeroU32::new(self.buffer_batch_size())
+            .expect("batch size falls back to a positive default")
     }
     /// Range width for the next scan step (Go `getTaskBatch`).
     fn read_range_size(&self) -> u32 {
@@ -88,7 +89,9 @@ impl ReaderConfig {
     fn dispatch_timeout_nanos(&self) -> i64 {
         self.live
             .as_ref()
-            .map_or(self.dispatch_timeout.as_nanos() as i64, |live| live.dispatch_timeout_nanos())
+            .map_or(self.dispatch_timeout.as_nanos() as i64, |live| {
+                live.dispatch_timeout_nanos()
+            })
     }
 }
 impl Default for ReaderConfig {
@@ -96,7 +99,9 @@ impl Default for ReaderConfig {
         Self {
             batch_size: NonZeroU32::new(DEFAULT_TASKS_BATCH_SIZE as u32).unwrap(),
             read_range_size: DEFAULT_READ_RANGE_SIZE as u32,
-            dispatch_timeout: Duration::from_nanos(DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS as u64),
+            dispatch_timeout: Duration::from_nanos(
+                DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS as u64,
+            ),
             dispatch_timeout_buffer: Duration::from_nanos(DISPATCH_TIMEOUT_BUFFER_NANOS as u64),
             live: None,
         }
@@ -221,6 +226,12 @@ struct Inner {
     completion: Arc<Completion>,
     loops: usize,
     should_reload: Arc<dyn Fn() -> bool + Send + Sync>,
+    metric_context: Arc<Mutex<Option<ReaderMetricContext>>>,
+}
+#[derive(Clone)]
+struct ReaderMetricContext {
+    metrics: crate::matching_metrics::MatchingMetrics,
+    context: crate::matching_metrics::PollMetricContext,
 }
 impl Drop for Inner {
     fn drop(&mut self) {
@@ -235,8 +246,9 @@ pub struct TaskReader {
 enum Attempt {
     /// Handed off to a poller.
     Offered,
-    /// Retry the same head after a yield (throttled or dispatch deadline).
-    Retry,
+    /// Retry the same head after dispatch throttling.
+    Throttled,
+    TimedOut,
     /// The reader is stopping.
     Stopped,
 }
@@ -256,19 +268,41 @@ pub struct IsolationConfig {
     pub select: IsolationSelector,
     pub should_reload: Arc<dyn Fn() -> bool + Send + Sync>,
 }
-pub type IsolationSelector =
-    Arc<dyn Fn(&cadence_persistence::matching_blob::TaskData) -> (String, i64) + Send + Sync>;
+pub type IsolationSelector = Arc<
+    dyn Fn(&cadence_persistence::matching_blob::TaskData) -> (String, i64, Option<&'static str>)
+        + Send
+        + Sync,
+>;
 impl Default for IsolationConfig {
     fn default() -> Self {
         Self {
             groups: Vec::new(),
-            select: Arc::new(|_| (String::new(), 0)),
+            select: Arc::new(|_| (String::new(), 0, None)),
             should_reload: Arc::new(|| false),
         }
     }
 }
-pub type DispatchCheck = Arc<dyn Fn(AllocatedTask) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, tonic::Status>> + Send>> + Send + Sync>;
+pub type DispatchCheck = Arc<
+    dyn Fn(
+            AllocatedTask,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<bool, tonic::Status>> + Send>,
+        > + Send
+        + Sync,
+>;
 impl TaskReader {
+    pub fn with_metric_context(
+        &self,
+        metrics: crate::matching_metrics::MatchingMetrics,
+        context: crate::matching_metrics::PollMetricContext,
+    ) {
+        *self
+            .inner
+            .metric_context
+            .lock()
+            .expect("matching reader metrics lock") =
+            Some(ReaderMetricContext { metrics, context });
+    }
     pub fn new(queue: Arc<DurableTaskQueue>, wake: Arc<Notify>, config: ReaderConfig) -> Self {
         Self::with_domain_activity(queue, wake, config, Arc::new(|| true))
     }
@@ -324,6 +358,33 @@ impl TaskReader {
         isolation: IsolationConfig,
         dispatch_check: Option<DispatchCheck>,
     ) -> Self {
+        Self::with_dispatch_check_metrics(
+            queue,
+            wake,
+            config,
+            active,
+            limiter,
+            isolation,
+            dispatch_check,
+            None,
+        )
+    }
+    // This constructor keeps the existing dispatch dependencies and optional
+    // metric context together for the service's runtime wiring.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_dispatch_check_metrics(
+        queue: Arc<DurableTaskQueue>,
+        wake: Arc<Notify>,
+        config: ReaderConfig,
+        active: Arc<dyn Fn() -> bool + Send + Sync>,
+        limiter: Arc<TaskListLimiter>,
+        isolation: IsolationConfig,
+        dispatch_check: Option<DispatchCheck>,
+        metric_context: Option<(
+            crate::matching_metrics::MatchingMetrics,
+            crate::matching_metrics::PollMetricContext,
+        )>,
+    ) -> Self {
         let (stop, stopped) = watch::channel(false);
         let matcher = Arc::new(Rendezvous::default());
         let isolated: HashMap<_, _> = isolation
@@ -341,6 +402,9 @@ impl TaskReader {
             completion: completion.clone(),
             loops: buffers + 1,
             should_reload: isolation.should_reload.clone(),
+            metric_context: Arc::new(Mutex::new(
+                metric_context.map(|(metrics, context)| ReaderMetricContext { metrics, context }),
+            )),
         });
         let mut buffer_senders = HashMap::new();
         for buffer_group in std::iter::once(String::new()).chain(isolated.keys().cloned()) {
@@ -369,6 +433,7 @@ impl TaskReader {
             let isolation = isolation.clone();
             let timeout_buffer = config.dispatch_timeout_buffer;
             let dispatch_config = config.clone();
+            let dispatch_metrics = inner.metric_context.clone();
             tokio::spawn(async move {
                 let _completed = dispatched;
                 'dispatch: loop {
@@ -385,10 +450,19 @@ impl TaskReader {
                         }
                     };
                     let Some(task) = task else { break };
+                    let dispatch_started = std::time::Instant::now();
+                    let mut dispatch_attempt = 0u64;
                     loop {
                         // Go rechecks expiry at each dispatch attempt, including
                         // after a row spent time waiting behind another head.
                         if task.data.expiry_nanos > 0 && now() > task.data.expiry_nanos {
+                            if let Some(reader_metrics) = dispatch_metrics
+                                .lock()
+                                .expect("matching reader metrics lock")
+                                .as_ref()
+                            {
+                                reader_metrics.metrics.expired_task(&reader_metrics.context);
+                            }
                             let queue = dispatch_queue.clone();
                             let id = task.task_id;
                             let result =
@@ -410,19 +484,48 @@ impl TaskReader {
                                 Ok(true) => {
                                     let queue = dispatch_queue.clone();
                                     let id = task.task_id;
-                                    if !matches!(tokio::task::spawn_blocking(move || { queue.complete(id)?; queue.run_garbage_collection(false).map(|_| ()) }).await, Ok(Ok(_))) {
+                                    if !matches!(
+                                        tokio::task::spawn_blocking(move || {
+                                            queue.complete(id)?;
+                                            queue.run_garbage_collection(false).map(|_| ())
+                                        })
+                                        .await,
+                                        Ok(Ok(_))
+                                    ) {
                                         dispatch_queue.stop();
                                         break 'dispatch;
                                     }
                                     break;
                                 }
                                 Ok(false) => (),
-                                Err(_) => { tokio::task::yield_now().await; continue; }
+                                Err(_) => {
+                                    tokio::task::yield_now().await;
+                                    continue;
+                                }
                             }
                         }
                         // Go `newDispatchContext`: the deadline only applies to an
                         // active (or unknown) domain above the 1e-7 noise floor.
-                        let (group, mut isolation_duration) = (isolation.select)(&task.data);
+                    let original_group = task
+                        .data
+                        .partition_config
+                        .as_ref()
+                        .and_then(|config| config.get("isolation-group"))
+                        .map(String::as_str)
+                        .unwrap_or_default();
+                    let (group, mut isolation_duration, leak_cause) =
+                        (isolation.select)(&task.data);
+                    if let (Some(cause), Some(reader_metrics)) = (
+                        leak_cause,
+                        dispatch_metrics
+                            .lock()
+                            .expect("matching reader metrics lock")
+                            .as_ref(),
+                    ) {
+                        reader_metrics
+                            .metrics
+                            .task_isolation_leak(&reader_metrics.context, original_group, cause);
+                    }
                         let target = isolated.get(&group).unwrap_or_else(|| {
                             isolation_duration = 0;
                             &matcher
@@ -442,6 +545,7 @@ impl TaskReader {
                                 );
                                 dispatch_limiter.now().saturating_add(timeout)
                             });
+                        let attempt_started = std::time::Instant::now();
                         let attempt = async {
                             // Go `taskMatcher.ratelimit` maps ErrCannotWait (zero
                             // burst or an unreachable deadline) to a throttled retry.
@@ -451,7 +555,7 @@ impl TaskReader {
                             {
                                 WaitOutcome::Acquired => (),
                                 WaitOutcome::Stopped => return Attempt::Stopped,
-                                WaitOutcome::Throttled => return Attempt::Retry,
+                                WaitOutcome::Throttled => return Attempt::Throttled,
                             }
                             let mut dispatched = task.clone();
                             let dispatch_group = if isolated.contains_key(&group) {
@@ -477,14 +581,59 @@ impl TaskReader {
                                 );
                                 tokio::time::timeout(remaining, attempt)
                                     .await
-                                    .unwrap_or(Attempt::Retry)
+                                    .unwrap_or(Attempt::TimedOut)
                             }
                             None => attempt.await,
                         };
+                        if let Some(reader_metrics) = dispatch_metrics
+                            .lock()
+                            .expect("matching reader metrics lock")
+                            .as_ref()
+                        {
+                            match &outcome {
+                                Attempt::Throttled => {
+                                    reader_metrics.metrics.task_list_counter_event(
+                                        crate::matching_metrics::BUFFER_THROTTLE_COUNT,
+                                        &reader_metrics.context,
+                                    )
+                                }
+                                Attempt::TimedOut => {
+                                    reader_metrics.metrics.task_list_counter_event(
+                                        crate::matching_metrics::ASYNC_MATCH_DISPATCH_TIMEOUTS,
+                                        &reader_metrics.context,
+                                    )
+                                }
+                                _ => (),
+                            }
+                        }
+                        if let Some(reader_metrics) = dispatch_metrics
+                            .lock()
+                            .expect("matching reader metrics lock")
+                            .as_ref()
+                        {
+                            reader_metrics.metrics.async_match_latency(
+                                &reader_metrics.context,
+                                attempt_started.elapsed(),
+                            );
+                        }
                         match outcome {
-                            Attempt::Offered => break,
+                            Attempt::Offered => {
+                                if let Some(reader_metrics) = dispatch_metrics
+                                    .lock()
+                                    .expect("matching reader metrics lock")
+                                    .as_ref()
+                                {
+                                    reader_metrics.metrics.async_match_local(
+                                        &reader_metrics.context,
+                                        (dispatch_attempt > 0).then_some(dispatch_attempt),
+                                        dispatch_started.elapsed(),
+                                    );
+                                }
+                                break;
+                            }
                             Attempt::Stopped => break 'dispatch,
-                            Attempt::Retry => {
+                            Attempt::Throttled | Attempt::TimedOut => {
+                                dispatch_attempt = dispatch_attempt.saturating_add(1);
                                 // Go yields before retrying a throttled/timeout head.
                                 tokio::task::yield_now().await;
                                 continue;
@@ -497,11 +646,23 @@ impl TaskReader {
         }
         let pumped = Completed(completion);
         let mut pump_stop = stopped;
+        let reader_metrics = inner.metric_context.clone();
         tokio::spawn(async move {
             let _completed = pumped;
             'pump: loop {
                 if *pump_stop.borrow() {
                     break;
+                }
+                if let Some(reader_metrics) = reader_metrics
+                    .lock()
+                    .expect("matching reader metrics lock")
+                    .as_ref()
+                {
+                    reader_metrics.metrics.task_list_gauge(
+                        crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST,
+                        &reader_metrics.context,
+                        queue.levels().2 as f64,
+                    );
                 }
                 // Subscribe before SQL so appends during a scan are not lost.
                 let notification = wake.notified();
@@ -510,10 +671,8 @@ impl TaskReader {
                 let queue_copy = queue.clone();
                 // Go reads the scan range and batch size on every bounded read.
                 let (range, batch) = (config.read_range_size(), config.read_batch_size());
-                let result = tokio::task::spawn_blocking(move || {
-                    queue_copy.reader_turn(range, batch)
-                })
-                .await;
+                let result =
+                    tokio::task::spawn_blocking(move || queue_copy.reader_turn(range, batch)).await;
                 if *pump_stop.borrow() || queue.is_stopped() {
                     break;
                 }
@@ -551,6 +710,18 @@ impl TaskReader {
                             break 'pump;
                         }
                     };
+                    let expired = turn.take_expired_count();
+                    if expired > 0 {
+                        if let Some(reader_metrics) = reader_metrics
+                            .lock()
+                            .expect("matching reader metrics lock")
+                            .as_ref()
+                        {
+                            reader_metrics
+                                .metrics
+                                .expired_tasks(&reader_metrics.context, expired);
+                        }
+                    }
                     let task = match result {
                         Ok(Some(task)) => task,
                         Ok(None) => break,
@@ -562,7 +733,25 @@ impl TaskReader {
                             break 'pump;
                         }
                     };
-                    let (group, _) = (isolation.select)(&task.data);
+                    let original_group = task
+                        .data
+                        .partition_config
+                        .as_ref()
+                        .and_then(|config| config.get("isolation-group"))
+                        .map(String::as_str)
+                        .unwrap_or_default();
+                    let (group, _, leak_cause) = (isolation.select)(&task.data);
+                    if let (Some(cause), Some(reader_metrics)) = (
+                        leak_cause,
+                        reader_metrics
+                            .lock()
+                            .expect("matching reader metrics lock")
+                            .as_ref(),
+                    ) {
+                        reader_metrics
+                            .metrics
+                            .task_isolation_leak(&reader_metrics.context, original_group, cause);
+                    }
                     let buffer_send = buffer_senders
                         .get(&group)
                         .unwrap_or_else(|| &buffer_senders[""]);
@@ -581,6 +770,17 @@ impl TaskReader {
                 }
                 // Release the exclusive cursor before the next SQL turn.
                 drop(turn);
+                if let Some(reader_metrics) = reader_metrics
+                    .lock()
+                    .expect("matching reader metrics lock")
+                    .as_ref()
+                {
+                    reader_metrics.metrics.task_list_gauge(
+                        crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST,
+                        &reader_metrics.context,
+                        queue.levels().2 as f64,
+                    );
+                }
                 if pending {
                     continue;
                 }
@@ -594,6 +794,39 @@ impl TaskReader {
     }
     pub async fn poll(&self) -> Option<AllocatedTask> {
         self.inner.matcher.poll(self.inner.stop.subscribe()).await
+    }
+    pub(crate) fn has_isolation_group(&self, group: &str) -> bool {
+        self.inner.isolated.contains_key(group)
+    }
+    pub(crate) fn record_task_count(&self, task_count: i64) {
+        if let Some(reader_metrics) = self
+            .inner
+            .metric_context
+            .lock()
+            .expect("matching reader metrics lock")
+            .as_ref()
+        {
+            reader_metrics.metrics.task_list_gauge(
+                crate::matching_metrics::TASK_COUNT_PER_TASK_LIST,
+                &reader_metrics.context,
+                task_count as f64,
+            );
+        }
+    }
+    pub(crate) fn record_task_lag(&self, task_lag: i64) {
+        if let Some(reader_metrics) = self
+            .inner
+            .metric_context
+            .lock()
+            .expect("matching reader metrics lock")
+            .as_ref()
+        {
+            reader_metrics.metrics.task_list_gauge(
+                crate::matching_metrics::TASK_LAG_PER_TASK_LIST,
+                &reader_metrics.context,
+                task_lag as f64,
+            );
+        }
     }
     pub fn should_reload(&self) -> bool {
         (self.inner.should_reload)()
@@ -691,7 +924,10 @@ mod tests {
         // Go `getTaskBatchWithRange` falls back to the property default when
         // the configured batch size is not positive.
         batch.store(0, Ordering::SeqCst);
-        assert_eq!(config.read_batch_size().get(), DEFAULT_TASKS_BATCH_SIZE as u32);
+        assert_eq!(
+            config.read_batch_size().get(),
+            DEFAULT_TASKS_BATCH_SIZE as u32
+        );
         batch.store(-3, Ordering::SeqCst);
         assert_eq!(config.buffer_batch_size(), DEFAULT_TASKS_BATCH_SIZE as u32);
         // Go tolerates a non-positive range by making no progress in its
@@ -773,6 +1009,46 @@ mod tests {
             .await
             .unwrap();
     }
+    #[tokio::test]
+    async fn matching_reader_reports_go_ack_backlog_gauge() {
+        let (_directory, queue, reader, wake) = fixture(0, 3);
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        reader.with_metric_context(
+            crate::matching_metrics::MatchingMetrics::new(sink.clone()),
+            crate::matching_metrics::PollMetricContext {
+                domain: "reader-domain".into(),
+                task_list: "reader-list".into(),
+                task_list_kind: 0,
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
+            },
+        );
+        queue.append(&[TaskData::default()], now()).unwrap();
+        wake.notify_waiters();
+        wait_read(&queue, 1).await;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !sink
+                .events()
+                .iter()
+                .any(|event| event.name == crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST)
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(queue.levels().2, 1);
+        let backlog = sink
+            .events()
+            .into_iter()
+            .rfind(|event| event.name == crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST)
+            .unwrap();
+        assert_eq!(
+            backlog.value,
+            crate::matching_metrics::MetricValue::Number(1.0)
+        );
+        stop(queue, reader).await;
+    }
     async fn wait_read(queue: &DurableTaskQueue, expected: i64) {
         tokio::time::timeout(Duration::from_secs(2), async {
             while queue.levels().0 < expected {
@@ -807,6 +1083,7 @@ mod tests {
                             .cloned()
                             .unwrap_or_default(),
                         0,
+                        None,
                     )
                 }),
             },
@@ -859,9 +1136,9 @@ mod tests {
                 select: Arc::new(move |_| {
                     let remaining = expires - now();
                     if remaining > 50_000_000 {
-                        ("a".into(), remaining)
+                        ("a".into(), remaining, None)
                     } else {
-                        (String::new(), 0)
+                        (String::new(), 0, None)
                     }
                 }),
             },

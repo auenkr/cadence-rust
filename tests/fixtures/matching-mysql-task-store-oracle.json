@@ -1,0 +1,39 @@
+{
+  "source": "go/common/persistence/sql/sql_task_store.go + go/common/persistence/sql/sqlplugin/mysql/task.go + go/schema/mysql/v8/cadence/schema.sql",
+  "evidence_status": "source-derived, not executed against Go or MySQL",
+  "database_shard": {
+    "algorithm": "farm.Hash32(UTF8(domainUUID + '_' + taskListName)) % nShards",
+    "task_lists_shard_id": "database shard ID",
+    "tasks_shard_id_column": "absent; the shard ID selects the physical database only"
+  },
+  "lease": {
+    "missing_row": "insert range_id=0 with default TaskListInfo blob before beginning lease transaction",
+    "transaction": ["SELECT range_id ... FOR UPDATE", "compare expected range", "increment range_id", "update task-list blob", "commit"],
+    "missing_locked_row_error": "ConditionFailed: Task list does not exist.",
+    "range_mismatch_error_prefix": "ConditionFailed: Task list range ID was",
+    "positive_previous_range_mismatch_prefix": "ConditionFailed: leaseTaskList:renew failed:"
+  },
+  "create_tasks": {
+    "transaction": ["insert every task row", "SELECT task-list range_id ... FOR UPDATE", "compare expected range", "commit"],
+    "stale_range": "rollback all inserted task rows",
+    "task_domain": "per-row source domain ID",
+    "lease_domain": "target task-list domain ID"
+  },
+  "read": {
+    "interval": "task_id > read_level AND task_id <= max_read_level",
+    "order": "task_id ascending",
+    "limit": "signed batch size passed through to the MySQL LIMIT expression",
+    "expiry": "expired tasks remain visible to persistence reads"
+  },
+  "deletion": {
+    "complete_task": "single task delete; no task-list lease check",
+    "complete_tasks_less_than": "task_id <= inclusive_ack ORDER BY domain_id,task_list_name,task_type,task_id LIMIT limit",
+    "zero_limit": "MissingLimit: missing limit parameter",
+    "task_list_delete": "filter shard_id/domain/name/type/range and require exactly one affected row"
+  },
+  "pool": {
+    "max_conns_nonpositive": "unlimited",
+    "max_idle_nonpositive": 2,
+    "max_conn_lifetime": "discard on return/next checkout; never interrupt active transaction"
+  }
+}

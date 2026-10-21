@@ -35,6 +35,16 @@ http, frontend, history, matching, tchannel, matching_tchannel, matching_http = 
 for listener in reservations:
     listener.close()
 config = (root / 'rust/config/development.yaml').read_text()
+# The production main assembly starts Matching's Ringpop provider for explicit
+# config. Keep this component probe a deterministic one-node ring on the same
+# randomized TChannel port it binds, so no unrelated Go/Rust Ringpop processes
+# are needed for the focused persistence and native Thrift assertions.
+config = re.sub(
+    r'(?m)^  bootstrapHosts:.*$',
+    f'  broadcastAddress: 127.0.0.1\n  bootstrapHosts: ["127.0.0.1:{matching_tchannel}"]',
+    config,
+    count=1,
+)
 domain_database = (artifacts / 'go-cadence.sqlite').resolve()
 oracle_database = (artifacts / 'go-oracle.sqlite').resolve()
 for path in (domain_database, oracle_database):
@@ -105,7 +115,8 @@ def assert_embedded_start_succeeds():
     test_command = command.copy()
     config_index = test_command.index('--config')
     del test_command[config_index:config_index + 2]
-    test_command[test_command.index('--data-dir') + 1] = str(artifacts / 'embedded-data')
+    embedded_data = artifacts / 'embedded-data'
+    test_command[test_command.index('--data-dir') + 1] = str(embedded_data)
     log_path = artifacts / 'embedded-startup.log'
     with log_path.open('w') as log:
         process = subprocess.Popen(test_command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
@@ -116,10 +127,24 @@ def assert_embedded_start_succeeds():
                     raise RuntimeError(f'no-config embedded Matching exited; see {log_path}')
                 try:
                     with socket.create_connection(('127.0.0.1', matching_tchannel), timeout=0.2):
-                        return
+                        break
                 except OSError:
                     time.sleep(0.1)
-            raise RuntimeError(f'no-config embedded Matching did not start; see {log_path}')
+            else:
+                raise RuntimeError(f'no-config embedded Matching did not start; see {log_path}')
+            embedded_env = {
+                **os.environ,
+                'CADENCE_MATCHING_TCHANNEL': f'127.0.0.1:{matching_tchannel}',
+                'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
+                'CADENCE_MATCHING_SQLITE_DB': str(embedded_data / 'matching.db'),
+                'CADENCE_MATCHING_TCHANNEL_ONLY': '1',
+                'CADENCE_MATCHING_TLS_HTTP': '',
+            }
+            subprocess.run([
+                'go', 'test', '-overlay', str(overlay.resolve()),
+                './service/matching/wrappers/thrift',
+                '-run', '^TestRustMatchingNativeThrift$', '-count=1', '-v',
+            ], cwd=root / 'go', env=embedded_env, check=True, timeout=240)
         finally:
             process.terminate()
             try:
@@ -141,6 +166,24 @@ def assert_runtime_listener_failure_cleans_up():
             raise AssertionError('server unexpectedly started with Matching TChannel port occupied')
         if 'address already in use' not in (result.stdout + result.stderr).lower():
             raise AssertionError(f'server failed before the occupied Matching listener: {result.stdout}\\n{result.stderr}')
+    finally:
+        occupied.close()
+
+def assert_matching_grpc_bind_fails_before_membership_startup():
+    occupied = socket.socket()
+    occupied.bind(('127.0.0.1', 0))
+    occupied.listen()
+    test_command = command.copy()
+    test_command[test_command.index('--matching-grpc-port') + 1] = str(occupied.getsockname()[1])
+    test_command[test_command.index('--data-dir') + 1] = str(artifacts / 'grpc-listener-failure-data')
+    try:
+        result = subprocess.run(test_command, cwd=root, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            raise AssertionError('server unexpectedly started with Matching gRPC port occupied')
+        if 'address already in use' not in (result.stdout + result.stderr).lower():
+            raise AssertionError(f'server failed before the occupied Matching gRPC listener: {result.stdout}\n{result.stderr}')
+        if 'starting Matching Ringpop membership' in (result.stdout + result.stderr):
+            raise AssertionError('Ringpop membership startup ran despite the Matching gRPC bind failure')
     finally:
         occupied.close()
 
@@ -176,6 +219,7 @@ assert_start_fails(mismatched_path, 'loading Matching HTTP TLS certificate/key')
 assert_start_fails(root / 'rust/config/development.yaml', 'does not support configured NoSQL')
 assert_embedded_start_succeeds()
 assert_runtime_listener_failure_cleans_up()
+assert_matching_grpc_bind_fails_before_membership_startup()
 with (artifacts / 'server.log').open('w') as log:
     server = subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
     try:

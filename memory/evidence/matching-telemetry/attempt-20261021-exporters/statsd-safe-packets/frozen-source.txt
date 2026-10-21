@@ -1,0 +1,8 @@
+Rust source code revision: 1c7f6b6b9e851c84d2274128d89427415c6db10b
+Rust source manifest: memory/evidence/matching-telemetry/attempt-20261021-rebuild-client-metrics/rust-source-sha256.json (247 tracked Rust files)
+Harness/evidence source revision: 9aaeac777daf8798c9c3c992bc93cea87377a34d
+Run source state: source.json records HEAD and only generated untracked evidence/__pycache__; no tracked source was modified during the run.
+Frozen Rust binary: /home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/1c7f6b6b/cadence-server
+Frozen Rust binary SHA256: a863a56e2864a1fa5dfea677f04915ffff559240130980ee54d40e98a741049f
+Original Go server SHA256: 0ed004a0f68aee07f132d6e9e8b7faa8e71c992ebdecb11eb30d7c9a257b9bb5
+StatsD capture: 205 packets; maximum datagram 1430 bytes; 70 packets after SIGTERM.

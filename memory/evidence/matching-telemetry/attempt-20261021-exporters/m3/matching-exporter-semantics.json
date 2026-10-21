@@ -1,0 +1,55 @@
+{
+  "format": "m3",
+  "packetCount": 22,
+  "batchCount": 22,
+  "metricCount": 1471,
+  "requiredMetrics": [
+    "cadence_requests_per_tl",
+    "cadence_tasklist_request",
+    "poll_success_per_tl",
+    "cadence_client_requests"
+  ],
+  "expectedDomain": "service-compat-b7dcd226-7d32-4398-9381-0af4caa632fd",
+  "requestMetric": {
+    "name": "cadence_requests_per_tl",
+    "tags": {
+      "env": "test",
+      "service": "cadence_matching",
+      "cadence_service": "cadence-matching",
+      "caller": "cadence-frontend",
+      "domain": "service-compat-b7dcd226-7d32-4398-9381-0af4caa632fd",
+      "operation": "RespondQueryTaskCompleted",
+      "task_list": "query_b7dcd226_7d32_4398_9381_0af4caa632fd",
+      "transport": "grpc"
+    },
+    "value": {
+      "metricType": "COUNTER",
+      "count": 1,
+      "gauge": 0,
+      "timer": 0
+    }
+  },
+  "shutdownPacketCount": 17,
+  "shutdownQuerySamples": [
+    {
+      "name": "cadence_requests_per_tl",
+      "tags": {
+        "env": "test",
+        "service": "cadence_matching",
+        "cadence_service": "cadence-matching",
+        "caller": "cadence-frontend",
+        "domain": "service-compat-b7dcd226-7d32-4398-9381-0af4caa632fd",
+        "operation": "RespondQueryTaskCompleted",
+        "task_list": "query_b7dcd226_7d32_4398_9381_0af4caa632fd",
+        "transport": "grpc"
+      },
+      "value": {
+        "metricType": "COUNTER",
+        "count": 1,
+        "gauge": 0,
+        "timer": 0
+      }
+    }
+  ],
+  "timestampsPreserved": true
+}
