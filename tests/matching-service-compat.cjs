@@ -30,23 +30,50 @@ function call(service, method, request) {
     { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
 }
 const payload = data => ({ data: Buffer.from(data) });
-function durableTaskCount(taskList, fallbackDatabase) {
+function sqlText(value) { return String(value).replaceAll("'", "''"); }
+function domainHex(domainId) { return String(domainId).replace(/-/g, '').toLowerCase(); }
+const MYSQL_OBSERVATION_TIMEOUT_MS = 30000;
+function mysqlQuery(sql) {
+  if (!process.env.CADENCE_MATCHING_MYSQL) return { status: 1, stdout: '', stderr: 'MySQL probe mode is not enabled' };
+  const container = process.env.CADENCE_MYSQL_DOCKER_CONTAINER;
+  const password = process.env.CADENCE_MYSQL_PASSWORD || '';
+  const database = process.env.CADENCE_MYSQL_DATABASE || 'cadence';
+  const command = container
+    ? ['docker', ['exec', container, 'mysql', '--batch', '--skip-column-names', '-uroot',
+      `-p${password}`, database, '-e', sql]]
+    : ['mysql', ['--batch', '--skip-column-names', '--host', process.env.CADENCE_MYSQL_HOST || '127.0.0.1',
+      '--port', process.env.CADENCE_MYSQL_PORT || '3306', '--user', process.env.CADENCE_MYSQL_USER || 'root',
+      `--password=${password}`, database, '-e', sql]];
+  // The observation is bounded so a stalled database or container cannot hang
+  // the gate; every failure mode is reported instead of a silent empty result.
+  const result = spawnSync(command[0], command[1], {
+    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: MYSQL_OBSERVATION_TIMEOUT_MS,
+  });
+  if (result.error) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation failed: ${result.error.message}` };
+  if (result.signal) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation was killed by ${result.signal} after ${MYSQL_OBSERVATION_TIMEOUT_MS}ms` };
+  return { status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
+}
+function mysqlRows(sql) {
+  const result = mysqlQuery(sql);
+  if (result.status !== 0) throw new Error(`MySQL query failed: ${(result.stderr || '').trim() || sql}`);
+  return result.stdout.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => line.split('\t'));
+}
+// Every task query is constrained by the canonical domain UUID, the task list
+// and the task type, exactly like Go's task table keys.
+function durableTaskCount(domainId, taskList, taskType, fallbackDatabase) {
   if (process.env.CADENCE_MATCHING_MYSQL) {
-    const query = `SELECT COUNT(*) FROM tasks WHERE task_list_name='${taskList.replaceAll("'", "''")}' AND task_type=0`;
-    const container = process.env.CADENCE_MYSQL_DOCKER_CONTAINER;
-    const command = container
-      ? ['docker', ['exec', container, 'mysql', '--batch', '--skip-column-names', '-uroot',
-        `-p${process.env.CADENCE_MYSQL_PASSWORD || ''}`, process.env.CADENCE_MYSQL_DATABASE, '-e', query]]
-      : ['mysql', ['--batch', '--skip-column-names', '--host', process.env.CADENCE_MYSQL_HOST,
-        '--port', process.env.CADENCE_MYSQL_PORT, '--user', process.env.CADENCE_MYSQL_USER,
-        `--password=${process.env.CADENCE_MYSQL_PASSWORD || ''}`, process.env.CADENCE_MYSQL_DATABASE, '-e', query]];
-    const result = spawnSync(command[0], command[1], { encoding: 'utf8' });
+    const query = `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList)}' AND task_type=${taskType}`;
+    const result = mysqlQuery(query);
     if (result.status === 0) result.stdout = result.stdout.trim();
     return result;
   }
   const database = process.env.CADENCE_MATCHING_SQLITE_DB || fallbackDatabase;
-  return spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, taskList], { encoding: 'utf8' });
+  return spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where domain_id=? and task_list_name=? and task_type=?", (bytes.fromhex(sys.argv[2]), sys.argv[3], int(sys.argv[4]))).fetchone()[0])', database, domainHex(domainId), taskList, String(taskType)], { encoding: 'utf8', timeout: 60000 });
 }
+// The production MySQL gate (task garbage collection, persisted
+// acknowledgement, range consistency and Go's domain metadata) lives in
+// tests/matching-mysql-gate.cjs together with the ThriftRW blob decoder.
+const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder } = require('./matching-mysql-gate.cjs');
 async function run() {
   const id = randomUUID(), domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
   await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
@@ -124,10 +151,27 @@ async function run() {
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
     taskStartToCloseTimeout: { seconds: '10' }, input: payload('start'),
   };
+  // The persisted watermark of a queue is read while its task is stored and
+  // undelivered. A task that a poller already holds may be collected before
+  // the poll returns, so the watermark is never read after a delivery.
+  const awaitPersistedTask = async (listName, taskType, timeoutMs = 20000) => {
+    if (!process.env.CADENCE_MATCHING_MYSQL) return null;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const rows = mysqlRows(`SELECT COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(listName)}' AND task_type=${taskType}`);
+      const count = Number(rows[0][0]);
+      const value = rows[0][1] && rows[0][1] !== 'NULL' ? Number(rows[0][1]) : null;
+      if (count > 0 && value !== null && Number.isFinite(value)) return { taskType, rows: count, maxTaskId: value };
+      if (Date.now() >= deadline) return { taskType, rows: count, maxTaskId: value === null ? null : value };
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  };
   let restartEvidence;
+  const restartState = { taskList: null, watermark: null };
   if (restartMode) {
-    const restartID = `restart-${id}`, restartTaskList = `restart-tasks-${id}`;
-    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
+    const restartID = `restart-${id}`;
+    restartState.taskList = `restart-tasks-${id}`;
+    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartState.taskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     let restartStarted;
     const restartProvisionDeadline = Date.now() + 15000;
     for (;;) {
@@ -140,12 +184,14 @@ async function run() {
     const persistedDeadline = Date.now() + 20000;
     let persisted;
     while (Date.now() < persistedDeadline) {
-      persisted = durableTaskCount(restartTaskList, path.join(work, 'matching.db'));
+      persisted = durableTaskCount(domainId, restartState.taskList, 0, path.join(work, 'matching.db'));
       if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.equal(persisted?.status, 0, `could not inspect Matching durable queue: ${persisted?.stderr}`);
     assert(Number(persisted.stdout.trim()) > 0, 'workflow task was not persisted before Matching restart');
+    // The persisted watermark is read while the row is stored and undelivered.
+    restartState.watermark = await awaitPersistedTask(restartState.taskList, 0);
     const beforePid = rust.pid;
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -153,13 +199,13 @@ async function run() {
     if (goServicesPid) process.kill(goServicesPid, 0);
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
-    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
+    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartState.taskList }, encoding: 'utf8', timeout: 120000 });
     fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
     if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
     const finalHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: restartID, runId: restartStarted.runId } });
     const completions = finalHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(completions, 1, 'restart workflow must have exactly one visible completion');
-    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
+    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartState.taskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), durableWatermarkBeforeKill: restartState.watermark, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
     // Reuse the second live process for the existing compatibility coverage below.
   }
   let started;
@@ -172,6 +218,7 @@ async function run() {
     }
   }
   const execution = { workflowId: id, runId: started.runId };
+  const mainDecisionWatermark = await awaitPersistedTask(taskList.name, 0);
   const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(decision.workflowExecution.runId, started.runId);
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
@@ -185,10 +232,12 @@ async function run() {
       startToCloseTimeout: { seconds: '30' }, heartbeatTimeout: { seconds: '10' },
     } }],
   });
+  const mainActivityWatermark = await awaitPersistedTask(taskList.name, 1);
   const activity = await call('WorkerAPI', 'PollForActivityTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(activity.input.data.toString(), 'activity');
   assert.equal((await call('WorkerAPI', 'RecordActivityTaskHeartbeat', { taskToken: activity.taskToken, details: payload('heartbeat') })).cancelRequested, false);
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: activity.taskToken, result: payload('activity-result'), identity: 'service-probe' });
+  const finalWatermark = await awaitPersistedTask(taskList.name, 0);
   const final = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: final.taskToken, identity: 'service-probe', decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('done') } }],
@@ -212,7 +261,7 @@ async function run() {
     const taskDeadline = Date.now() + 20000;
     let queued;
     while (Date.now() < taskDeadline) {
-      queued = durableTaskCount(drainTaskList, path.join(work, 'matching.db'));
+      queued = durableTaskCount(domainId, drainTaskList, 0, path.join(work, 'matching.db'));
       if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -384,7 +433,83 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
+  let productionDatabaseEvidence;
+  if (productionMode && process.env.CADENCE_MATCHING_MYSQL) {
+    // The GC assertions below decode Go's task-list metadata, so the decoder
+    // is checked against the committed blob fixtures first.
+    const decoderFixtureCases = verifyTaskListBlobDecoder();
+    // A dedicated backlog on a task list without any poller. Its persisted
+    // watermark is read while the decision task is stored and undelivered,
+    // and the existing SDK drains it afterwards.
+    const backlogList = { name: `gc-backlog-${id}` };
+    const backlogWorkflowId = `gc-backlog-${id}`;
+    const backlogStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: backlogWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: backlogList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const backlogWatermark = await awaitPersistedTask(backlogList.name, 0);
+    assert(backlogWatermark && backlogWatermark.maxTaskId !== null,
+      'Go History did not persist the dedicated garbage collection backlog task');
+    const backlogSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: backlogWorkflowId, CADENCE_MIXED_RESTART_TASK_LIST: backlogList.name,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'gc-backlog-sdk.log'), `${backlogSdk.stdout || ''}\n${backlogSdk.stderr || ''}`);
+    if (backlogSdk.status !== 0) throw new Error(`Existing SDK did not drain the garbage collection backlog: ${backlogSdk.error || backlogSdk.status}; see ${work}/gc-backlog-sdk.log`);
+    const backlogHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: backlogWorkflowId, runId: backlogStarted.runId } });
+    const backlogCompletions = backlogHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(backlogCompletions, 1, 'the drained garbage collection backlog must have exactly one visible completion');
+    // A task that is never acknowledged must survive the collector.
+    const pendingList = { name: `gc-pending-${id}` };
+    const pendingStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: `gc-pending-${id}`, taskList: pendingList, requestId: randomUUID(),
+    });
+    const pendingWatermark = await awaitPersistedTask(pendingList.name, 0);
+    assert(pendingWatermark && pendingWatermark.maxTaskId !== null, 'Go History did not persist the unacknowledged control task');
+    const liveBlockProvider = async (listName, taskType) => {
+      const taskListType = taskType === 0 ? 'TASK_LIST_TYPE_DECISION' : 'TASK_LIST_TYPE_ACTIVITY';
+      const status = (await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: listName }, taskListType, includeTaskListStatus: true })).taskListStatus;
+      return { startId: Number(status.taskIdBlock.startId), endId: Number(status.taskIdBlock.endId) };
+    };
+    const mainDecisionMax = Math.max(mainDecisionWatermark?.maxTaskId ?? 0, finalWatermark?.maxTaskId ?? 0);
+    const gateExpectations = [
+      { label: 'backlogDecision', name: backlogList.name, taskType: 0, observedMaxTaskId: backlogWatermark.maxTaskId },
+      // The activity row of the backlog was created and completed by the SDK
+      // without an observation, so this queue has no durable task id. Go
+      // persists the acknowledgement 0 for a queue that never acknowledged a
+      // task, so 0 is the valid lower bound and the queue carries no durable
+      // garbage collection evidence.
+      { label: 'backlogActivity', name: backlogList.name, taskType: 1, minAck: 0, durableGcEvidence: false },
+      { label: 'mainDecision', name: taskList.name, taskType: 0, observedMaxTaskId: mainDecisionMax },
+      { label: 'mainActivity', name: taskList.name, taskType: 1, observedMaxTaskId: mainActivityWatermark?.maxTaskId ?? 1 },
+    ];
+    if (restartMode && restartState.watermark && restartState.watermark.maxTaskId !== null) {
+      gateExpectations.push({ label: 'restartDecision', name: restartState.taskList, taskType: 0, observedMaxTaskId: restartState.watermark.maxTaskId });
+      // The restart activity row was created and completed by the SDK without
+      // an observation, so this queue carries no durable garbage collection
+      // evidence and the valid lower bound of its acknowledgement is 0.
+      gateExpectations.push({ label: 'restartActivity', name: restartState.taskList, taskType: 1, minAck: 0, durableGcEvidence: false });
+    }
+    const taskGarbageCollection = await verifyProductionMySqlTaskGc({
+      query: mysqlRows,
+      domainId,
+      taskLists: gateExpectations,
+      pendingListName: pendingList.name,
+      liveBlockProvider,
+      rangeSize: 100000,
+      sleep: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
+    });
+    const domainMetadata = observeProductionMySqlDomain({ query: mysqlRows, domain, domainId });
+    productionDatabaseEvidence = {
+      decoderFixtureCases,
+      taskGarbageCollection,
+      domainMetadata,
+      backlog: { taskList: backlogList.name, workflowId: backlogWorkflowId, watermark: backlogWatermark, completionEvents: backlogCompletions },
+      pendingControl: { taskList: pendingList.name, workflowId: pendingStarted.workflowId || `gc-pending-${id}`, watermark: pendingWatermark },
+    };
+    fs.writeFileSync(path.join(work, 'db-observations.json'), JSON.stringify(productionDatabaseEvidence, null, 2) + '\n');
+  }
+  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
   } finally {
     if (productionMode) rust.kill('SIGTERM');
     else fs.writeFileSync(stop, 'stop');

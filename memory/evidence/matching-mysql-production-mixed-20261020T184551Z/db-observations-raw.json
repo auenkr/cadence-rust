@@ -1,0 +1,51 @@
+{
+  "capturedAt": "2026-10-20T18:55:50Z",
+  "container": "cadence-mysql-test",
+  "database": "cadence",
+  "domainShardId": 54321,
+  "taskListShardId": 0,
+  "statements": [
+    {
+      "statement": "SELECT name, HEX(id) FROM domains WHERE name LIKE 'service-compat-%' ORDER BY name;",
+      "exitCode": 0,
+      "stdout": "service-compat-2d31dc06-c271-4051-91d5-01770364808d\t01A15AA2640A7BDBABD480C75E8918B1\n",
+      "stderr": "mysql: [Warning] Using a password on the command line interface can be insecure.\n"
+    },
+    {
+      "statement": "SELECT shard_id, COUNT(*) FROM task_lists GROUP BY shard_id;",
+      "exitCode": 0,
+      "stdout": "0\t55\n",
+      "stderr": "mysql: [Warning] Using a password on the command line interface can be insecure.\n"
+    },
+    {
+      "statement": "SELECT task_list_name, task_type, COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('01a15aa2640a7bdbabd480c75e8918b1') GROUP BY task_list_name, task_type ORDER BY task_list_name, task_type;",
+      "exitCode": 0,
+      "stdout": "gc-pending-2d31dc06-c271-4051-91d5-01770364808d\t0\t1\t1\nisolated-2d31dc06-c271-4051-91d5-01770364808d\t0\t1\t1\npaced-2d31dc06-c271-4051-91d5-01770364808d\t0\t1\t1\n",
+      "stderr": "mysql: [Warning] Using a password on the command line interface can be insecure.\n"
+    },
+    {
+      "statement": "SELECT name, task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15aa2640a7bdbabd480c75e8918b1') ORDER BY name, task_type;",
+      "exitCode": 0,
+      "stdout": "arm-instance:4728d63f-61c9-48da-aeca-c47767656873\t0\t1\t06000A00010A000C00000000000000000A000E18E09FE8054DBAD50A001018E0515373FEBAD500\tthriftrw\ncadence-scheduler\t0\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ncadence-scheduler\t1\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ndiscovery-ready-2d31dc06-c271-4051-91d5-01770364808d\t0\t3\t06000A00000A000C0000000000030D400A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ngc-backlog-2d31dc06-c271-4051-91d5-01770364808d\t0\t1\t06000A00000A000C00000000000000010A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ngc-backlog-2d31dc06-c271-4051-91d5-01770364808d\t1\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ngc-pending-2d31dc06-c271-4051-91d5-01770364808d\t0\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ngraceful-drain-tasks-2d31dc06-c271-4051-91d5-01770364808d\t0\t2\t06000A00000A000C00000000000000010A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ngraceful-drain-tasks-2d31dc06-c271-4051-91d5-01770364808d\t1\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\nisolated-2d31dc06-c271-4051-91d5-01770364808d\t0\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\nisolated-2d31dc06-c271-4051-91d5-01770364808d\t1\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD50C00120A000A000000000000000108000C0000000208000E000000010D0010080C00000002000000000F000A0B0000000000000000050F000A0B00000001000000067A6F6E652D61000D0012080C00000001000000000F000A0B00000000000000\tthriftrw\nmixed-sdk-7d99f0d3-f9fe-4426-b26b-4beb699bdbd7\t0\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\nmixed-sdk-7d99f0d3-f9fe-4426-b26b-4beb699bdbd7\t1\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\npaced-2d31dc06-c271-4051-91d5-01770364808d\t0\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\npaced-2d31dc06-c271-4051-91d5-01770364808d\t1\t1\t06000A00000A000C00000000000000020A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\nquery-2d31dc06-c271-4051-91d5-01770364808d\t0\t1\t06000A00000A000C00000000000000000A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\nrestart-tasks-2d31dc06-c271-4051-91d5-01770364808d\t0\t3\t06000A00000A000C0000000000030D400A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\nrestart-tasks-2d31dc06-c271-4051-91d5-01770364808d\t1\t2\t06000A00000A000C00000000000186A00A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ntasks-2d31dc06-c271-4051-91d5-01770364808d\t0\t2\t06000A00000A000C00000000000186A00A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\ntasks-2d31dc06-c271-4051-91d5-01770364808d\t1\t2\t06000A00000A000C00000000000186A00A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\nunpolled-2d31dc06-c271-4051-91d5-01770364808d\t1\t1\t06000A00000A000C00000000000000010A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\nunpolled-activity-timeouts\t1\t1\t06000A00000A000C00000000000000010A000E00000000000000000A001018E0515373FEBAD500\tthriftrw\n",
+      "stderr": "mysql: [Warning] Using a password on the command line interface can be insecure.\n"
+    },
+    {
+      "statement": "SELECT name, task_type, range_id FROM task_lists WHERE shard_id=54321 AND domain_id=UNHEX('01a15aa2640a7bdbabd480c75e8918b1') ORDER BY name, task_type;",
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "mysql: [Warning] Using a password on the command line interface can be insecure.\n"
+    },
+    {
+      "statement": "SELECT name, HEX(id), is_global, data_encoding, LENGTH(data) FROM domains WHERE name='service-compat-2d31dc06-c271-4051-91d5-01770364808d';",
+      "exitCode": 0,
+      "stdout": "service-compat-2d31dc06-c271-4051-91d5-01770364808d\t01A15AA2640A7BDBABD480C75E8918B1\t0\tthriftrw\t597\n",
+      "stderr": "mysql: [Warning] Using a password on the command line interface can be insecure.\n"
+    },
+    {
+      "statement": "SELECT notification_version FROM domain_metadata;",
+      "exitCode": 0,
+      "stdout": "5\n",
+      "stderr": "mysql: [Warning] Using a password on the command line interface can be insecure.\n"
+    }
+  ]
+}

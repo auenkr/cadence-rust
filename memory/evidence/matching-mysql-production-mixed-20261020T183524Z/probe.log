@@ -1,0 +1,11 @@
+AssertionError [ERR_ASSERTION]: no Matching task ids were observed in Go's tasks table
+    at verifyProductionMySqlTaskGc (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/tests/matching-mysql-gate.cjs:53:3)
+    at run (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/tests/matching-service-compat.cjs:452:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}

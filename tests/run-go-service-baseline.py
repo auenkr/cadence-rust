@@ -13,8 +13,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -33,11 +35,142 @@ parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default
 parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'),
     help='configure and capture one Rust Matching exporter in the production Ringpop lane')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
+parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
 work.mkdir(parents=True, exist_ok=True)
 print(f'Go baseline artifacts: {work}', flush=True)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import matching_evidence
+
+
+def mysql_rows(sql):
+    """Run one read-only MySQL statement against the shared database."""
+    return matching_evidence.mysql_rows(
+        sql,
+        container=os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'),
+        password=mysql_password,
+        database=mysql_database,
+        host=mysql_host,
+        port=mysql_port,
+        user=mysql_user,
+    )
+
+
+def check_go_schema_only():
+    """Confirm the shared database holds Go's schema and no private tables."""
+    return matching_evidence.check_go_schema_only(
+        root / 'go/schema/mysql/v8/cadence/schema.sql',
+        container=os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'),
+        password=mysql_password,
+        database=mysql_database,
+        host=mysql_host,
+        port=mysql_port,
+        user=mysql_user,
+    )
+
+
+def validate_matching_exporter(exporter, work, repository):
+    """Decode captured exporter output and require SDK-driven Matching metrics."""
+    required = ('cadence_requests_per_tl', 'cadence_tasklist_request', 'poll_success_per_tl',
+                'cadence_client_requests')
+    caller = 'cadence-service-compat'
+    if exporter == 'prometheus':
+        scrape = (work / 'prometheus-scrape.txt').read_text(encoding='utf-8')
+        samples = [line for line in scrape.splitlines() if line and not line.startswith('#')]
+        if not samples:
+            raise RuntimeError('Prometheus scrape succeeded but returned no metric samples')
+        rendered = '\n'.join(samples)
+        for metric in required:
+            if metric not in rendered:
+                raise RuntimeError(f'Prometheus output lacks SDK-driven Matching metric {metric}')
+            values = [float(line.rsplit(' ', 1)[1]) for line in samples
+                      if metric in line and re.search(r'\s[-+0-9.eE]+$', line)]
+            if not values or max(values) <= 0:
+                raise RuntimeError(f'Prometheus metric {metric} has no positive SDK-driven sample')
+        request_lines = [line for line in samples if 'cadence_requests_per_tl' in line]
+        labels = '\n'.join(request_lines)
+        for label in (f'caller="{caller}"', 'transport="grpc"', 'cadence_service="cadence_matching"'):
+            if label not in labels:
+                raise RuntimeError(f'Prometheus request metric lacks {label}')
+        if not re.search(r'domain="(?!_unknown_)[^"]+"', labels):
+            raise RuntimeError('Prometheus request metric lacks a populated domain label')
+        if 'operation="RespondQueryTaskCompleted"' not in labels:
+            raise RuntimeError('Prometheus request metrics lack the SDK query response operation')
+        semantic = {'format': exporter, 'sampleCount': len(samples),
+                    'requiredMetrics': list(required), 'requestSamples': request_lines}
+    elif exporter == 'statsd':
+        packets = [json.loads(line)['base64'] for line in (work / 'statsd-packets.json').read_text().splitlines() if line.strip()]
+        if not packets:
+            raise RuntimeError('StatsD capture received no UDP packets')
+        decoded = [base64.b64decode(packet).decode('utf-8') for packet in packets]
+        lines = [line for packet in decoded for line in packet.splitlines() if line]
+        requests = [line for line in lines if 'cadence_requests_per_tl' in line]
+        rendered = '\n'.join(lines)
+        for metric in required:
+            if metric not in rendered:
+                raise RuntimeError(f'StatsD output lacks SDK-driven Matching metric {metric}')
+            values = [float(match.group(1)) for line in lines if metric in line
+                      for match in [re.search(r':([-+0-9.eE]+)\|[cgm]', line)] if match]
+            if not values or max(values) <= 0:
+                raise RuntimeError(f'StatsD metric {metric} has no positive SDK-driven sample')
+        labels = '\n'.join(requests)
+        for tag in (f'.caller.{caller}', '.transport.grpc', '.cadence_service.cadence-matching'):
+            if tag not in labels:
+                raise RuntimeError(f'StatsD request metric lacks {tag}')
+        if not re.search(r'\.domain\.(?!_unknown_)[^.:]+', labels):
+            raise RuntimeError('StatsD request metric lacks a populated domain label')
+        if '.operation.RespondQueryTaskCompleted' not in labels:
+            raise RuntimeError('StatsD request metrics lack the SDK query response operation')
+        semantic = {'format': exporter, 'packetCount': len(packets), 'lineCount': len(lines),
+                    'requiredMetrics': list(required), 'requestLines': requests}
+    else:
+        packets = [base64.b64decode(json.loads(line)['base64'])
+                   for line in (work / 'm3-packets.json').read_text().splitlines() if line.strip()]
+        if not packets:
+            raise RuntimeError('M3 capture received no UDP packets')
+        decoder = subprocess.run(
+            ['go', 'run', './tools/matching-metrics-m3-oracle', 'decode-hex'],
+            cwd=repository / 'go', input=''.join(packet.hex() + '\n' for packet in packets),
+            capture_output=True, text=True, check=True, timeout=120)
+        (work / 'm3-decoded.jsonl').write_text(decoder.stdout)
+        batches = [json.loads(line) for line in decoder.stdout.splitlines() if line.strip()]
+        if not batches:
+            raise RuntimeError('M3 Go Compact decoder returned no metric batches')
+        metrics = []
+        for batch in batches:
+            common = {tag['name']: tag['value'] for tag in batch.get('commonTags', [])}
+            for metric in batch.get('metrics', []):
+                tags = {**common, **{tag['name']: tag['value'] for tag in metric.get('tags', [])}}
+                metrics.append((metric['name'], tags, metric['value']))
+        for required_metric in required:
+            matching_values = [value for name, _, value in metrics if required_metric in name]
+            if not matching_values:
+                raise RuntimeError(f'M3 output lacks SDK-driven Matching metric {required_metric}')
+            if not any(value.get('count', value.get('gauge', value.get('timer', 0))) > 0
+                       for value in matching_values if isinstance(value, dict)):
+                raise RuntimeError(f'M3 metric {required_metric} has no positive SDK-driven value')
+        request_metrics = [(name, tags, value) for name, tags, value in metrics
+                           if 'cadence_requests_per_tl' in name]
+        if not request_metrics:
+            raise RuntimeError('M3 request metric was not emitted')
+        _, tags, value = request_metrics[0]
+        for label, expected in (('caller', caller), ('transport', 'grpc'),
+                                ('cadence_service', 'cadence-matching')):
+            if tags.get(label) != expected:
+                raise RuntimeError(f'M3 request metric expected {label}={expected!r}, got {tags.get(label)!r}')
+        if not tags.get('domain') or tags['domain'] == '_unknown_':
+            raise RuntimeError('M3 request metric lacks a populated domain label')
+        if not any(metric_tags.get('operation') == 'RespondQueryTaskCompleted'
+                   for _, metric_tags, _ in request_metrics):
+            raise RuntimeError('M3 request metrics lack the SDK query response operation')
+        semantic = {'format': exporter, 'packetCount': len(packets), 'batchCount': len(batches),
+                    'metricCount': len(metrics), 'requiredMetrics': list(required),
+                    'requestMetric': {'name': request_metrics[0][0], 'tags': tags, 'value': value},
+                    'timestampsPreserved': True}
+    (work / 'matching-exporter-semantics.json').write_text(json.dumps(semantic, indent=2) + '\n')
+    return semantic
 production_matching = args.rust_production_binary is not None
 if production_matching and not (args.rust_matching or args.matching_restart):
     parser.error('--rust-production-binary requires --rust-matching or --matching-restart')
@@ -184,6 +317,8 @@ if production_matching:
                 f'    metrics:\n      {args.matching_exporter}:\n'
                 '        hostPort: ' + json.dumps(exporter_address) + '\n'
             )
+            if args.matching_exporter == 'm3':
+                matching_metrics_yaml += '        service: cadence_matching\n        env: test\n'
         rust_text, replaced_metrics = re.subn(
             r'(?ms)^  matching:\n(.*?)(?=^  (?:frontend|history|worker):|\Z)',
             lambda match: '  matching:\n' + re.sub(
@@ -267,114 +402,197 @@ if (args.rust_matching or args.matching_restart) and not production_matching:
     import os
     command = [str(binary), '-test.run=^TestRustMatchingGoServices$', '-test.timeout=15m']
     environment = {**os.environ, 'CADENCE_GO_CONFIG': str(config), 'CADENCE_RUST_MATCHING_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}'}
-with (work / 'server.log').open('w') as log:
-    server = subprocess.Popen(command, cwd=work, stdout=log, stderr=subprocess.STDOUT, env=environment)
-    try:
-        deadline = time.monotonic() + 90
-        while True:
-            if server.poll() is not None:
-                raise RuntimeError(f'Go baseline exited; see {work / "server.log"}')
-            try:
-                with socket.create_connection(('127.0.0.1', int(ports['FRONTEND_PORT_GRPC'])), timeout=0.5):
-                    break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('Go baseline startup timed out')
-                time.sleep(0.1)
-        with (work / 'probe.log').open('w') as output:
-            if production_matching:
-                probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
-                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
-                    f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
-                    'restart' if args.matching_restart else '', str(server.pid), 'production']
-            elif args.rust_matching or args.matching_restart:
-                probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
-                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
-                    f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
-                    'restart' if args.matching_restart else '', str(server.pid)]
-            elif args.matching_delivery:
-                probe = ['node', str(root / 'tests/matching-history-compat.cjs'),
-                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}']
-            else:
-                probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
-                    f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
-            probe_environment = None
-            udp_capture = None
-            udp_thread = None
-            udp_packets = []
-            udp_stop = threading.Event()
-            if args.matching_exporter in ('statsd', 'm3'):
-                udp_capture = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                udp_capture.bind(('127.0.0.1', int(exporter_address.rsplit(':', 1)[1])))
-                udp_capture.settimeout(0.1)
-                def collect_udp():
-                    while not udp_stop.is_set():
-                        try:
-                            packet, _ = udp_capture.recvfrom(65535)
-                            udp_packets.append(packet)
-                        except socket.timeout:
-                            continue
-                udp_thread = threading.Thread(target=collect_udp, daemon=True)
-                udp_thread.start()
-            if matching_test_executable and (args.rust_matching or args.matching_restart):
-                probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
-            if production_matching:
-                probe_environment = {**os.environ,
-                    'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(args.rust_production_binary.resolve()),
-                    'CADENCE_RUST_MATCHING_PRODUCTION_CONFIG': str(rust_config),
-                    'CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL': ports['RUST_MATCHING_PORT'],
-                    'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
-                    'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
-                    'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
-                    'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
-                if args.mysql:
-                    probe_environment.update({
-                        'CADENCE_MATCHING_MYSQL': '1',
-                        'CADENCE_MYSQL_HOST': mysql_host,
-                        'CADENCE_MYSQL_PORT': mysql_port,
-                        'CADENCE_MYSQL_USER': mysql_user,
-                        'CADENCE_MYSQL_PASSWORD': mysql_password,
-                        'CADENCE_MYSQL_DATABASE': mysql_database,
-                    })
-                    if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
-                        probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
-            result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
-            if udp_capture:
-                udp_stop.set()
-                udp_thread.join(timeout=2)
-                udp_capture.close()
-                (work / f'{args.matching_exporter}-packets.json').write_text(
-                    ''.join(json.dumps({'base64': base64.b64encode(packet).decode('ascii')}) + '\n'
-                            for packet in udp_packets))
-            elif args.matching_exporter == 'prometheus':
-                try:
-                    with urllib.request.urlopen(f'http://{exporter_address}/metrics', timeout=5) as response:
-                        (work / 'prometheus-scrape.txt').write_bytes(response.read())
-                except Exception as error:
-                    (work / 'prometheus-scrape-error.txt').write_text(str(error) + '\n')
-        (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
-            'topology': ('Go Frontend/History/Worker with Rust Matching via production Ringpop' if production_matching else ('Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'))),
-            'goServicesPid': server.pid, 'goServicesAliveAfterProbe': server.poll() is None,
-            'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
-            'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
-            'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
-            'historyTransport': args.history_transport if production_matching else None,
-            'matchingExporter': args.matching_exporter,
-            'matchingExporterAddress': exporter_address,
-            'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
-            'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
-            'acceptanceEligible': not production_matching,
-            'serverCommand': command}, indent=2) + '\n')
-        if result.returncode:
-            raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
-    finally:
-        server.terminate()
+results = {
+    'topology': ('Go Frontend/History/Worker with Rust Matching via production Ringpop' if production_matching else ('Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'))),
+    'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
+    'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
+    'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
+    'historyTransport': args.history_transport if production_matching else None,
+    'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
+    'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
+    'acceptanceEligible': not production_matching,
+    'serverCommand': command,
+    'artifactsDirectory': str(work),
+}
+
+
+def copy_evidence(destination, results):
+    """Copy the selected run evidence into a durable directory."""
+    config_files = sorted(config.glob('*.yaml'))
+    if production_matching:
+        config_files += [Path(rust_config), Path(rust_dynamic_config)]
+    binaries = {'goBinary': Path(binary)}
+    if production_matching:
+        binaries['rustProductionBinary'] = Path(args.rust_production_binary)
+    return matching_evidence.copy_evidence(
+        destination,
+        work=work,
+        config_files=config_files,
+        repository=root,
+        binaries=binaries,
+        results=results,
+    )
+
+
+environment_note = {key: value for key, value in os.environ.items()
+                   if key.startswith('CADENCE_') and 'PASSWORD' not in key.upper()}
+(work / 'command.txt').write_text(
+    'env ' + ' '.join(f'{key}={value}' for key, value in sorted(environment_note.items())) + '\n'
+    + ' '.join([shlex.quote(part) for part in [sys.executable, *sys.argv]]) + '\n')
+exit_code = 0
+failure = None
+try:
+    with (work / 'server.log').open('w') as log:
+        server = subprocess.Popen(command, cwd=work, stdout=log, stderr=subprocess.STDOUT, env=environment)
         try:
-            server.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            server.kill()
-            server.wait(timeout=10)
+            deadline = time.monotonic() + 90
+            while True:
+                if server.poll() is not None:
+                    raise RuntimeError(f'Go baseline exited; see {work / "server.log"}')
+                try:
+                    with socket.create_connection(('127.0.0.1', int(ports['FRONTEND_PORT_GRPC'])), timeout=0.5):
+                        break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('Go baseline startup timed out')
+                    time.sleep(0.1)
+            with (work / 'probe.log').open('w') as output:
+                if production_matching:
+                    probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
+                        f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
+                        'restart' if args.matching_restart else '', str(server.pid), 'production']
+                elif args.rust_matching or args.matching_restart:
+                    probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}',
+                        f'127.0.0.1:{ports["RUST_MATCHING_PORT_GRPC"]}', str(work / 'rust-matching'), f'127.0.0.1:{ports["FRONTEND_PORT"]}',
+                        'restart' if args.matching_restart else '', str(server.pid)]
+                elif args.matching_delivery:
+                    probe = ['node', str(root / 'tests/matching-history-compat.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}']
+                else:
+                    probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
+                probe_environment = None
+                udp_capture = None
+                udp_thread = None
+                udp_packets = []
+                udp_stop = threading.Event()
+                prometheus_scrapes = []
+                prometheus_thread = None
+                if args.matching_exporter in ('statsd', 'm3'):
+                    udp_capture = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    udp_capture.bind(('127.0.0.1', int(exporter_address.rsplit(':', 1)[1])))
+                    udp_capture.settimeout(0.1)
+
+                    def collect_udp():
+                        while True:
+                            try:
+                                packet, _ = udp_capture.recvfrom(65535)
+                                udp_packets.append(packet)
+                            except socket.timeout:
+                                if udp_stop.is_set():
+                                    break
+
+                    udp_thread = threading.Thread(target=collect_udp, daemon=True)
+                    udp_thread.start()
+                elif args.matching_exporter == 'prometheus':
+                    def scrape_prometheus():
+                        while not udp_stop.is_set():
+                            try:
+                                with urllib.request.urlopen(f'http://{exporter_address}/metrics', timeout=1) as response:
+                                    prometheus_scrapes.append(response.read().decode('utf-8'))
+                            except Exception:
+                                pass
+                            udp_stop.wait(0.2)
+
+                    prometheus_thread = threading.Thread(target=scrape_prometheus, daemon=True)
+                    prometheus_thread.start()
+                if matching_test_executable and (args.rust_matching or args.matching_restart):
+                    probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
+                if production_matching:
+                    probe_environment = {**os.environ,
+                        'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(args.rust_production_binary.resolve()),
+                        'CADENCE_RUST_MATCHING_PRODUCTION_CONFIG': str(rust_config),
+                        'CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL': ports['RUST_MATCHING_PORT'],
+                        'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
+                        'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
+                        'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
+                        'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
+                    if args.mysql:
+                        probe_environment.update({
+                            'CADENCE_MATCHING_MYSQL': '1',
+                            'CADENCE_MYSQL_HOST': mysql_host,
+                            'CADENCE_MYSQL_PORT': mysql_port,
+                            'CADENCE_MYSQL_USER': mysql_user,
+                            'CADENCE_MYSQL_PASSWORD': mysql_password,
+                            'CADENCE_MYSQL_DATABASE': mysql_database,
+                        })
+                        if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
+                            probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
+                result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
+                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120)))
+                if udp_capture:
+                    udp_stop.set()
+                    udp_thread.join(timeout=2)
+                    udp_capture.close()
+                    (work / f'{args.matching_exporter}-packets.json').write_text(
+                        ''.join(json.dumps({'base64': base64.b64encode(packet).decode('ascii')}) + '\n'
+                                for packet in udp_packets))
+                elif args.matching_exporter == 'prometheus':
+                    udp_stop.set()
+                    prometheus_thread.join(timeout=2)
+                    successful_scrapes = [scrape for scrape in prometheus_scrapes
+                                          if any(line and not line.startswith('#') for line in scrape.splitlines())]
+                    if successful_scrapes:
+                        (work / 'prometheus-scrape.txt').write_text(successful_scrapes[-1])
+                    else:
+                        (work / 'prometheus-scrape-error.txt').write_text(
+                            'no successful scrape with metric samples during the SDK probe\n')
+            results['probeExitCode'] = result.returncode
+            results['goServicesPid'] = server.pid
+            results['goServicesAliveAfterProbe'] = server.poll() is None
+            results['matchingExporter'] = args.matching_exporter
+            results['matchingExporterAddress'] = exporter_address if production_matching else None
+            observations_path = work / 'rust-matching' / 'db-observations.json'
+            if not observations_path.is_file():
+                observations_path = work / 'db-observations.json'
+            if observations_path.is_file():
+                observations = json.loads(observations_path.read_text())
+                results['taskGarbageCollection'] = observations.get('taskGarbageCollection')
+                results['domainMetadata'] = observations.get('domainMetadata')
+                results['decoderFixtureCases'] = observations.get('decoderFixtureCases')
+            if args.mysql:
+                try:
+                    results['goSchemaOnly'] = check_go_schema_only()
+                except Exception as error:  # the schema observation must not mask the probe failure
+                    results['goSchemaOnly'] = {'error': f'{type(error).__name__}: {error}'}
+            (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
+            if result.returncode:
+                raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+            if args.matching_exporter:
+                semantics = validate_matching_exporter(args.matching_exporter, work, root)
+                results['matchingExporterSemantics'] = semantics
+                (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=10)
+except BaseException as error:
+    exit_code = 1
+    failure = f'{type(error).__name__}: {error}'
+    raise
+finally:
+    results['runExitCode'] = exit_code
+    results['failure'] = failure
+    (work / 'run.exit').write_text(f'{exit_code}\n')
+    (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
+    if args.evidence_dir:
+        copied = copy_evidence(args.evidence_dir, results)
+        print(f'Selected evidence copied to {args.evidence_dir}: {copied}', flush=True)
 if production_matching:
     print(f'Preliminary production process probe completed; it is not Matching acceptance evidence: {work / "results.json"}', flush=True)
 else:
