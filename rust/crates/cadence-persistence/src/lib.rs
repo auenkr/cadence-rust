@@ -39,4 +39,5 @@ pub mod matching_gc;
 
 pub mod matching_domain_metadata;
 pub mod matching_domain_mysql;
+pub mod matching_domain_postgres;
 pub mod matching_retry;

@@ -67,6 +67,23 @@ function durableTaskCount(domainId, taskList, taskType, fallbackDatabase) {
     if (result.status === 0) result.stdout = result.stdout.trim();
     return result;
   }
+  if (process.env.CADENCE_MATCHING_POSTGRES) {
+    const env = { ...process.env,
+      PGHOST: process.env.CADENCE_POSTGRES_HOST, PGPORT: process.env.CADENCE_POSTGRES_PORT,
+      PGUSER: process.env.CADENCE_POSTGRES_USER, PGDATABASE: process.env.CADENCE_POSTGRES_DATABASE,
+      PGPASSWORD: process.env.CADENCE_POSTGRES_PASSWORD || '',
+      PGSSLMODE: process.env.CADENCE_POSTGRES_SSLMODE || 'disable' };
+    for (const [name, value] of [['PGSSLROOTCERT', process.env.CADENCE_POSTGRES_CA_FILE],
+      ['PGSSLCERT', process.env.CADENCE_POSTGRES_CERT_FILE], ['PGSSLKEY', process.env.CADENCE_POSTGRES_KEY_FILE]]) {
+      if (value) env[name] = value;
+    }
+    const result = spawnSync('psql', ['-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
+      '-v', `task_list=${taskList}`, '-v', `domain_id=${domainId}`, '-v', `task_type=${taskType}`,
+      '-c', "SELECT count(*) FROM tasks WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND task_list_name=:'task_list' AND task_type=:'task_type'"],
+      { encoding: 'utf8', env, timeout: 30000 });
+    if (result.status === 0) result.stdout = result.stdout.trim();
+    return result;
+  }
   const database = process.env.CADENCE_MATCHING_SQLITE_DB || fallbackDatabase;
   return spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where domain_id=? and task_list_name=? and task_type=?", (bytes.fromhex(sys.argv[2]), sys.argv[3], int(sys.argv[4]))).fetchone()[0])', database, domainHex(domainId), taskList, String(taskType)], { encoding: 'utf8', timeout: 60000 });
 }
@@ -155,8 +172,18 @@ async function run() {
   // undelivered. A task that a poller already holds may be collected before
   // the poll returns, so the watermark is never read after a delivery.
   const awaitPersistedTask = async (listName, taskType, timeoutMs = 20000) => {
-    if (!process.env.CADENCE_MATCHING_MYSQL) return null;
+    if (!process.env.CADENCE_MATCHING_MYSQL && !process.env.CADENCE_MATCHING_POSTGRES) return null;
     const deadline = Date.now() + timeoutMs;
+    if (process.env.CADENCE_MATCHING_POSTGRES) {
+      for (;;) {
+        const rows = durableTaskCount(domainId, listName, taskType, null);
+        if (rows.status !== 0) throw new Error(`PostgreSQL task observation failed: ${rows.stderr}`);
+        const count = Number(rows.stdout);
+        if (count > 0) return { taskType, rows: count, maxTaskId: null };
+        if (Date.now() >= deadline) return { taskType, rows: count, maxTaskId: null };
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
     for (;;) {
       const rows = mysqlRows(`SELECT COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(listName)}' AND task_type=${taskType}`);
       const count = Number(rows[0][0]);
@@ -433,6 +460,27 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
+  if (productionMode && process.env.CADENCE_MATCHING_POSTGRES) {
+    const pendingWorkflowId = `rust-postgres-pending-${id}`;
+    const pendingTaskList = `rust-postgres-pending-tasks-${id}`;
+    const pending = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: pendingWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: { name: pendingTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const deadline = Date.now() + 20000;
+    let rows;
+    do {
+      rows = durableTaskCount(domainId, pendingTaskList, 0, undefined);
+      if (rows.status === 0 && Number(rows.stdout) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } while (Date.now() < deadline);
+    assert.equal(rows?.status, 0, `could not inspect Rust-produced PostgreSQL task: ${rows?.stderr}`);
+    assert(Number(rows.stdout) > 0, 'Go History did not persist a pending PostgreSQL task through Rust Matching');
+    fs.writeFileSync(path.join(work, 'rust-postgres-evidence.json'), JSON.stringify({
+      domain, domainId, workflowId: pending.workflowId || pendingWorkflowId, runId: pending.runId,
+      taskList: pendingTaskList, taskRowsBeforeConsumption: Number(rows.stdout),
+    }, null, 2) + '\n');
+  }
   let productionDatabaseEvidence;
   if (productionMode && process.env.CADENCE_MATCHING_MYSQL) {
     // The GC assertions below decode Go's task-list metadata, so the decoder

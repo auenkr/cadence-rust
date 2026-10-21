@@ -1,11 +1,14 @@
 //! Select Matching's queue persistence from Go's configured default store.
 //!
-//! This adapter supports the existing SQLite and single-database MySQL task
+//! This adapter supports the existing SQLite, MySQL, and PostgreSQL task
 //! tables. It opens Cadence's shared schema and never creates a
 //! parallel production database or installs a partial schema.
 use cadence_persistence::{
     matching_blob::BlobEncoding,
     matching_mysql::{MySqlTaskStore, MySqlTaskStoreConfig, MySqlTlsConfig},
+    matching_postgres::{
+        PostgresShardConfig, PostgresTaskStore, PostgresTaskStoreConfig, PostgresTlsConfig,
+    },
     matching_sqlite::SqliteTaskStore,
     matching_task_store::MatchingTaskStore,
 };
@@ -20,8 +23,8 @@ pub struct ConfiguredMatchingStores {
     pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
 }
 
-/// Open Matching's configured default SQL store. MySQL task and domain reads
-/// share one pool so their combined connections obey Go's maxConns setting.
+/// Open Matching's configured default SQL store. MySQL and PostgreSQL task and
+/// domain reads share one pool so their combined connections obey Go maxConns.
 pub fn open_configured_default_store(
     persistence: &crate::config::PersistenceConfig,
     active_cluster_name: &str,
@@ -104,8 +107,60 @@ pub fn open_configured_default_store(
                 domain_metadata_source: Some(Arc::new(metadata)),
             })
         }
+        "postgres" => {
+            if sql.use_multiple_databases || !sql.multiple_databases_config.is_empty() {
+                anyhow::bail!("Matching PostgreSQL task persistence does not support multipleDatabasesConfig");
+            }
+            if sql.database_name.is_empty() {
+                anyhow::bail!("Matching PostgreSQL SQL persistence databaseName cannot be empty");
+            }
+            if sql.connect_addr.is_empty() {
+                anyhow::bail!("Matching PostgreSQL SQL persistence connectAddr cannot be empty");
+            }
+            let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
+            if n_shards < 1 {
+                anyhow::bail!("Matching PostgreSQL nShards must be positive, got {n_shards}");
+            }
+            let encoding = if sql.encoding_type.is_empty() {
+                BlobEncoding::ThriftRW
+            } else {
+                BlobEncoding::parse(&sql.encoding_type)?
+            };
+            let tls = sql.tls.as_ref().map(|tls| PostgresTlsConfig {
+                enabled: tls.enabled,
+                ssl_mode: tls.ssl_mode.clone(),
+                ca_file: tls.ca_file.clone(),
+                cert_file: tls.cert_file.clone(),
+                key_file: tls.key_file.clone(),
+            });
+            let config = PostgresTaskStoreConfig {
+                shards: vec![PostgresShardConfig {
+                    connect_addr: sql.connect_addr.clone(),
+                    user: sql.user.clone(),
+                    password: sql.password.clone(),
+                    database_name: sql.database_name.clone(),
+                    connect_attributes: sql.connect_attributes.clone(),
+                    tls,
+                }],
+                n_shards: n_shards as usize,
+                use_multiple_databases: false,
+                max_conns: sql.max_conns,
+                max_idle_conns: sql.max_idle_conns,
+                max_conn_lifetime: (sql.max_conn_lifetime_nanos > 0)
+                    .then(|| Duration::from_nanos(sql.max_conn_lifetime_nanos as u64)),
+                encoding,
+            };
+            let (store, metadata) = PostgresTaskStore::connect_with_domain_metadata(
+                config,
+                active_cluster_name,
+            )?;
+            Ok(ConfiguredMatchingStores {
+                task_store: Arc::new(store),
+                domain_metadata_source: Some(Arc::new(metadata)),
+            })
+        }
         other => anyhow::bail!(
-            "Matching task persistence does not support SQL plugin {other:?}; supported plugins are sqlite and mysql"
+            "Matching task persistence does not support SQL plugin {other:?}; supported plugins are sqlite, mysql, and postgres"
         ),
     }
 }
