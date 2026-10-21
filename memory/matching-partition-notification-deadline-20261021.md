@@ -24,11 +24,25 @@ behavior; no change was warranted.
 
 ## Regression and validation
 
-Added `partition_notification_fanout_is_concurrent_and_obeys_caller_deadline`
-in `matching_registry.rs`: a 10ms peer completes while a 500ms peer is bounded
-by the shared 80ms caller deadline, and the best-effort collector observes both
-outcomes. This source regression covers fanout timing/deadline semantics; the
-existing two-host integration source gate covers owner routing and config
-refresh. No Cargo, Go, cluster, or Docker command was run because the telemetry
-build lane is active. Compilation and runtime behavior remain unverified for
-this follow-up.
+Added `matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_caller_deadline`
+in `matching_rpc_tests.rs`. It calls the real Matching update handler, uses live
+membership and a real in-process gRPC Matching server for the later partition,
+and a TCP peer that accepts but does not answer for the earlier partition. The
+caller supplies a 500ms gRPC deadline. The test requires the later owner to
+persist the refreshed config, the handler to wait through the delayed peer's
+caller deadline, and the root update to succeed despite that peer failure. The
+ascending partition IDs make this distinguish the old sequential implementation:
+it would wait on the first peer until the deadline and leave no time to refresh
+the later owner.
+
+Queued telemetry-lane command (not run here):
+
+```sh
+cargo test -p cadence-server --bin cadence-server grpc_matching::matching_rpc_tests::matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_caller_deadline -- --exact --nocapture
+```
+
+No Cargo, Go, cluster, or Docker command was run because the telemetry build
+lane is active. `rustfmt --check` parsed the edited Rust file but exited 1 due to
+pre-existing formatting differences throughout that file; no formatter was
+applied. `git diff --check` passed. Compilation and runtime behavior remain
+unverified for this follow-up.

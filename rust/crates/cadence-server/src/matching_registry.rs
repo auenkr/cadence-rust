@@ -1935,37 +1935,6 @@ mod tests {
     use cadence_persistence::matching_blob::BlobEncoding;
     use std::time::Duration;
 
-    #[tokio::test]
-    async fn partition_notification_fanout_is_concurrent_and_obeys_caller_deadline() {
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(80);
-        let mut peers = tokio::task::JoinSet::new();
-        for delay in [Duration::from_millis(10), Duration::from_millis(500)] {
-            peers.spawn(async move {
-                tokio::time::timeout_at(deadline, tokio::time::sleep(delay)).await
-            });
-        }
-        let started = tokio::time::Instant::now();
-        let mut succeeded = 0;
-        let mut deadline_failures = 0;
-        while let Some(result) = peers.join_next().await {
-            match result.unwrap() {
-                Ok(()) => succeeded += 1,
-                Err(_) => deadline_failures += 1,
-            }
-        }
-        assert_eq!(
-            succeeded, 1,
-            "the fast peer completes while the delayed peer remains outstanding"
-        );
-        assert_eq!(
-            deadline_failures, 1,
-            "the slow peer inherits the caller deadline"
-        );
-        assert!(
-            started.elapsed() < Duration::from_millis(250),
-            "fanout waits only through the caller deadline"
-        );
-    }
     #[test]
     fn writer_owner_closure_keeps_registry_key_and_observes_provider_updates() {
         let observed = Arc::new(Mutex::new(Vec::new()));

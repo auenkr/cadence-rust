@@ -2108,6 +2108,90 @@ async fn matching_rpc_partition_update_refreshes_remote_read_owner_and_ignores_w
 }
 
 #[tokio::test]
+async fn matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_caller_deadline() {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+
+    let history = start_starting_history().await;
+    let (_root_dir, root_store, root, key) = fixture_with_history(&history);
+    let (_fast_dir, _fast_store, fast, _) = fixture_with_history(&history);
+
+    let fast_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let slow_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: "127.0.0.1:1".into() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: fast_listener.local_addr().unwrap().to_string() },
+        Host { address: "node-2:7935".into(), identity: "node-2".into(), grpc_address: slow_listener.local_addr().unwrap().to_string() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let (root_name, slow_partition, fast_partition) = (0..10_000)
+        .map(|index| format!("partition-notify-deadline-{index}"))
+        .find_map(|name| {
+            if ring.lookup(&name)?.identity() != "node-0" {
+                return None;
+            }
+            let candidates = (1..=100).map(|partition| {
+                (partition, ring.lookup(&format!("/__cadence_sys/{name}/{partition}" )).unwrap().identity().to_owned())
+            }).collect::<Vec<_>>();
+            let slow = candidates.iter().find(|(_, owner)| owner == "node-2")?.0;
+            let fast = candidates.iter().find(|(partition, owner)| owner == "node-1" && partition > slow)?.0;
+            Some((name, *slow, *fast))
+        })
+        .expect("find root and ascending slow/fast partition owners");
+
+    let root = root.with_membership(Membership::new("node-0", hosts.clone()));
+    let fast = fast.with_membership(Membership::new("node-1", hosts.clone()));
+    let fast_service = fast.clone();
+    let fast_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(fast_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(fast_listener))
+            .await
+            .unwrap();
+    });
+    let (slow_connected_tx, slow_connected_rx) = tokio::sync::oneshot::channel();
+    let slow_peer = tokio::spawn(async move {
+        let (stream, _) = slow_listener.accept().await.unwrap();
+        let _stream = stream; // Accept TCP, then leave the gRPC peer delayed indefinitely.
+        let _ = slow_connected_tx.send(());
+        std::future::pending::<()>().await;
+    });
+
+    let root_task_list = p::TaskList { name: root_name.clone(), kind: 1, ..Default::default() };
+    let mut request = Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: key.domain_id.to_string(),
+        task_list: Some(root_task_list),
+        task_list_type: 1,
+        partition_config: Some(native_config(0, &[0, slow_partition, fast_partition], &[0])),
+    });
+    // This is the caller's context deadline, forwarded by the real handler to
+    // every peer refresh. There is deliberately no test-only service hook.
+    request.metadata_mut().insert("grpc-timeout", "500m".parse().unwrap());
+    let started = tokio::time::Instant::now();
+    root.update_task_list_partition_config(request).await.unwrap();
+    let elapsed = started.elapsed();
+    tokio::time::timeout(Duration::from_secs(1), slow_connected_rx).await.unwrap().unwrap();
+
+    let fast_name = format!("/__cadence_sys/{root_name}/{fast_partition}");
+    let fast_queue = fast.durable_queue(
+        &key.domain_id.to_string(),
+        &p::TaskList { name: fast_name, kind: 1, ..Default::default() },
+        0,
+    ).await.unwrap();
+    assert_eq!(fast_queue.partitions.get().unwrap().version, 1,
+        "the later fast owner receives its refresh while the lower-ID slow peer is still pending");
+    assert!(elapsed >= Duration::from_millis(300), "the update waits for the caller deadline on the delayed peer");
+    assert!(elapsed < Duration::from_secs(2), "the delayed peer is bounded by the caller deadline");
+    assert_eq!(root_store.get_task_list(&key).unwrap().data.adaptive_partition_config.unwrap().version, 1,
+        "peer timeout remains best effort after the root config is persisted");
+
+    root.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    fast.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    fast_server.abort();
+    slow_peer.abort();
+}
+
+#[tokio::test]
 async fn matching_rpc_native_partition_concurrent_versions_and_fencing() {
     let (_dir, store, matching, key) = fixture();
     let registry = matching.queues.as_ref().unwrap();
