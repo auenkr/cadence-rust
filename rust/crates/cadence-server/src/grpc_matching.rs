@@ -1380,13 +1380,13 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForDecisionTask, Some(&request.get_ref().domain_id), None)?;
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         if incoming_deadline.is_none() {
             self.throttled_logger.error("PollForDecisionTask", "Context timeout not set for long poll API.");
             return Err(Status::invalid_argument("Context timeout is not set."));
         }
         let r = request.into_inner();
-        self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForDecisionTask, Some(&r.domain_id), None)?;
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
@@ -1553,13 +1553,13 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
+        self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForActivityTask, Some(&request.get_ref().domain_id), None)?;
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
         if incoming_deadline.is_none() {
             self.throttled_logger.error("PollForActivityTask", "Context timeout not set for long poll API.");
             return Err(Status::invalid_argument("Context timeout is not set."));
         }
         let r = request.into_inner();
-        self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForActivityTask, Some(&r.domain_id), None)?;
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;

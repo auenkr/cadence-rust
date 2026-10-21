@@ -1,22 +1,56 @@
 //! Shared rate limited error logging for Matching's long poll validation.
 use crate::admin::DynamicConfigOverlay;
+use cadence_common::rate_limiter::RateLimiter;
 use cadence_persistence::dynamic_config;
 use std::sync::{Arc, Mutex};
 
+const REFRESH_NANOS: i64 = 5_000_000_000;
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 type Sink = Arc<dyn Fn(&str) + Send + Sync>;
+type RateSource = Arc<dyn Fn() -> f64 + Send + Sync>;
 
-struct Bucket {
-    tokens: f64,
-    last: i64,
+struct DynamicBucket {
+    limiter: RateLimiter,
+    last_update: i64,
+    source: RateSource,
+}
+
+impl DynamicBucket {
+    fn burst(rate: f64) -> i64 {
+        if rate == 0.0 {
+            0
+        } else {
+            (rate.ceil() as i64).max(1)
+        }
+    }
+
+    fn new(source: RateSource, now: i64) -> Self {
+        let rate = source();
+        Self {
+            limiter: RateLimiter::new(rate, Self::burst(rate)),
+            last_update: now,
+            source,
+        }
+    }
+
+    fn allow(&mut self, now: i64) -> bool {
+        // Match Go quotas.NewDynamicRateLimiter: sample config at construction,
+        // then refresh on now.After(lastUpdate + TTL - 1ns). SetLimitAndBurst
+        // operates at the limiter's recorded time; do not advance it here.
+        if now > self.last_update.saturating_add(REFRESH_NANOS - 1) {
+            let rate = (self.source)();
+            self.limiter.set_limit_and_burst(rate, Self::burst(rate));
+            self.last_update = now;
+        }
+        self.limiter.allow(now)
+    }
 }
 
 /// One logger is shared by both Matching poll methods, as in Go handler.NewHandler.
 pub(crate) struct MatchingThrottledLogger {
-    overlay: Arc<Mutex<DynamicConfigOverlay>>,
     clock: Clock,
     sink: Sink,
-    bucket: Mutex<Bucket>,
+    bucket: Mutex<DynamicBucket>,
 }
 
 impl MatchingThrottledLogger {
@@ -38,45 +72,30 @@ impl MatchingThrottledLogger {
         clock: Clock,
         sink: Sink,
     ) -> Self {
-        let now = clock();
-        let initial_tokens = {
+        let source: RateSource = Arc::new(move || {
             let config = overlay.lock().expect("admin config lock");
             dynamic_config::integer(config.property_values("matching.throttledLogRPS"), None, 20)
-                .max(0) as f64
-        };
+                as f64
+        });
+        let now = clock();
         Self {
-            overlay,
             clock,
             sink,
-            bucket: Mutex::new(Bucket {
-                tokens: initial_tokens,
-                last: now,
-            }),
+            bucket: Mutex::new(DynamicBucket::new(source, now)),
         }
     }
 
     pub(crate) fn error(&self, handler: &str, message: &str) {
-        let rate = {
-            let config = self.overlay.lock().expect("admin config lock");
-            dynamic_config::integer(config.property_values("matching.throttledLogRPS"), None, 20)
-                .max(0) as f64
-        };
-        if rate == 0.0 {
-            return;
+        if self
+            .bucket
+            .lock()
+            .expect("Matching log bucket lock")
+            .allow((self.clock)())
+        {
+            (self.sink)(&format!(
+                "{message} handler={handler} error=Context timeout is not set."
+            ));
         }
-        let now = (self.clock)();
-        let mut bucket = self.bucket.lock().expect("Matching log bucket lock");
-        let elapsed = now.saturating_sub(bucket.last).max(0) as f64 / 1_000_000_000.0;
-        bucket.tokens = (bucket.tokens + elapsed * rate).min(rate);
-        bucket.last = now;
-        if bucket.tokens < 1.0 {
-            return;
-        }
-        bucket.tokens -= 1.0;
-        drop(bucket);
-        (self.sink)(&format!(
-            "{message} handler={handler} error=Context timeout is not set."
-        ));
     }
 }
 
@@ -85,23 +104,26 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
-    #[test]
-    fn activity_and_decision_errors_share_the_dynamic_rate_bucket() {
-        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+    fn set_rate(overlay: &Arc<Mutex<DynamicConfigOverlay>>, rate: i64) {
         overlay.lock().unwrap().update(
             false,
             "matching.throttledLogRPS",
             vec![cadence_api::admin::DynamicConfigValue {
                 value: Some(cadence_api::types::DataBlob::new(
                     cadence_api::enums::EncodingType::JSON,
-                    b"1".to_vec(),
+                    rate.to_string().into_bytes(),
                 )),
                 filters: vec![],
             }],
         );
-        let now = Arc::new(AtomicI64::new(0));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let logger = MatchingThrottledLogger::with_clock_and_sink(
+    }
+
+    fn logger(
+        overlay: Arc<Mutex<DynamicConfigOverlay>>,
+        now: Arc<AtomicI64>,
+        calls: Arc<AtomicUsize>,
+    ) -> MatchingThrottledLogger {
+        MatchingThrottledLogger::with_clock_and_sink(
             overlay,
             {
                 let now = now.clone();
@@ -113,21 +135,45 @@ mod tests {
                     calls.fetch_add(1, Ordering::SeqCst);
                 })
             },
-        );
-        logger.error(
-            "PollForActivityTask",
-            "Context timeout not set for long poll API.",
-        );
-        logger.error(
-            "PollForDecisionTask",
-            "Context timeout not set for long poll API.",
-        );
+        )
+    }
+
+    #[test]
+    fn default_rate_starts_with_twenty_tokens_and_is_shared_by_both_polls() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let logger = logger(overlay, Arc::new(AtomicI64::new(0)), calls.clone());
+        for i in 0..21 {
+            logger.error(
+                if i % 2 == 0 {
+                    "PollForActivityTask"
+                } else {
+                    "PollForDecisionTask"
+                },
+                "Context timeout not set for long poll API.",
+            );
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 20);
+    }
+
+    #[test]
+    fn zero_rate_blocks_initial_logs_and_new_rate_is_sampled_only_after_five_seconds() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        set_rate(&overlay, 0);
+        let now = Arc::new(AtomicI64::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let logger = logger(overlay.clone(), now.clone(), calls.clone());
+        logger.error("PollForActivityTask", "missing deadline");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        set_rate(&overlay, 1);
+        now.store(REFRESH_NANOS - 1, Ordering::SeqCst);
+        logger.error("PollForDecisionTask", "missing deadline");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        now.store(REFRESH_NANOS, Ordering::SeqCst);
+        logger.error("PollForDecisionTask", "missing deadline");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        now.store(REFRESH_NANOS + 1_000_000_000, Ordering::SeqCst);
+        logger.error("PollForDecisionTask", "missing deadline");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        now.store(1_000_000_000, Ordering::SeqCst);
-        logger.error(
-            "PollForDecisionTask",
-            "Context timeout not set for long poll API.",
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }
