@@ -129,3 +129,37 @@ root files over the candidate.
 - No build or tests were run. Matching is not complete; the parity audit,
   remaining failure/recovery behavior, PG inline PEM follow-up, and heavy-lane
   gates are outstanding.
+
+## Checkpoint refresh: `cedb83cbb`
+
+The current pushed candidate head is `cedb83cbb` (`Recompose Matching
+compatibility runner with MySQL probes`); its source tree was clean before this
+memory refresh. This supersedes
+the older status above that Cassandra recovery harness work and PG inline TLS
+were still pending. Current source inputs include PG inline TLS/cache
+(`a8db27ab1`, composed in `e219c4730`), Cassandra owner-crash and
+release/fresh-acquisition gates (`219758e37`, `21a7095dd`), and SQL multi-DB
+routing (`695198be0`, composed in `ed9254721`). Persistence quota rejection
+metric export is committed in `afbc2ca86`.
+
+The combined runner checkpoint retains telemetry MySQL task-GC, domain and blob
+observers, two-host Matching setup/cleanup/failover, Cassandra owner-correlated
+recovery, and conditional release/fresh-acquisition evidence. It has not yet
+incorporated the PG owner's expanded assertions for task type, GC/ack/range,
+domain/blob and handoff evidence. PG commits `f0d2a51ba` (feed SQL to
+`psql -f -` so psql variable expansion works) and `e3cfca7a6` (read evidence
+from the probe artifact directory) are ready to reconcile with that larger PG
+harness commit. A direct cherry-pick of `f0d2a51ba` was attempted and aborted
+without changes: its old `taskCount` implementation conflicts with the
+composed runner's `matching-task-observer` architecture. Reapply the SQL stdin
+behavior in the PG owner's updated observer changes; do not transplant the
+obsolete helper. The current probe writes `rust-postgres-evidence.json` below
+its `process.argv[5]` artifact directory.
+
+`node --check` passed for the combined CJS runner and `git diff --check` passed
+at `cedb83cbb`. No Go/Cargo builds, database probes, containers, services or
+runtime tests were run; PG retains the heavy lane. PG observer expansion,
+runtime multi-shard configuration, Cassandra protocol-version follow-up,
+careful later integration of the untouched root user overlay, and all required
+mixed Go/Rust gates remain outstanding. This is a source candidate and does
+not establish Matching completion.
