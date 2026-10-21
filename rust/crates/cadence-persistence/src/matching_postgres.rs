@@ -94,7 +94,6 @@ pub(crate) struct PostgresConnectionPool {
 struct PostgresTlsConnectorConfig {
     verify_peer: bool,
     verify_hostname: bool,
-    allow_plaintext_first: bool,
     root_cert: Option<String>,
     cert: Option<String>,
     key: Option<String>,
@@ -155,20 +154,6 @@ impl PostgresConnectionPool {
                 state.open += 1;
                 drop(state);
                 let connected: Result<Client> = match &self.tls {
-                    Some(tls) if tls.allow_plaintext_first => match self.options.connect(NoTls) {
-                        Ok(client) => Ok(client),
-                        Err(plain_error) if postgres_requires_tls(&plain_error) => {
-                            let mut secure_options = self.options.clone();
-                            secure_options.ssl_mode(SslMode::Require);
-                            match postgres_tls_connector(tls) {
-                                Ok(connector) => secure_options
-                                    .connect(connector)
-                                    .map_err(normalize_postgres_error),
-                                Err(error) => Err(error),
-                            }
-                        }
-                        Err(error) => Err(normalize_postgres_error(error)),
-                    },
                     Some(tls) => match postgres_tls_connector(tls) {
                         Ok(connector) => self
                             .options
@@ -762,7 +747,7 @@ fn postgres_options(
             if tls.ssl_mode.is_empty() {
                 "require".to_owned()
             } else {
-                tls.ssl_mode.to_ascii_lowercase()
+                tls.ssl_mode.clone()
             }
         })
         .unwrap_or_else(|| "disable".to_owned());
@@ -778,7 +763,7 @@ fn postgres_options(
         .unwrap_or_default();
     for (key, value) in &shard.connect_attributes {
         match key.to_ascii_lowercase().as_str() {
-            "sslmode" => ssl_mode = value.to_ascii_lowercase(),
+            "sslmode" => ssl_mode = value.clone(),
             "sslrootcert" => root_cert = value.clone(),
             "sslcert" => cert = value.clone(),
             "sslkey" => key_file = value.clone(),
@@ -805,15 +790,17 @@ fn postgres_options(
             }
         }
     }
-    let allow_plaintext_first = ssl_mode == "allow";
+    // lib/pq treats an explicitly empty sslmode like its default mode,
+    // require. ConnectAttributes are applied after the TLS block in Go.
+    if ssl_mode.is_empty() {
+        ssl_mode = "require".to_owned();
+    }
+    let root_cert_exists = !root_cert.is_empty() && std::path::Path::new(&root_cert).exists();
     let (mode, verify_peer, verify_hostname) = match ssl_mode.as_str() {
         "disable" => (SslMode::Disable, false, false),
-        // The synchronous driver has no lib/pq `allow` mode. The pool emulates
-        // it by trying plaintext, then retrying TLS only when PostgreSQL
-        // explicitly rejects the plaintext connection as SSL-off.
-        "allow" => (SslMode::Disable, false, false),
-        "prefer" => (SslMode::Prefer, false, false),
-        "require" => (SslMode::Require, false, false),
+        // lib/pq v1.10.2 treats require like verify-ca when sslrootcert
+        // exists, and ignores a missing sslrootcert.
+        "require" => (SslMode::Require, root_cert_exists, false),
         "verify-ca" => (SslMode::Require, true, false),
         "verify-full" => (SslMode::Require, true, true),
         other => {
@@ -832,34 +819,16 @@ fn postgres_options(
             ));
         }
         Some(PostgresTlsConnectorConfig {
-            verify_peer: if allow_plaintext_first {
-                false
-            } else {
-                verify_peer
-            },
-            verify_hostname: if allow_plaintext_first {
-                false
-            } else {
-                verify_hostname
-            },
-            allow_plaintext_first,
-            // lib/pq keeps certificate parameters when sslmode=allow is
-            // selected, including when ConnectAttributes overrides a TLS
-            // block's sslmode. The fallback remains `require` semantics, so
-            // CA material is loaded but does not enable peer verification.
-            root_cert: (!root_cert.is_empty()).then_some(root_cert),
+            verify_peer,
+            verify_hostname,
+            root_cert: (root_cert_exists || verify_peer)
+                .then_some(root_cert)
+                .filter(|path| !path.is_empty()),
             cert: (!cert.is_empty()).then_some(cert),
             key: (!key_file.is_empty()).then_some(key_file),
         })
     };
     Ok((options, tls))
-}
-
-fn postgres_requires_tls(error: &postgres::Error) -> bool {
-    error.as_db_error().is_some_and(|db_error| {
-        db_error.code().code() == "28000"
-            && db_error.message().to_ascii_lowercase().contains("ssl off")
-    })
 }
 
 fn postgres_tls_connector(config: &PostgresTlsConnectorConfig) -> Result<MakeTlsConnector> {
@@ -1068,37 +1037,104 @@ mod tests {
     }
 
     #[test]
-    fn postgres_sslmode_allow_is_plaintext_first_with_require_tls_fallback() {
-        let (options, tls) = postgres_options(&shard(&[("sslmode", "allow")])).unwrap();
-        assert_eq!(options.get_ssl_mode(), SslMode::Disable);
-        let tls = tls.expect("allow mode needs a TLS retry configuration");
-        assert!(tls.allow_plaintext_first);
-        assert!(!tls.verify_peer);
-        assert!(!tls.verify_hostname);
-        assert!(tls.root_cert.is_none());
-        assert!(tls.cert.is_none());
-        assert!(tls.key.is_none());
+    fn postgres_sslmode_matches_libpq_driver_modes() {
+        assert!(postgres_options(&shard(&[("sslmode", "allow")])).is_err());
+        assert!(postgres_options(&shard(&[("sslmode", "prefer")])).is_err());
+        assert!(postgres_options(&shard(&[("sslmode", "REQUIRE")])).is_err());
+        let (options, _) = postgres_options(&shard(&[("sslmode", "")])).unwrap();
+        assert_eq!(options.get_ssl_mode(), SslMode::Require);
 
-        // Go applies ConnectAttributes after TLS-derived parameters. Explicit
-        // sslmode therefore overrides tls.sslmode, including `allow`.
         let mut config = shard(&[]);
         config.tls = Some(PostgresTlsConfig {
             enabled: true,
             ssl_mode: "require".into(),
-            ca_file: "/configured/ca.pem".into(),
-            cert_file: "/configured/client.pem".into(),
-            key_file: "/configured/client.key".into(),
+            ca_file: "/nonexistent/postgres-ca.pem".into(),
+            cert_file: String::new(),
+            key_file: String::new(),
+        });
+        let (options, tls) = postgres_options(&config).unwrap();
+        assert_eq!(options.get_ssl_mode(), SslMode::Require);
+        let tls = tls.unwrap();
+        assert!(
+            !tls.verify_peer,
+            "lib/pq ignores a missing root certificate in require mode"
+        );
+        assert!(tls.root_cert.is_none());
+
+        // Go applies ConnectAttributes after TLS-derived parameters.
+        let mut config = shard(&[]);
+        config.tls = Some(PostgresTlsConfig {
+            enabled: true,
+            ssl_mode: "require".into(),
+            ca_file: String::new(),
+            cert_file: String::new(),
+            key_file: String::new(),
         });
         config
             .connect_attributes
             .insert("sslmode".into(), "allow".into());
-        let (options, tls) = postgres_options(&config).unwrap();
-        assert_eq!(options.get_ssl_mode(), SslMode::Disable);
-        let tls = tls.expect("ConnectAttributes allow override needs TLS retry");
-        assert!(tls.allow_plaintext_first);
-        assert_eq!(tls.root_cert.as_deref(), Some("/configured/ca.pem"));
-        assert_eq!(tls.cert.as_deref(), Some("/configured/client.pem"));
-        assert_eq!(tls.key.as_deref(), Some("/configured/client.key"));
+        assert!(postgres_options(&config).is_err());
+
+        let (options, tls) = postgres_options(&shard(&[("sslmode", "verify-ca")])).unwrap();
+        assert_eq!(options.get_ssl_mode(), SslMode::Require);
+        assert!(tls.unwrap().verify_peer);
+        let (options, tls) = postgres_options(&shard(&[("sslmode", "verify-full")])).unwrap();
+        assert_eq!(options.get_ssl_mode(), SslMode::Require);
+        let tls = tls.unwrap();
+        assert!(tls.verify_peer);
+        assert!(tls.verify_hostname);
+    }
+
+    #[test]
+    #[ignore = "live TLS oracle; run against the labelled disposable PostgreSQL instance"]
+    fn postgres_tls_live_oracle() {
+        let mut config = shard(&[]);
+        config.connect_addr =
+            std::env::var("CADENCE_POSTGRES_ADDR").expect("CADENCE_POSTGRES_ADDR is required");
+        config.user = std::env::var("CADENCE_POSTGRES_USER").unwrap_or_else(|_| "postgres".into());
+        config.password = std::env::var("CADENCE_POSTGRES_PASSWORD").unwrap_or_default();
+        config.database_name =
+            std::env::var("CADENCE_POSTGRES_DATABASE").unwrap_or_else(|_| "cadence".into());
+        let mode = std::env::var("CADENCE_POSTGRES_SSLMODE")
+            .expect("CADENCE_POSTGRES_SSLMODE is required");
+        if mode != "disable" {
+            config.tls = Some(PostgresTlsConfig {
+                enabled: true,
+                ssl_mode: mode.clone(),
+                ca_file: std::env::var("CADENCE_POSTGRES_CA_FILE").unwrap_or_default(),
+                cert_file: String::new(),
+                key_file: String::new(),
+            });
+        }
+        let expected_success = std::env::var("CADENCE_POSTGRES_TLS_EXPECT_SUCCESS")
+            .map(|value| value == "true")
+            .unwrap_or(true);
+        let attempt = postgres_options(&config).and_then(|(options, tls)| match tls {
+            Some(tls) => postgres_tls_connector(&tls).and_then(|connector| {
+                options.connect(connector).map_err(|error| {
+                    configuration_error(format!("live PostgreSQL TLS connection: {error}"))
+                })
+            }),
+            None => options.connect(NoTls).map_err(|error| {
+                configuration_error(format!("live PostgreSQL connection: {error}"))
+            }),
+        });
+        match (expected_success, attempt) {
+            (true, Ok(mut client)) => {
+                let value: i32 = client.query_one("SELECT 1", &[]).unwrap().get(0);
+                assert_eq!(value, 1);
+                println!("live PostgreSQL TLS case succeeded for sslmode={mode}");
+            }
+            (false, Err(error)) => {
+                println!(
+                    "live PostgreSQL TLS case rejected as expected for sslmode={mode}: {error}"
+                );
+            }
+            (true, Err(error)) => {
+                panic!("expected live PostgreSQL TLS success for sslmode={mode}: {error}")
+            }
+            (false, Ok(_)) => panic!("expected live PostgreSQL TLS rejection for sslmode={mode}"),
+        }
     }
 
     #[test]
