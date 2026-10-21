@@ -412,26 +412,30 @@ if args.postgres:
             (work / 'go-consumed-task-row-count.log').write_text(consume_rows.stdout + consume_rows.stderr)
             if consume_rows.returncode or consume_rows.stdout.strip() != '0':
                 raise RuntimeError(f'Go Matching completion left {consume_rows.stdout.strip()!r} pending task rows; see {work / "go-consumed-task-row-count.log"}')
-            # Go derives each task-ID block from the persisted range row, so the
-            # expected block comes from PostgreSQL rather than a hard-coded value.
-            range_ids = {}
-            for name in (rust_evidence['taskList'], pending['taskList']):
-                range_query = subprocess.run(['psql', '-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
-                    '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'task_list={name}',
-                    '-v', 'task_type=0', '-f', '-'],
-                    input="SELECT range_id FROM task_lists WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND name=:'task_list' AND task_type=:'task_type'::smallint;\n",
-                    env=pg_environment, capture_output=True, text=True, timeout=30)
-                (work / f'range-id-{name}.log').write_text(range_query.stdout + range_query.stderr)
-                if range_query.returncode or not range_query.stdout.strip().isdigit():
-                    raise RuntimeError(f'could not read decision task-list range for {name}; see {work / f"range-id-{name}.log"}')
-                range_ids[name] = range_query.stdout.strip()
             with (work / 'go-verification-probe.log').open('w') as output:
                 verification = subprocess.run(['node', str(root / 'tests/matching-postgres-go-verify.cjs'),
                     f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', rust_evidence['domain'],
                     rust_evidence['workflowId'], rust_evidence['runId'], rust_evidence['taskList'],
-                    pending['workflowId'], pending['runId'], pending['taskList'],
-                    range_ids[rust_evidence['taskList']], range_ids[pending['taskList']]],
+                    pending['workflowId'], pending['runId'], pending['taskList']],
                     cwd=root, stdout=output, stderr=subprocess.STDOUT, timeout=300)
+            if not verification.returncode:
+                # Go's task-ID block must match the range row it persisted: block =
+                # ((range-1)*100000+1, range*100000). Read the rows after the Go call,
+                # since DescribeTaskList can lease and advance a range.
+                verified = json.loads((work / 'go-verification-probe.log').read_text().strip().splitlines()[-1])
+                for key, name in (('taskList', rust_evidence['taskList']), ('consumedTaskList', pending['taskList'])):
+                    range_query = subprocess.run(['psql', '-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
+                        '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'task_list={name}',
+                        '-v', 'task_type=0', '-f', '-'],
+                        input="SELECT range_id FROM task_lists WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND name=:'task_list' AND task_type=:'task_type'::smallint;\n",
+                        env=pg_environment, capture_output=True, text=True, timeout=30)
+                    (work / f'range-id-{key}.log').write_text(range_query.stdout + range_query.stderr)
+                    if range_query.returncode or not range_query.stdout.strip().isdigit():
+                        raise RuntimeError(f'could not read decision task-list range for {name}; see {work / f"range-id-{key}.log"}')
+                    range_id = int(range_query.stdout.strip())
+                    block = verified['taskBlocks'][key]
+                    if block != {'startId': str((range_id - 1) * 100000 + 1), 'endId': str(range_id * 100000)}:
+                        raise RuntimeError(f'Go task-ID block {block} does not match persisted range {range_id} for {name}')
             (work / 'go-verification-results.json').write_text(json.dumps({
                 'exitCode': verification.returncode,
                 'topology': 'original Go Frontend/History/Matching/Worker reopened PostgreSQL after Rust Matching mixed-service run',
