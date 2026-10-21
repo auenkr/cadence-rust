@@ -1,0 +1,2 @@
+env CADENCE_MYSQL_DOCKER_CONTAINER=cadence-mysql-test
+/usr/bin/python3 tests/run-go-service-baseline.py --artifacts-dir /tmp/matching-telemetry-m3 --binary /home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/artifacts/frozen-production/cadence-server-go-original --rust-production-binary /home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/1c7f6b6b/cadence-server --rust-matching --matching-restart --mysql --history-transport grpc --matching-exporter m3 --evidence-dir memory/evidence/matching-telemetry/attempt-20261021-exporters/m3

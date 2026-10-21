@@ -1,0 +1,3 @@
+Pinned Go module: github.com/uber-go/tally v3.5.8+incompatible (go/go.mod, go/go.sum).
+Oracle source: /home/ubuntu/go/pkg/mod/github.com/uber-go/tally@v3.5.8+incompatible/prometheus/sanitize.go, DefaultSanitizerOpts applies AlphanumericRange + UnderscoreCharacters to names, label keys, and values, with replacement '_'. sanitize.go implements Value() via the configured ValidCharacters sanitizer, replacing every unsupported rune.
+Captured raw labels confirm the oracle: caller cadence-frontend -> cadence_frontend; cadence_service cadence-matching -> cadence_matching; probe domain hyphens -> underscores; operation and transport are unchanged. Exact same-sample positive request appears in qualifying-request-sample.txt and offline-validation.json below.

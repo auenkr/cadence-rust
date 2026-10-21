@@ -45,28 +45,48 @@ impl TaskIsolation<'_> {
     /// Empty group and zero duration mean no isolation. A selected group with
     /// zero duration means isolation has no age cutoff, not "leak immediately".
     pub fn select(&self) -> (&str, i64) {
+        let (group, duration, _) = self.select_with_cause();
+        (group, duration)
+    }
+
+    /// Preserve Go's leak reason while keeping `select`'s behavior and public
+    /// return shape for existing callers.
+    pub fn select_with_cause(&self) -> (&str, i64, Option<&'static str>) {
         if !self.enabled
             || self.sticky
             || self.group.is_empty()
-            || self.drained != Ok(false)
-            || !self.known
-            || !self.recent_poller
-            || !self
-                .partition_groups
-                .is_some_and(|groups| groups.is_empty() || groups.iter().any(|g| g == self.group))
         {
-            return ("", 0);
+            return ("", 0, None);
+        }
+        if self.drained.is_err() {
+            return ("", 0, Some("error"));
+        }
+        if self.drained == Ok(true) {
+            return ("", 0, Some("group_drained"));
+        }
+        if !self.known {
+            return ("", 0, Some("group_unknown"));
+        }
+        if !self.recent_poller {
+            return ("", 0, Some("no_recent_pollers"));
+        }
+        if !self
+            .partition_groups
+            .is_some_and(|groups| groups.is_empty() || groups.iter().any(|g| g == self.group))
+        {
+            return ("", 0, Some("partition_change"));
         }
         if self.total_duration == 0 {
-            return (self.group, 0);
+            return (self.group, 0, None);
         }
         if self.task_latency < self.total_duration.saturating_sub(MINIMUM_ISOLATION_NANOS) {
             (
                 self.group,
                 self.total_duration.saturating_sub(self.task_latency),
+                None,
             )
         } else {
-            ("", 0)
+            ("", 0, Some("expired"))
         }
     }
 }
@@ -151,5 +171,28 @@ mod tests {
                 expected
             );
         }
+    }
+    #[test]
+    fn selection_preserves_go_leak_causes() {
+        let policy = |drained, known, recent_poller, partition_groups, total_duration, task_latency| {
+            TaskIsolation {
+                enabled: true,
+                sticky: false,
+                group: "a",
+                known,
+                drained,
+                recent_poller,
+                partition_groups,
+                total_duration,
+                task_latency,
+            }
+        };
+        assert_eq!(policy(Err(()), true, true, Some(&[]), 0, 0).select_with_cause().2, Some("error"));
+        assert_eq!(policy(Ok(true), true, true, Some(&[]), 0, 0).select_with_cause().2, Some("group_drained"));
+        assert_eq!(policy(Ok(false), false, true, Some(&[]), 0, 0).select_with_cause().2, Some("group_unknown"));
+        assert_eq!(policy(Ok(false), true, false, Some(&[]), 0, 0).select_with_cause().2, Some("no_recent_pollers"));
+        let wrong_partition = vec!["b".to_owned()];
+        assert_eq!(policy(Ok(false), true, true, Some(&wrong_partition), 0, 0).select_with_cause().2, Some("partition_change"));
+        assert_eq!(policy(Ok(false), true, true, Some(&[]), 100, 60).select_with_cause().2, Some("expired"));
     }
 }

@@ -25,7 +25,14 @@ impl TaskGarbageCollector {
         now: Instant,
         delete: impl FnMut(i64, i64) -> Result<usize, E>,
     ) -> Result<usize, E> {
-        self.run_with_batch_provider(ack, || i64::from(batch.get()), max_interval, force, now, delete)
+        self.run_with_batch_provider(
+            ack,
+            || i64::from(batch.get()),
+            max_interval,
+            force,
+            now,
+            delete,
+        )
     }
 
     /// Sample Go's signed batch property after acquiring the GC serialization lock.
@@ -197,7 +204,10 @@ mod tests {
         let sampled = std::sync::atomic::AtomicUsize::new(0);
         let result: Result<usize, ()> = gc.run_with_batch_provider(
             1,
-            || { sampled.fetch_add(1, std::sync::atomic::Ordering::SeqCst); 4_294_967_296 },
+            || {
+                sampled.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                4_294_967_296
+            },
             Duration::from_secs(1),
             true,
             now,
@@ -210,14 +220,23 @@ mod tests {
         let seen = std::sync::atomic::AtomicI64::new(0);
         let result: Result<usize, ()> = gc.run_with_batch_provider(
             1,
-            || { sampled.fetch_add(1, std::sync::atomic::Ordering::SeqCst); 4_294_967_296 },
+            || {
+                sampled.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                4_294_967_296
+            },
             Duration::from_secs(1),
             true,
             now,
-            |_, batch| { seen.store(batch, std::sync::atomic::Ordering::SeqCst); Ok(0) },
+            |_, batch| {
+                seen.store(batch, std::sync::atomic::Ordering::SeqCst);
+                Ok(0)
+            },
         );
         assert_eq!(result, Ok(0));
-        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 4_294_967_296);
+        assert_eq!(
+            seen.load(std::sync::atomic::Ordering::SeqCst),
+            4_294_967_296
+        );
         assert_eq!(sampled.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(gc.ack_level(), 1);
     }
@@ -228,8 +247,16 @@ mod tests {
         let now = Instant::now();
         let mut calls = 0;
         let result: Result<usize, ()> = gc.run_with_batch_provider(
-            1, || 0, Duration::from_secs(1), true, now,
-            |_, batch| { assert_eq!(batch, 0); calls += 1; Err(()) },
+            1,
+            || 0,
+            Duration::from_secs(1),
+            true,
+            now,
+            |_, batch| {
+                assert_eq!(batch, 0);
+                calls += 1;
+                Err(())
+            },
         );
         assert_eq!(result, Ok(0));
         assert_eq!(calls, 1);
@@ -237,8 +264,20 @@ mod tests {
 
         let mut calls = 0;
         let result: Result<usize, ()> = gc.run_with_batch_provider(
-            1, || -2, Duration::from_secs(1), true, now,
-            |_, batch| { assert_eq!(batch, -2); calls += 1; if calls == 3 { Err(()) } else { Ok(9) } },
+            1,
+            || -2,
+            Duration::from_secs(1),
+            true,
+            now,
+            |_, batch| {
+                assert_eq!(batch, -2);
+                calls += 1;
+                if calls == 3 {
+                    Err(())
+                } else {
+                    Ok(9)
+                }
+            },
         );
         assert_eq!(result, Ok(18));
         assert_eq!(calls, 3);

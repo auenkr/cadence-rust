@@ -1,0 +1,27 @@
+{
+  "format": "prometheus",
+  "sampleCount": 1029254,
+  "requiredMetrics": [
+    "cadence_requests_per_tl",
+    "cadence_tasklist_request",
+    "poll_success_per_tl",
+    "cadence_client_requests"
+  ],
+  "expectedDomain": "service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e",
+  "prometheusExpectedLabels": {
+    "caller": "cadence_frontend",
+    "transport": "grpc",
+    "cadence_service": "cadence_matching",
+    "domain": "service_compat_1d6e593a_3607_469a_b1e7_8d7688b09f3e",
+    "operation": "RespondQueryTaskCompleted"
+  },
+  "positiveRequiredMetricSamples": {
+    "cadence_requests_per_tl": 12126,
+    "cadence_tasklist_request": 590,
+    "poll_success_per_tl": 1235,
+    "cadence_client_requests": 934
+  },
+  "requestSamples": [
+    "cadence_requests_per_tl{cadence_service=\"cadence_matching\",caller=\"cadence_frontend\",domain=\"service_compat_1d6e593a_3607_469a_b1e7_8d7688b09f3e\",operation=\"RespondQueryTaskCompleted\",task_list=\"query_1d6e593a_3607_469a_b1e7_8d7688b09f3e\",transport=\"grpc\"} 1"
+  ]
+}

@@ -1,0 +1,1027 @@
+use crate::cluster::metadata::update::{FetchedKeyspace, SchemaUpdate};
+use crate::cluster::metadata::{Peer, SingleKeyspaceMetadataError};
+use crate::errors::{ClusterStateTokenError, ConnectionPoolError};
+use crate::network::{Connection, ConnectivityChangeEvent, PoolConfig, VerifiedKeyspaceName};
+use crate::observability::metrics::Metrics;
+use crate::policies::host_filter::HostFilter;
+use crate::routing::locator::ReplicaLocator;
+use crate::routing::locator::tablets::{RawTablet, Tablet, TabletsInfo};
+use crate::routing::partitioner::{PartitionerName, calculate_token_for_partition_key};
+use crate::routing::{Shard, Token};
+use crate::utils::safe_format::IteratorSafeFormatExt;
+
+use crate::frame::response::result::TableSpec;
+use crate::serialize::row::{RowSerializationContext, SerializeRow, SerializedValues};
+use itertools::Itertools;
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tracing::{debug, warn};
+use uuid::Uuid;
+
+use super::metadata::{Keyspace, Metadata, Strategy, Table};
+use super::node::{Node, NodeRef};
+
+/// Helper struct to group parameters that are only needed to
+/// construct `Node` objects.
+pub(crate) struct NodeConfig {
+    // Config for `NodeConnectionPool` for all new nodes.
+    pub(crate) pool_config: PoolConfig,
+    // Keyspace send in "USE <keyspace name>" when opening each connection.
+    pub(crate) used_keyspace: Option<VerifiedKeyspaceName>,
+    // Sender part of that channel to pass to `PoolRefiller`s.
+    pub(crate) connectivity_events_sender: mpsc::UnboundedSender<ConnectivityChangeEvent>,
+    // Metrics passed to each new `NodeConnectionPool`.
+    pub(crate) metrics: Metrics,
+}
+
+/// Represents the state of the cluster, including known nodes, keyspaces, and replica locator.
+///
+/// It is immutable after creation, and is replaced atomically upon a metadata refresh.
+/// Can be accessed through [Session::get_cluster_state()](crate::client::session::Session::get_cluster_state).
+#[derive(Clone)]
+pub struct ClusterState {
+    /// All nodes known to be part of the cluster, accessible by their host ID.
+    /// Often refered to as "topology metadata".
+    pub(crate) known_nodes: HashMap<Uuid, Arc<Node>>, // Invariant: nonempty after Cluster::new()
+
+    /// Contains the same set of nodes as `known_nodes`.
+    ///
+    /// Introduced to fix the bug that zero-token nodes were missing from
+    /// `ClusterState::get_nodes_info()` slice, because the slice was borrowed
+    /// from `ReplicaLocator`, which only contains nodes with some tokens assigned.
+    // TODO: in 2.0, make `get_nodes_info()` return `Iterator` instead of a slice.
+    // Then, remove this field.
+    pub(crate) all_nodes: Vec<Arc<Node>>,
+
+    /// All keyspaces in the cluster, accessible by their name.
+    /// Often refered to as "schema metadata".
+    pub(crate) keyspaces: HashMap<String, Keyspace>,
+
+    /// The entity which provides a way to find the set of owning nodes (+shards, in case of ScyllaDB)
+    /// for a given (token, replication strategy, table) tuple.
+    /// It relies on both topology and schema metadata.
+    pub(crate) locator: ReplicaLocator,
+
+    /// The name of the cluster, as reported by the `cluster_name` column in `system.local`.
+    pub(crate) cluster_name: Option<String>,
+}
+
+impl std::fmt::Debug for ClusterState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ring_printer = {
+            struct RingSizePrinter(usize);
+            impl std::fmt::Debug for RingSizePrinter {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "<size={}>", self.0)
+                }
+            }
+            RingSizePrinter(self.locator.ring().len())
+        };
+
+        f.debug_struct("ClusterState")
+            .field("known_nodes", &self.known_nodes)
+            .field("ring", &ring_printer)
+            .field("keyspaces", &self.keyspaces.keys())
+            .finish_non_exhaustive()
+    }
+}
+
+type KnownNodes = HashMap<Uuid, Arc<Node>>;
+type Ring = Vec<(Token, Arc<Node>)>;
+
+impl ClusterState {
+    pub(crate) async fn wait_until_all_pools_are_initialized(&self) {
+        for node in self.locator.unique_nodes_in_global_ring().iter() {
+            node.wait_until_pool_initialized().await;
+        }
+    }
+
+    /// Triggers immediate pool refills for given nodes. This resets exponential
+    /// backoff for those nodes, so they will be retried immediately instead of
+    /// waiting for the next retry timeout.
+    ///
+    /// Suitable, among others, for nodes whose client routes were added or updated.
+    pub(super) fn trigger_pool_refills_for_hosts(&self, host_ids: impl Iterator<Item = Uuid>) {
+        for host_id in host_ids {
+            if let Some(node) = self.known_nodes.get(&host_id) {
+                debug!(
+                    host_id = %host_id,
+                    "Triggering immediate pool refill for relevant Node"
+                );
+                node.trigger_pool_refill();
+            }
+        }
+    }
+
+    /// Finds the known node whose address equals `addr`, if any.
+    ///
+    /// `STATUS_CHANGE` events carry the node's broadcast address. For a node learnt from
+    /// metadata that is exactly what [`Node::address`] holds
+    /// ([`NodeAddr::Translatable`], i.e. before any address translation), so the
+    /// comparison is right. In the current implementation, `Node` object always uses this variant.
+    fn node_by_broadcast_address(&self, addr: SocketAddr) -> Option<&Arc<Node>> {
+        self.known_nodes
+            .values()
+            .find(|node| node.address.into_inner() == addr)
+    }
+
+    /// Triggers an immediate pool refill for the node with the given broadcast
+    /// address. Used when a `STATUS_CHANGE UP` event hints that a node is back
+    /// and its pool (likely in exponential backoff) should retry immediately.
+    pub(super) fn trigger_pool_refill_for_addr(&self, addr: SocketAddr) {
+        let Some(node) = self.node_by_broadcast_address(addr) else {
+            debug!(
+                address = %addr,
+                "STATUS_CHANGE UP: no known node with this address"
+            );
+            return;
+        };
+        debug!(
+            address = %addr,
+            host_id = %node.host_id,
+            "STATUS_CHANGE UP: triggering immediate pool refill"
+        );
+        node.trigger_pool_refill();
+    }
+
+    /// Triggers an immediate keepalive request on all connections to the node with the
+    /// given broadcast address.
+    ///
+    /// Used when a `STATUS_CHANGE DOWN` event hints that the node's connections are
+    /// likely defunct, so the driver probes them immediately instead of waiting for the
+    /// next keepalive interval tick. If the probe fails, the connections are closed and
+    /// the node stops being targeted by the load balancing policy; if it succeeds, the
+    /// node is likely still alive and keeps being targeted.
+    pub(super) fn trigger_keepalive_for_addr(&self, addr: SocketAddr) {
+        let Some(node) = self.node_by_broadcast_address(addr) else {
+            debug!(
+                address = %addr,
+                "STATUS_CHANGE DOWN: no known node with this address"
+            );
+            return;
+        };
+        debug!(
+            address = %addr,
+            host_id = %node.host_id,
+            "STATUS_CHANGE DOWN: triggering immediate keepalive"
+        );
+        node.trigger_keepalive();
+    }
+
+    pub(crate) async fn new(
+        metadata: Metadata,
+        node_config: &NodeConfig,
+        host_filter: Option<&dyn HostFilter>,
+    ) -> Self {
+        let (new_known_nodes, ring) =
+            Self::calculate_new_topology(metadata.peers, &HashMap::new(), node_config, host_filter);
+
+        let keyspaces = Self::resolve_metadata_keyspaces(metadata.keyspaces, &HashMap::new());
+
+        let mut tablets = TabletsInfo::new();
+        // Perform maintenance to create empty entries for all tablets-based tables.
+        Self::perform_tablets_maintenance(
+            &mut tablets,
+            &HashMap::new(),
+            &new_known_nodes,
+            &keyspaces,
+        );
+
+        let (locator, keyspaces) = Self::calculate_new_locator(keyspaces, ring, tablets).await;
+
+        ClusterState {
+            all_nodes: new_known_nodes.values().cloned().collect(),
+            known_nodes: new_known_nodes,
+            keyspaces,
+            locator,
+            cluster_name: metadata.cluster_name,
+        }
+    }
+
+    /// Creates new ClusterState using information about topology and schema held
+    /// in `metadata`. Uses `self` to reuse data when possible.
+    pub(crate) async fn new_updated(
+        &self,
+        metadata: Metadata,
+        node_config: &NodeConfig,
+        host_filter: Option<&dyn HostFilter>,
+    ) -> Self {
+        let keyspaces = Self::resolve_metadata_keyspaces(metadata.keyspaces, &self.keyspaces);
+
+        let (new_known_nodes, ring) = Self::calculate_new_topology(
+            metadata.peers,
+            &self.known_nodes,
+            node_config,
+            host_filter,
+        );
+
+        let mut tablets = self.locator.tablets.clone();
+        Self::perform_tablets_maintenance(
+            &mut tablets,
+            &self.known_nodes,
+            &new_known_nodes,
+            &keyspaces,
+        );
+
+        let (locator, keyspaces) = Self::calculate_new_locator(keyspaces, ring, tablets).await;
+
+        ClusterState {
+            all_nodes: new_known_nodes.values().cloned().collect(),
+            known_nodes: new_known_nodes,
+            keyspaces,
+            locator,
+            cluster_name: metadata.cluster_name,
+        }
+    }
+
+    /// Creates a new `ClusterState` from partially fetched metadata, reusing
+    /// everything of `self` that the partial fetches did not read - the
+    /// counterpart of [`new_updated`](Self::new_updated) for partial fetches.
+    ///
+    /// `peers` is the peer list read by a partial topology fetch and `schema`
+    /// the per-keyspace schema read by a partial schema fetch; `None` means the
+    /// aspect was not re-read, so the one of `self` stands. The cluster name is
+    /// never re-read by a partial fetch - it is fixed for the lifetime of a
+    /// cluster.
+    pub(crate) async fn new_with_partial_changes(
+        &self,
+        peers: Option<Vec<Peer>>,
+        schema: Option<SchemaUpdate>,
+        node_config: &NodeConfig,
+        host_filter: Option<&dyn HostFilter>,
+    ) -> Self {
+        let (new_known_nodes, ring) = match peers {
+            Some(peers) => {
+                Self::calculate_new_topology(peers, &self.known_nodes, node_config, host_filter)
+            }
+            // The ring in place is exactly the (token, node) list that the
+            // unchanged topology implies, so it is reused as is.
+            None => (
+                self.known_nodes.clone(),
+                self.locator.ring().iter().cloned().collect(),
+            ),
+        };
+
+        let keyspaces = match schema {
+            Some(schema) => self.updated_keyspaces(schema),
+            None => self.keyspaces.clone(),
+        };
+
+        let mut tablets = self.locator.tablets.clone();
+        Self::perform_tablets_maintenance(
+            &mut tablets,
+            &self.known_nodes,
+            &new_known_nodes,
+            &keyspaces,
+        );
+
+        let (locator, keyspaces) = Self::calculate_new_locator(keyspaces, ring, tablets).await;
+
+        ClusterState {
+            all_nodes: new_known_nodes.values().cloned().collect(),
+            known_nodes: new_known_nodes,
+            keyspaces,
+            locator,
+            cluster_name: self.cluster_name.clone(),
+        }
+    }
+
+    /// Applies a partial schema update onto the schema metadata of `self`:
+    /// replaces the metadata of the re-read keyspaces and removes those that
+    /// ceased to exist, keeping every keyspace the update does not mention.
+    fn updated_keyspaces(&self, schema: SchemaUpdate) -> HashMap<String, Keyspace> {
+        let mut new_keyspaces = self.keyspaces.clone();
+
+        for (name, keyspace) in schema.keyspaces {
+            // A keyspace whose fresh metadata turned out inconsistent keeps its
+            // previous version, as after a full fetch - hence the resolution
+            // step, shared with `new_updated`.
+            let resolved = match keyspace {
+                FetchedKeyspace::Present(keyspace) => {
+                    Self::resolve_metadata_keyspace(&name, keyspace, &self.keyspaces)
+                }
+                FetchedKeyspace::Absent => None,
+            };
+
+            match resolved {
+                Some(keyspace) => new_keyspaces.insert(name, keyspace),
+                None => new_keyspaces.remove(&name),
+            };
+        }
+
+        new_keyspaces
+    }
+
+    /// Creates a new topology (`Node` objects and token ring) from metadata peers,
+    /// and previous topology.
+    ///
+    /// Previous topology is used to reuse connection pools and `Node` objects when possible.
+    fn calculate_new_topology(
+        peers: Vec<Peer>,
+        known_nodes: &KnownNodes,
+        node_config: &NodeConfig,
+        host_filter: Option<&dyn HostFilter>,
+    ) -> (KnownNodes, Ring) {
+        // Create new updated known_nodes and ring
+        let mut new_known_nodes: KnownNodes = HashMap::with_capacity(peers.len());
+        let mut ring: Ring = Vec::new();
+
+        for peer in peers {
+            // Take existing Arc<Node> if possible, otherwise create new one.
+            let peer_host_id = peer.host_id;
+            let is_enabled = host_filter.is_none_or(|f| f.accept(&peer));
+            let (peer_endpoint, peer_tokens) = peer.into_peer_endpoint_and_tokens();
+
+            let node = match (is_enabled, known_nodes.get(&peer_host_id)) {
+                // If the node is disabled, then we never want to have a connection pool to it.
+                // If it already existed, and was disabled, and all parameters (dc, rack, address) match
+                // then we can reuse the object.
+                // Otherwise we need to create a new one.
+                (false, Some(node))
+                    if !node.is_enabled()
+                        && node.datacenter == peer_endpoint.datacenter
+                        && node.rack == peer_endpoint.rack
+                        && node.address == peer_endpoint.address =>
+                {
+                    Arc::clone(node)
+                }
+                (false, _) => Arc::new(Node::new_disabled(peer_endpoint)),
+                // Changing rack/datacenter but not ip address seems improbable
+                // so we can just create new node and connections in such case.
+                // Here we allow preserving the Node object in full if all attributes (dc, rack, address)
+                // match. If only address is different, we recreate Node object but share the same underlying pool.
+                //
+                // IMPORTANT EDGE CASE: The old Node object might have been disabled. We know that the new Node object
+                // must be enabled, so there is no point in using the old one then.
+                (true, Some(node))
+                    if node.is_enabled()
+                        && node.datacenter == peer_endpoint.datacenter
+                        && node.rack == peer_endpoint.rack =>
+                {
+                    if node.address == peer_endpoint.address {
+                        Arc::clone(node)
+                    } else {
+                        // If IP changes, the Node struct is recreated, but the underlying pool is preserved and notified about the IP change.
+                        Arc::new(Node::inherit_with_ip_changed(node, peer_endpoint))
+                    }
+                }
+                (true, _) => Arc::new(Node::new(
+                    peer_endpoint,
+                    &node_config.pool_config,
+                    node_config.connectivity_events_sender.clone(),
+                    node_config.used_keyspace.clone(),
+                    node_config.metrics.clone(),
+                )),
+            };
+
+            new_known_nodes.insert(peer_host_id, Arc::clone(&node));
+
+            for token in peer_tokens {
+                ring.push((token, Arc::clone(&node)));
+            }
+        }
+
+        (new_known_nodes, ring)
+    }
+
+    /// Handles single-keyspace errors by reusing old `Keyspace` objects for such
+    /// broken keyspaces and warns about it.
+    fn resolve_metadata_keyspaces(
+        meta_keyspaces: HashMap<String, Result<Keyspace, SingleKeyspaceMetadataError>>,
+        old_keyspaces: &HashMap<String, Keyspace>,
+    ) -> HashMap<String, Keyspace> {
+        meta_keyspaces
+            .into_iter()
+            .filter_map(|(ks_name, ks)| {
+                Self::resolve_metadata_keyspace(&ks_name, ks, old_keyspaces).map(|ks| (ks_name, ks))
+            })
+            .collect()
+    }
+
+    /// [`resolve_metadata_keyspaces`](Self::resolve_metadata_keyspaces) for a
+    /// single keyspace. `None` means there is no metadata to be had for it,
+    /// neither fresh nor previous, so it belongs in no `ClusterState`.
+    fn resolve_metadata_keyspace(
+        ks_name: &str,
+        ks: Result<Keyspace, SingleKeyspaceMetadataError>,
+        old_keyspaces: &HashMap<String, Keyspace>,
+    ) -> Option<Keyspace> {
+        match ks {
+            Ok(ks) => Some(ks),
+            Err(e) => {
+                if let Some(old_ks) = old_keyspaces.get(ks_name) {
+                    warn!(
+                        "Encountered an error while processing \
+                        metadata of keyspace \"{ks_name}\": {e}. \
+                        Re-using older version of this keyspace metadata"
+                    );
+                    Some(old_ks.clone())
+                } else {
+                    warn!(
+                        "Encountered an error while processing metadata \
+                        of keyspace \"{ks_name}\": {e}. \
+                        No previous version of this keyspace metadata found, so it will not be \
+                        present in ClusterState until next refresh."
+                    );
+                    None
+                }
+            }
+        }
+    }
+
+    fn perform_tablets_maintenance(
+        tablets: &mut TabletsInfo,
+        old_known_nodes: &KnownNodes,
+        new_known_nodes: &KnownNodes,
+        keyspaces: &HashMap<String, Keyspace>,
+    ) {
+        let removed_nodes = {
+            let mut removed_nodes = HashSet::new();
+            for old_peer in old_known_nodes {
+                if !new_known_nodes.contains_key(old_peer.0) {
+                    removed_nodes.insert(*old_peer.0);
+                }
+            }
+
+            removed_nodes
+        };
+
+        let recreated_nodes = {
+            let mut recreated_nodes = HashMap::new();
+            for (old_peer_id, old_peer_node) in old_known_nodes {
+                if let Some(new_peer_node) = new_known_nodes.get(old_peer_id)
+                    && !Arc::ptr_eq(old_peer_node, new_peer_node)
+                {
+                    recreated_nodes.insert(*old_peer_id, Arc::clone(new_peer_node));
+                }
+            }
+
+            recreated_nodes
+        };
+
+        tablets.perform_maintenance(keyspaces, &removed_nodes, new_known_nodes, &recreated_nodes)
+    }
+
+    async fn calculate_new_locator(
+        keyspaces: HashMap<String, Keyspace>,
+        ring: Ring,
+        tablets: TabletsInfo,
+    ) -> (ReplicaLocator, HashMap<String, Keyspace>) {
+        tokio::task::spawn_blocking(move || {
+            let keyspace_strategies = keyspaces
+                .values()
+                .filter(|ks| !ks.tablet_based)
+                .map(|ks| &ks.strategy);
+            let locator = ReplicaLocator::new(ring.into_iter(), keyspace_strategies, tablets);
+            (locator, keyspaces)
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Returns the name of the cluster, as reported by the `cluster_name` column in `system.local`.
+    pub fn cluster_name(&self) -> &str {
+        self.cluster_name.as_deref().unwrap_or("")
+    }
+
+    /// Access keyspace details collected by the driver.
+    pub fn get_keyspace(&self, keyspace: impl AsRef<str>) -> Option<&Keyspace> {
+        self.keyspaces.get(keyspace.as_ref())
+    }
+
+    /// Returns an iterator over keyspaces.
+    pub fn keyspaces_iter(&self) -> impl Iterator<Item = (&str, &Keyspace)> {
+        self.keyspaces.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Access details about nodes known to the driver
+    pub fn get_nodes_info(&self) -> &[Arc<Node>] {
+        &self.all_nodes
+    }
+
+    /// Access details about specific node known to the driver, querying by host id.
+    pub fn get_node_by_host_id(&self, host_id: Uuid) -> Option<NodeRef<'_>> {
+        self.known_nodes.get(&host_id)
+    }
+
+    /// Compute token of a table partition key
+    ///
+    /// `partition_key` argument contains the values of all partition key
+    /// columns. You can use both unnamed values like a tuple (e.g. `(1, 5, 5)`)
+    /// or named values (e.g. struct that derives `SerializeRow`), as you would
+    /// when executing a request. No additional values are allowed besides values
+    /// for primary key columns.
+    pub fn compute_token(
+        &self,
+        keyspace: &str,
+        table: &str,
+        partition_key: &dyn SerializeRow,
+    ) -> Result<Token, ClusterStateTokenError> {
+        let table_meta = self.lookup_table_meta(keyspace, table)?;
+
+        let values = SerializedValues::from_serializable(
+            &RowSerializationContext::from_specs(table_meta.pk_column_specs.as_slice()),
+            partition_key,
+        )?;
+
+        // Delegate actual token calculation to centralized helper.
+        self.do_compute_token(table_meta, &values)
+    }
+
+    fn do_compute_token(
+        &self,
+        table: &Table,
+        serialized_partition_key: &SerializedValues,
+    ) -> Result<Token, ClusterStateTokenError> {
+        let partitioner = table
+            .partitioner
+            .as_deref()
+            .and_then(PartitionerName::from_str)
+            .unwrap_or_default();
+        calculate_token_for_partition_key(serialized_partition_key, &partitioner)
+            .map_err(ClusterStateTokenError::TokenCalculation)
+    }
+
+    /// Helper: lookup table metadata or return `UnknownTable` error.
+    fn lookup_table_meta(
+        &self,
+        keyspace: &str,
+        table: &str,
+    ) -> Result<&Table, ClusterStateTokenError> {
+        self.keyspaces
+            .get(keyspace)
+            .and_then(|k| k.tables.get(table))
+            .ok_or_else(|| ClusterStateTokenError::UnknownTable {
+                keyspace: keyspace.to_string(),
+                table: table.to_string(),
+            })
+    }
+
+    /// Access to replicas owning a given token
+    pub fn get_token_endpoints(
+        &self,
+        keyspace: &str,
+        table: &str,
+        token: Token,
+    ) -> Vec<(Arc<Node>, Shard)> {
+        let table_spec = TableSpec::borrowed(keyspace, table);
+        self.get_token_endpoints_iter(&table_spec, token)
+            .map(|(node, shard)| (node.clone(), shard))
+            .collect()
+    }
+
+    pub(crate) fn get_token_endpoints_iter(
+        &self,
+        table_spec: &TableSpec,
+        token: Token,
+    ) -> impl Iterator<Item = (NodeRef<'_>, Shard)> + Clone + use<'_> {
+        let keyspace = self.keyspaces.get(table_spec.ks_name());
+        let strategy = keyspace
+            .map(|k| &k.strategy)
+            .unwrap_or(&Strategy::LocalStrategy);
+        let replica_set = self
+            .replica_locator()
+            .replicas_for_token(token, strategy, None, table_spec);
+
+        replica_set.into_iter()
+    }
+
+    /// Access to replicas owning a given partition key (similar to `nodetool getendpoints`)
+    ///
+    /// `partition_key` argument contains the values of all partition key
+    /// columns. You can use both unnamed values like a tuple (e.g. `(1, 5, 5)`)
+    /// or named values (e.g. struct that derives `SerializeRow`), as you would
+    /// when executing a request. No additional values are allowed besides values
+    /// for primary key columns.
+    pub fn get_endpoints(
+        &self,
+        keyspace: &str,
+        table: &str,
+        partition_key: &dyn SerializeRow,
+    ) -> Result<Vec<(Arc<Node>, Shard)>, ClusterStateTokenError> {
+        let token = self.compute_token(keyspace, table, partition_key)?;
+        Ok(self.get_token_endpoints(keyspace, table, token))
+    }
+
+    /// Access replica location info
+    pub fn replica_locator(&self) -> &ReplicaLocator {
+        &self.locator
+    }
+
+    /// Returns nonempty iterator (over nodes) of iterators (over shards).
+    ///
+    /// External iterator iterates over nodes.
+    /// Internal iterator iterates over working connections to all shards of given node.
+    pub(crate) fn iter_working_connections_per_node(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = (Uuid, impl Iterator<Item = Arc<Connection>> + use<>)> + use<'_>,
+        ConnectionPoolError,
+    > {
+        // The returned iterator is nonempty by nonemptiness invariant of `self.known_nodes`.
+        assert!(!self.known_nodes.is_empty());
+        let nodes_iter = self.known_nodes.values();
+        let mut connection_pool_per_node_iter = nodes_iter.map(|node| {
+            node.get_working_connections()
+                .map(|pool| (node.host_id, pool))
+        });
+
+        // First we try to find the first working pool of connections.
+        // If none is found, return error.
+        let first_working_pool_or_error: Result<(Uuid, Vec<Arc<Connection>>), ConnectionPoolError> =
+            connection_pool_per_node_iter
+                .by_ref()
+                .find_or_first(Result::is_ok)
+                .expect("impossible: known_nodes was asserted to be nonempty");
+
+        // We have:
+        // 1. either consumed the whole iterator without success and got the first error,
+        //    in which case we propagate it;
+        // 2. or found the first working pool of connections.
+        let first_working_pool: (Uuid, Vec<Arc<Connection>>) = first_working_pool_or_error?;
+
+        // We retrieve connection pools for remaining nodes (those that are left in the iterator
+        // once the first working pool has been found).
+        let remaining_pools_iter = connection_pool_per_node_iter;
+        // Errors (non-working pools) are filtered out.
+        let remaining_working_pools_iter = remaining_pools_iter.filter_map(Result::ok);
+
+        // First pool is chained with the rest.
+        // Then, pools are made iterators, so now we have `impl Iterator<Item = (Uuid, impl Iterator<Item = Arc<Connection>>)>`.
+        Ok(std::iter::once(first_working_pool)
+            .chain(remaining_working_pools_iter)
+            .map(|(host_id, pool)| (host_id, IntoIterator::into_iter(pool))))
+        // By an invariant `self.known_nodes` is nonempty, so the returned iterator
+        // is nonempty, too.
+    }
+
+    /// Returns nonempty iterator of working connections to all shards.
+    pub(crate) fn iter_working_connections_to_shards(
+        &self,
+    ) -> Result<impl Iterator<Item = Arc<Connection>> + use<'_>, ConnectionPoolError> {
+        self.iter_working_connections_per_node()
+            .map(|outer_iter| outer_iter.flat_map(|(_, inner_iter)| inner_iter))
+    }
+
+    /// Returns nonempty iterator of working connections to all nodes.
+    pub(crate) fn iter_working_connections_to_nodes(
+        &self,
+    ) -> Result<impl Iterator<Item = Arc<Connection>> + use<'_>, ConnectionPoolError> {
+        // The returned iterator is nonempty by nonemptiness invariant of `self.known_nodes`.
+        assert!(!self.known_nodes.is_empty());
+        let nodes_iter = self.known_nodes.values();
+        let mut single_connection_per_node_iter =
+            nodes_iter.map(|node| node.get_random_connection());
+
+        // First we try to find the first working connection.
+        // If none is found, return error.
+        let first_working_connection_or_error: Result<Arc<Connection>, ConnectionPoolError> =
+            single_connection_per_node_iter
+                .by_ref()
+                .find_or_first(Result::is_ok)
+                .expect("impossible: known_nodes was asserted to be nonempty");
+
+        // We have:
+        // 1. either consumed the whole iterator without success and got the first error,
+        //    in which case we propagate it;
+        // 2. or found the first working connection.
+        let first_working_connection: Arc<Connection> = first_working_connection_or_error?;
+
+        // We retrieve single random connections for remaining nodes (those that are left in the iterator
+        // once the first working connection has been found). Errors (non-working connections) are filtered out.
+        let remaining_connection_iter = single_connection_per_node_iter.filter_map(Result::ok);
+
+        // Connections to the remaining nodes are chained to the first working connection.
+        Ok(std::iter::once(first_working_connection).chain(remaining_connection_iter))
+        // The returned iterator is nonempty, because it returns at least `first_working_pool`.
+    }
+
+    #[cfg(test)]
+    fn known_nodes(&self) -> &HashMap<Uuid, Arc<Node>> {
+        &self.known_nodes
+    }
+
+    pub(crate) fn update_tablets(&mut self, raw_tablets: Vec<(TableSpec<'static>, RawTablet)>) {
+        let replica_translator = |uuid: Uuid| self.known_nodes.get(&uuid).cloned();
+
+        for (table, raw_tablet) in raw_tablets.into_iter() {
+            // Should we skip tablets that belong to a keyspace not present in
+            // self.keyspaces? The keyspace could have been, without driver's knowledge:
+            // 1. Dropped - in which case we'll remove its info soon (when refreshing
+            // topology) anyway.
+            // 2. Created - no harm in storing the info now.
+            //
+            // So I think we can safely skip checking keyspace presence.
+            let tablet = match Tablet::from_raw_tablet(raw_tablet, replica_translator) {
+                Ok(t) => t,
+                Err((t, f)) => {
+                    debug!(
+                        "Nodes ({}) that are replicas for a tablet {{ks: {}, table: {}, range: [{}. {}]}} not present in current ClusterState.known_nodes. \
+                       Skipping these replicas until topology refresh",
+                        f.iter().safe_format(", "),
+                        table.ks_name(),
+                        table.table_name(),
+                        t.range().0.value(),
+                        t.range().1.value()
+                    );
+                    t
+                }
+            };
+            self.locator.tablets.add_tablet(table, tablet);
+        }
+    }
+}
+
+/// Additional API for interop-based code.
+#[cfg(all(scylla_unstable, feature = "unstable-csharp-rs"))]
+impl ClusterState {
+    /// Compute token for an externally-provided **serialized** partition key.
+    ///
+    /// For typical Rust code that starts from strongly-typed key values, prefer
+    /// [`ClusterState::compute_token`], which takes typed values and handles their
+    /// serialization into [`SerializedValues`] for you.
+    ///
+    /// This is a lower-level variant of [`ClusterState::compute_token`] intended for interop
+    /// and FFI use, when the caller already has a [`SerializedValues`] representing
+    /// the partition key.
+    ///
+    /// # Partition key format
+    ///
+    /// `serialized_partition_key` must contain **exactly** the serialized values of
+    /// the table’s partition key columns:
+    ///
+    /// - Values must be provided in the same order as the partition key columns are
+    ///   defined in the table schema (e.g. `PRIMARY KEY ((k1, k2), ...)` means `k1`,
+    ///   then `k2`).
+    /// - Each value must be serialized using the CQL type of the corresponding
+    ///   partition key column, using the standard CQL binary encoding (including
+    ///   length prefixes for composite keys).
+    /// - Only partition key columns are allowed; clustering or regular columns must
+    ///   not be included.
+    /// - Partition key components must not be null or unset.
+    ///
+    /// This method performs no reordering or validation beyond basic structural
+    /// checks. If the provided values do not exactly match the table’s partition key
+    /// definition in order, type, or encoding, token computation will produce
+    /// incorrect results.
+    ///
+    /// # Usage notes
+    ///
+    /// Use this method when you already have a `SerializedValues` representation of
+    /// the partition key, for example:
+    ///
+    /// - from another language / binding,
+    /// - from code that manually constructs `SerializedValues` using
+    ///   [`RowSerializationContext`] and the [`SerializeRow`] trait.
+    ///
+    /// # Correctness validation
+    ///
+    /// Type validation at this stage would be difficult, as it would likely require deserializing
+    /// each value to check its type against the table schema. Therefore, it is the caller’s
+    /// responsibility to ensure that the provided serialized values are correct for the target
+    /// table’s partition key.
+    pub fn compute_token_preserialized(
+        &self,
+        keyspace: &str,
+        table: &str,
+        serialized_partition_key: &SerializedValues,
+    ) -> Result<Token, ClusterStateTokenError> {
+        let table_meta = self.lookup_table_meta(keyspace, table)?;
+        self.do_compute_token(table_meta, serialized_partition_key)
+    }
+
+    /// Compute token using a specific partitioner, bypassing table metadata lookup.
+    ///
+    /// See [`ClusterState::compute_token_preserialized`] for details on
+    /// the `serialized_partition_key` format.
+    ///
+    /// This is useful when the table metadata is not available but the partitioner
+    /// is known (or default Murmur3 is desired).
+    /// This is the case for the following (Obsolete) C# Driver API:
+    /// ```csharp
+    /// public ICollection<HostShard> GetReplicas(string keyspaceName, byte[] partitionKey);
+    /// ```
+    /// Once this API is removed, this method can be removed as well.
+    pub fn compute_token_preserialized_with_partitioner(
+        &self,
+        partitioner: &PartitionerName,
+        serialized_partition_key: &SerializedValues,
+    ) -> Result<Token, ClusterStateTokenError> {
+        calculate_token_for_partition_key(serialized_partition_key, partitioner)
+            .map_err(ClusterStateTokenError::TokenCalculation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cluster::metadata::{Metadata, Peer};
+    use crate::cluster::node::NodeAddr;
+    use crate::policies::host_filter::HostFilter;
+    use crate::test_utils::setup_tracing;
+
+    use std::collections::{HashMap, HashSet};
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    fn make_addr(id: u16) -> NodeAddr {
+        NodeAddr::Translatable(SocketAddr::from(([255, 255, 255, id as u8], id)))
+    }
+
+    fn make_peer(
+        host_id: Uuid,
+        address: NodeAddr,
+        datacenter: Option<&str>,
+        rack: Option<&str>,
+    ) -> Peer {
+        Peer {
+            host_id,
+            address,
+            tokens: vec![Token::new(1)],
+            datacenter: datacenter.map(String::from),
+            rack: rack.map(String::from),
+        }
+    }
+
+    fn make_metadata(peers: Vec<Peer>) -> Metadata {
+        Metadata {
+            peers,
+            keyspaces: HashMap::new(),
+            client_routes: None,
+            cluster_name: Some("Test Cluster".into()),
+        }
+    }
+
+    /// A host filter that rejects peers whose address is in the reject set.
+    struct AddrRejectFilter {
+        rejected: HashSet<NodeAddr>,
+    }
+
+    impl AddrRejectFilter {
+        fn rejecting(addrs: impl IntoIterator<Item = NodeAddr>) -> Self {
+            Self {
+                rejected: addrs.into_iter().collect(),
+            }
+        }
+    }
+
+    impl HostFilter for AddrRejectFilter {
+        fn accept(&self, peer: &Peer) -> bool {
+            !self.rejected.contains(&peer.address)
+        }
+    }
+
+    /// Helper: build a ClusterState from metadata and an optional host filter.
+    async fn new_cluster_state(
+        metadata: Metadata,
+        host_filter: Option<&dyn HostFilter>,
+    ) -> ClusterState {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let node_config = NodeConfig {
+            pool_config: Default::default(),
+            used_keyspace: None,
+            connectivity_events_sender: tx,
+            metrics: Default::default(),
+        };
+        ClusterState::new(metadata, &node_config, host_filter).await
+    }
+
+    /// Helper: build a ClusterState from metadata, old state, and an optional host filter.
+    async fn update_cluster_state(
+        previous: &ClusterState,
+        metadata: Metadata,
+        host_filter: Option<&dyn HostFilter>,
+    ) -> ClusterState {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let node_config = NodeConfig {
+            pool_config: Default::default(),
+            used_keyspace: None,
+            connectivity_events_sender: tx,
+            metrics: Default::default(),
+        };
+        previous
+            .new_updated(metadata, &node_config, host_filter)
+            .await
+    }
+
+    // Node's address changes so that host filter no longer rejects it.
+    // The node should become enabled, and the Node object must NOT be reused.
+    #[tokio::test]
+    async fn node_included_after_ip_change_not_filtered_anymore() {
+        setup_tracing();
+
+        let host_id = Uuid::new_v4();
+        let addr_rejected = make_addr(1);
+        let addr_accepted = make_addr(2);
+        let filter = AddrRejectFilter::rejecting([addr_rejected]);
+
+        // Build initial state: peer at addr_rejected ⇒ disabled.
+        let initial_metadata = make_metadata(vec![make_peer(
+            host_id,
+            addr_rejected,
+            Some("dc1"),
+            Some("r1"),
+        )]);
+        let initial_state = new_cluster_state(initial_metadata, Some(&filter)).await;
+        let old_node = initial_state.known_nodes().get(&host_id).unwrap().clone();
+        assert!(
+            !old_node.is_enabled(),
+            "node should be disabled when its address is rejected"
+        );
+
+        // Refresh: same host_id moves to addr_accepted ⇒ should be enabled.
+        let new_metadata = make_metadata(vec![make_peer(
+            host_id,
+            addr_accepted,
+            Some("dc1"),
+            Some("r1"),
+        )]);
+        let new_state = update_cluster_state(&initial_state, new_metadata, Some(&filter)).await;
+        let new_node = new_state.known_nodes().get(&host_id).unwrap();
+
+        assert!(
+            new_node.is_enabled(),
+            "node should be enabled after address change passes the filter"
+        );
+        assert!(
+            !Arc::ptr_eq(&old_node, new_node),
+            "Node object must NOT be reused when transitioning from disabled to enabled"
+        );
+    }
+
+    // Node's address changes so that host filter now rejects it.
+    // The node should become disabled, and the Node object must NOT be reused.
+    #[tokio::test]
+    async fn node_filtered_out_after_ip_change() {
+        setup_tracing();
+
+        let host_id = Uuid::new_v4();
+        let addr_accepted = make_addr(1);
+        let addr_rejected = make_addr(2);
+        let filter = AddrRejectFilter::rejecting([addr_rejected]);
+
+        // Build initial state: peer at addr_accepted ⇒ enabled.
+        let initial_metadata = make_metadata(vec![make_peer(
+            host_id,
+            addr_accepted,
+            Some("dc1"),
+            Some("r1"),
+        )]);
+        let initial_state = new_cluster_state(initial_metadata, Some(&filter)).await;
+        let old_node = initial_state.known_nodes().get(&host_id).unwrap().clone();
+        assert!(
+            old_node.is_enabled(),
+            "node should be enabled when its address is accepted"
+        );
+
+        // Refresh: same host_id moves to addr_rejected ⇒ should be disabled.
+        let new_metadata = make_metadata(vec![make_peer(
+            host_id,
+            addr_rejected,
+            Some("dc1"),
+            Some("r1"),
+        )]);
+        let new_state = update_cluster_state(&initial_state, new_metadata, Some(&filter)).await;
+        let new_node = new_state.known_nodes().get(&host_id).unwrap();
+
+        assert!(
+            !new_node.is_enabled(),
+            "node should be disabled after address change hits the filter"
+        );
+        assert!(
+            !Arc::ptr_eq(&old_node, new_node),
+            "Node object must NOT be reused when transitioning from enabled to disabled"
+        );
+    }
+
+    // A disabled node whose attributes (dc, rack, address) have not changed
+    // should reuse the same Node object (Arc::ptr_eq).
+    #[tokio::test]
+    async fn disabled_node_unchanged_attributes_reuses_object() {
+        setup_tracing();
+
+        let host_id = Uuid::new_v4();
+        let addr = make_addr(1);
+        let filter = AddrRejectFilter::rejecting([addr]);
+
+        // Build initial state: peer at addr ⇒ disabled.
+        let initial_metadata =
+            make_metadata(vec![make_peer(host_id, addr, Some("dc1"), Some("r1"))]);
+        let initial_state = new_cluster_state(initial_metadata, Some(&filter)).await;
+        let old_node = initial_state.known_nodes().get(&host_id).unwrap().clone();
+        assert!(!old_node.is_enabled(), "node should be disabled");
+
+        // Refresh with identical attributes, still filtered out.
+        let new_metadata = make_metadata(vec![make_peer(host_id, addr, Some("dc1"), Some("r1"))]);
+        let new_state = update_cluster_state(&initial_state, new_metadata, Some(&filter)).await;
+        let new_node = new_state.known_nodes().get(&host_id).unwrap();
+
+        assert!(!new_node.is_enabled(), "node should still be disabled");
+        assert!(
+            Arc::ptr_eq(&old_node, new_node),
+            "Node object should be reused when disabled node's attributes haven't changed"
+        );
+    }
+}

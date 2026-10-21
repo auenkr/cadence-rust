@@ -31,6 +31,11 @@ pub mod yarpc;
 
 #[allow(clippy::result_large_err)]
 pub mod matching_history;
+pub mod matching_metrics;
+pub mod matching_metrics_prometheus;
+pub mod matching_metrics_statsd;
+pub mod matching_metrics_m3;
+pub mod matching_metrics_runtime;
 // The resolver carries tonic Status through matching placement call paths.
 #[allow(clippy::result_large_err)]
 pub mod matching_history_peer_resolver;
@@ -47,6 +52,7 @@ pub mod matching_partition;
 #[allow(clippy::result_large_err)]
 pub mod matching_registry;
 pub mod matching_runtime;
+mod matching_blocking;
 pub mod matching_scaler;
 pub mod matching_semaphore;
 pub mod matching_sync;
@@ -55,7 +61,11 @@ pub mod matching_sync;
 pub mod matching_writer;
 
 pub mod matching_domain_cache;
+pub mod matching_persistence;
+pub mod matching_persistence_limiter;
 pub mod matching_limiter;
+pub mod matching_quota;
+pub(crate) mod matching_throttled_logger;
 pub mod matching_task_store;
 
 #[allow(clippy::result_large_err)]
@@ -73,3 +83,7 @@ pub mod matching_membership_lifecycle;
 pub mod matching_peer_provider;
 #[allow(clippy::result_large_err)]
 pub mod matching_shard_distributor;
+#[allow(clippy::result_large_err)]
+pub mod matching_shard_processor;
+#[allow(clippy::result_large_err)]
+pub mod matching_shard_routing;

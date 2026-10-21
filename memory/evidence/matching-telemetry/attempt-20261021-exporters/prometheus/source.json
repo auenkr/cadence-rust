@@ -1,0 +1,9 @@
+{
+  "repository": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry",
+  "head": "ab4aa2d135d1cbb8faf2fa5a7f89acffb89e16a9",
+  "branch": "matching-telemetry-mysql-candidate",
+  "status": [
+    "?? memory/evidence/matching-telemetry/attempt-20261021-exporters/prometheus/",
+    "?? tests/__pycache__/"
+  ]
+}

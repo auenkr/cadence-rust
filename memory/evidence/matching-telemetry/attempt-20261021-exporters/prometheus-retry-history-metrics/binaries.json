@@ -1,0 +1,10 @@
+{
+  "goBinary": {
+    "path": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/artifacts/frozen-production/cadence-server-go-original",
+    "sha256": "0ed004a0f68aee07f132d6e9e8b7faa8e71c992ebdecb11eb30d7c9a257b9bb5"
+  },
+  "rustProductionBinary": {
+    "path": "/home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/1c7f6b6b/cadence-server",
+    "sha256": "a863a56e2864a1fa5dfea677f04915ffff559240130980ee54d40e98a741049f"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "probeExitCode": 0,
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goServicesPid": 2497180,
+  "goServicesAliveAfterProbe": true,
+  "goMatchingStarted": false,
+  "rustProductionBinary": "/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/cadence-server",
+  "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+  "historyTransport": "grpc",
+  "rustDynamicConfigFile": "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/memory/evidence/matching-dns-build-20261020-2726808/configured-sd/rust-dynamic-config.yaml",
+  "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+  "acceptanceEligible": false,
+  "serverCommand": [
+    "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/memory/evidence/matching-dns-build-20261020-2726808/configured-sd/cadence-server",
+    "--config",
+    "/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/memory/evidence/matching-dns-build-20261020-2726808/configured-sd/config",
+    "--zone",
+    "sqlite",
+    "start",
+    "--auto-setup",
+    "--services",
+    "frontend,history,worker"
+  ]
+}

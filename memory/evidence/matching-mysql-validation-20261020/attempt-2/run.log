@@ -1,0 +1,9 @@
+    Checking mysql_async v0.37.1 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/vendor/mysql_async-0.37.1)
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-thrift)
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-proto)
+error: failed to run custom build command for `cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-proto)`
+
+Caused by:
+  process didn't exit successfully: `/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/build/cadence-proto-6381ba8706f3e20e/build-script-build` (exit status: 1)
+  --- stderr
+  Error: "Cadence IDL missing: run git submodule update --init go/idls"

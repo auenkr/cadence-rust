@@ -654,3 +654,72 @@ Cassandra ownercrash source219758e37 pushed; final storage fixture conditionalre
 
 PG production build sourcea8db27ab1 CARGOexit0/launcherexit0 independently inspected; frozen binary4fbc0eb3973b48a14210ffd5c99cbf5fc69b9d8bc565cf0b4b6310a5ec553c40 at cache matching-postgres-parity-20261021/cadence-rust-matching-server. Full trackedsource manifest518files, clean gitstatus, IDLbfbf273, hashmanifest4a0faef87ace2bac4df1da8507e730528690a42368b51b3593d239522ee1bbb8. Persistence224passed11ignored actual0, corrected RustTLS attempt4 aggregate0. First mixedPG attempt1 FAILED1 before SDK: @grpc/grpc-js missing via assigned cadence-web/package.json. Results correct GoFE/History/Worker/noGoMatching but acceptancefalse. PG owner correcting dependencies/preflight, sole heavy lane retained.
 Cassandra final21a7095dd pushed; fresh independent review round2 no findings exact Go conditional releasebatch/ownercrash/cache/fresh acquisition source, runtime unverified. Sourcefixture explicitly not SDKrelease. Sourcegap review confirmed SQLmultiDB startup rejection (MySQL/PG) despite adapter support; isolated Luna matching-sql-multidb-production-20261021-1 sourcefix active. Nonv4 Cassandra protocol configuration limitation remains queued. Integration includes PGinline e219c4730, metricsafbc2ca86 (persistence QPS rejection export, Go busyfailure counters), unbuilt. Harness semantic merge lost twohost/Cass setup declarations; owner correcting full branch composition, pending Cass21 merge, independent combined harness review required before gate. Root USER paths preserved. Matching incomplete.
+
+## Telemetry/MySQL candidate continuation — 2026-10-21
+
+Work resumed in isolated worktree `/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry` on branch `matching-telemetry-mysql-candidate`; root user edits were not touched. Committed predecessor lint/exporter harness changes as `20803f369`, then merged validated `codex/matching-task-store-abstraction` (`efee2576e`) as `faed87d28`. The merge keeps the strict MySQL SDK/SIGKILL+SIGTERM/GC/schema evidence and durable `--evidence-dir` runner, resolving the runner conflict additively. Existing historical whitespace in redacted config evidence was retained unchanged.
+
+Strict locked workspace/all-target Clippy with `-D warnings` passed after initializing pinned IDL submodule bfbf273b. Final post-shutdown-flush Rust source was linted in evidence `attempt-20261021-clippy-2` (exit 0). The main shutdown sequence now always attempts Matching metrics shutdown/flush, appends any flush failure to existing shutdown errors, and reports the combined errors. Python runner AST parse, `--help`, MySQL probe static checks, and `git diff --check` passed; outputs are in `memory/evidence/matching-telemetry/attempt-20261021-harness-merge`.
+
+The production exporter gate configures one exporter in the original Go Frontend/History/Worker plus production Rust Matching lane, with no Go Matching. The SDK restart probe awaits the final Rust process's SIGTERM exit before it returns. For StatsD/M3, the gate sets one-hour reporting/flush intervals, timestamps every captured UDP packet, and requires the post-SIGTERM packet set to contain positive task-add, successful-poll, History client, and exact same-sample query request metrics. M3 uses the pinned Go Compact Thrift decoder for both full and post-SIGTERM packet sets. All exporters require a zero exit SIGTERM record; Prometheus additionally requires nonempty successful scrape snapshots during the SDK probe and the exact same-sample query labels. The validator derives domain from the SDK probe result and checks caller `cadence-frontend`, inbound transport `grpc` (confirmed from the first real probe scrape; independent of outbound History transport), service `cadence-matching`, and query response operation on that same positive sample. Raw captures, timestamps, decoder logs, shutdown markers, semantic summary, and sanitized configs are copied via evidence-dir. Live mixed gates remain pending.
+
+A pre-build SHA256 manifest covers all 247 tracked Rust files at source revision `faed87d280f418bf723870e0b536a511f1b5becf` and is stored under `memory/evidence/matching-telemetry/attempt-20261021-production-build`. The production build exited 0. Its binary is frozen at `/home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/faed87d28/cadence-server`, SHA256 `fa35738b543ff1d7759995442ce4e11c55693e522540c006b039c90edcf031b5`; no Rust build input changed afterward. The runtime partition-refresh candidate `e4042831d` remains excluded until mixed gates finish. The exporter-only harness adjustments are being captured separately and do not change this binary. Run Prometheus/StatsD/M3 sequentially with production binary, MySQL, original Go services, and evidence-dir; inspect each captured log/exit/raw sample/semantic assertion, then commit and push source+evidence. Matching remains incomplete; no History service work is authorized.
+
+### Prometheus gate checkpoint
+
+The first configured Prometheus mixed run used the frozen binary and original Go
+Frontend/History/Worker, with no Go Matching. Probe exit was 0, all Go services
+remained up, Matching completed SIGTERM with exit 0, and DB/GC observations were
+captured. The gate correctly returned 1 because the expected positive
+`cadence_client_requests` History client counter was absent. The full scrape had
+a positive `RespondQueryTaskCompleted` sample: caller `cadence_frontend`,
+transport `grpc`, service `cadence_matching`, probe domain normalized to
+underscores by Prometheus label sanitization. The captured transport confirms
+that inbound Matching transport is independent from outbound History transport.
+
+The production History client code emitted `cadence_client_requests`, but
+`main.rs` constructed it with the no-op metrics sink; later runtime wiring only
+covered Matching handlers/registry. Current source fix attaches the configured
+Matching sink to the production History client. The positive required metric
+assertion remains enabled. Raw 244,086,291-byte scrape JSONL is gzip-preserved at
+6,083,165 bytes; decompressed-content SHA256 and a representative request sample are
+in `memory/evidence/matching-telemetry/attempt-20261021-exporters/prometheus`.
+The runner now streams compressed scrape snapshots and validates incrementally.
+Strict locked all-target Clippy passed on source revision
+`1c7f6b6b9e851c84d2274128d89427415c6db10b`; the 247-file Rust manifest matched
+before and after production build. The rebuilt binary is frozen at
+`/home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/1c7f6b6b/cadence-server`,
+SHA256 `a863a56e2864a1fa5dfea677f04915ffff559240130980ee54d40e98a741049f`.
+Evidence and build log are in
+`memory/evidence/matching-telemetry/attempt-20261021-rebuild-client-metrics`.
+The second Prometheus run again had probe exit 0 and SIGTERM exit 0, but gate exit 1 because the same-sample caller check expected the unsanitized `cadence-frontend`. Offline validation of all 340 preserved compressed scrapes now passes using every expected Prometheus label transformed by the pinned Go Tally v3.5.8 sanitizer. It finds the exact positive query series and all four required positive metric families (including 923 `cadence_client_requests` samples). Pinned sanitizer source, exact sample, semantic JSON and raw-scrape hash are in `attempt-20261021-exporters/prometheus-retry-history-metrics`. A fresh full Prometheus gate is required with the corrected validator; StatsD and M3 have not run.
+
+
+### StatsD shutdown failure
+
+The first configured StatsD mixed run reached the SDK/restart/MySQL probe but
+returned exit 1 because Rust's SIGTERM metrics flush failed with
+`Message too long (os error 90)`. The raw UDP capture and all run logs are
+preserved in `attempt-20261021-exporters/statsd`; it contained one 51,376-byte
+datagram and no qualified query line. Investigation traced this to the harness's
+10 MiB `flushBytes` setting, which violates the option's maximum UDP datagram
+meaning. The runner now uses Go's documented safe 1432-byte default and keeps
+aggregates pending until SIGTERM using the one-hour reporting interval. The
+StatsD attempt must pass with zero Rust exit plus required positive post-signal
+metrics and the exact same-sample query label assertion.
+
+
+### StatsD configured gate
+
+The safe-packet StatsD retry passed end to end in
+`attempt-20261021-exporters/statsd-safe-packets`: launcher/run/probe exits 0,
+original Go Frontend/History/Worker remained alive, no Go Matching instance, and
+Rust SIGTERM exit 0. It captured 205 packets with maximum datagram 1430 bytes;
+70 arrived after the SIGTERM marker. The post-signal set contains positive values
+for all four required Matching metrics and the same positive
+`RespondQueryTaskCompleted` request sample with exact SDK domain, caller, gRPC
+transport, Matching service, and operation labels. MySQL GC observations
+converged, and SDK restart/graceful-recovery logs are retained. The original
+`Message too long` failure and raw partial capture remain preserved separately.
+The current StatsD evidence records frozen Rust binary/source and harness
+revisions. M3 is the only remaining configured exporter gate.

@@ -1,9 +1,8 @@
 //! Durable single-owner Matching queue. Workflow state lives in History, not here.
 use crate::{
     matching_blob::{TaskData, TaskListData},
-    matching_sqlite::{
-        AllocatedTask, Result as StorageResult, SqliteTaskStore, StorageError, TaskListKey,
-    },
+    matching_sqlite::{AllocatedTask, Result as StorageResult, StorageError, TaskListKey},
+    matching_task_store::MatchingTaskStore,
 };
 use cadence_common::ack_manager::AckManager;
 use std::{
@@ -27,6 +26,7 @@ pub enum QueueError {
     ReaderState(String),
 }
 pub type Result<T> = std::result::Result<T, QueueError>;
+pub type LeaseObserver = Arc<dyn Fn(bool) + Send + Sync>;
 #[derive(Clone)]
 pub struct PendingTask {
     pub data: TaskData,
@@ -42,7 +42,7 @@ struct State {
     in_flight: HashMap<i64, AllocatedTask>,
 }
 pub struct DurableTaskQueue {
-    store: Arc<SqliteTaskStore>,
+    store: Arc<dyn MatchingTaskStore>,
     key: TaskListKey,
     range_size: NonZeroU32,
     state: Mutex<State>,
@@ -54,6 +54,7 @@ pub struct DurableTaskQueue {
     gc_batch_size_provider: Mutex<Option<Arc<dyn Fn() -> i64 + Send + Sync>>>,
     stopped: AtomicBool,
     stop_waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    lease_observer: Mutex<Option<LeaseObserver>>,
 }
 #[derive(Default)]
 struct ReaderGate {
@@ -93,15 +94,20 @@ pub struct ReaderTurn {
     _permit: ReaderPermit,
     tasks: VecDeque<AllocatedTask>,
     pending: bool,
+    expired: usize,
 }
 impl ReaderTurn {
     pub fn next(&mut self, mut clock: impl FnMut() -> i64) -> Result<Option<AllocatedTask>> {
         while let Some(task) = self.tasks.pop_front() {
-            if let Some(task) = self.queue.register_read(task, &mut clock)? {
-                return Ok(Some(task));
+            match self.queue.register_read(task, &mut clock)? {
+                Some(task) => return Ok(Some(task)),
+                None => self.expired += 1,
             }
         }
         Ok(None)
+    }
+    pub fn take_expired_count(&mut self) -> usize {
+        std::mem::take(&mut self.expired)
     }
     pub fn scan_pending(&self) -> bool {
         self.pending
@@ -120,7 +126,7 @@ struct ScannedBatch {
     finished: bool,
 }
 fn scan_batch(
-    store: &SqliteTaskStore,
+    store: &dyn MatchingTaskStore,
     key: &TaskListKey,
     mut read: i64,
     max: i64,
@@ -165,7 +171,7 @@ fn block(range: i64, size: NonZeroU32) -> (i64, i64) {
 }
 impl DurableTaskQueue {
     pub fn open(
-        store: Arc<SqliteTaskStore>,
+        store: Arc<dyn MatchingTaskStore>,
         key: TaskListKey,
         kind: i16,
         range_size: NonZeroU32,
@@ -186,6 +192,7 @@ impl DurableTaskQueue {
             gc_batch_size_provider: Mutex::new(None),
             stopped: AtomicBool::new(false),
             stop_waker: Mutex::new(None),
+            lease_observer: Mutex::new(None),
             writer: Mutex::new(()),
             database: Mutex::new(()),
             reader: Arc::new(ReaderGate::default()),
@@ -204,6 +211,22 @@ impl DurableTaskQueue {
             Err(QueueError::Stopped)
         } else {
             Ok(())
+        }
+    }
+    /// Install a service-owned callback for each task-list lease renewal.
+    /// `true` means the retry operation obtained a lease; a failed renewal is
+    /// reported once after its retry policy terminates.
+    pub fn set_lease_observer(&self, observer: LeaseObserver) {
+        *self.lease_observer.lock().expect("matching lease observer lock") = Some(observer);
+    }
+    fn observe_lease(&self, success: bool) {
+        if let Some(observer) = self
+            .lease_observer
+            .lock()
+            .expect("matching lease observer lock")
+            .clone()
+        {
+            observer(success);
         }
     }
     fn check<T>(&self, result: StorageResult<T>) -> Result<T> {
@@ -238,6 +261,7 @@ impl DurableTaskQueue {
                     (state.next_id, state.block_end) = block(lease.range_id, self.range_size);
                     Ok(())
                 });
+                self.observe_lease(result.is_ok());
                 if result.is_err() {
                     self.stop();
                 }
@@ -261,14 +285,14 @@ impl DurableTaskQueue {
                 task.data = task.data.clone().at_creation(timestamp, *timeout);
             }
         }
-        let result = self.store.create_tasks_with_domains(
-            &self.key,
-            range_id,
-            tasks
-                .iter()
-                .zip(data)
-                .map(|(task, (domain, _))| (*domain, task)),
-        );
+        let tasks_with_domains = tasks
+            .iter()
+            .zip(data)
+            .map(|(task, (domain, _))| (*domain, task))
+            .collect::<Vec<_>>();
+        let result =
+            self.store
+                .create_tasks_with_domains(&self.key, range_id, now, &tasks_with_domains);
         // Go advances the read boundary after the write returns, even on error.
         // Allocated IDs are never reused after an uncertain persistence outcome.
         if let Some(last) = tasks.last() {
@@ -314,7 +338,7 @@ impl DurableTaskQueue {
         let _writer = self.writer.lock().expect("matching writer gate");
         self.append_serialized(data, now, None)
     }
-    pub fn append_pending(&self, pending: &[PendingTask]) -> Result<Vec<AllocatedTask>> {
+    pub fn append_pending(&self, pending: &[PendingTask], now_nanos: i64) -> Result<Vec<AllocatedTask>> {
         let data = pending
             .iter()
             .map(|task| (task.source_domain, task.data.clone()))
@@ -323,12 +347,8 @@ impl DurableTaskQueue {
             .iter()
             .map(|task| task.schedule_to_start_seconds)
             .collect::<Vec<_>>();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|time| time.as_nanos() as i64)
-            .unwrap_or_default();
         let _writer = self.writer.lock().expect("matching writer gate");
-        self.append_serialized(&data, now, Some(&timeouts))
+        self.append_serialized(&data, now_nanos, Some(&timeouts))
     }
     pub fn task_list_kind(&self) -> i16 {
         self.state
@@ -410,6 +430,7 @@ impl DurableTaskQueue {
             _permit: permit,
             pending: !scanned.tasks.is_empty() || !scanned.finished,
             tasks: scanned.tasks.into(),
+            expired: 0,
         })
     }
     fn load_reader_turn(
@@ -425,7 +446,14 @@ impl DurableTaskQueue {
             .expect("matching queue lock")
             .max_read_level;
         let (initial_read, _, _) = self.ack.levels();
-        let scanned = scan_batch(&self.store, &self.key, initial_read, max, range, batch)?;
+        let scanned = scan_batch(
+            self.store.as_ref(),
+            &self.key,
+            initial_read,
+            max,
+            range,
+            batch,
+        )?;
         let _state = self.state.lock().expect("matching queue lock");
         self.active()?;
         if scanned.tasks.is_empty() {
@@ -547,18 +575,29 @@ impl DurableTaskQueue {
     }
     /// Go defaults: 100 rows per delete batch, one second between small drains.
     pub fn run_garbage_collection(&self, force: bool) -> Result<usize> {
-        let provider = self.gc_batch_size_provider.lock().expect("matching GC config lock").clone();
+        let provider = self
+            .gc_batch_size_provider
+            .lock()
+            .expect("matching GC config lock")
+            .clone();
         match provider {
             Some(provider) => self.run_garbage_collection_with_batch_provider(
-                force, move || provider(), std::time::Duration::from_secs(1),
+                force,
+                move || provider(),
+                std::time::Duration::from_secs(1),
             ),
             None => self.run_garbage_collection_with(
-                force, NonZeroU32::new(100).unwrap(), std::time::Duration::from_secs(1),
+                force,
+                NonZeroU32::new(100).unwrap(),
+                std::time::Duration::from_secs(1),
             ),
         }
     }
     pub fn set_gc_batch_size_provider(&self, provider: Arc<dyn Fn() -> i64 + Send + Sync>) {
-        *self.gc_batch_size_provider.lock().expect("matching GC config lock") = Some(provider);
+        *self
+            .gc_batch_size_provider
+            .lock()
+            .expect("matching GC config lock") = Some(provider);
     }
     pub fn run_garbage_collection_with(
         &self,
@@ -595,6 +634,17 @@ impl DurableTaskQueue {
     }
     pub fn levels(&self) -> (i64, i64, i64) {
         self.ack.levels()
+    }
+    /// Go task-list reader's task count query, excluding rows at/below the ack watermark.
+    pub fn task_list_size(&self) -> Result<i64> {
+        let (_, ack, _) = self.ack.levels();
+        Ok(self.store.task_list_size(&self.key, ack)?)
+    }
+    /// Estimated queue lag emitted by Go as maxReadLevel minus ackLevel.
+    pub fn task_lag(&self) -> i64 {
+        let state = self.state.lock().expect("matching queue lock");
+        let (_, ack, _) = self.ack.levels();
+        state.max_read_level.saturating_sub(ack)
     }
     /// Queue status fields exposed by Go DescribeTaskList. Rate/isolation/QPS
     /// belong to the task-list controller rather than the persistence reader.
@@ -633,6 +683,7 @@ impl DurableTaskQueue {
 mod tests {
     use super::*;
     use crate::matching_blob::BlobEncoding;
+    use crate::matching_sqlite::SqliteTaskStore;
     use uuid::Uuid;
     fn n(value: u32) -> NonZeroU32 {
         NonZeroU32::new(value).unwrap()
@@ -741,7 +792,10 @@ mod tests {
     #[test]
     fn matching_queue_live_gc_batch_provider_is_used_for_each_attempt() {
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("gc.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("gc.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
         let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
         let configured = Arc::new(std::sync::atomic::AtomicI64::new(1));
         let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -753,7 +807,9 @@ mod tests {
         }));
         let written = queue.append(&[data(), data()], 2).unwrap();
         let batch = queue.read_batch(10, n(10), 3).unwrap();
-        for task in batch.tasks { queue.complete(task.task_id).unwrap(); }
+        for task in batch.tasks {
+            queue.complete(task.task_id).unwrap();
+        }
         assert_eq!(queue.run_garbage_collection(true).unwrap(), 2);
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(written.len(), 2);
@@ -761,7 +817,9 @@ mod tests {
         configured.store(2, std::sync::atomic::Ordering::SeqCst);
         let later = queue.append(&[data()], 4).unwrap();
         let batch = queue.read_batch(10, n(10), 5).unwrap();
-        for task in batch.tasks { queue.complete(task.task_id).unwrap(); }
+        for task in batch.tasks {
+            queue.complete(task.task_id).unwrap();
+        }
         assert_eq!(queue.run_garbage_collection(true).unwrap(), 1);
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert_eq!(later.len(), 1);
@@ -1131,6 +1189,38 @@ mod tests {
         assert_eq!(read, written[1].task_id);
         assert_eq!(backlog, 1);
         assert!(times.next().is_none());
+    }
+    #[test]
+    fn matching_reader_turn_reports_initially_expired_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = Arc::new(DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap());
+        let mut task = data();
+        task.expiry_nanos = 100;
+        queue.append(&[task], 2).unwrap();
+        let mut turn = queue.reader_turn(100, n(10)).unwrap();
+        assert!(turn.next(|| 101).unwrap().is_none());
+        assert_eq!(turn.take_expired_count(), 1);
+        assert_eq!(turn.take_expired_count(), 0);
+        assert_eq!(queue.levels().2, 0);
+    }
+    #[test]
+    fn matching_queue_reader_size_and_lag_gauges_follow_ack_levels() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = DurableTaskQueue::open(store, key(), 0, n(100), 1).unwrap();
+        queue.append(&[data(), data()], 2).unwrap();
+        assert_eq!(queue.task_list_size().unwrap(), 2);
+        let batch = queue.read_batch(100, n(10), 3).unwrap();
+        queue.complete(batch.tasks[0].task_id).unwrap();
+        assert_eq!(queue.task_list_size().unwrap(), 1);
+        assert_eq!(queue.task_lag(), 1);
     }
     #[test]
     fn matching_queue_original_go_expiry_fixtures() {

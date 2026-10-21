@@ -1,0 +1,11 @@
+
+running 3 tests
+test grpc_matching::durable_tests::matching_remote_routing_propagates_spectator_failure_without_ring_fallback ... ok
+test matching_dispatch::tests::matching_remote_forward_reaches_go_yarpc_peer ... ok
+test grpc_matching::durable_tests::matching_remote_adds_and_query_reach_go_yarpc_through_production_handlers ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 352 filtered out; finished in 0.04s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.04s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default

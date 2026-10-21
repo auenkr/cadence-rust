@@ -1,0 +1,10 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 38s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 2 tests
+test matching_shard_processor::tests::report_has_strict_ttl_and_recomputes_qps_after_original_deadline ... ok
+test matching_shard_processor::tests::start_is_noop_and_stop_is_exact_name_across_domain_and_type ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 349 filtered out; finished in 0.09s
+
