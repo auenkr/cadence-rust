@@ -1338,11 +1338,10 @@ impl Matching {
         domain_name: Option<&str>,
     ) -> Result<(), Status> {
         let resolved = domain_name.map(str::to_owned).or_else(|| {
-            // Go's handler asks its shared domain cache for the name and uses
-            // the empty string on a miss, so only the host bucket applies.
-            // Use Matching's same cache-backed resolver here; unlike the
-            // engine path, a cache miss must not preempt the quota decision.
-            domain_id.and_then(|id| self.domain_name(id).ok())
+            // Go's handler uses the domain cache and treats a miss as the
+            // empty domain name, which still participates in the domain stage
+            // (falling back to the host rate). Mirror that here.
+            domain_id.map(|id| self.domain_name(id).unwrap_or_default())
         });
         if self.rpc_quota.allow(method, resolved.as_deref()) {
             Ok(())

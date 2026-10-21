@@ -249,7 +249,7 @@ impl MatchingRpcQuota {
     pub(crate) fn allow(&self, method: MatchingRpc, domain: Option<&str>) -> bool {
         let (class, reject) = method.policy();
         let now = (self.clock)();
-        let domain_bucket = domain.filter(|name| !name.is_empty()).map(|name| {
+        let domain_bucket = domain.map(|name| {
             let key = (class, name.to_owned());
             let mut state = self.state.lock().expect("Matching quota lock");
             state
@@ -289,7 +289,7 @@ impl MatchingRpcQuota {
             let metric = QuotaRejection {
                 method,
                 class,
-                domain: domain.filter(|name| !name.is_empty()).map(str::to_owned),
+                domain: domain.map(str::to_owned),
             };
             #[cfg(test)]
             *self
