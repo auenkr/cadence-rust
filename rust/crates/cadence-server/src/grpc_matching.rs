@@ -284,6 +284,7 @@ pub struct Matching {
     shard_router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
     task_list_ownership: Option<TaskListOwnershipCheck>,
     rpc_quota: Arc<crate::matching_quota::MatchingRpcQuota>,
+    throttled_logger: Arc<crate::matching_throttled_logger::MatchingThrottledLogger>,
     pub(crate) poll_expiration: std::time::Duration,
 }
 /// Runtime-provided ownership check. The cached flag is advisory and only
@@ -310,6 +311,7 @@ impl Matching {
             state.admin.dynamic_config.clone(),
             metric_sink,
         ));
+        let throttled_logger = Arc::new(crate::matching_throttled_logger::MatchingThrottledLogger::new(state.admin.dynamic_config.clone()));
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
@@ -321,6 +323,7 @@ impl Matching {
             shard_router: None,
             task_list_ownership: None,
             rpc_quota,
+            throttled_logger,
             poll_expiration: std::time::Duration::from_secs(60),
         }
     }
@@ -1378,6 +1381,10 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
+        if incoming_deadline.is_none() {
+            self.throttled_logger.error("PollForDecisionTask", "Context timeout not set for long poll API.");
+            return Err(Status::invalid_argument("Context timeout is not set."));
+        }
         let r = request.into_inner();
         self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForDecisionTask, Some(&r.domain_id), None)?;
         let mut payload = r
@@ -1547,6 +1554,10 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
+        if incoming_deadline.is_none() {
+            self.throttled_logger.error("PollForActivityTask", "Context timeout not set for long poll API.");
+            return Err(Status::invalid_argument("Context timeout is not set."));
+        }
         let r = request.into_inner();
         self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForActivityTask, Some(&r.domain_id), None)?;
         let mut payload = r

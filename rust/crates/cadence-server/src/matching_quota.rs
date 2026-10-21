@@ -96,9 +96,8 @@ impl DynamicBucket {
         // Go refreshes only when now.After(lastUpdate + TTL - 1ns).
         if now > self.last_update.saturating_add(REFRESH_NANOS - 1) {
             let (rate, burst) = Self::rate_and_burst((self.source)());
-            // Bring the existing bucket to the refresh instant before
-            // changing its rate, as Go's SetLimitAndBurst does via its clock.
-            self.limiter.tokens(now);
+            // Go's SetLimitAndBurst updates against the limiter's latest
+            // recorded time; it does not advance the limiter to `now`.
             self.limiter.set_limit_and_burst(rate, burst);
             self.last_update = now;
         }
@@ -422,6 +421,20 @@ mod tests {
     }
 
     #[test]
+    fn refreshing_rate_does_not_refill_at_the_configuration_refresh_instant() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        set(&overlay, "matching.rps", vec![entry(1, &[])]);
+        let now = Arc::new(AtomicI64::new(10));
+        let clock: Clock = Arc::new({ let now = now.clone(); move || now.load(Ordering::SeqCst) });
+        let quota = MatchingRpcQuota::with_clock(overlay.clone(), clock);
+        assert!(quota.allow(MatchingRpc::GetTaskListsByDomain, None));
+        set(&overlay, "matching.rps", vec![entry(2, &[])]);
+        now.store(5_000_000_011, Ordering::SeqCst);
+        assert!(quota.allow(MatchingRpc::GetTaskListsByDomain, None));
+        assert!(quota.allow(MatchingRpc::GetTaskListsByDomain, None));
+        assert!(!quota.allow(MatchingRpc::GetTaskListsByDomain, None));
+    }
+
     fn hard_rejection_emits_one_classified_metric_event_but_count_only_does_not() {
         let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
         set(&overlay, "matching.rps", vec![entry(0, &[])]);

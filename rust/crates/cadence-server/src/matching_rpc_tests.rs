@@ -22,6 +22,17 @@ fn quota_config(value: i64, domain: Option<&str>) -> cadence_api::admin::Dynamic
 }
 
 #[tokio::test]
+async fn matching_long_polls_reject_missing_transport_deadlines_with_bad_request() {
+    let matching = Matching::new(crate::handlers::AppState::default());
+    let decision = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest::default())).await.unwrap_err();
+    assert_eq!(decision.code(), tonic::Code::InvalidArgument);
+    assert_eq!(decision.message(), "Context timeout is not set.");
+    let activity = matching.poll_for_activity_task(Request::new(m::PollForActivityTaskRequest::default())).await.unwrap_err();
+    assert_eq!(activity.code(), tonic::Code::InvalidArgument);
+    assert_eq!(activity.message(), "Context timeout is not set.");
+}
+
+#[tokio::test]
 async fn matching_rpc_quotas_classify_shared_protocol_handlers_and_preserve_count_only_calls() {
     let mut state = crate::handlers::AppState::default();
     let domain_id = Uuid::from_u128(9001);
