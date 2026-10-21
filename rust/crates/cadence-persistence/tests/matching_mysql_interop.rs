@@ -90,7 +90,7 @@ fn mysql_interop_harness() {
 
     // The stale insert must be fenced and rolled back atomically.
     let stale = allocated(40, "must-rollback");
-    let result = store.create_tasks_with_domains(&go_key, 0, &[(go_key.domain_id, &stale)]);
+    let result = store.create_tasks_with_domains(&go_key, 0, 1_700_000_000_000_000_000, &[(go_key.domain_id, &stale)]);
     assert!(matches!(result, Err(StorageError::ConditionFailed(_))));
     assert_eq!(store.get_tasks(&go_key, 39, i64::MAX, 32).unwrap().len(), 0);
 
@@ -101,7 +101,7 @@ fn mysql_interop_harness() {
     assert_eq!(rust_lease.range_id, 2);
     let rust_task = allocated(30, "rust-workflow-30");
     store
-        .create_tasks_with_domains(&go_key, 2, &[(go_key.domain_id, &rust_task)])
+        .create_tasks_with_domains(&go_key, 2, 1_700_000_000_000_000_000, &[(go_key.domain_id, &rust_task)])
         .unwrap();
     let mut task_list = rust_lease.data;
     task_list.ack_level = 20;

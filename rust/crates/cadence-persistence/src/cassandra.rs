@@ -78,7 +78,7 @@ pub struct CassandraTaskListUdt {
     pub domain_id: Uuid,
     pub name: String,
     #[scylla(rename = "type")]
-    pub r#type: i32,
+    pub type_: i32,
     pub ack_level: i64,
     pub kind: i32,
     pub last_updated: DateTime<Utc>,

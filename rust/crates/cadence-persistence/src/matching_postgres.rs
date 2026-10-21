@@ -18,7 +18,6 @@ use openssl::{
 };
 use postgres::{config::SslMode, types::ToSql, Client, Config, NoTls};
 use postgres_openssl::MakeTlsConnector;
-use crate::SemaphorePersistence;
 use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, Condvar, Mutex},
@@ -732,6 +731,12 @@ impl MatchingTaskStore for PostgresTaskStore {
     }
 }
 
+impl std::fmt::Debug for PostgresTaskStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("PostgresTaskStore").finish_non_exhaustive()
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::SemaphorePersistence for PostgresTaskStore {
     async fn create_semaphore(
@@ -747,6 +752,16 @@ impl crate::SemaphorePersistence for PostgresTaskStore {
             size,
             bucket_size,
         ).await
+    }
+
+    async fn get_semaphore_metadata(
+        &self,
+        domain_id: &str,
+        name: &str,
+    ) -> std::result::Result<crate::SemaphoreMetadata, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence
+            .get_semaphore_metadata(domain_id, name)
+            .await
     }
 
     async fn scan_semaphore_bucket(

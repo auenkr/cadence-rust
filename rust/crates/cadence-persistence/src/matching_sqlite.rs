@@ -4,7 +4,6 @@
 #[cfg(test)]
 use crate::matching_blob::TaskData;
 use crate::matching_blob::{self as blob, BlobEncoding, TaskListData};
-use crate::SemaphorePersistence;
 pub use crate::matching_task_store::{
     AllocatedTask, MatchingTaskStoreError as StorageError, Result, TaskListKey, TaskListRecord,
 };
@@ -89,6 +88,12 @@ impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
     }
 }
 
+impl std::fmt::Debug for SqliteTaskStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("SqliteTaskStore").finish_non_exhaustive()
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::SemaphorePersistence for SqliteTaskStore {
     async fn create_semaphore(
@@ -104,6 +109,16 @@ impl crate::SemaphorePersistence for SqliteTaskStore {
             size,
             bucket_size,
         ).await
+    }
+
+    async fn get_semaphore_metadata(
+        &self,
+        domain_id: &str,
+        name: &str,
+    ) -> std::result::Result<crate::SemaphoreMetadata, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence
+            .get_semaphore_metadata(domain_id, name)
+            .await
     }
 
     async fn scan_semaphore_bucket(

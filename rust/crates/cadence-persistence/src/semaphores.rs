@@ -119,10 +119,10 @@ pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
     ) -> Result<String, AcquireError>;
     async fn get_semaphore_ownership_by_owner(
         &self,
-        domain_id: &str,
-        name: &str,
-        bucket: i32,
-        owner_id: &str,
+        _domain_id: &str,
+        _name: &str,
+        _bucket: i32,
+        _owner_id: &str,
     ) -> Result<i32, AcquireError> {
         Err(AcquireError::Invalid(SqlUnsupportedSemaphorePersistence::MESSAGE.into()))
     }
@@ -136,11 +136,11 @@ pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
     ) -> Result<GrantOutcome, AcquireError>;
     async fn release_semaphore_token(
         &self,
-        domain_id: &str,
-        name: &str,
-        bucket: i32,
-        token_id: i32,
-        owner_id: &str,
+        _domain_id: &str,
+        _name: &str,
+        _bucket: i32,
+        _token_id: i32,
+        _owner_id: &str,
     ) -> Result<bool, AcquireError> {
         Err(AcquireError::Invalid(SqlUnsupportedSemaphorePersistence::MESSAGE.into()))
     }
@@ -543,26 +543,6 @@ impl super::InMemoryExecutionStore {
             token_id,
         });
         Ok(GrantOutcome::Applied)
-    }
-
-    pub fn release_semaphore_token(
-        &self,
-        domain_id: &str,
-        name: &str,
-        bucket: i32,
-        token_id: i32,
-        owner_id: &str,
-    ) -> Result<bool, AcquireError> {
-        let mut inner = self.inner.write().expect("execution store lock");
-        Self::semaphore_budget(&inner, domain_id, name)?;
-        let Some(holds) = inner.semaphore_holds.get_mut(&(
-            domain_id.to_string(), name.to_string(), bucket,
-        )) else {
-            return Ok(false);
-        };
-        let before = holds.len();
-        holds.retain(|hold| !(hold.owner_id == owner_id && hold.token_id == token_id));
-        Ok(holds.len() != before)
     }
 
     /// Release one owner's hold of a token, mirroring

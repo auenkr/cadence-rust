@@ -5,7 +5,6 @@
 //! behavior; a checked-out connection is only recycled after its transaction
 //! has ended. Production config assembly is a separate server integration.
 
-use crate::SemaphorePersistence;
 use crate::{
     matching_blob::{self as blob, BlobEncoding, TaskListData},
     matching_sqlite::StorageError,
@@ -954,6 +953,12 @@ impl MatchingTaskStore for MySqlTaskStore {
     }
 }
 
+impl std::fmt::Debug for MySqlTaskStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("MySqlTaskStore").finish_non_exhaustive()
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::SemaphorePersistence for MySqlTaskStore {
     async fn create_semaphore(
@@ -965,6 +970,16 @@ impl crate::SemaphorePersistence for MySqlTaskStore {
     ) -> std::result::Result<crate::SemaphoreMetadata, crate::SemaphoreError> {
         crate::SqlUnsupportedSemaphorePersistence
             .create_semaphore(domain, name, size, bucket_size)
+            .await
+    }
+
+    async fn get_semaphore_metadata(
+        &self,
+        domain_id: &str,
+        name: &str,
+    ) -> std::result::Result<crate::SemaphoreMetadata, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence
+            .get_semaphore_metadata(domain_id, name)
             .await
     }
 

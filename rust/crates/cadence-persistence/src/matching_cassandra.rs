@@ -22,7 +22,7 @@ use scylla::{
         Statement,
     },
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use uuid::Uuid;
 
 const LIST_ROW: i32 = 1;
@@ -44,7 +44,7 @@ fn task_list_lwt_applied(result: QueryResult) -> Result<bool> {
         .ok_or_else(|| {
             CassandraMatchingTaskStore::internal("Cassandra LWT returned no result row")
         })?;
-    match row.first() {
+    match row.columns.first() {
         Some(Some(scylla::value::CqlValue::Boolean(applied))) => Ok(*applied),
         Some(value) => Err(CassandraMatchingTaskStore::internal(format!(
             "Cassandra LWT returned invalid [applied] column: {value:?}"
@@ -110,7 +110,7 @@ impl CassandraMatchingTaskStore {
         Ok(CassandraTaskListUdt {
             domain_id: key.domain_id,
             name: key.name.clone(),
-            r#type: key.task_type,
+            type_: key.task_type,
             ack_level: data.ack_level,
             kind: i32::from(data.kind),
             last_updated,
@@ -189,27 +189,6 @@ impl CassandraMatchingTaskStore {
         })
     }
 
-    fn task_udt(domain_id: Uuid, data: &TaskData) -> Result<CassandraTaskUdt> {
-        let run_id = data
-            .run_id
-            .as_deref()
-            .map(Uuid::from_slice)
-            .transpose()
-            .map_err(|error| Self::internal(format!("invalid task run ID: {error}")))?;
-        Ok(CassandraTaskUdt {
-            domain_id,
-            workflow_id: data.workflow_id.clone(),
-            run_id,
-            schedule_id: data.schedule_id,
-            created_time: timestamp(data.created_nanos)?,
-            partition_config: data.partition_config.as_ref().map(|config| {
-                config
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<HashMap<_, _>>()
-            }),
-        })
-    }
 }
 
 fn timestamp(nanos: i64) -> Result<DateTime<Utc>> {
@@ -384,7 +363,7 @@ mod tests {
             ..Default::default()
         };
         let udt = CassandraMatchingTaskStore::task_list_udt(&key, &data).unwrap();
-        assert_eq!(udt.r#type, 1);
+        assert_eq!(udt.type_, 1);
         assert_eq!(udt.adaptive_partition_config.as_ref().unwrap().version, 9);
         assert_eq!(CassandraMatchingTaskStore::list_data(udt).unwrap(), data);
     }

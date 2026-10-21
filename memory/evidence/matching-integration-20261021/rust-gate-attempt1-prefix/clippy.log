@@ -1,0 +1,554 @@
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-proto)
+   Compiling crc32c v0.6.8
+   Compiling enum-as-inner v0.6.1
+    Checking strsim v0.11.1
+    Checking clap_lex v1.1.1
+    Checking ipnet v2.12.2
+    Checking linux-raw-sys v0.12.1
+    Checking data-encoding v2.11.1
+    Checking linked-hash-map v0.5.6
+    Checking hickory-proto v0.24.4
+    Checking lru-cache v0.1.2
+    Checking rustix v1.1.5
+    Checking clap_builder v4.6.7
+    Checking fs-err v3.3.2
+    Checking serde_urlencoded v0.7.1
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-persistence)
+error: proc-macro derive panicked
+  --> crates/cadence-persistence/src/cassandra.rs:76:42
+   |
+76 | #[derive(Debug, Clone, DeserializeValue, SerializeValue)]
+   |                                          ^^^^^^^^^^^^^^
+   |
+   = help: message: `"visited_flag_r#type"` is not a valid identifier
+
+    Checking axum-core v0.5.6
+error[E0046]: not all trait items implemented, missing: `get_semaphore_metadata`
+   --> crates/cadence-persistence/src/matching_mysql.rs:958:1
+    |
+958 |   impl crate::SemaphorePersistence for MySqlTaskStore {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `get_semaphore_metadata` in implementation
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:102:5
+    |
+102 | /     async fn get_semaphore_metadata(
+103 | |         &self,
+104 | |         domain_id: &str,
+105 | |         name: &str,
+106 | |     ) -> Result<SemaphoreMetadata, AcquireError>;
+    | |_________________________________________________- `get_semaphore_metadata` from trait
+
+error[E0277]: `matching_mysql::MySqlTaskStore` doesn't implement `std::fmt::Debug`
+   --> crates/cadence-persistence/src/matching_mysql.rs:958:38
+    |
+958 | impl crate::SemaphorePersistence for MySqlTaskStore {
+    |                                      ^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `std::fmt::Debug` is not implemented for `matching_mysql::MySqlTaskStore`
+   --> crates/cadence-persistence/src/matching_mysql.rs:452:1
+    |
+452 | pub struct MySqlTaskStore {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: add `#[derive(Debug)]` to `matching_mysql::MySqlTaskStore` or manually `impl std::fmt::Debug for matching_mysql::MySqlTaskStore`
+note: required by a bound in `semaphores::SemaphorePersistence`
+   --> crates/cadence-persistence/src/semaphores.rs:94:33
+    |
+ 94 | pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
+    |                                 ^^^^^^^^^^^^^^^ required by this bound in `SemaphorePersistence`
+
+error[E0046]: not all trait items implemented, missing: `get_semaphore_metadata`
+   --> crates/cadence-persistence/src/matching_postgres.rs:736:1
+    |
+736 |   impl crate::SemaphorePersistence for PostgresTaskStore {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `get_semaphore_metadata` in implementation
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:102:5
+    |
+102 | /     async fn get_semaphore_metadata(
+103 | |         &self,
+104 | |         domain_id: &str,
+105 | |         name: &str,
+106 | |     ) -> Result<SemaphoreMetadata, AcquireError>;
+    | |_________________________________________________- `get_semaphore_metadata` from trait
+
+error[E0277]: `matching_postgres::PostgresTaskStore` doesn't implement `std::fmt::Debug`
+   --> crates/cadence-persistence/src/matching_postgres.rs:736:38
+    |
+736 | impl crate::SemaphorePersistence for PostgresTaskStore {
+    |                                      ^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `std::fmt::Debug` is not implemented for `matching_postgres::PostgresTaskStore`
+   --> crates/cadence-persistence/src/matching_postgres.rs:275:1
+    |
+275 | pub struct PostgresTaskStore {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: add `#[derive(Debug)]` to `matching_postgres::PostgresTaskStore` or manually `impl std::fmt::Debug for matching_postgres::PostgresTaskStore`
+note: required by a bound in `semaphores::SemaphorePersistence`
+   --> crates/cadence-persistence/src/semaphores.rs:94:33
+    |
+ 94 | pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
+    |                                 ^^^^^^^^^^^^^^^ required by this bound in `SemaphorePersistence`
+
+error[E0046]: not all trait items implemented, missing: `get_semaphore_metadata`
+   --> crates/cadence-persistence/src/matching_sqlite.rs:93:1
+    |
+ 93 |   impl crate::SemaphorePersistence for SqliteTaskStore {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `get_semaphore_metadata` in implementation
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:102:5
+    |
+102 | /     async fn get_semaphore_metadata(
+103 | |         &self,
+104 | |         domain_id: &str,
+105 | |         name: &str,
+106 | |     ) -> Result<SemaphoreMetadata, AcquireError>;
+    | |_________________________________________________- `get_semaphore_metadata` from trait
+
+error[E0277]: `matching_sqlite::SqliteTaskStore` doesn't implement `std::fmt::Debug`
+  --> crates/cadence-persistence/src/matching_sqlite.rs:93:38
+   |
+93 | impl crate::SemaphorePersistence for SqliteTaskStore {
+   |                                      ^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `matching_sqlite::SqliteTaskStore`
+note: required by a bound in `semaphores::SemaphorePersistence`
+  --> crates/cadence-persistence/src/semaphores.rs:94:33
+   |
+94 | pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
+   |                                 ^^^^^^^^^^^^^^^ required by this bound in `SemaphorePersistence`
+help: consider annotating `matching_sqlite::SqliteTaskStore` with `#[derive(Debug)]`
+   |
+15 + #[derive(Debug)]
+16 | pub struct SqliteTaskStore {
+   |
+
+error[E0592]: duplicate definitions with name `release_semaphore_token`
+   --> crates/cadence-persistence/src/semaphores.rs:570:5
+    |
+548 | /     pub fn release_semaphore_token(
+549 | |         &self,
+550 | |         domain_id: &str,
+551 | |         name: &str,
+...   |
+554 | |         owner_id: &str,
+555 | |     ) -> Result<bool, AcquireError> {
+    | |___________________________________- other definition for `release_semaphore_token`
+...
+570 | /     pub fn release_semaphore_token(
+571 | |         &self,
+572 | |         domain_id: &str,
+573 | |         name: &str,
+...   |
+576 | |         owner_id: &str,
+577 | |     ) -> Result<bool, AcquireError> {
+    | |___________________________________^ duplicate definitions for `release_semaphore_token`
+
+   Compiling clap_derive v4.6.7
+error[E0599]: no method named `first` found for struct `scylla::value::Row` in the current scope
+  --> crates/cadence-persistence/src/matching_cassandra.rs:47:15
+   |
+47 |     match row.first() {
+   |               ^^^^^ method not found in `scylla::value::Row`
+   |
+help: one of the expressions' fields has a method of the same name
+   |
+47 |     match row.columns.first() {
+   |               ++++++++
+
+error[E0614]: type `bool` cannot be dereferenced
+  --> crates/cadence-persistence/src/matching_cassandra.rs:48:69
+   |
+48 | ...n(applied))) => Ok(*applied),
+   |                       ^^^^^^^^ can't be dereferenced
+
+error[E0277]: the trait bound `CassandraTaskListUdt: SerializeValue` is not satisfied
+   --> crates/cadence-persistence/src/matching_cassandra.rs:509:95
+    |
+507 | ...(session.query_unpaged(
+    |             ------------- required by a bound introduced by this call
+508 | ...in_id, task_list_name, task_list_type, type, task_id, range_id, task...
+509 | ...e, key.task_type, LIST_ROW, LIST_SENTINEL, 1_i64, udt, timestamp(now...
+    |                                                      ^^^ unsatisfied trait bound
+    |
+help: the trait `scylla::serialize::value::SerializeValue` is not implemented for `cassandra::CassandraTaskListUdt`
+   --> crates/cadence-persistence/src/cassandra.rs:77:1
+    |
+ 77 | pub struct CassandraTaskListUdt {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `scylla::serialize::value::SerializeValue`:
+              &T
+              &[u8]
+              (T15,)
+              (T14, T15)
+              (T13, T14, T15)
+              (T12, T13, T14, T15)
+              (T11, T12, T13, T14, T15)
+              (T10, T11, T12, T13, T14, T15)
+            and 54 others
+    = note: required for `(Uuid, _, i32, i32, i64, i64, _, _)` to implement `scylla::serialize::row::SerializeRow`
+note: required by a bound in `scylla::client::session::Session::query_unpaged`
+   --> vendor/scylla-1.9.0/src/client/session.rs:747:22
+    |
+744 |     pub async fn query_unpaged(
+    |                  ------------- required by a bound in this associated function
+...
+747 |         values: impl SerializeRow,
+    |                      ^^^^^^^^^^^^ required by this bound in `Session::query_unpaged`
+    = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_persistence-8544efc207dac621.long-type-5682488173251025177.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `CassandraTaskListUdt: SerializeValue` is not satisfied
+   --> crates/cadence-persistence/src/matching_cassandra.rs:507:30
+    |
+507 |                   let result = self.driver.run(session.query_unpaged(
+    |  ______________________________^
+508 | |                     "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, range_id, task_list, created...
+509 | |                     (key.domain_id, &key.name, key.task_type, LIST_ROW, LIST_SENTINEL, 1_i64, udt, timestamp(now_nanos)?)))
+    | |___________________________________________________________________________________________________________________________^ unsatisfied trait bound
+    |
+help: the trait `scylla::serialize::value::SerializeValue` is not implemented for `cassandra::CassandraTaskListUdt`
+   --> crates/cadence-persistence/src/cassandra.rs:77:1
+    |
+ 77 | pub struct CassandraTaskListUdt {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `scylla::serialize::value::SerializeValue`:
+              &T
+              &[u8]
+              (T15,)
+              (T14, T15)
+              (T13, T14, T15)
+              (T12, T13, T14, T15)
+              (T11, T12, T13, T14, T15)
+              (T10, T11, T12, T13, T14, T15)
+            and 54 others
+    = note: required for `(Uuid, _, i32, i32, i64, i64, _, _)` to implement `scylla::serialize::row::SerializeRow`
+note: required by a bound in `scylla::client::session::Session::query_unpaged`
+   --> vendor/scylla-1.9.0/src/client/session.rs:747:22
+    |
+744 |     pub async fn query_unpaged(
+    |                  ------------- required by a bound in this associated function
+...
+747 |         values: impl SerializeRow,
+    |                      ^^^^^^^^^^^^ required by this bound in `Session::query_unpaged`
+    = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_persistence-8544efc207dac621.long-type-5682488173251025177.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `CassandraTaskListUdt: SerializeValue` is not satisfied
+   --> crates/cadence-persistence/src/matching_cassandra.rs:533:21
+    |
+529 |             .run(session.query_unpaged(
+    |                          ------------- required by a bound introduced by this call
+...
+533 |                     udt,
+    |                     ^^^ unsatisfied trait bound
+    |
+help: the trait `scylla::serialize::value::SerializeValue` is not implemented for `cassandra::CassandraTaskListUdt`
+   --> crates/cadence-persistence/src/cassandra.rs:77:1
+    |
+ 77 | pub struct CassandraTaskListUdt {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `scylla::serialize::value::SerializeValue`:
+              &T
+              &[u8]
+              (T15,)
+              (T14, T15)
+              (T13, T14, T15)
+              (T12, T13, T14, T15)
+              (T11, T12, T13, T14, T15)
+              (T10, T11, T12, T13, T14, T15)
+            and 54 others
+    = note: required for `(i64, _, _, Uuid, _, i32, i32, i64, i64)` to implement `scylla::serialize::row::SerializeRow`
+note: required by a bound in `scylla::client::session::Session::query_unpaged`
+   --> vendor/scylla-1.9.0/src/client/session.rs:747:22
+    |
+744 |     pub async fn query_unpaged(
+    |                  ------------- required by a bound in this associated function
+...
+747 |         values: impl SerializeRow,
+    |                      ^^^^^^^^^^^^ required by this bound in `Session::query_unpaged`
+    = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_persistence-8544efc207dac621.long-type-5682488173251025177.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `CassandraTaskListUdt: SerializeValue` is not satisfied
+   --> crates/cadence-persistence/src/matching_cassandra.rs:527:22
+    |
+527 |           let result = self
+    |  ______________________^
+528 | |             .driver
+529 | |             .run(session.query_unpaged(
+530 | |                 UPDATE_LIST,
+...   |
+541 | |                 ),
+542 | |             ))
+    | |______________^ unsatisfied trait bound
+    |
+help: the trait `scylla::serialize::value::SerializeValue` is not implemented for `cassandra::CassandraTaskListUdt`
+   --> crates/cadence-persistence/src/cassandra.rs:77:1
+    |
+ 77 | pub struct CassandraTaskListUdt {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `scylla::serialize::value::SerializeValue`:
+              &T
+              &[u8]
+              (T15,)
+              (T14, T15)
+              (T13, T14, T15)
+              (T12, T13, T14, T15)
+              (T11, T12, T13, T14, T15)
+              (T10, T11, T12, T13, T14, T15)
+            and 54 others
+    = note: required for `(i64, _, _, Uuid, _, i32, i32, i64, i64)` to implement `scylla::serialize::row::SerializeRow`
+note: required by a bound in `scylla::client::session::Session::query_unpaged`
+   --> vendor/scylla-1.9.0/src/client/session.rs:747:22
+    |
+744 |     pub async fn query_unpaged(
+    |                  ------------- required by a bound in this associated function
+...
+747 |         values: impl SerializeRow,
+    |                      ^^^^^^^^^^^^ required by this bound in `Session::query_unpaged`
+    = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_persistence-8544efc207dac621.long-type-5682488173251025177.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `CassandraTaskListUdt: SerializeValue` is not satisfied
+    --> crates/cadence-persistence/src/matching_cassandra.rs:587:29
+     |
+ 574 |                 .run(session.batch(
+     |                              ----- required by a bound introduced by this call
+...
+ 587 |                             udt,
+     |                             ^^^ unsatisfied trait bound
+     |
+help: the trait `scylla::serialize::value::SerializeValue` is not implemented for `cassandra::CassandraTaskListUdt`
+    --> crates/cadence-persistence/src/cassandra.rs:77:1
+     |
+  77 | pub struct CassandraTaskListUdt {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = help: the following other types implement trait `scylla::serialize::value::SerializeValue`:
+               &T
+               &[u8]
+               (T15,)
+               (T14, T15)
+               (T13, T14, T15)
+               (T12, T13, T14, T15)
+               (T11, T12, T13, T14, T15)
+               (T10, T11, T12, T13, T14, T15)
+             and 54 others
+     = note: required for `(i64, _, _, Uuid, _, i32, i32, i64, i64)` to implement `scylla::serialize::row::SerializeRow`
+     = note: required for `((Uuid, &String, i32, i32, i64, _), _)` to implement `scylla::serialize::batch::BatchValues`
+note: required by a bound in `scylla::client::session::Session::batch`
+    --> vendor/scylla-1.9.0/src/client/session.rs:1295:22
+     |
+1292 |     pub async fn batch(
+     |                  ----- required by a bound in this associated function
+...
+1295 |         values: impl BatchValues,
+     |                      ^^^^^^^^^^^ required by this bound in `Session::batch`
+     = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_persistence-8544efc207dac621.long-type-5682488173251025177.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `CassandraTaskListUdt: SerializeValue` is not satisfied
+    --> crates/cadence-persistence/src/matching_cassandra.rs:573:13
+     |
+ 573 | /             self.driver
+ 574 | |                 .run(session.batch(
+ 575 | |                     &batch,
+...    |
+ 596 | |                     ),
+ 597 | |                 ))
+     | |__________________^ unsatisfied trait bound
+     |
+help: the trait `scylla::serialize::value::SerializeValue` is not implemented for `cassandra::CassandraTaskListUdt`
+    --> crates/cadence-persistence/src/cassandra.rs:77:1
+     |
+  77 | pub struct CassandraTaskListUdt {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = help: the following other types implement trait `scylla::serialize::value::SerializeValue`:
+               &T
+               &[u8]
+               (T15,)
+               (T14, T15)
+               (T13, T14, T15)
+               (T12, T13, T14, T15)
+               (T11, T12, T13, T14, T15)
+               (T10, T11, T12, T13, T14, T15)
+             and 54 others
+     = note: required for `(i64, _, _, Uuid, _, i32, i32, i64, i64)` to implement `scylla::serialize::row::SerializeRow`
+     = note: required for `((Uuid, &String, i32, i32, i64, _), _)` to implement `scylla::serialize::batch::BatchValues`
+note: required by a bound in `scylla::client::session::Session::batch`
+    --> vendor/scylla-1.9.0/src/client/session.rs:1295:22
+     |
+1292 |     pub async fn batch(
+     |                  ----- required by a bound in this associated function
+...
+1295 |         values: impl BatchValues,
+     |                      ^^^^^^^^^^^ required by this bound in `Session::batch`
+     = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_persistence-8544efc207dac621.long-type-5682488173251025177.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `CassandraTaskListUdt: SerializeValue` is not satisfied
+   --> crates/cadence-persistence/src/matching_cassandra.rs:605:25
+    |
+601 |                 .run(session.query_unpaged(
+    |                              ------------- required by a bound introduced by this call
+...
+605 |                         udt,
+    |                         ^^^ unsatisfied trait bound
+    |
+help: the trait `scylla::serialize::value::SerializeValue` is not implemented for `cassandra::CassandraTaskListUdt`
+   --> crates/cadence-persistence/src/cassandra.rs:77:1
+    |
+ 77 | pub struct CassandraTaskListUdt {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `scylla::serialize::value::SerializeValue`:
+              &T
+              &[u8]
+              (T15,)
+              (T14, T15)
+              (T13, T14, T15)
+              (T12, T13, T14, T15)
+              (T11, T12, T13, T14, T15)
+              (T10, T11, T12, T13, T14, T15)
+            and 54 others
+    = note: required for `(i64, _, _, Uuid, _, i32, i32, i64, i64)` to implement `scylla::serialize::row::SerializeRow`
+note: required by a bound in `scylla::client::session::Session::query_unpaged`
+   --> vendor/scylla-1.9.0/src/client/session.rs:747:22
+    |
+744 |     pub async fn query_unpaged(
+    |                  ------------- required by a bound in this associated function
+...
+747 |         values: impl SerializeRow,
+    |                      ^^^^^^^^^^^^ required by this bound in `Session::query_unpaged`
+    = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_persistence-8544efc207dac621.long-type-5682488173251025177.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `CassandraTaskListUdt: SerializeValue` is not satisfied
+   --> crates/cadence-persistence/src/matching_cassandra.rs:600:13
+    |
+600 | /             self.driver
+601 | |                 .run(session.query_unpaged(
+602 | |                     UPDATE_LIST,
+...   |
+613 | |                     ),
+614 | |                 ))
+    | |__________________^ unsatisfied trait bound
+    |
+help: the trait `scylla::serialize::value::SerializeValue` is not implemented for `cassandra::CassandraTaskListUdt`
+   --> crates/cadence-persistence/src/cassandra.rs:77:1
+    |
+ 77 | pub struct CassandraTaskListUdt {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `scylla::serialize::value::SerializeValue`:
+              &T
+              &[u8]
+              (T15,)
+              (T14, T15)
+              (T13, T14, T15)
+              (T12, T13, T14, T15)
+              (T11, T12, T13, T14, T15)
+              (T10, T11, T12, T13, T14, T15)
+            and 54 others
+    = note: required for `(i64, _, _, Uuid, _, i32, i32, i64, i64)` to implement `scylla::serialize::row::SerializeRow`
+note: required by a bound in `scylla::client::session::Session::query_unpaged`
+   --> vendor/scylla-1.9.0/src/client/session.rs:747:22
+    |
+744 |     pub async fn query_unpaged(
+    |                  ------------- required by a bound in this associated function
+...
+747 |         values: impl SerializeRow,
+    |                      ^^^^^^^^^^^^ required by this bound in `Session::query_unpaged`
+    = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_persistence-8544efc207dac621.long-type-5682488173251025177.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error: unused import: `crate::SemaphorePersistence`
+ --> crates/cadence-persistence/src/matching_mysql.rs:8:5
+  |
+8 | use crate::SemaphorePersistence;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `-D unused-imports` implied by `-D warnings`
+  = help: to override `-D warnings` add `#[allow(unused_imports)]`
+
+error: unused import: `crate::SemaphorePersistence`
+  --> crates/cadence-persistence/src/matching_postgres.rs:21:5
+   |
+21 | use crate::SemaphorePersistence;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: unused import: `crate::SemaphorePersistence`
+ --> crates/cadence-persistence/src/matching_sqlite.rs:7:5
+  |
+7 | use crate::SemaphorePersistence;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    Checking serde_path_to_error v0.1.20
+error: unused variable: `bucket`
+   --> crates/cadence-persistence/src/semaphores.rs:124:9
+    |
+124 |         bucket: i32,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_bucket`
+    |
+    = note: `-D unused-variables` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(unused_variables)]`
+
+error: unused variable: `domain_id`
+   --> crates/cadence-persistence/src/semaphores.rs:122:9
+    |
+122 |         domain_id: &str,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_domain_id`
+
+error: unused variable: `name`
+   --> crates/cadence-persistence/src/semaphores.rs:123:9
+    |
+123 |         name: &str,
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_name`
+
+error: unused variable: `owner_id`
+   --> crates/cadence-persistence/src/semaphores.rs:125:9
+    |
+125 |         owner_id: &str,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_owner_id`
+
+error: unused variable: `bucket`
+   --> crates/cadence-persistence/src/semaphores.rs:141:9
+    |
+141 |         bucket: i32,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_bucket`
+
+error: unused variable: `token_id`
+   --> crates/cadence-persistence/src/semaphores.rs:142:9
+    |
+142 |         token_id: i32,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_token_id`
+
+error: unused variable: `domain_id`
+   --> crates/cadence-persistence/src/semaphores.rs:139:9
+    |
+139 |         domain_id: &str,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_domain_id`
+
+error: unused variable: `name`
+   --> crates/cadence-persistence/src/semaphores.rs:140:9
+    |
+140 |         name: &str,
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_name`
+
+error: unused variable: `owner_id`
+   --> crates/cadence-persistence/src/semaphores.rs:143:9
+    |
+143 |         owner_id: &str,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_owner_id`
+
+    Checking powerfmt v0.2.1
+    Checking resolv-conf v0.7.6
+    Checking matchit v0.8.4
+    Checking num-conv v0.2.2
+    Checking unsafe-libyaml v0.2.11
+    Checking time-core v0.1.9
+    Checking deranged v0.5.9
+    Checking fastrand v2.5.0
+    Checking tempfile v3.27.0
+    Checking time v0.3.55
+Some errors have detailed explanations: E0046, E0277, E0592, E0599, E0614.
+For more information about an error, try `rustc --explain E0046`.
+error: could not compile `cadence-persistence` (lib) due to 30 previous errors
+warning: build failed, waiting for other jobs to finish...
