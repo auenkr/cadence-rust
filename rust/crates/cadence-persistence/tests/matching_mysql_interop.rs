@@ -28,6 +28,7 @@ fn config() -> MySqlTaskStoreConfig {
         max_conn_lifetime: Some(Duration::from_secs(300)),
         n_shards: 1,
         use_multiple_databases: false,
+        multiple_databases_config: Vec::new(),
         encoding: BlobEncoding::ThriftRW,
         tls: None,
     }

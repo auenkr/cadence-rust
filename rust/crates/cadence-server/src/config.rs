@@ -450,7 +450,11 @@ pub struct NosqlConfig {
     pub tls: Option<TlsConfig>,
     #[serde(default, rename = "protoVersion")]
     pub proto_version: i32,
-    #[serde(default, rename = "connectTimeout", deserialize_with = "de_go_duration")]
+    #[serde(
+        default,
+        rename = "connectTimeout",
+        deserialize_with = "de_go_duration"
+    )]
     pub connect_timeout_nanos: i64,
     #[serde(default, rename = "timeout", deserialize_with = "de_go_duration")]
     pub timeout_nanos: i64,
@@ -494,8 +498,7 @@ pub struct SqlConfig {
     pub connect_protocol: String,
     #[serde(default, rename = "connectAttributes")]
     pub connect_attributes: HashMap<String, String>,
-    /// Go SQL persistence uses this for physical database routing. Matching's
-    /// current Rust task adapter supports only the single database case.
+    /// Go SQL persistence uses this for physical database routing.
     #[serde(default, rename = "nShards")]
     pub n_shards: i32,
     #[serde(default, rename = "useMultipleDatabases")]
