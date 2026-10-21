@@ -36,6 +36,7 @@ parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default
 parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'),
     help='configure and capture one Rust Matching exporter in the production Ringpop lane')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
+parser.add_argument('--postgres', action='store_true', help='run production Rust Matching and original Go services against the same Go-configured PostgreSQL schema; requires CADENCE_POSTGRES_* settings')
 parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
@@ -299,6 +300,19 @@ mysql_visibility_database = os.environ.get('CADENCE_MYSQL_VISIBILITY_DATABASE', 
 mysql_host, _, mysql_port = mysql_addr.rpartition(':')
 if not mysql_host or not mysql_port.isdigit():
     parser.error('--mysql requires CADENCE_MYSQL_ADDR in host:port form')
+if args.postgres and not production_matching:
+    parser.error('--postgres requires --rust-production-binary')
+if args.mysql and args.postgres:
+    parser.error('--mysql and --postgres select different production databases; choose one')
+postgres_addr = os.environ.get('CADENCE_POSTGRES_ADDR', '127.0.0.1:5432')
+postgres_user = os.environ.get('CADENCE_POSTGRES_USER', 'postgres')
+postgres_password = os.environ.get('CADENCE_POSTGRES_PASSWORD', 'cadence')
+postgres_database = os.environ.get('CADENCE_POSTGRES_DATABASE', 'cadence')
+postgres_visibility_database = os.environ.get('CADENCE_POSTGRES_VISIBILITY_DATABASE', 'cadence_visibility')
+postgres_sslmode = os.environ.get('CADENCE_POSTGRES_SSLMODE', '')
+postgres_ca = os.environ.get('CADENCE_POSTGRES_CA_FILE', '')
+postgres_cert = os.environ.get('CADENCE_POSTGRES_CERT_FILE', '')
+postgres_key = os.environ.get('CADENCE_POSTGRES_KEY_FILE', '')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
@@ -388,6 +402,24 @@ if args.mysql:
     text = re.sub(r'(?m)^(\s*user:)\s*"root"\s*$', r'\1 ' + json.dumps(mysql_user), text)
     text = re.sub(r'(?m)^(\s*password:)\s*"cadence"\s*$', r'\1 ' + json.dumps(mysql_password), text)
     (config / 'development_mysql.yaml').write_text(text)
+elif args.postgres:
+    text = (root / 'go/config/development_postgres.yaml').read_text()
+    # Replace each datasource explicitly so password and database values do
+    # not collide with repeated YAML scalar values.
+    text = re.sub(r'(?m)^(\s*databaseName:)\s*"cadence"\s*$', r'\1 ' + json.dumps(postgres_database), text, count=1)
+    text = re.sub(r'(?m)^(\s*databaseName:)\s*"cadence_visibility"\s*$', r'\1 ' + json.dumps(postgres_visibility_database), text, count=1)
+    text = re.sub(r'(?m)^(\s*connectAddr:)\s*"127\.0\.0\.1:5432"\s*$', r'\1 ' + json.dumps(postgres_addr), text)
+    text = re.sub(r'(?m)^(\s*user:)\s*"postgres"\s*$', r'\1 ' + json.dumps(postgres_user), text)
+    text = re.sub(r'(?m)^(\s*password:)\s*"cadence"\s*$', r'\1 ' + json.dumps(postgres_password), text)
+    if postgres_sslmode:
+        tls = ('        tls:\n'
+               '          enabled: true\n'
+               '          sslmode: ' + json.dumps(postgres_sslmode) + '\n')
+        for field, value in [('caFile', postgres_ca), ('certFile', postgres_cert), ('keyFile', postgres_key)]:
+            if value:
+                tls += f'          {field}: {json.dumps(value)}\n'
+        text = re.sub(r'(?m)^(\s*maxConns:.*)$', r'\1\n' + tls, text)
+    (config / 'development_postgres.yaml').write_text(text)
 else:
     text = (root / 'go/config/development_sqlite.yaml').read_text()
     text = text.replace('"cadence.db"', json.dumps(str(work / 'cadence.db')))
@@ -472,6 +504,40 @@ if production_matching:
             '        maxConns: 2\n'
             '        maxIdleConns: 2\n'
         )
+    elif args.postgres:
+        tls_config = ''
+        if postgres_sslmode:
+            tls_config = ('        tls:\n'
+                          '          enabled: true\n'
+                          '          sslmode: ' + json.dumps(postgres_sslmode) + '\n')
+            for field, value in [('caFile', postgres_ca), ('certFile', postgres_cert), ('keyFile', postgres_key)]:
+                if value:
+                    tls_config += f'          {field}: {json.dumps(value)}\n'
+        persistence_config = (
+            'persistence:\n'
+            '  defaultStore: postgres-default\n'
+            '  visibilityStore: postgres-visibility\n'
+            '  numHistoryShards: 4\n'
+            '  datastores:\n'
+            '    postgres-default:\n'
+            '      sql:\n'
+            '        pluginName: postgres\n'
+            '        databaseName: ' + json.dumps(postgres_database) + '\n'
+            '        connectAddr: ' + json.dumps(postgres_addr) + '\n'
+            '        user: ' + json.dumps(postgres_user) + '\n'
+            '        password: ' + json.dumps(postgres_password) + '\n'
+            '        nShards: 1\n'
+            '        maxConns: 20\n' + tls_config +
+            '    postgres-visibility:\n'
+            '      sql:\n'
+            '        pluginName: postgres\n'
+            '        databaseName: ' + json.dumps(postgres_visibility_database) + '\n'
+            '        connectAddr: ' + json.dumps(postgres_addr) + '\n'
+            '        user: ' + json.dumps(postgres_user) + '\n'
+            '        password: ' + json.dumps(postgres_password) + '\n'
+            '        nShards: 1\n'
+            '        maxConns: 2\n' + tls_config
+        )
     else:
         persistence_config = (
         'persistence:\n'
@@ -509,7 +575,7 @@ if production_matching:
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
         '--data-dir', str(work / 'rust-matching-data')], indent=2) + '\n')
-command = [str(binary), '--config', str(config), '--zone', 'mysql' if args.mysql else 'sqlite', 'start',
+command = [str(binary), '--config', str(config), '--zone', 'mysql' if args.mysql else ('postgres' if args.postgres else 'sqlite'), 'start',
            '--auto-setup', '--services', 'frontend,history,worker' if production_matching else 'frontend,history,matching,worker']
 environment = None
 if (args.rust_matching or args.matching_restart) and not production_matching:
@@ -653,6 +719,20 @@ try:
                         })
                         if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
                             probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
+                    if args.postgres:
+                        pg_host, pg_port = postgres_addr.rsplit(':', 1)
+                        probe_environment.update({
+                            'CADENCE_MATCHING_POSTGRES': 'true',
+                            'CADENCE_POSTGRES_HOST': pg_host,
+                            'CADENCE_POSTGRES_PORT': pg_port,
+                            'CADENCE_POSTGRES_USER': postgres_user,
+                            'CADENCE_POSTGRES_PASSWORD': postgres_password,
+                            'CADENCE_POSTGRES_DATABASE': postgres_database,
+                            'CADENCE_POSTGRES_SSLMODE': postgres_sslmode,
+                            'CADENCE_POSTGRES_CA_FILE': postgres_ca,
+                            'CADENCE_POSTGRES_CERT_FILE': postgres_cert,
+                            'CADENCE_POSTGRES_KEY_FILE': postgres_key,
+                        })
                 result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
                     env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120)))
                 if udp_capture:

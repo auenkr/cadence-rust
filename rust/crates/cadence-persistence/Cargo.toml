@@ -19,6 +19,8 @@ rusqlite = { version = "0.32.1", features = ["bundled", "hooks"] }
 mysql = { version = "26.0.1", default-features = false, features = ["minimal-rust", "rustls-tls-ring"] }
 mysql_async = { version = "=0.37.1", default-features = false, features = ["minimal-rust", "rustls-tls", "ring"] }
 postgres = { version = "0.19", default-features = false }
+postgres-openssl = "0.5"
+openssl = "0.10"
 farmhash = "1.1.5"
 snap = "1.1.1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
