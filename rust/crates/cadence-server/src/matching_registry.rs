@@ -888,7 +888,7 @@ impl QueueRegistry {
                         }));
                     }
                     let partitions = match crate::matching_partition::PartitionCache::load(
-                            &registry.store,
+                            registry.store.as_ref(),
                             &queue,
                             &key,
                             kind,
@@ -1515,7 +1515,7 @@ impl QueueRegistry {
                 .map_err(Status::invalid_argument)?
                 .root()
                 .into();
-            handle.partitions.refresh(&store, &key)
+            handle.partitions.refresh(store.as_ref(), &key)
         })
         .await
         .map_err(|error| Status::internal(error.to_string()))?
