@@ -10,6 +10,37 @@ production evidence is recorded separately in
 `memory/evidence/matching-dns-build-20261020-2726808/`; it is bounded evidence,
 not a Matching acceptance audit.
 
+## Source refresh: Matching History outbound selector (2026-10-21)
+
+The former production-main note claiming TChannel History outbound is missing
+is stale. Pinned Go `go/common/rpc/params.go:76,120-134` samples
+`system.enableGRPCOutbound` at service construction, defaults true, and builds
+both History and Matching direct outbounds with that selection. The History
+peer resolver uses the matching named port (`go/client/history/peer_resolver.go`);
+Ringpop members expose `grpc` and `tchannel` named addresses. Matching obtains
+the retryable History client from its service resource (`go/service/matching/
+service.go:103`; `go/common/resource/resource_impl.go:286-300`).
+
+Rust already implements the same startup selector in `main.rs`, with the last
+unfiltered global dynamic-config value and true default. False selects the live
+Ringpop History `tchannel` address and `MatchingHistoryClient`'s native Thrift
+transport. The method path covers Matching's History `RefreshWorkflowTasks`,
+`DescribeWorkflowExecution`, `GetMutableState`, `RecordDecisionTaskStarted`,
+and `RecordActivityTaskStarted` calls, including retry/redirect and deadline
+handling. Focused source assertions and the existing Go TChannel peer oracle
+cover transport selection, payloads, typed errors, and cancellation.
+
+Same-source preliminary mixed TChannel evidence already exists at
+`memory/evidence/matching-dns-interop-20261020/mixed-tchannel-isolated/`; its
+Rust source commit `7030f2e` is an ancestor of this branch and the History
+transport source files are unchanged since that commit. The run completed an
+SDK workflow, query/isolation dispatch, partition config, process restart and
+graceful drain/recovery with Go Matching absent and Go Frontend/History/Worker
+alive. It is explicitly `acceptanceEligible: false`, and its transport
+assertion was configured through Rust dynamic config plus successful workload,
+not per-call tracing. A fresh post-slot mixed run is queued in
+`matching-history-outbound-transport-20261021.md`; Matching remains incomplete.
+
 ## Current positive evidence and limits
 
 - Production Rust Matching can be started beside Go Frontend, History, and
@@ -54,21 +85,34 @@ not a Matching acceptance audit.
 
 2. **Partition cache propagation remains local.** Native partition metadata,
    root updates, persistence fencing, and local owner notification exist, but
-   local registry notification does not itself notify matching owners on other
-   hosts. Go's root update path sends notifications to old/new non-root read and
-   write partitions. Complete this through the live Matching peer path and test
-   config changes that add/remove remote partition IDs, out-of-order versions,
-   owner movement, and refresh after restart. Do not conflate this with the
-   existing Ringpop task-list routing or the configured shard-distributor gate.
+   local notification does not reach matching owners on other hosts. Rust
+   `QueueRegistry::update_partition_config` updates loaded non-root owners in
+   that process and includes old/new read and write partition IDs. Go's
+   `taskListManagerImpl.notifyPartitionConfig` sends
+   `RefreshTaskListPartitionConfig` to each non-root read partition in the old
+   and new configs. Complete the remote calls through the live Matching peer
+   path and queue a two-host gate for adding/removing remote partition IDs,
+   stale/out-of-order versions, owner movement, and refresh after restart. Do
+   not conflate this with existing Ringpop task-list routing or the configured
+   shard-distributor gate. The source change now resolves each target through
+   Matching membership and sends refresh RPCs to local or remote gRPC owners.
+   Refresh failures remain best-effort, matching Go's logged-but-not-returned
+   notification errors. A focused two-host source gate covers remote add/remove,
+   write-only exclusion, stale-version rejection, and owner movement; it has not
+   been executed.
 
-3. **Go domain-change side effects need a current-path parity check.** Go's
-   `domainChangeCallback` clears manager pollers and unloads/refreshes managers
-   after domain failover/config changes. Rust has a production metadata cache
-   and domain filtering, but a change callback that produces all matching-side
-   side effects is not established by the cited mixed gate. Compare
-   `engine.go:1707-1785` to the current cache/runtime subscribers; add the
-   missing invalidation/notification behavior only after confirming a live Go
-   call path and preserve global-domain semantics.
+3. **Domain failover side effects differ in enumeration, but the core poll
+   release path exists.** Go `domainChangeCallback` is triggered by increasing
+   failover notification versions on global, non-active-active domains. It
+   enumerates `ManagersByDomainID` (managers already loaded in the process),
+   filters to normal decision/activity and sticky decision managers, then
+   releases blocked polls. It does not enumerate persisted task-list rows or
+   create managers. Rust now tracks the global notification watermark in the
+   domain cache callback and releases the same loaded manager kinds only for
+   newly notified global non-active-active domains. Ordinary config updates do
+   not trigger release; no generic unload/clear-poller effect was found in
+   `engine.go:1707-1785`. A focused eligibility regression was added; mixed
+   failover evidence remains outstanding.
 
 4. **Remaining Matching behavior and lifecycle still require the parity audit.**
    The source includes cross-host poll/add/query forwarding, typed ownership
@@ -99,9 +143,10 @@ not a Matching acceptance audit.
    selected Matching persistence backend. Add conditional-update races,
    restart rebuild, bucket scan, metadata creation, and two-process acquire
    tests. Keep the in-memory adapter for focused unit tests.
-3. Implement cross-host partition config notifications and validate owner
-   movement/reload. Then continue the current Matching Go-source parity audit
-   for domain callbacks and failure/recovery behaviors.
+3. Run the added two-host partition notification regression and a mixed Go/Rust
+   failover gate with blocked normal decision/activity polls, sticky decision
+   polls, active-active and non-global controls. Keep the owner-pinned poller
+   retention gate separate from the public Frontend routing assertion.
 4. Complete the service parity audit and reproducible mixed Go/Rust failure,
    restart, and recovery evidence before beginning History migration.
 

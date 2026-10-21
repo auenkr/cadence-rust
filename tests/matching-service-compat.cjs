@@ -249,9 +249,77 @@ async function run() {
   const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(decision.workflowExecution.runId, started.runId);
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+  if (productionMode && failureRecoveryMode) {
+    const diagnosticPeers = [
+      { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { name: 'secondary', address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const membershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    let pollOwner;
+    try { pollOwner = await directPartitionOwner(membershipPeer, domain, taskList.name); }
+    finally { membershipPeer.close(); }
+    const ownerPeer = diagnosticPeers.find(peer => peer.address === pollOwner);
+    assert(ownerPeer, `workflow poll task list owner ${pollOwner || '<empty>'} did not match either configured Matching member`);
+    const ownerClient = directMatchingClient(`127.0.0.1:${ownerPeer.grpc}`);
+    try {
+      const ownerDescription = await new Promise((resolve, reject) => ownerClient.DescribeTaskList({
+        domainId, request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true },
+      }, (error, value) => error ? reject(error) : resolve(value)));
+      const ownerPollers = (ownerDescription.pollers || []).map(poller => poller.identity);
+      fs.writeFileSync(path.join(work, 'production-poller-retention-owner.json'), JSON.stringify({
+        taskList: taskList.name, owner: ownerPeer.name, ownerAddress: pollOwner,
+        expectedPollerIdentity: 'service-probe', ownerPollers,
+        frontendPollers: (described.pollers || []).map(poller => poller.identity),
+      }, null, 2) + '\n');
+      assert(ownerPollers.includes('service-probe'),
+        `Matching owner ${ownerPeer.name} did not retain service-probe after completing its decision poll`);
+    } finally { ownerClient.close(); }
+  }
+  if (!described.pollers.some(poller => poller.identity === 'service-probe') && productionMode && failureRecoveryMode) {
+    const diagnosticPeers = [
+      { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { name: 'secondary', address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const diagnostics = {
+      taskList: taskList.name,
+      frontendVisiblePollers: (described.pollers || []).map(poller => poller.identity),
+      frontendTaskIdBlock: described.taskListStatus?.taskIdBlock || null,
+      rustViews: [],
+    };
+    for (const peer of diagnosticPeers) {
+      const matching = directMatchingClient(`127.0.0.1:${peer.grpc}`);
+      const entry = { member: peer.name, address: peer.address };
+      try { entry.reportedOwner = await directPartitionOwner(matching, domain, taskList.name); }
+      catch (error) { entry.ownerError = error.details || error.message; }
+      try {
+        const response = await new Promise((resolve, reject) => matching.DescribeTaskList({
+          domainId, request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true },
+        }, (error, value) => error ? reject(error) : resolve(value)));
+        entry.pollers = (response.pollers || []).map(poller => poller.identity);
+        entry.taskIdBlock = response.taskListStatus?.taskIdBlock || null;
+      } catch (error) { entry.describeError = { code: error.code, details: error.details || error.message }; }
+      diagnostics.rustViews.push(entry);
+      matching.close();
+    }
+    fs.writeFileSync(path.join(work, 'production-poller-owner-diagnostics.json'), JSON.stringify(diagnostics, null, 2) + '\n');
+  }
   assert(described.pollers.some(poller => poller.identity === 'service-probe'));
-  assert.equal(described.taskListStatus.taskIdBlock.startId, '1');
-  assert.equal(described.taskListStatus.taskIdBlock.endId, '100000');
+  const decisionBlock = described.taskListStatus.taskIdBlock;
+  const decisionBlockStart = Number(decisionBlock.startId), decisionBlockEnd = Number(decisionBlock.endId);
+  assert(decisionBlockStart >= 1, `task ID block must start at a positive ID: ${JSON.stringify(decisionBlock)}`);
+  assert.equal(decisionBlockEnd - decisionBlockStart + 1, 100000, 'task ID block must preserve Go Matching range size');
+  assert.equal((decisionBlockStart - 1) % 100000, 0, 'task ID block must align to Go Matching range boundaries');
+  if (productionMode && failureRecoveryMode) {
+    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
+    const persistedRange = spawnSync('python3', ['-c',
+      'import sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1]); r=c.execute("select range_id from task_lists where domain_id=? and name=? and task_type=0", (uuid.UUID(sys.argv[2]).bytes, sys.argv[3])).fetchone(); print(r[0] if r else -1)',
+      database, domainId, taskList.name], { encoding: 'utf8' });
+    assert.equal(persistedRange.status, 0, `could not read persisted decision task-list range: ${persistedRange.stderr}`);
+    assert.equal(decisionBlockEnd / 100000, Number(persistedRange.stdout.trim()), 'reported task ID block must match the persisted Go-compatible range lease');
+  } else {
+    assert.equal(decisionBlockStart, 1, 'a fresh single-owner task list must start at ID 1');
+    assert.equal(decisionBlockEnd, 100000, 'a fresh single-owner task list must expose the first 100000-ID block');
+  }
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: decision.taskToken, identity: 'service-probe', decisions: [{ scheduleActivityTaskDecisionAttributes: {
       activityId: 'echo', activityType: { name: 'Echo' }, taskList, input: payload('activity'),
@@ -412,8 +480,49 @@ async function run() {
   // Real Go History start through an isolated Rust queue. Create a scheduled
   // activity normally, then reference that schedule from a second task list to
   // control its isolation metadata without changing Go History configuration.
-  clients.Matching = new schema.matching.v1.MatchingAPI(process.argv[4], grpc.credentials.createInsecure());
-  const isolatedList = { name: `isolated-${id}` };
+  let isolatedListName = `isolated-${id}`;
+  let isolatedMatchingGrpc = process.argv[4];
+  if (productionMode && failureRecoveryMode) {
+    // The direct Matching client used by the isolation probe must target the
+    // Ringpop owner. A random task list can hash to either member, and this
+    // probe intentionally bypasses Frontend routing to set isolation groups.
+    const peers = [
+      { address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const membershipPeers = peers.map(peer => directMatchingClient(`127.0.0.1:${peer.grpc}`));
+    let selectedOwner;
+    let lastObservation = 'no common owner observed';
+    const ownerDeadline = Date.now() + 30000;
+    try {
+      for (let index = 0; index < 128 && Date.now() < ownerDeadline; index++) {
+        const candidate = `${isolatedListName}-${index}`;
+        try {
+          const owners = await Promise.all(membershipPeers.map(client => directPartitionOwner(client, domain, candidate)));
+          if (owners[0] !== owners[1]) {
+            lastObservation = `members disagreed: ${owners.join(', ')}`;
+          } else {
+            selectedOwner = peers.find(peer => peer.address === owners[0]);
+            if (selectedOwner) {
+              isolatedListName = candidate;
+              isolatedMatchingGrpc = `127.0.0.1:${selectedOwner.grpc}`;
+              break;
+            }
+            lastObservation = `owner ${owners[0]} did not match either configured member`;
+          }
+        } catch (error) {
+          lastObservation = error.details || error.message;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert(selectedOwner, `could not find an isolation task list with a common live Ringpop owner: ${lastObservation}`);
+    } finally {
+      membershipPeers.forEach(client => client.close());
+    }
+  }
+  assert.match(isolatedMatchingGrpc, /^127\.0\.0\.1:\d+$/, 'direct isolation Matching client must receive a host:port address');
+  clients.Matching = new schema.matching.v1.MatchingAPI(isolatedMatchingGrpc, grpc.credentials.createInsecure());
+  const isolatedList = { name: isolatedListName };
   const isoStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
     ...startRequest, workflowId: `isolated-${id}`, taskList: isolatedList, requestId: randomUUID(),
   });
@@ -429,7 +538,8 @@ async function run() {
     scheduled = history.history.events.find(event => event.activityTaskScheduledEventAttributes);
     if (!scheduled && Date.now() > scheduleDeadline) throw new Error('isolated activity not scheduled');
   }
-  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } });
+  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } })
+    .then(response => ({ response }), error => ({ error }));
   const pollerB = randomUUID();
   const pollB = call('Matching', 'PollForActivityTask', { domainId, pollerId: pollerB, isolationGroup: 'zone-b', request: { taskList: isolatedList, identity: 'isolated-worker-b' } }).then(response => ({ response }), error => ({ error }));
   const registeredDeadline = Date.now() + 10000;
@@ -440,7 +550,9 @@ async function run() {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   await call('Matching', 'AddActivityTask', { domainId, sourceDomainId: domainId, workflowExecution: { workflowId: `isolated-${id}`, runId: isoStart.runId }, taskList: isolatedList, scheduleId: scheduled.eventId, partitionConfig: { 'isolation-group': 'zone-a' } });
-  const isolatedTask = await pollA;
+  const isolatedPollResult = await pollA;
+  if (isolatedPollResult.error) throw isolatedPollResult.error;
+  const isolatedTask = isolatedPollResult.response;
   assert.equal(isolatedTask.activityId, 'isolated');
   await call('Matching', 'CancelOutstandingPoll', { domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', pollerId: pollerB });
   assert.equal((await pollB).error?.code, grpc.status.CANCELLED, 'other isolation group must not consume the isolated activity');
@@ -559,27 +671,53 @@ async function run() {
   }
   console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
   } finally {
-    if (productionMode) {
-      const sigtermSentUnixNs = Date.now() * 1_000_000;
-      fs.writeFileSync(path.join(work, 'matching-shutdown.json'), JSON.stringify({
-        signal: 'SIGTERM', sigtermSentUnixNs,
-      }) + '\n');
-      rust.kill('SIGTERM');
+
+    const cleanupErrors = [];
+    async function stopRust(child, label, waitForExit) {
+      if (!child) return;
+      if (child.exitCode === null && child.signalCode === null) {
+        if (productionMode) {
+          if (label === 'primary') {
+            const sigtermSentUnixNs = Date.now() * 1_000_000;
+            fs.writeFileSync(path.join(work, 'matching-shutdown.json'), JSON.stringify({
+              signal: 'SIGTERM', sigtermSentUnixNs,
+            }) + '\n');
+          }
+          child.kill('SIGTERM');
+        }
+        else if (label === 'primary') fs.writeFileSync(stop, 'stop');
+      }
+      let timer;
+      let result = await Promise.race([
+        waitForExit,
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), 20000); }),
+      ]);
+      clearTimeout(timer);
+      if (result === null) {
+        child.kill('SIGKILL');
+        result = await waitForExit;
+        cleanupErrors.push(`${label} Rust Matching required SIGKILL after shutdown timeout`);
+      }
+      if (productionMode && label === 'primary' && result?.code === 0) {
+        const shutdownPath = path.join(work, 'matching-shutdown.json');
+        const shutdown = JSON.parse(fs.readFileSync(shutdownPath, 'utf8'));
+        shutdown.exitCode = result.code;
+        shutdown.childSignal = result.signal;
+        shutdown.completedAtUnixNs = Date.now() * 1_000_000;
+        fs.writeFileSync(shutdownPath, JSON.stringify(shutdown, null, 2) + '\n');
+      }
+      if (result?.code !== 0) cleanupErrors.push(`${label} Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-${label === 'primary' ? 'after-restart' : 'secondary'}.log`);
+
     }
-    else fs.writeFileSync(stop, 'stop');
-    let shutdownTimer;
-    const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
-    clearTimeout(shutdownTimer);
-    if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
-    if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
-    if (productionMode) {
-      const shutdownPath = path.join(work, 'matching-shutdown.json');
-      const shutdown = JSON.parse(fs.readFileSync(shutdownPath, 'utf8'));
-      shutdown.exitCode = result.code;
-      shutdown.childSignal = result.signal;
-      shutdown.completedAtUnixNs = Date.now() * 1_000_000;
-      fs.writeFileSync(shutdownPath, JSON.stringify(shutdown, null, 2) + '\n');
-    }
+    // Each process gets its own bounded shutdown attempt. Collect errors so a
+    // stuck primary never prevents us from reaping the secondary instance.
+    const secondaryExit = secondaryRust && new Promise(resolve => {
+      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) resolve({ code: secondaryRust.exitCode, signal: secondaryRust.signalCode });
+      else secondaryRust.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    await stopRust(rust, 'primary', exited);
+    if (secondaryRust) await stopRust(secondaryRust, 'secondary', secondaryExit);
+    if (cleanupErrors.length) throw new Error(cleanupErrors.join('; '));
   }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));

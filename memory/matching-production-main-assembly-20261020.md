@@ -12,11 +12,12 @@ socket, and starts the Ringpop+Matching TChannel listener before bootstrap so
 JOIN requests can reach it. `MatchingMembershipLifecycle` publishes the
 initial membership only after provider startup; `MatchingRuntime` attaches
 that snapshot to the handler and starts the service membership cleanup loop.
-The production History client uses `RingpopHistoryMembership` and
-`MatchingHistoryPeerResolver` with configured history shard count and the
-named gRPC port. If `system.enableGRPCOutbound` is false, startup fails
-explicitly because Matching's History Thrift/TChannel client path is not yet
-implemented; Rust must not silently override Go's transport choice.
+The original note below about rejecting `system.enableGRPCOutbound=false` is
+stale. Commit `8b3e7991a` added the native History Thrift/TChannel path and
+production selector. See
+`matching-history-outbound-transport-20261021.md` for the pinned Go behavior,
+current source trace, existing evidence, and the fresh test queued for the
+telemetry lane.
 
 Shutdown now calls lifecycle withdrawal while Matching listeners remain
 available, then drains/stops the Matching runtime, stops membership refresh and
@@ -34,10 +35,12 @@ it is not mixed-cluster discovery evidence.
 
 Known implementation and parity gaps:
 
-- The `system.enableGRPCOutbound=false` case is rejected because no outbound
-  History TChannel Thrift adapter is wired. Go chooses transport from this
-  dynamic setting (`go/common/rpc/params.go`). Complete that adapter and honor
-  runtime transport changes before claiming production interoperability.
+- `system.enableGRPCOutbound` is sampled during Matching startup, as Go samples
+  it while building RPC outbounds in `go/common/rpc/params.go:76,120-134`.
+  The last unfiltered global value wins; absent a value, Go defaults to true.
+  False selects the discovered History `tchannel` named port and native Thrift
+  client. Rust implements this in `main.rs`, its live Ringpop History
+  membership adapter, shard resolver, and `MatchingHistoryClient`.
 - `MatchingRuntime` and `main.rs` still do not assemble the shard-distributor
   spectator/executor or a processor factory tied to queue ownership. Do not
   use a placeholder processor to claim parity; this requires a separate
@@ -68,9 +71,10 @@ Thrift runner includes an occupied-gRPC-port startup check before Ringpop
 membership starts. SIGTERM/SIGINT during Ringpop bootstrap now unwinds the
 partially started membership/runtime/listener and exits cleanly. The production
 mixed runner's result metadata now records the discovered History gRPC path
-and its `system.enableGRPCOutbound=true` requirement. Source review verified Go
+and its `system.enableGRPCOutbound` selector. Source review verified Go
 defaults that property to true and the Go config-store lookup applies the last
-unfiltered global value.
+unfiltered global value. The outbound TChannel implementation and mixed probe
+were subsequently completed; see `matching-history-outbound-transport-20261021.md`.
 
 These changes are source-only. Python syntax compilation and `git diff --check`
 passed; no build or compatibility test was run while the SWIM/shard-distributor

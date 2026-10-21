@@ -9,6 +9,78 @@ use m::matching_api_server::MatchingApi;
 use std::{num::NonZeroU32, time::Duration};
 use uuid::Uuid;
 
+fn quota_config(value: i64, domain: Option<&str>) -> cadence_api::admin::DynamicConfigValue {
+    use cadence_api::{admin::{DynamicConfigFilter, DynamicConfigValue}, enums::EncodingType, types::DataBlob};
+    let blob = |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+    DynamicConfigValue {
+        value: blob(serde_json::json!(value)),
+        filters: domain.into_iter().map(|name| DynamicConfigFilter {
+            name: "domainName".into(),
+            value: blob(serde_json::json!(name)),
+        }).collect(),
+    }
+}
+
+#[tokio::test]
+async fn matching_long_polls_reject_missing_transport_deadlines_with_bad_request() {
+    let matching = Matching::new(crate::handlers::AppState::default());
+    let decision = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest::default())).await.unwrap_err();
+    assert_eq!(decision.code(), tonic::Code::InvalidArgument);
+    assert_eq!(decision.message(), "Context timeout is not set.");
+    let activity = matching.poll_for_activity_task(Request::new(m::PollForActivityTaskRequest::default())).await.unwrap_err();
+    assert_eq!(activity.code(), tonic::Code::InvalidArgument);
+    assert_eq!(activity.message(), "Context timeout is not set.");
+}
+
+#[tokio::test]
+async fn matching_rpc_quotas_classify_shared_protocol_handlers_and_preserve_count_only_calls() {
+    let mut state = crate::handlers::AppState::default();
+    let domain_id = Uuid::from_u128(9001);
+    state.domains.create(
+        cadence_api::types::DomainInfo { name: "quota-domain".into(), uuid: domain_id.to_string(), ..Default::default() },
+        Default::default(), Default::default(), false,
+    ).unwrap();
+    {
+        let mut config = state.admin.dynamic_config.lock().unwrap();
+        config.update(false, "matching.rps", vec![quota_config(20, None)]);
+        config.update(false, "matching.domainrps", vec![quota_config(1, Some("quota-domain"))]);
+        config.update(false, "matching.workerrps", vec![quota_config(20, None)]);
+        config.update(false, "matching.domainworkerrps", vec![quota_config(1, Some("quota-domain"))]);
+    }
+    let matching = Matching::new(state);
+
+    // `GetTaskListsByDomain` is a user RPC and its domain filter uses the
+    // request's name. The second call is rejected by only the domain bucket.
+    matching.get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+        domain: "quota-domain".into(),
+    })).await.unwrap();
+    let user_error = matching.get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+        domain: "quota-domain".into(),
+    })).await.unwrap_err();
+    assert_eq!(user_error.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(user_error.message(), "Matching host rps exceeded");
+    assert!(user_error.details().len() > 0, "Go-compatible ServiceBusyError detail is required");
+
+    // Go counts these worker control calls but ignores a denied decision.
+    let cancel = || Request::new(m::CancelOutstandingPollRequest {
+        domain_id: domain_id.to_string(),
+        task_list_type: 1,
+        task_list: Some(p::TaskList { name: "queue".into(), ..Default::default() }),
+        poller_id: "poller".into(),
+    });
+    matching.cancel_outstanding_poll(cancel()).await.unwrap();
+    matching.cancel_outstanding_poll(cancel()).await.unwrap();
+
+    // Poll is a rejecting worker RPC and shares the same class/domain bucket.
+    let worker_error = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: domain_id.to_string(),
+        request: None,
+        ..Default::default()
+    })).await.unwrap_err();
+    assert_eq!(worker_error.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(worker_error.message(), "Matching host rps exceeded");
+}
+
 struct FailingShardOwnerLookup;
 impl crate::matching_shard_routing::ShardOwnerLookup for FailingShardOwnerLookup {
     fn get_shard_owner(
@@ -2039,6 +2111,199 @@ async fn matching_rpc_native_partition_cache_updates_refreshes_and_recovers() {
     let sticky = matching.durable_queue(&key.domain_id.to_string(), &p::TaskList { name: "sticky-config".into(), kind: 2, ..Default::default() }, 0).await.unwrap();
     assert!(sticky.partitions.get().is_none());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_partition_update_refreshes_remote_read_owner_and_ignores_write_only_owner() {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+
+    let history = start_starting_history().await;
+    let (_first_dir, _first_store, first, key) = fixture_with_history(&history);
+    let (_second_dir, _second_store, second, _) = fixture_with_history(&history);
+    let first_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let second_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: first_listener.local_addr().unwrap().to_string() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: second_listener.local_addr().unwrap().to_string() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let (root_name, root_host) = (0..100)
+        .map(|index| {
+            let name = format!("partition-refresh-root-{index}");
+            let owner = ring.lookup(&name).unwrap().identity().to_owned();
+            (name, owner)
+        })
+        .find(|(_, owner)| owner == "node-0")
+        .unwrap();
+    let read_partition = (1..=100)
+        .find(|partition| ring.lookup(&format!("/__cadence_sys/{root_name}/{partition}" )).unwrap().identity() != root_host)
+        .unwrap();
+    let write_only_partition = (1..=100)
+        .find(|partition| *partition != read_partition
+            && ring.lookup(&format!("/__cadence_sys/{root_name}/{partition}" )).unwrap().identity() != root_host)
+        .unwrap();
+    let first = first.with_membership(Membership::new("node-0", hosts.clone()));
+    let second = second.with_membership(Membership::new("node-1", hosts.clone()));
+    let first_service = first.clone();
+    let first_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(first_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(first_listener))
+            .await.unwrap();
+    });
+    let second_service = second.clone();
+    let second_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(second_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(second_listener))
+            .await.unwrap();
+    });
+    let domain = key.domain_id.to_string();
+    let root_list = p::TaskList { name: root_name.clone(), kind: 1, ..Default::default() };
+    let root = if root_host == "node-0" { first.clone() } else { second.clone() };
+    let read_owner = ring.lookup(&format!("/__cadence_sys/{root_name}/{read_partition}")).unwrap().identity();
+    let remote = if read_owner == "node-0" { first.clone() } else { second.clone() };
+    let update = |read: &[i32], write: &[i32]| Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: domain.clone(), task_list: Some(root_list.clone()), task_list_type: 1,
+        partition_config: Some(native_config(999, read, write)),
+    });
+
+    root.update_task_list_partition_config(update(&[0, read_partition], &[0, write_only_partition])).await.unwrap();
+    let read_name = format!("/__cadence_sys/{root_name}/{read_partition}");
+    let read_queue = remote.durable_queue(&domain, &p::TaskList { name: read_name.clone(), kind: 1, ..Default::default() }, 0).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 1, "old/new read partition notification must load and refresh a remote owner");
+    let write_name = format!("/__cadence_sys/{root_name}/{write_only_partition}");
+    let write_host = ring.lookup(&write_name).unwrap().identity();
+    let write_owner = if write_host == "node-0" { &first } else { &second };
+    assert!(!write_owner.queues.as_ref().unwrap().contains_cached(&TaskListKey {
+        domain_id: key.domain_id, name: write_name.clone(), task_type: 0,
+    }), "Go refresh fanout does not create a manager for write-only partition IDs");
+
+    root.update_task_list_partition_config(update(&[0], &[0])).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 2, "removing a remote read partition sends the new config to the old partition owner");
+    remote.refresh_task_list_partition_config(Request::new(m::RefreshTaskListPartitionConfigRequest {
+        domain_id: domain, task_list: Some(p::TaskList { name: read_name, kind: 1, ..Default::default() }),
+        task_list_type: 1, partition_config: Some(native_config(1, &[0, read_partition], &[0])),
+    })).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 2, "out-of-order older push must be ignored by the owner manager");
+
+    // Remove the old owner from membership. The next root update must resolve
+    // the partition's new owner and refresh it there, including a local
+    // self-RPC that creates the manager if it is not loaded yet.
+    let moved_hosts = vec![hosts[0].clone()];
+    first.membership.as_ref().unwrap().replace(moved_hosts.clone());
+    second.membership.as_ref().unwrap().replace(moved_hosts);
+    root.update_task_list_partition_config(update(&[0, read_partition], &[0])).await.unwrap();
+    let moved_queue = first.durable_queue(&domain, &p::TaskList { name: format!("/__cadence_sys/{root_name}/{read_partition}"), kind: 1, ..Default::default() }, 0).await.unwrap();
+    assert_eq!(moved_queue.partitions.get().unwrap().version, 3, "partition config notification follows owner movement");
+
+    first.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    second.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    first_server.abort();
+    second_server.abort();
+}
+
+#[tokio::test]
+async fn matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_caller_deadline() {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+
+    let history = start_starting_history().await;
+    let (_root_dir, root_store, root, key) = fixture_with_history(&history);
+    let (_fast_dir, _fast_store, fast, _) = fixture_with_history(&history);
+
+    let fast_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let slow_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: "127.0.0.1:1".into() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: fast_listener.local_addr().unwrap().to_string() },
+        Host { address: "node-2:7935".into(), identity: "node-2".into(), grpc_address: slow_listener.local_addr().unwrap().to_string() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let (root_name, slow_partition, fast_partition) = (0..10_000)
+        .map(|index| format!("partition-notify-deadline-{index}"))
+        .find_map(|name| {
+            if ring.lookup(&name)?.identity() != "node-0" {
+                return None;
+            }
+            let candidates = (1..=100).map(|partition| {
+                (partition, ring.lookup(&format!("/__cadence_sys/{name}/{partition}" )).unwrap().identity().to_owned())
+            }).collect::<Vec<_>>();
+            let slow = *candidates.iter().find(|(_, owner)| owner == "node-2")?.0;
+            let fast = *candidates
+                .iter()
+                .find(|(partition, owner)| owner == "node-1" && partition > &slow)?
+                .0;
+            Some((name, slow, fast))
+        })
+        .expect("find root and ascending slow/fast partition owners");
+
+    let root = root.with_membership(Membership::new("node-0", hosts.clone()));
+    let fast = fast.with_membership(Membership::new("node-1", hosts.clone()));
+    let fast_service = fast.clone();
+    let fast_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(fast_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(fast_listener))
+            .await
+            .unwrap();
+    });
+    let (slow_connected_tx, slow_connected_rx) = tokio::sync::oneshot::channel();
+    let slow_peer = tokio::spawn(async move {
+        let (stream, _) = slow_listener.accept().await.unwrap();
+        let _stream = stream; // Accept TCP, then leave the gRPC peer delayed indefinitely.
+        let _ = slow_connected_tx.send(());
+        std::future::pending::<()>().await;
+    });
+
+    let fast_name = format!("/__cadence_sys/{root_name}/{fast_partition}");
+    let fast_queue = fast.durable_queue(
+        &key.domain_id.to_string(),
+        &p::TaskList { name: fast_name, kind: 1, ..Default::default() },
+        0,
+    ).await.unwrap();
+    assert!(fast_queue.partitions.get().is_none(), "the fast owner starts without the new config");
+
+    let root_task_list = p::TaskList { name: root_name.clone(), kind: 1, ..Default::default() };
+    let mut request = Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: key.domain_id.to_string(),
+        task_list: Some(root_task_list),
+        task_list_type: 1,
+        partition_config: Some(native_config(0, &[0, slow_partition, fast_partition], &[0])),
+    });
+    // This is the caller's context deadline, forwarded by the real handler to
+    // every peer refresh. There is deliberately no test-only service hook.
+    request.metadata_mut().insert("grpc-timeout", "800m".parse().unwrap());
+    let started = tokio::time::Instant::now();
+    let updater = {
+        let root = root.clone();
+        tokio::spawn(async move { root.update_task_list_partition_config(request).await })
+    };
+    tokio::time::timeout(Duration::from_millis(600), async {
+        while fast_queue.partitions.get().is_none_or(|config| config.version != 1) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the later fast owner must receive its RPC before the caller deadline");
+    let fast_received_at = started.elapsed();
+    assert!(fast_received_at < Duration::from_millis(600));
+    updater.await.unwrap().unwrap();
+    let elapsed = started.elapsed();
+    tokio::time::timeout(Duration::from_secs(1), slow_connected_rx).await.unwrap().unwrap();
+
+    assert_eq!(fast_queue.partitions.get().unwrap().version, 1,
+        "the later fast owner receives its refresh while the lower-ID slow peer is still pending");
+    assert!(elapsed >= Duration::from_millis(600), "the update waits for the caller deadline on the delayed peer");
+    assert!(elapsed < Duration::from_secs(2), "the delayed peer is bounded by the caller deadline");
+    assert_eq!(root_store.get_task_list(&key).unwrap().data.adaptive_partition_config.unwrap().version, 1,
+        "peer timeout remains best effort after the root config is persisted");
+
+    root.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    fast.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    fast_server.abort();
+    slow_peer.abort();
 }
 
 #[tokio::test]
