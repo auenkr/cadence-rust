@@ -2225,6 +2225,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::UpdateTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::UpdateTaskListPartitionConfigResponse>, Status> {
+        let caller_deadline = crate::matching_sync::request_deadline(&request);
         let r = request.into_inner();
         self.domain_name(&r.domain_id)?;
         let task_list = r
@@ -2267,7 +2268,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .durable_queue(&r.domain_id, &task_list, r.task_list_type - 1)
                 .await?;
             registry
-                .update_partition_config(
+                .update_partition_config_with_deadline(
                     cadence_persistence::matching_sqlite::TaskListKey {
                         domain_id: uuid::Uuid::parse_str(&r.domain_id).expect("validated domain"),
                         name: task_list.name,
@@ -2276,6 +2277,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     queue,
                     partition_config_from_proto(config),
                     matching_now(),
+                    caller_deadline,
                 )
                 .await?;
             return Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {}));

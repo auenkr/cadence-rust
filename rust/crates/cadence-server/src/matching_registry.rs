@@ -1506,6 +1506,18 @@ impl QueueRegistry {
         config: cadence_persistence::StoredPartitionConfig,
         now: i64,
     ) -> Result<(), Status> {
+        self.update_partition_config_with_deadline(key, handle, config, now, None)
+            .await
+    }
+
+    pub async fn update_partition_config_with_deadline(
+        &self,
+        key: TaskListKey,
+        handle: QueueHandle,
+        config: cadence_persistence::StoredPartitionConfig,
+        now: i64,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<(), Status> {
         let registry = self.clone();
         let domain_id = key.domain_id;
         let task_type = key.task_type;
@@ -1551,6 +1563,7 @@ impl QueueRegistry {
         };
         let partition_config =
             crate::grpc_matching::partition_config_to_proto(new_config);
+        let mut notifications = tokio::task::JoinSet::new();
         for partition in read_partitions {
             let task_list_name = format!("/__cadence_sys/{root_name}/{partition}");
             let (owner, channel) = match membership.channel_for_task_list_owner(&task_list_name) {
@@ -1570,14 +1583,32 @@ impl QueueRegistry {
                 task_list_type: task_type + 1,
                 partition_config: Some(partition_config.clone()),
             };
-            if let Err(error) = cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel)
-                .refresh_task_list_partition_config(tonic::Request::new(request))
-                .await
-            {
-                // Go logs partition notification failures but does not fail the
-                // root update RPC. Keep that error behavior while allowing a
-                // later refresh or owner reload to converge.
-                eprintln!("warning: refreshing Matching partition {task_list_name} on {} failed: {error}", owner.identity());
+            let owner_identity = owner.identity().to_owned();
+            notifications.spawn(async move {
+                let mut request = tonic::Request::new(request);
+                if let Some(deadline) = caller_deadline {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    request.set_timeout(remaining);
+                }
+                cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel)
+                    .refresh_task_list_partition_config(request)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| (task_list_name, owner_identity, error))
+            });
+        }
+        while let Some(result) = notifications.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err((task_list_name, owner, error))) => {
+                    // Go logs partition notification failures but does not fail
+                    // the root update RPC. Keep that error behavior while allowing
+                    // a later refresh or owner reload to converge.
+                    eprintln!("warning: refreshing Matching partition {task_list_name} on {owner} failed: {error}");
+                }
+                Err(error) => {
+                    eprintln!("warning: Matching partition notification task failed: {error}")
+                }
             }
         }
         Ok(())
@@ -1903,6 +1934,38 @@ mod tests {
     use super::*;
     use cadence_persistence::matching_blob::BlobEncoding;
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn partition_notification_fanout_is_concurrent_and_obeys_caller_deadline() {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(80);
+        let mut peers = tokio::task::JoinSet::new();
+        for delay in [Duration::from_millis(10), Duration::from_millis(500)] {
+            peers.spawn(async move {
+                tokio::time::timeout_at(deadline, tokio::time::sleep(delay)).await
+            });
+        }
+        let started = tokio::time::Instant::now();
+        let mut succeeded = 0;
+        let mut deadline_failures = 0;
+        while let Some(result) = peers.join_next().await {
+            match result.unwrap() {
+                Ok(()) => succeeded += 1,
+                Err(_) => deadline_failures += 1,
+            }
+        }
+        assert_eq!(
+            succeeded, 1,
+            "the fast peer completes while the delayed peer remains outstanding"
+        );
+        assert_eq!(
+            deadline_failures, 1,
+            "the slow peer inherits the caller deadline"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "fanout waits only through the caller deadline"
+        );
+    }
     #[test]
     fn writer_owner_closure_keeps_registry_key_and_observes_provider_updates() {
         let observed = Arc::new(Mutex::new(Vec::new()));
