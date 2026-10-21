@@ -494,3 +494,19 @@ meaning. The runner now uses Go's documented safe 1432-byte default and keeps
 aggregates pending until SIGTERM using the one-hour reporting interval. The
 StatsD attempt must pass with zero Rust exit plus required positive post-signal
 metrics and the exact same-sample query label assertion.
+
+
+### StatsD configured gate
+
+The safe-packet StatsD retry passed end to end in
+`attempt-20261021-exporters/statsd-safe-packets`: launcher/run/probe exits 0,
+original Go Frontend/History/Worker remained alive, no Go Matching instance, and
+Rust SIGTERM exit 0. It captured 205 packets with maximum datagram 1430 bytes;
+70 arrived after the SIGTERM marker. The post-signal set contains positive values
+for all four required Matching metrics and the same positive
+`RespondQueryTaskCompleted` request sample with exact SDK domain, caller, gRPC
+transport, Matching service, and operation labels. MySQL GC observations
+converged, and SDK restart/graceful-recovery logs are retained. The original
+`Message too long` failure and raw partial capture remain preserved separately.
+The current StatsD evidence records frozen Rust binary/source and harness
+revisions. M3 is the only remaining configured exporter gate.

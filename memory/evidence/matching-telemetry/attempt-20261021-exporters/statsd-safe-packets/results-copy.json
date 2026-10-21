@@ -1,0 +1,2493 @@
+{
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goMatchingStarted": false,
+  "rustProductionBinary": "/home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/1c7f6b6b/cadence-server",
+  "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+  "historyTransport": "grpc",
+  "rustDynamicConfigFile": "/tmp/matching-telemetry-statsd-safe-packets/rust-dynamic-config.yaml",
+  "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+  "acceptanceEligible": false,
+  "serverCommand": [
+    "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/artifacts/frozen-production/cadence-server-go-original",
+    "--config",
+    "/tmp/matching-telemetry-statsd-safe-packets/config",
+    "--zone",
+    "mysql",
+    "start",
+    "--auto-setup",
+    "--services",
+    "frontend,history,worker"
+  ],
+  "artifactsDirectory": "/tmp/matching-telemetry-statsd-safe-packets",
+  "probeExitCode": 0,
+  "goServicesPid": 3117120,
+  "goServicesAliveAfterProbe": true,
+  "matchingExporter": "statsd",
+  "matchingExporterAddress": "127.0.0.1:48117",
+  "taskGarbageCollection": {
+    "pendingTaskRows": 1,
+    "statements": [
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15e7dd4277a179acccd31edcafcdc') AND name='gc-backlog-a971fbd7-7829-48b5-b9d2-cafe4b9dc294' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15e7dd4277a179acccd31edcafcdc') AND name='gc-backlog-a971fbd7-7829-48b5-b9d2-cafe4b9dc294' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15e7dd4277a179acccd31edcafcdc') AND name='tasks-a971fbd7-7829-48b5-b9d2-cafe4b9dc294' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15e7dd4277a179acccd31edcafcdc') AND name='tasks-a971fbd7-7829-48b5-b9d2-cafe4b9dc294' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15e7dd4277a179acccd31edcafcdc') AND name='restart-tasks-a971fbd7-7829-48b5-b9d2-cafe4b9dc294' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15e7dd4277a179acccd31edcafcdc') AND name='restart-tasks-a971fbd7-7829-48b5-b9d2-cafe4b9dc294' ORDER BY task_type",
+      "SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('01a15e7dd4277a179acccd31edcafcdc') AND task_list_name='gc-pending-a971fbd7-7829-48b5-b9d2-cafe4b9dc294'"
+    ],
+    "snapshots": [
+      {
+        "at": "2026-10-21T12:44:54.259Z",
+        "pendingTasks": 1,
+        "converged": false,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 1,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 1,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:44:55.803Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:44:57.369Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:44:58.910Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:00.520Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:02.053Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:03.575Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:05.115Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:06.674Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:08.239Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:09.763Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:11.306Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:12.919Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:14.467Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:15.968Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:17.634Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:19.136Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:20.663Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:22.159Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:23.758Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:25.363Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:26.921Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:28.479Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:30.040Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:31.620Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:33.457Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:35.274Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:36.831Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:38.461Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:39.999Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:41.595Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:43.261Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:45.525Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:47.174Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:48.732Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:50.384Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:51.934Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-21T12:45:53.616Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": true,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      }
+    ],
+    "queues": {
+      "backlogDecision": {
+        "taskList": "gc-backlog-a971fbd7-7829-48b5-b9d2-cafe4b9dc294",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 1,
+        "liveBlock": {
+          "startId": 1,
+          "endId": 100000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "backlogActivity": {
+        "taskList": "gc-backlog-a971fbd7-7829-48b5-b9d2-cafe4b9dc294",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 0,
+        "observedMaxTaskId": null,
+        "minAck": 0,
+        "persistedRange": 1,
+        "liveBlock": {
+          "startId": 1,
+          "endId": 100000
+        },
+        "dataEncoding": "thriftrw",
+        "durableGcEvidence": false,
+        "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+      },
+      "mainDecision": {
+        "taskList": "tasks-a971fbd7-7829-48b5-b9d2-cafe4b9dc294",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 2,
+        "observedMaxTaskId": 2,
+        "minAck": null,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "mainActivity": {
+        "taskList": "tasks-a971fbd7-7829-48b5-b9d2-cafe4b9dc294",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "restartDecision": {
+        "taskList": "restart-tasks-a971fbd7-7829-48b5-b9d2-cafe4b9dc294",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 3,
+        "liveBlock": {
+          "startId": 200001,
+          "endId": 300000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "restartActivity": {
+        "taskList": "restart-tasks-a971fbd7-7829-48b5-b9d2-cafe4b9dc294",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 0,
+        "observedMaxTaskId": null,
+        "minAck": 0,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw",
+        "durableGcEvidence": false,
+        "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+      }
+    },
+    "rangeSize": 100000
+  },
+  "domainMetadata": {
+    "domain": "service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294",
+    "domainId": "01a15e7dd4277a179acccd31edcafcdc",
+    "isGlobal": 0,
+    "dataEncoding": "thriftrw",
+    "dataLength": 467,
+    "notificationVersions": [
+      9
+    ]
+  },
+  "decoderFixtureCases": 4,
+  "goSchemaOnly": {
+    "presentTables": [
+      "active_cluster_selection_policy",
+      "activity_info_maps",
+      "buffered_events",
+      "buffered_replication_task_maps",
+      "child_execution_info_maps",
+      "cluster_config",
+      "cross_cluster_tasks",
+      "current_executions",
+      "domain_audit_log",
+      "domain_metadata",
+      "domains",
+      "executions",
+      "history_node",
+      "history_tree",
+      "queue",
+      "queue_metadata",
+      "replication_tasks",
+      "replication_tasks_dlq",
+      "request_cancel_info_maps",
+      "schema_update_history",
+      "schema_version",
+      "shards",
+      "signal_info_maps",
+      "signals_requested_sets",
+      "task_lists",
+      "tasks",
+      "timer_info_maps",
+      "timer_tasks",
+      "transfer_tasks"
+    ],
+    "goSchemaTables": [
+      "active_cluster_selection_policy",
+      "activity_info_maps",
+      "buffered_events",
+      "buffered_replication_task_maps",
+      "child_execution_info_maps",
+      "cluster_config",
+      "cross_cluster_tasks",
+      "current_executions",
+      "domain_audit_log",
+      "domain_metadata",
+      "domains",
+      "executions",
+      "history_node",
+      "history_tree",
+      "queue",
+      "queue_metadata",
+      "replication_tasks",
+      "replication_tasks_dlq",
+      "request_cancel_info_maps",
+      "shards",
+      "signal_info_maps",
+      "signals_requested_sets",
+      "task_lists",
+      "tasks",
+      "timer_info_maps",
+      "timer_tasks",
+      "transfer_tasks"
+    ],
+    "goSetupTables": [
+      "schema_update_history",
+      "schema_version"
+    ],
+    "missingGoTables": []
+  },
+  "matchingExporterSemantics": {
+    "format": "statsd",
+    "packetCount": 205,
+    "lineCount": 1403,
+    "requiredMetrics": [
+      "cadence_requests_per_tl",
+      "cadence_tasklist_request",
+      "poll_success_per_tl",
+      "cadence_client_requests"
+    ],
+    "expectedDomain": "service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294",
+    "requestLines": [
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:32|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:16|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:16|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.CancelOutstandingPoll.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.discovery_ready_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.__sticky__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddDecisionTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:8|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:64|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:32|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:32|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.CancelOutstandingPoll.task_list.__sticky__.transport.grpc:12|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.discovery_ready_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:76|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:76|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:76|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:9|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:3|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:27|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.RespondQueryTaskCompleted.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.__sticky__.transport.grpc:5|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddDecisionTask.task_list.__sticky__.transport.grpc:25|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.QueryWorkflow.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.CancelOutstandingPoll.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.UpdateTaskListPartitionConfig.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c"
+    ],
+    "qualifiedQueryLines": [
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.RespondQueryTaskCompleted.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c"
+    ],
+    "shutdownPacketCount": 70,
+    "shutdownPacketLines": [
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:0.365202|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:0.575045|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:0.575524|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:0.389043|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21248.041742|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19533.325655|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19600.668998|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19785.835341|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19733.59051|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21428.815252|ms",
+      "asyncmatch_latency_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_pending_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1155.44307|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19740.377761|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21284.401214|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21329.537031|ms",
+      "asyncmatch_latency_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1754.902428|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19962.983024|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:21323.110502|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19744.841515|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21320.608324|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19601.830446|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19880.511848|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21387.249142|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21263.281936|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19521.470486|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19483.14092|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:21276.888158|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21303.419795|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19533.889979|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19610.210269|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:21248.861629|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21452.341908|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:21286.61867|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19608.530536|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19535.652272|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:21435.346381|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19899.742831|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19899.661671|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19741.818572|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19899.633111|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21355.916027|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21289.145449|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19802.851268|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21271.795999|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19824.56891|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19872.940511|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19808.45895|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19801.442737|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21273.372131|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19684.400183|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19613.614295|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19621.930276|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19559.820613|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19718.83608|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19762.209244|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19892.577298|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19754.216504|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19543.008127|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19937.834956|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19833.039734|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21263.985341|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19625.445183|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19986.983403|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21323.279863|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19561.238383|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19570.390172|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19834.696826|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19628.009521|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21269.324461|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19541.827478|ms",
+      "asyncmatch_latency_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1333.342919|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21268.537215|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21271.994561|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19891.325048|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19819.387391|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19906.896164|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21384.30884|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19631.054025|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21307.97703|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19626.547151|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:21269.992986|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:21404.818473|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19842.369043|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21302.176627|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19901.161042|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19565.950578|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19969.052829|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:26627.494401|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21363.044761|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21338.250936|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19900.640878|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:26626.591594|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:21278.312048|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19953.10267|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:26626.989037|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19915.501429|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19850.914666|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:21286.964513|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:19634.092007|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19781.625389|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19980.951358|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:19639.773529|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:19723.994279|ms",
+      "cadence_latency_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:26636.123385|ms",
+      "asyncmatch_dispatch_timeouts_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_pending_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:20|c",
+      "asyncmatch_dispatch_timeouts_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:25|c",
+      "asyncmatch_dispatch_timeouts_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:26|c",
+      "asyncmatch_dispatch_timeouts_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:20|c",
+      "asyncmatch_dispatch_timeouts_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_activity_timeouts:1|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.256ms-362.038671ms:1|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_pending_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.1.024s-1.448154687s:1|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_pending_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.2.896309375s-4.096s:20|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.graceful_drain_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.2.828427ms-4ms:1|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.1.448154687s-2.048s:1|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.2.896309375s-4.096s:25|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.1.024s-1.448154687s:1|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.2.896309375s-4.096s:26|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.724.077343ms-1.024s:2|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.2.896309375s-4.096s:20|c",
+      "asyncmatch_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_activity_timeouts.2.896309375s-4.096s:1|c",
+      "asyncmatch_local_poll_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.256ms-362.038671ms:1|c",
+      "asyncmatch_local_poll_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.graceful_drain_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.4ms-5.656854ms:1|c",
+      "asyncmatch_local_poll_latency_per_tl_ns.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.724.077343ms-1.024s:2|c",
+      "asyncmatch_local_poll_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "asyncmatch_local_poll_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.graceful_drain_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "asyncmatch_local_poll_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientGetMutableState.2.828427ms-4ms:1|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordActivityTaskStarted.11.313708ms-16ms:1|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordActivityTaskStarted.16ms-22.627416ms:1|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordActivityTaskStarted.22.627416ms-32ms:2|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordActivityTaskStarted.32ms-45.254833ms:1|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordDecisionTaskStarted.11.313708ms-16ms:1|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordDecisionTaskStarted.16ms-22.627416ms:3|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordDecisionTaskStarted.22.627416ms-32ms:13|c",
+      "cadence_client_latency_ns.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordDecisionTaskStarted.32ms-45.254833ms:6|c",
+      "cadence_client_requests.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientGetMutableState:1|c",
+      "cadence_client_requests.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordActivityTaskStarted:5|c",
+      "cadence_client_requests.cadence_role.history_client.cadence_service.cadence-matching.operation.HistoryClientRecordDecisionTaskStarted:23|c",
+      "cadence_errors_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_errors_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:4|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:4|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.16.384s-23.170475005s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.46.340950011s-1m5.536s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:32|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:32|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.16.384s-23.170475005s:16|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.46.340950011s-1m5.536s:16|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:16|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:16|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.CancelOutstandingPoll.task_list.__sticky__.transport.grpc.0s-1ms:11|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.CancelOutstandingPoll.task_list.__sticky__.transport.grpc.1ms-1.414213ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.discovery_ready_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.8ms-11.313708ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:72|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.1.414213ms-2ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.1ms-1.414213ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.2.828427ms-4ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.2ms-2.828427ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:69|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.11.313708ms-16ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.1ms-1.414213ms:4|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.2.828427ms-4ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.8ms-11.313708ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:70|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.1ms-1.414213ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.2ms-2.828427ms:3|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.5.656854ms-8ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.8ms-11.313708ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.1.024s-1.448154687s:3|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.11.585237502s-16.384s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.128ms-181.019335ms:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.23.170475005s-32.768s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.45.254833ms-64ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.724.077343ms-1.024s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.23.170475005s-32.768s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.1.024s-1.448154687s:6|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.128ms-181.019335ms:4|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.181.019335ms-256ms:3|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.22.627416ms-32ms:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.23.170475005s-32.768s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.32ms-45.254833ms:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.45.254833ms-64ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.64ms-90.509667ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.724.077343ms-1.024s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.8.192s-11.585237502s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.90.509667ms-128ms:3|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.45.254833ms-64ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.64ms-90.509667ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.32ms-45.254833ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.45.254833ms-64ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.RespondQueryTaskCompleted.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForActivityTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.16.384s-23.170475005s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc.46.340950011s-1m5.536s:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.__sticky__.transport.grpc.32ms-45.254833ms:2|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.__sticky__.transport.grpc.45.254833ms-64ms:3|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029.transport.grpc.16ms-22.627416ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddDecisionTask.task_list.__sticky__.transport.grpc.16ms-22.627416ms:4|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddDecisionTask.task_list.__sticky__.transport.grpc.22.627416ms-32ms:11|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddDecisionTask.task_list.__sticky__.transport.grpc.32ms-45.254833ms:8|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddDecisionTask.task_list.__sticky__.transport.grpc.45.254833ms-64ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddDecisionTask.task_list.__sticky__.transport.grpc.64ms-90.509667ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.QueryWorkflow.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.32ms-45.254833ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.32ms-45.254833ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.CancelOutstandingPoll.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.0s-1ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.16ms-22.627416ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.64ms-90.509667ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.90.509667ms-128ms:1|c",
+      "cadence_latency_per_tl_ns.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.UpdateTaskListPartitionConfig.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc.8ms-11.313708ms:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:8|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-batcher.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:64|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:32|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.cadence-system.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:32|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.default.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.CancelOutstandingPoll.task_list.__sticky__.transport.grpc:12|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.discovery_ready_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:76|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:76|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:76|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:9|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:3|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:27|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForDecisionTask.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.RespondQueryTaskCompleted.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForActivityTask.task_list.__sticky__.transport.grpc:4|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__ephemeral__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-frontend.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.operation.PollForDecisionTask.task_list.__sticky__.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.__sticky__.transport.grpc:5|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddDecisionTask.task_list.__sticky__.transport.grpc:25|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-history.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.QueryWorkflow.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.AddActivityTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.CancelOutstandingPoll.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.DescribeTaskList.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.PollForActivityTask.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:2|c",
+      "cadence_requests_per_tl.cadence_service.cadence-matching.caller.cadence-service-compat.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.operation.UpdateTaskListPartitionConfig.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.transport.grpc:1|c",
+      "cadence_tasklist_request.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.matching_host.arm-instance.operation.AddTask.tasklist.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.tasklistType.activity_task:1|c",
+      "cadence_tasklist_request.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.matching_host.arm-instance.operation.AddTask.tasklist.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029.tasklistType.activity_task:1|c",
+      "isolation_success_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.isolation_group.zone_a.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "isolation_task_matches_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.isolation_group.zone_a.poller_isolation_group.zone_a.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-batcher.task_list.__sticky__:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-batcher.task_list.cadence_scheduler:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-batcher.task_list.cadence_sys_batcher_tasklist:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.__sticky__:8|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.cadence_archival_tl:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.cadence_scheduler:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.cadence_sys_failoverManager_tasklist:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.cadence_sys_processor_parent_close_policy:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.cadence_sys_tl_scanner_tasklist_0:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.check_data_corruption_workflow_tl:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.diagnostics_wf_tasklist:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.domain_deprecation_tasklist:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.default.task_list.__sticky__:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.default.task_list.cadence_scheduler:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.task_list.__sticky__:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.task_list.cadence_scheduler:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.task_list.__sticky__:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.task_list.cadence_scheduler:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.task_list.__sticky__:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.task_list.cadence_scheduler:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.cadence_scheduler:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.discovery_ready_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.gc_pending_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.graceful_drain_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.unpolled_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.unpolled_activity_timeouts:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.task_list.__sticky__:1|c",
+      "lease_requests_per_tl.cadence_service.cadence-matching.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.task_list.cadence_scheduler:2|c",
+      "local_to_local_matches_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__:21|c",
+      "local_to_local_matches_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "local_to_local_matches_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:4|c",
+      "local_to_local_matches_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.0s-1ms:1|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.1.024s-1.448154687s:7|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.128ms-181.019335ms:3|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.2ms-2.828427ms:1|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.32ms-45.254833ms:1|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.724.077343ms-1.024s:1|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.8.192s-11.585237502s:2|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.90.509667ms-128ms:5|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.0s-1ms:1|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.16ms-22.627416ms:1|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.0s-1ms:2|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.724.077343ms-1.024s:2|c",
+      "poll_local_match_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.0s-1ms:1|c",
+      "poll_success_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__:21|c",
+      "poll_success_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "poll_success_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:4|c",
+      "poll_success_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "poll_success_sync_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__:19|c",
+      "poll_success_sync_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "poll_success_sync_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "poll_success_sync_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.cadence-batcher.task_list.__ephemeral__:2|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.cadence-batcher.task_list.__sticky__:6|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.__ephemeral__:16|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.__sticky__:48|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.default.task_list.__ephemeral__:1|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.default.task_list.__sticky__:3|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.task_list.__ephemeral__:1|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.task_list.__sticky__:3|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.task_list.__ephemeral__:1|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.task_list.__sticky__:3|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.task_list.__ephemeral__:1|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.task_list.__sticky__:3|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.task_list.__ephemeral__:1|c",
+      "poll_timeouts_per_tl.cadence_service.cadence-matching.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.task_list.__sticky__:3|c",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.cadence-batcher.task_list.__ephemeral__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.cadence-batcher.task_list.__sticky__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.__ephemeral__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.__sticky__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.default.task_list.__ephemeral__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.default.task_list.__sticky__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.task_list.__ephemeral__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.task_list.__sticky__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.task_list.__ephemeral__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.task_list.__sticky__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.task_list.__ephemeral__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.task_list.__sticky__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__ephemeral__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:2|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.task_list.__ephemeral__:1|g",
+      "poller_count_per_tl.cadence_service.cadence-matching.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.task_list.__sticky__:1|g",
+      "rate_limit_per_tl.cadence_service.cadence-matching.domain.cadence-batcher.task_list.__sticky__:100000|g",
+      "rate_limit_per_tl.cadence_service.cadence-matching.domain.cadence-system.task_list.__sticky__:100000|g",
+      "rate_limit_per_tl.cadence_service.cadence-matching.domain.default.task_list.__sticky__:100000|g",
+      "rate_limit_per_tl.cadence_service.cadence-matching.domain.service-compat-03e7d88a-a6bd-4430-9752-56604f05ecfe.task_list.__sticky__:100000|g",
+      "rate_limit_per_tl.cadence_service.cadence-matching.domain.service-compat-1d6e593a-3607-469a-b1e7-8d7688b09f3e.task_list.__sticky__:100000|g",
+      "rate_limit_per_tl.cadence_service.cadence-matching.domain.service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56.task_list.__sticky__:100000|g",
+      "rate_limit_per_tl.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "rate_limit_per_tl.cadence_service.cadence-matching.domain.service-compat-c4f81329-d76f-4804-8316-0ec5f1628648.task_list.__sticky__:100000|g",
+      "syncmatch_local_poll_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.16ms-22.627416ms:4|c",
+      "syncmatch_local_poll_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.22.627416ms-32ms:10|c",
+      "syncmatch_local_poll_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.__sticky__.32ms-45.254833ms:8|c",
+      "syncmatch_local_poll_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.32ms-45.254833ms:1|c",
+      "syncmatch_local_poll_latency_per_tl_ns.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029.16ms-22.627416ms:1|c",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e66-2a70-7219-9aba-b07612ec771e.task_list.__sticky__:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e66-2a70-7219-9aba-b07612ec771e.task_list.cadence_scheduler:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e71-27d3-74cf-9aa3-a351c13bd8d7.task_list.__sticky__:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e71-27d3-74cf-9aa3-a351c13bd8d7.task_list.cadence_scheduler:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e76-6701-76ce-a2db-ff17435f3d96.task_list.__sticky__:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e76-6701-76ce-a2db-ff17435f3d96.task_list.cadence_scheduler:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e78-dd7c-74f2-89e3-ea1def8263c7.task_list.__sticky__:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e78-dd7c-74f2-89e3-ea1def8263c7.task_list.cadence_scheduler:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.__sticky__:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.cadence_scheduler:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.discovery_ready_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_pending_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.graceful_drain_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.restart_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_activity_timeouts:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.__sticky__:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.cadence_scheduler:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.cadence_sys_batcher_tasklist:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.__sticky__:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_archival_tl:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_scheduler:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_failoverManager_tasklist:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_processor_parent_close_policy:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_tl_scanner_tasklist_0:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.check_data_corruption_workflow_tl:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.diagnostics_wf_tasklist:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.domain_deprecation_tasklist:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.a478cc08-af09-4f34-9a12-57ee76e7b91d.task_list.__sticky__:0|g",
+      "task_backlog_per_tl.cadence_service.cadence-matching.domain.a478cc08-af09-4f34-9a12-57ee76e7b91d.task_list.cadence_scheduler:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e66-2a70-7219-9aba-b07612ec771e.task_list.__sticky__:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e66-2a70-7219-9aba-b07612ec771e.task_list.cadence_scheduler:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e71-27d3-74cf-9aa3-a351c13bd8d7.task_list.__sticky__:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e71-27d3-74cf-9aa3-a351c13bd8d7.task_list.cadence_scheduler:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e76-6701-76ce-a2db-ff17435f3d96.task_list.__sticky__:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e76-6701-76ce-a2db-ff17435f3d96.task_list.cadence_scheduler:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e78-dd7c-74f2-89e3-ea1def8263c7.task_list.__sticky__:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e78-dd7c-74f2-89e3-ea1def8263c7.task_list.cadence_scheduler:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.discovery_ready_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_pending_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.graceful_drain_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_activity_timeouts:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.__sticky__:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.cadence_scheduler:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.cadence_sys_batcher_tasklist:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.__sticky__:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_archival_tl:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_scheduler:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_failoverManager_tasklist:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_processor_parent_close_policy:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_tl_scanner_tasklist_0:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.check_data_corruption_workflow_tl:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.diagnostics_wf_tasklist:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.domain_deprecation_tasklist:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.a478cc08-af09-4f34-9a12-57ee76e7b91d.task_list.__sticky__:0|g",
+      "task_count_per_tl.cadence_service.cadence-matching.domain.a478cc08-af09-4f34-9a12-57ee76e7b91d.task_list.cadence_scheduler:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e66-2a70-7219-9aba-b07612ec771e.task_list.__sticky__:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e66-2a70-7219-9aba-b07612ec771e.task_list.cadence_scheduler:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e71-27d3-74cf-9aa3-a351c13bd8d7.task_list.__sticky__:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e71-27d3-74cf-9aa3-a351c13bd8d7.task_list.cadence_scheduler:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e76-6701-76ce-a2db-ff17435f3d96.task_list.__sticky__:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e76-6701-76ce-a2db-ff17435f3d96.task_list.cadence_scheduler:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e78-dd7c-74f2-89e3-ea1def8263c7.task_list.__sticky__:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e78-dd7c-74f2-89e3-ea1def8263c7.task_list.cadence_scheduler:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.discovery_ready_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_backlog_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.gc_pending_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.graceful_drain_tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.mixed_sdk_03a0cb3a_3a20_48d5_8785_b813ea8ed029:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.tasks_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_activity_timeouts:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.__sticky__:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.cadence_scheduler:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.3116607e-419b-4783-85fc-47726a4c3fe9.task_list.cadence_sys_batcher_tasklist:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.__sticky__:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_archival_tl:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_scheduler:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_failoverManager_tasklist:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_processor_parent_close_policy:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.cadence_sys_tl_scanner_tasklist_0:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.check_data_corruption_workflow_tl:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.diagnostics_wf_tasklist:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.32049b68-7872-4094-8e63-d0dd59896a83.task_list.domain_deprecation_tasklist:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.a478cc08-af09-4f34-9a12-57ee76e7b91d.task_list.__sticky__:0|g",
+      "task_lag_per_tl.cadence_service.cadence-matching.domain.a478cc08-af09-4f34-9a12-57ee76e7b91d.task_list.cadence_scheduler:0|g",
+      "task_list_partition_config_num_read.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.tasklist_root_partition.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "task_list_partition_config_num_read.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.tasklist_root_partition.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "task_list_partition_config_num_read.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.tasklist_root_partition.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "task_list_partition_config_num_write.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.tasklist_root_partition.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "task_list_partition_config_num_write.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.tasklist_root_partition.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "task_list_partition_config_num_write.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294.tasklist_root_partition.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "tasklist_managers.cadence_service.cadence-matching.operation.TaskListMgr:67|g",
+      "tasklist_poller_partition_mismatch.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.isolation_enabled.true.task_list.isolated_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "tasklist_poller_partition_mismatch.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.isolation_enabled.true.task_list.paced_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "tasklist_poller_partition_mismatch.cadence_service.cadence-matching.domain.service-compat-a971fbd7-7829-48b5-b9d2-cafe4b9dc294.isolation_enabled.true.task_list.query_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|g",
+      "tasks_expired_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_a971fbd7_7829_48b5_b9d2_cafe4b9dc294:1|c",
+      "tasks_expired_per_tl.cadence_service.cadence-matching.domain.01a15e7d-d427-7a17-9acc-cd31edcafcdc.task_list.unpolled_activity_timeouts:1|c"
+    ],
+    "shutdownQuerySample": true
+  },
+  "runExitCode": 0,
+  "failure": null
+}
