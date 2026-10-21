@@ -313,7 +313,28 @@ async function run() {
       assert.equal(stored.owner_id, acquired[0].owner, 'Go gocql must observe the exact Rust semaphore owner row');
       assert.equal(stored.token_id, expectedToken, 'Go gocql must observe the positive Rust semaphore token row');
       semaphoreOwner = stored.owner_id;
-      semaphoreEvidence = { semaphoreName, createdThroughGoFrontend: true, ownerId: semaphoreOwner, tokenId: stored.token_id, concurrentGrants: acquired.length, noSlotResponses: unavailable.length };
+      // Go's semaphore.Identifier.RingKey is domainID_semaphoreName_bucket.
+      // Resolve that exact key through both production Rust handlers before any
+      // crash, so the durable hold is tied to the process that owns its manager.
+      const semaphoreRingKey = `${domainId}_${semaphoreName}_0`;
+      const primarySemaphoreOwner = await directPartitionOwner(
+        directMatchingClient(`127.0.0.1:${rustGrpcPort}`), domain, semaphoreRingKey,
+      );
+      const secondarySemaphoreOwner = await directPartitionOwner(
+        directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`), domain, semaphoreRingKey,
+      );
+      assert(primarySemaphoreOwner, 'primary did not resolve the semaphore bucket ring key');
+      assert.equal(secondarySemaphoreOwner, primarySemaphoreOwner, 'Rust instances disagree on the semaphore bucket owner');
+      const semaphoreOwnerIndex = primarySemaphoreOwner === `127.0.0.1:${rustTChannel}` ? 0
+        : primarySemaphoreOwner === `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}` ? 1 : -1;
+      assert(semaphoreOwnerIndex >= 0, `semaphore bucket resolves to an unknown Rust host: ${primarySemaphoreOwner}`);
+      semaphoreEvidence = {
+        semaphoreName, bucket: 0, ringKey: semaphoreRingKey,
+        bucketOwner: primarySemaphoreOwner, bucketOwnerIndex: semaphoreOwnerIndex,
+        createdThroughGoFrontend: true, ownerId: semaphoreOwner, tokenId: stored.token_id,
+        concurrentGrants: acquired.length, noSlotResponses: unavailable.length,
+        persistedHoldBeforeCrash: { ownerId: stored.owner_id, tokenId: stored.token_id },
+      };
     }
     const primaryMembershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
     const secondaryPeer = directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
@@ -526,11 +547,54 @@ async function run() {
       assert(secondaryReady, 'restarted Rust Matching member did not rejoin Go discovery');
     }
     if (cassandraGate && semaphoreEvidence) {
-      const recovered = await semaphoreAcquire(semaphoreOwner);
-      assert.equal(Number(recovered.tokenId), semaphoreEvidence.tokenId, 'semaphore hold must survive Matching owner crash and be recovered from Cassandra');
-      const afterRestart = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-after-recovery');
+      const heldBeforeOwnerCrash = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-immediately-before-owner-crash');
+      assert.equal(heldBeforeOwnerCrash.owner_id, semaphoreOwner);
+      assert.equal(heldBeforeOwnerCrash.token_id, semaphoreEvidence.tokenId);
+      const semaphoreFailed = semaphoreEvidence.bucketOwnerIndex === 0 ? rust : secondaryRust;
+      const semaphoreSurvivor = semaphoreEvidence.bucketOwnerIndex === 0 ? secondaryRust : rust;
+      const semaphoreFailedExitPromise = new Promise(resolve => semaphoreFailed.once('exit', (code, signal) => resolve({ code, signal })));
+      semaphoreFailed.kill('SIGKILL');
+      const semaphoreFailedExit = await semaphoreFailedExitPromise;
+      assert.equal(semaphoreFailedExit.signal, 'SIGKILL', 'persisted semaphore bucket owner did not crash');
+      const survivorPeer = directMatchingClient(`127.0.0.1:${semaphoreEvidence.bucketOwnerIndex === 0 ? process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT : rustGrpcPort}`);
+      const recoveryDeadline = Date.now() + 45000;
+      let recoveredOwner = '';
+      while (Date.now() < recoveryDeadline) {
+        try {
+          recoveredOwner = await directPartitionOwner(survivorPeer, domain, semaphoreEvidence.ringKey);
+          if (recoveredOwner === (semaphoreEvidence.bucketOwnerIndex === 0
+            ? `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}` : `127.0.0.1:${rustTChannel}`)) break;
+        } catch (_) {}
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      assert(recoveredOwner, 'surviving Rust host did not resolve the semaphore bucket after owner crash');
+      const recovered = await acquireSemaphore(survivorPeer, { domainId, semaphoreName: semaphoreEvidence.semaphoreName, bucket: 0, ownerId: semaphoreOwner });
+      assert.equal(Number(recovered.tokenId), semaphoreEvidence.tokenId, 'surviving semaphore owner must recover the persisted hold without granting a new token');
+      const afterRestart = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-after-owner-recovery');
       assert.equal(afterRestart.owner_id, semaphoreOwner);
       assert.equal(afterRestart.token_id, semaphoreEvidence.tokenId);
+      semaphoreEvidence.ownerCrash = {
+        crashedPid: semaphoreFailed.pid, survivorPid: semaphoreSurvivor.pid,
+        persistedHoldBeforeCrash: { ownerId: heldBeforeOwnerCrash.owner_id, tokenId: heldBeforeOwnerCrash.token_id },
+        persistedHoldAfterRecovery: { ownerId: afterRestart.owner_id, tokenId: afterRestart.token_id },
+        recoveredOwner, recoveredTokenId: Number(recovered.tokenId),
+      };
+      if (semaphoreEvidence.bucketOwnerIndex === 0) {
+        rust = startRust('after-semaphore-owner-recovery');
+        await waitForRustReady('after-semaphore-owner-recovery');
+      } else {
+        secondaryRust = startSecondaryRust();
+        const readyDeadline = Date.now() + 30000;
+        let ready = false;
+        while (Date.now() < readyDeadline) {
+          try {
+            await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-semaphore-restarted-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+            ready = true;
+            break;
+          } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
+        }
+        assert(ready, 'crashed semaphore owner did not rejoin Go discovery');
+      }
     }
   }
   let restartEvidence;
