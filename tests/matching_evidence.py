@@ -123,7 +123,7 @@ def copy_evidence(destination, *, work, config_files, repository, binaries, resu
     for name in ('probe.log', 'results.json', 'run.exit', 'command.txt', 'db-observations.json',
                  'go-sdk.log', 'restart-sdk.log', 'graceful-drain-sdk.log', 'server.log',
                  'rust-build.log', 'build.log', 'prometheus-scrape.txt',
-                 'prometheus-scrape-samples.jsonl',
+                 'prometheus-scrape-samples.jsonl.gz',
                  'prometheus-scrape-error.txt', 'statsd-packets.json', 'm3-packets.json',
                  'm3-decoder-go.log', 'm3-shutdown-decoder-go.log', 'm3-decoded.jsonl',
                  'matching-exporter-semantics.json'):

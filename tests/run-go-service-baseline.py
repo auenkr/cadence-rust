@@ -9,6 +9,7 @@ production Ringpop lane (grpc or tchannel).
 """
 import argparse
 import base64
+import gzip
 import json
 import os
 from pathlib import Path
@@ -75,42 +76,62 @@ def validate_matching_exporter(exporter, work, repository, expected_domain):
     """Decode captured exporter output and require SDK-driven Matching metrics."""
     required = ('cadence_requests_per_tl', 'cadence_tasklist_request', 'poll_success_per_tl',
                 'cadence_client_requests')
-    # Query completion is sent from the Go Frontend's Matching client. The Go
-    # baseline leaves EnableGRPCOutbound unset, so that direct client uses TChannel.
+    # The production Ringpop probe sends inbound Matching RPCs through gRPC;
+    # system.enableGRPCOutbound selects a separate Rust-to-History path.
     caller = 'cadence-frontend'
-    transport = 'tchannel'
+    # The mixed SDK probe's Matching requests enter through the production
+    # gRPC listener (the outbound History transport setting is independent).
+    transport = 'grpc'
     shutdown_path = work / 'rust-matching' / 'matching-shutdown.json'
     shutdown = json.loads(shutdown_path.read_text()) if shutdown_path.is_file() else None
     if not shutdown or shutdown.get('exitCode') != 0 or shutdown.get('signal') != 'SIGTERM':
         raise RuntimeError('Rust Matching did not provide a successful SIGTERM shutdown record')
     if exporter == 'prometheus':
-        snapshots_path = work / 'prometheus-scrape-samples.jsonl'
-        scrapes = ([json.loads(line)['body'] for line in snapshots_path.read_text().splitlines() if line.strip()]
-                   if snapshots_path.is_file() else [(work / 'prometheus-scrape.txt').read_text(encoding='utf-8')])
-        samples = [line for scrape in scrapes for line in scrape.splitlines()
-                   if line and not line.startswith('#')]
-        if not samples:
+        snapshots_path = work / 'prometheus-scrape-samples.jsonl.gz'
+        snapshots = gzip.open(snapshots_path, 'rt', encoding='utf-8') if snapshots_path.is_file() else None
+        if snapshots is not None:
+            scrape_iter = (json.loads(line)['body'] for line in snapshots if line.strip())
+        else:
+            legacy_path = work / 'prometheus-scrape-samples.jsonl'
+            scrape_iter = ((json.loads(line)['body'] for line in legacy_path.open(encoding='utf-8') if line.strip())
+                           if legacy_path.is_file() else iter([(work / 'prometheus-scrape.txt').read_text(encoding='utf-8')]))
+        sample_count = 0
+        metric_values = {metric: [] for metric in required}
+        request_lines = set()
+        prometheus_domain = re.sub(r'[^A-Za-z0-9_]', '_', expected_domain)
+        for scrape in scrape_iter:
+            for line in scrape.splitlines():
+                if not line or line.startswith('#'):
+                    continue
+                sample_count += 1
+                for metric in required:
+                    if metric in line:
+                        match = re.search(r'\s([-+0-9.eE]+)$', line)
+                        if match and float(match.group(1)) > 0:
+                            metric_values[metric].append(float(match.group(1)))
+                if ('cadence_requests_per_tl' in line
+                    and f'caller="{caller}"' in line
+                    and f'transport="{transport}"' in line
+                    and 'cadence_service="cadence_matching"' in line
+                    and f'domain="{prometheus_domain}"' in line
+                    and 'operation="RespondQueryTaskCompleted"' in line):
+                    match = re.search(r'\s([-+0-9.eE]+)$', line)
+                    if match and float(match.group(1)) > 0:
+                        request_lines.add(line)
+        if snapshots is not None:
+            snapshots.close()
+        if sample_count == 0:
             raise RuntimeError('Prometheus scrape succeeded but returned no metric samples')
-        rendered = '\n'.join(samples)
         for metric in required:
-            if metric not in rendered:
-                raise RuntimeError(f'Prometheus output lacks SDK-driven Matching metric {metric}')
-            values = [float(line.rsplit(' ', 1)[1]) for line in samples
-                      if metric in line and re.search(r'\s[-+0-9.eE]+$', line)]
-            if not values or max(values) <= 0:
+            if not metric_values[metric]:
                 raise RuntimeError(f'Prometheus metric {metric} has no positive SDK-driven sample')
-        request_lines = [line for line in samples if 'cadence_requests_per_tl' in line
-                         and f'caller="{caller}"' in line
-                         and f'transport="{transport}"' in line
-                         and 'cadence_service="cadence_matching"' in line
-                         and f'domain="{expected_domain}"' in line
-                         and 'operation="RespondQueryTaskCompleted"' in line]
-        request_values = [float(line.rsplit(' ', 1)[1]) for line in request_lines
-                          if re.search(r'\s[-+0-9.eE]+$', line)]
-        if not request_values or max(request_values) <= 0:
+        request_lines = sorted(request_lines)
+        if not request_lines:
             raise RuntimeError('Prometheus lacks a positive query request sample with the expected domain/caller/transport/service labels')
-        semantic = {'format': exporter, 'sampleCount': len(samples),
+        semantic = {'format': exporter, 'sampleCount': sample_count,
                     'requiredMetrics': list(required), 'expectedDomain': expected_domain,
+                    'prometheusDomainLabel': prometheus_domain,
+                    'positiveRequiredMetricSamples': {key: len(value) for key, value in metric_values.items()},
                     'requestSamples': request_lines}
     elif exporter == 'statsd':
         captured = [json.loads(line) for line in (work / 'statsd-packets.json').read_text().splitlines() if line.strip()]
@@ -557,7 +578,8 @@ try:
                 udp_thread = None
                 udp_packets = []
                 udp_stop = threading.Event()
-                prometheus_scrapes = []
+                prometheus_scrape_count = [0]
+                prometheus_last_scrape = [None]
                 prometheus_thread = None
                 if args.matching_exporter in ('statsd', 'm3'):
                     udp_capture = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -576,11 +598,19 @@ try:
                     udp_thread = threading.Thread(target=collect_udp, daemon=True)
                     udp_thread.start()
                 elif args.matching_exporter == 'prometheus':
+                    prometheus_capture = gzip.open(
+                        work / 'prometheus-scrape-samples.jsonl.gz', 'wt', encoding='utf-8')
                     def scrape_prometheus():
                         while not udp_stop.is_set():
                             try:
                                 with urllib.request.urlopen(f'http://{exporter_address}/metrics', timeout=1) as response:
-                                    prometheus_scrapes.append(response.read().decode('utf-8'))
+                                    scrape = response.read().decode('utf-8')
+                                    if any(line and not line.startswith('#') for line in scrape.splitlines()):
+                                        prometheus_capture.write(json.dumps({
+                                            'capturedAtUnixNs': time.time_ns(), 'body': scrape}) + '\n')
+                                        prometheus_capture.flush()
+                                        prometheus_scrape_count[0] += 1
+                                        prometheus_last_scrape[0] = scrape
                             except Exception:
                                 pass
                             udp_stop.wait(0.2)
@@ -622,12 +652,9 @@ try:
                 elif args.matching_exporter == 'prometheus':
                     udp_stop.set()
                     prometheus_thread.join(timeout=2)
-                    successful_scrapes = [scrape for scrape in prometheus_scrapes
-                                          if any(line and not line.startswith('#') for line in scrape.splitlines())]
-                    if successful_scrapes:
-                        (work / 'prometheus-scrape.txt').write_text(successful_scrapes[-1])
-                        (work / 'prometheus-scrape-samples.jsonl').write_text(
-                            ''.join(json.dumps({'body': scrape}) + '\n' for scrape in successful_scrapes))
+                    prometheus_capture.close()
+                    if prometheus_scrape_count[0]:
+                        (work / 'prometheus-scrape.txt').write_text(prometheus_last_scrape[0])
                     else:
                         (work / 'prometheus-scrape-error.txt').write_text(
                             'no successful scrape with metric samples during the SDK probe\n')

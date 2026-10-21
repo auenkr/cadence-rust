@@ -451,3 +451,27 @@ Strict locked workspace/all-target Clippy with `-D warnings` passed after initia
 The production exporter gate configures one exporter in the original Go Frontend/History/Worker plus production Rust Matching lane, with no Go Matching. The SDK restart probe awaits the final Rust process's SIGTERM exit before it returns. For StatsD/M3, the gate sets one-hour reporting/flush intervals, timestamps every captured UDP packet, and requires the post-SIGTERM packet set to contain positive task-add, successful-poll, History client, and exact same-sample query request metrics. M3 uses the pinned Go Compact Thrift decoder for both full and post-SIGTERM packet sets. All exporters require a zero exit SIGTERM record; Prometheus additionally requires nonempty successful scrape snapshots during the SDK probe and the exact same-sample query labels. The validator derives domain from the SDK probe result and checks caller `cadence-frontend`, transport `tchannel` (the Go baseline leaves EnableGRPCOutbound unset), service `cadence-matching`, and query response operation on that same positive sample. Raw captures, timestamps, decoder logs, shutdown markers, semantic summary, and sanitized configs are copied via evidence-dir. Live mixed gates remain pending.
 
 A pre-build SHA256 manifest covers all 247 tracked Rust files at source revision `faed87d280f418bf723870e0b536a511f1b5becf` and is stored under `memory/evidence/matching-telemetry/attempt-20261021-production-build`. The production build exited 0. Its binary is frozen at `/home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/faed87d28/cadence-server`, SHA256 `fa35738b543ff1d7759995442ce4e11c55693e522540c006b039c90edcf031b5`; no Rust build input changed afterward. The runtime partition-refresh candidate `e4042831d` remains excluded until mixed gates finish. The exporter-only harness adjustments are being captured separately and do not change this binary. Run Prometheus/StatsD/M3 sequentially with production binary, MySQL, original Go services, and evidence-dir; inspect each captured log/exit/raw sample/semantic assertion, then commit and push source+evidence. Matching remains incomplete; no History service work is authorized.
+
+### Prometheus gate checkpoint
+
+The first configured Prometheus mixed run used the frozen binary and original Go
+Frontend/History/Worker, with no Go Matching. Probe exit was 0, all Go services
+remained up, Matching completed SIGTERM with exit 0, and DB/GC observations were
+captured. The gate correctly returned 1 because the expected positive
+`cadence_client_requests` History client counter was absent. The full scrape had
+a positive `RespondQueryTaskCompleted` sample: caller `cadence_frontend`,
+transport `grpc`, service `cadence_matching`, probe domain normalized to
+underscores by Prometheus label sanitization. The captured transport confirms
+that inbound Matching transport is independent from outbound History transport.
+
+The production History client code emitted `cadence_client_requests`, but
+`main.rs` constructed it with the no-op metrics sink; later runtime wiring only
+covered Matching handlers/registry. Current source fix attaches the configured
+Matching sink to the production History client. The positive required metric
+assertion remains enabled. Raw 244,086,291-byte scrape JSONL is gzip-preserved at
+6,083,165 bytes; decompressed-content SHA256 and a representative request sample are
+in `memory/evidence/matching-telemetry/attempt-20261021-exporters/prometheus`.
+The runner now streams compressed scrape snapshots and validates incrementally;
+no source change should occur during any active run. Strict lint, combined
+production rebuild, and new frozen-binary manifest/hash are pending before the
+Prometheus retry. StatsD and M3 gates have not run.

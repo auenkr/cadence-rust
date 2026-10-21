@@ -987,6 +987,11 @@ async fn main() -> anyhow::Result<()> {
                     std::time::Duration::from_secs(1),
                     32 * 1024 * 1024,
                 );
+                // Matching's outbound History client shares the service
+                // exporter and root tags with the inbound Matching handlers.
+                let history = matching_metric_sink.as_ref().map_or(history.clone(), |sink| {
+                    history.with_metrics(sink.clone())
+                });
                 if let Some(provider) = matching_ringpop_provider.as_ref() {
                     let named_port = if grpc_outbound {
                         cadence_server::matching_history_peer_resolver::NamedPort::Grpc
