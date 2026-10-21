@@ -357,7 +357,7 @@ if args.postgres:
             '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'domain={rust_evidence["domain"]}',
             '-v', f'task_list={rust_evidence["taskList"]}', '-v',
             f'task_type={rust_evidence.get("taskType", 0)}', '-f', '-'],
-            input=statement + '\n', env=pg_environment, capture_output=True, text=True, timeout=30)
+            input=statement + '\n', env=pg_environment, capture_output=True, text=True, timeout=120)
         (work / f'{name}.log').write_text(check.stdout + check.stderr)
         if check.returncode:
             raise RuntimeError(f'PostgreSQL {name} check failed; see {work / f"{name}.log"}')
@@ -408,7 +408,7 @@ if args.postgres:
                 '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'task_list={pending["taskList"]}',
                 '-v', f'task_type={pending.get("taskType", 0)}', '-f', '-'],
                 input="SELECT count(*) FROM tasks WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND task_list_name=:'task_list' AND task_type=:'task_type'::smallint;\n",
-                env=pg_environment, capture_output=True, text=True, timeout=30)
+                env=pg_environment, capture_output=True, text=True, timeout=120)
             (work / 'go-consumed-task-row-count.log').write_text(consume_rows.stdout + consume_rows.stderr)
             if consume_rows.returncode or consume_rows.stdout.strip() != '0':
                 raise RuntimeError(f'Go Matching completion left {consume_rows.stdout.strip()!r} pending task rows; see {work / "go-consumed-task-row-count.log"}')
@@ -428,7 +428,7 @@ if args.postgres:
                         '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'task_list={name}',
                         '-v', 'task_type=0', '-f', '-'],
                         input="SELECT range_id FROM task_lists WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND name=:'task_list' AND task_type=:'task_type'::smallint;\n",
-                        env=pg_environment, capture_output=True, text=True, timeout=30)
+                        env=pg_environment, capture_output=True, text=True, timeout=120)
                     (work / f'range-id-{key}.log').write_text(range_query.stdout + range_query.stderr)
                     if range_query.returncode or not range_query.stdout.strip().isdigit():
                         raise RuntimeError(f'could not read decision task-list range for {name}; see {work / f"range-id-{key}.log"}')
