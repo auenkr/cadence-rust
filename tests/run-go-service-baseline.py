@@ -71,14 +71,24 @@ def check_go_schema_only():
     )
 
 
-def validate_matching_exporter(exporter, work, repository):
+def validate_matching_exporter(exporter, work, repository, expected_domain):
     """Decode captured exporter output and require SDK-driven Matching metrics."""
     required = ('cadence_requests_per_tl', 'cadence_tasklist_request', 'poll_success_per_tl',
                 'cadence_client_requests')
-    caller = 'cadence-service-compat'
+    # Query completion is sent from the Go Frontend's Matching client. The Go
+    # baseline leaves EnableGRPCOutbound unset, so that direct client uses TChannel.
+    caller = 'cadence-frontend'
+    transport = 'tchannel'
+    shutdown_path = work / 'rust-matching' / 'matching-shutdown.json'
+    shutdown = json.loads(shutdown_path.read_text()) if shutdown_path.is_file() else None
+    if not shutdown or shutdown.get('exitCode') != 0 or shutdown.get('signal') != 'SIGTERM':
+        raise RuntimeError('Rust Matching did not provide a successful SIGTERM shutdown record')
     if exporter == 'prometheus':
-        scrape = (work / 'prometheus-scrape.txt').read_text(encoding='utf-8')
-        samples = [line for line in scrape.splitlines() if line and not line.startswith('#')]
+        snapshots_path = work / 'prometheus-scrape-samples.jsonl'
+        scrapes = ([json.loads(line)['body'] for line in snapshots_path.read_text().splitlines() if line.strip()]
+                   if snapshots_path.is_file() else [(work / 'prometheus-scrape.txt').read_text(encoding='utf-8')])
+        samples = [line for scrape in scrapes for line in scrape.splitlines()
+                   if line and not line.startswith('#')]
         if not samples:
             raise RuntimeError('Prometheus scrape succeeded but returned no metric samples')
         rendered = '\n'.join(samples)
@@ -89,23 +99,36 @@ def validate_matching_exporter(exporter, work, repository):
                       if metric in line and re.search(r'\s[-+0-9.eE]+$', line)]
             if not values or max(values) <= 0:
                 raise RuntimeError(f'Prometheus metric {metric} has no positive SDK-driven sample')
-        request_lines = [line for line in samples if 'cadence_requests_per_tl' in line]
-        labels = '\n'.join(request_lines)
-        for label in (f'caller="{caller}"', 'transport="grpc"', 'cadence_service="cadence_matching"'):
-            if label not in labels:
-                raise RuntimeError(f'Prometheus request metric lacks {label}')
-        if not re.search(r'domain="(?!_unknown_)[^"]+"', labels):
-            raise RuntimeError('Prometheus request metric lacks a populated domain label')
-        if 'operation="RespondQueryTaskCompleted"' not in labels:
-            raise RuntimeError('Prometheus request metrics lack the SDK query response operation')
+        request_lines = [line for line in samples if 'cadence_requests_per_tl' in line
+                         and f'caller="{caller}"' in line
+                         and f'transport="{transport}"' in line
+                         and 'cadence_service="cadence_matching"' in line
+                         and f'domain="{expected_domain}"' in line
+                         and 'operation="RespondQueryTaskCompleted"' in line]
+        request_values = [float(line.rsplit(' ', 1)[1]) for line in request_lines
+                          if re.search(r'\s[-+0-9.eE]+$', line)]
+        if not request_values or max(request_values) <= 0:
+            raise RuntimeError('Prometheus lacks a positive query request sample with the expected domain/caller/transport/service labels')
         semantic = {'format': exporter, 'sampleCount': len(samples),
-                    'requiredMetrics': list(required), 'requestSamples': request_lines}
+                    'requiredMetrics': list(required), 'expectedDomain': expected_domain,
+                    'requestSamples': request_lines}
     elif exporter == 'statsd':
-        packets = [json.loads(line)['base64'] for line in (work / 'statsd-packets.json').read_text().splitlines() if line.strip()]
-        if not packets:
+        captured = [json.loads(line) for line in (work / 'statsd-packets.json').read_text().splitlines() if line.strip()]
+        packets = [item['base64'] for item in captured]
+        if not captured:
             raise RuntimeError('StatsD capture received no UDP packets')
         decoded = [base64.b64decode(packet).decode('utf-8') for packet in packets]
         lines = [line for packet in decoded for line in packet.splitlines() if line]
+        shutdown_packets = [item for item in captured if item['capturedAtUnixNs'] >= shutdown['sigtermSentUnixNs']]
+        if not shutdown_packets:
+            raise RuntimeError('StatsD emitted no UDP packets after SIGTERM; shutdown flush was not observed')
+        shutdown_lines = [line for item in shutdown_packets
+                          for line in base64.b64decode(item['base64']).decode('utf-8').splitlines() if line]
+        for metric in required:
+            values = [float(match.group(1)) for line in shutdown_lines if metric in line
+                      for match in [re.search(r':([-+0-9.eE]+)\|[cgm]', line)] if match]
+            if not values or max(values) <= 0:
+                raise RuntimeError(f'StatsD SIGTERM flush lacks positive SDK-driven metric {metric}')
         requests = [line for line in lines if 'cadence_requests_per_tl' in line]
         rendered = '\n'.join(lines)
         for metric in required:
@@ -115,29 +138,63 @@ def validate_matching_exporter(exporter, work, repository):
                       for match in [re.search(r':([-+0-9.eE]+)\|[cgm]', line)] if match]
             if not values or max(values) <= 0:
                 raise RuntimeError(f'StatsD metric {metric} has no positive SDK-driven sample')
-        labels = '\n'.join(requests)
-        for tag in (f'.caller.{caller}', '.transport.grpc', '.cadence_service.cadence-matching'):
-            if tag not in labels:
-                raise RuntimeError(f'StatsD request metric lacks {tag}')
-        if not re.search(r'\.domain\.(?!_unknown_)[^.:]+', labels):
-            raise RuntimeError('StatsD request metric lacks a populated domain label')
-        if '.operation.RespondQueryTaskCompleted' not in labels:
-            raise RuntimeError('StatsD request metrics lack the SDK query response operation')
+        qualified = [line for line in requests if f'.caller.{caller}' in line
+                     and f'.transport.{transport}' in line
+                     and '.cadence_service.cadence-matching' in line
+                     and f'.domain.{expected_domain}' in line
+                     and '.operation.RespondQueryTaskCompleted' in line]
+        qualified_values = [float(match.group(1)) for line in qualified
+                            for match in [re.search(r':([-+0-9.eE]+)\|[cgm]', line)] if match]
+        if not qualified_values or max(qualified_values) <= 0:
+            raise RuntimeError('StatsD lacks a positive query request sample with the expected domain/caller/transport/service labels')
         semantic = {'format': exporter, 'packetCount': len(packets), 'lineCount': len(lines),
-                    'requiredMetrics': list(required), 'requestLines': requests}
+                    'requiredMetrics': list(required), 'expectedDomain': expected_domain,
+                    'requestLines': requests, 'qualifiedQueryLines': qualified,
+                    'shutdownPacketCount': len(shutdown_packets), 'shutdownPacketLines': shutdown_lines,
+                    'shutdownQuerySample': any(line in shutdown_lines for line in qualified)}
+        if not semantic['shutdownQuerySample']:
+            raise RuntimeError('StatsD SIGTERM flush did not contain the qualified SDK query sample')
     else:
-        packets = [base64.b64decode(json.loads(line)['base64'])
-                   for line in (work / 'm3-packets.json').read_text().splitlines() if line.strip()]
-        if not packets:
+        captured = [json.loads(line) for line in (work / 'm3-packets.json').read_text().splitlines() if line.strip()]
+        packets = [base64.b64decode(item['base64']) for item in captured]
+        if not captured:
             raise RuntimeError('M3 capture received no UDP packets')
         decoder = subprocess.run(
             ['go', 'run', './tools/matching-metrics-m3-oracle', 'decode-hex'],
             cwd=repository / 'go', input=''.join(packet.hex() + '\n' for packet in packets),
-            capture_output=True, text=True, check=True, timeout=120)
+            capture_output=True, text=True, check=False, timeout=120)
+        (work / 'm3-decoder-go.log').write_text(
+            'command: go run ./tools/matching-metrics-m3-oracle decode-hex\n'
+            f'exit: {decoder.returncode}\nstdout:\n{decoder.stdout}\nstderr:\n{decoder.stderr}')
+        if decoder.returncode:
+            raise RuntimeError(f'pinned Go M3 decoder failed; see {work / "m3-decoder-go.log"}')
         (work / 'm3-decoded.jsonl').write_text(decoder.stdout)
         batches = [json.loads(line) for line in decoder.stdout.splitlines() if line.strip()]
         if not batches:
             raise RuntimeError('M3 Go Compact decoder returned no metric batches')
+        shutdown_packets = [packet for packet, item in zip(packets, captured)
+                            if item['capturedAtUnixNs'] >= shutdown['sigtermSentUnixNs']]
+        if not shutdown_packets:
+            raise RuntimeError('M3 emitted no UDP packets after SIGTERM; shutdown flush was not observed')
+        shutdown_decoder = subprocess.run(
+            ['go', 'run', './tools/matching-metrics-m3-oracle', 'decode-hex'],
+            cwd=repository / 'go', input=''.join(packet.hex() + '\n' for packet in shutdown_packets),
+            capture_output=True, text=True, check=False, timeout=120)
+        (work / 'm3-shutdown-decoder-go.log').write_text(
+            'command: go run ./tools/matching-metrics-m3-oracle decode-hex (SIGTERM packets)\n'
+            f'exit: {shutdown_decoder.returncode}\nstdout:\n{shutdown_decoder.stdout}\nstderr:\n{shutdown_decoder.stderr}')
+        if shutdown_decoder.returncode:
+            raise RuntimeError(f'pinned Go M3 shutdown decoder failed; see {work / "m3-shutdown-decoder-go.log"}')
+        shutdown_batches = [json.loads(line) for line in shutdown_decoder.stdout.splitlines() if line.strip()]
+        shutdown_metric_values = []
+        for batch in shutdown_batches:
+            for metric in batch.get('metrics', []):
+                value = metric['value']
+                if isinstance(value, dict):
+                    shutdown_metric_values.append((metric['name'], value.get('count', value.get('gauge', value.get('timer', 0)))))
+        for required_metric in required:
+            if not any(required_metric in name and value > 0 for name, value in shutdown_metric_values):
+                raise RuntimeError(f'M3 SIGTERM flush lacks positive SDK-driven metric {required_metric}')
         metrics = []
         for batch in batches:
             common = {tag['name']: tag['value'] for tag in batch.get('commonTags', [])}
@@ -152,22 +209,40 @@ def validate_matching_exporter(exporter, work, repository):
                        for value in matching_values if isinstance(value, dict)):
                 raise RuntimeError(f'M3 metric {required_metric} has no positive SDK-driven value')
         request_metrics = [(name, tags, value) for name, tags, value in metrics
-                           if 'cadence_requests_per_tl' in name]
-        if not request_metrics:
-            raise RuntimeError('M3 request metric was not emitted')
-        _, tags, value = request_metrics[0]
-        for label, expected in (('caller', caller), ('transport', 'grpc'),
-                                ('cadence_service', 'cadence-matching')):
-            if tags.get(label) != expected:
-                raise RuntimeError(f'M3 request metric expected {label}={expected!r}, got {tags.get(label)!r}')
-        if not tags.get('domain') or tags['domain'] == '_unknown_':
-            raise RuntimeError('M3 request metric lacks a populated domain label')
-        if not any(metric_tags.get('operation') == 'RespondQueryTaskCompleted'
-                   for _, metric_tags, _ in request_metrics):
-            raise RuntimeError('M3 request metrics lack the SDK query response operation')
+                           if 'cadence_requests_per_tl' in name
+                           and tags.get('caller') == caller
+                           and tags.get('transport') == transport
+                           and tags.get('cadence_service') == 'cadence-matching'
+                           and tags.get('domain') == expected_domain
+                           and tags.get('operation') == 'RespondQueryTaskCompleted']
+        positive_requests = [(name, tags, value) for name, tags, value in request_metrics
+                             if isinstance(value, dict)
+                             and value.get('count', value.get('gauge', value.get('timer', 0))) > 0]
+        if not positive_requests:
+            raise RuntimeError('M3 lacks a positive query request sample with the expected domain/caller/transport/service labels')
+        shutdown_metrics = []
+        for batch in shutdown_batches:
+            common = {tag['name']: tag['value'] for tag in batch.get('commonTags', [])}
+            for metric in batch.get('metrics', []):
+                tags = {**common, **{tag['name']: tag['value'] for tag in metric.get('tags', [])}}
+                value = metric['value']
+                if ('cadence_requests_per_tl' in metric['name'] and tags.get('caller') == caller
+                    and tags.get('transport') == transport
+                    and tags.get('cadence_service') == 'cadence-matching'
+                    and tags.get('domain') == expected_domain
+                    and tags.get('operation') == 'RespondQueryTaskCompleted'
+                    and isinstance(value, dict)
+                    and value.get('count', value.get('gauge', value.get('timer', 0))) > 0):
+                    shutdown_metrics.append({'name': metric['name'], 'tags': tags, 'value': value})
+        if not shutdown_metrics:
+            raise RuntimeError('M3 SIGTERM flush did not contain the qualified SDK query sample')
+        _, tags, value = positive_requests[0]
         semantic = {'format': exporter, 'packetCount': len(packets), 'batchCount': len(batches),
                     'metricCount': len(metrics), 'requiredMetrics': list(required),
-                    'requestMetric': {'name': request_metrics[0][0], 'tags': tags, 'value': value},
+                    'expectedDomain': expected_domain,
+                    'requestMetric': {'name': positive_requests[0][0], 'tags': tags, 'value': value},
+                    'shutdownPacketCount': len(shutdown_packets),
+                    'shutdownQuerySamples': shutdown_metrics,
                     'timestampsPreserved': True}
     (work / 'matching-exporter-semantics.json').write_text(json.dumps(semantic, indent=2) + '\n')
     return semantic
@@ -319,6 +394,10 @@ if production_matching:
             )
             if args.matching_exporter == 'm3':
                 matching_metrics_yaml += '        service: cadence_matching\n        env: test\n'
+            else:
+                matching_metrics_yaml += '        flushInterval: 1h\n        flushBytes: 10485760\n'
+        matching_metrics_yaml = matching_metrics_yaml.replace(
+            '    metrics:\n', '    metrics:\n      reportingInterval: 1h\n', 1)
         rust_text, replaced_metrics = re.subn(
             r'(?ms)^  matching:\n(.*?)(?=^  (?:frontend|history|worker):|\Z)',
             lambda match: '  matching:\n' + re.sub(
@@ -489,7 +568,7 @@ try:
                         while True:
                             try:
                                 packet, _ = udp_capture.recvfrom(65535)
-                                udp_packets.append(packet)
+                                udp_packets.append((packet, time.time_ns()))
                             except socket.timeout:
                                 if udp_stop.is_set():
                                     break
@@ -537,8 +616,9 @@ try:
                     udp_thread.join(timeout=2)
                     udp_capture.close()
                     (work / f'{args.matching_exporter}-packets.json').write_text(
-                        ''.join(json.dumps({'base64': base64.b64encode(packet).decode('ascii')}) + '\n'
-                                for packet in udp_packets))
+                        ''.join(json.dumps({'base64': base64.b64encode(packet).decode('ascii'),
+                                            'capturedAtUnixNs': captured_at}) + '\n'
+                                for packet, captured_at in udp_packets))
                 elif args.matching_exporter == 'prometheus':
                     udp_stop.set()
                     prometheus_thread.join(timeout=2)
@@ -546,6 +626,8 @@ try:
                                           if any(line and not line.startswith('#') for line in scrape.splitlines())]
                     if successful_scrapes:
                         (work / 'prometheus-scrape.txt').write_text(successful_scrapes[-1])
+                        (work / 'prometheus-scrape-samples.jsonl').write_text(
+                            ''.join(json.dumps({'body': scrape}) + '\n' for scrape in successful_scrapes))
                     else:
                         (work / 'prometheus-scrape-error.txt').write_text(
                             'no successful scrape with metric samples during the SDK probe\n')
@@ -571,7 +653,19 @@ try:
             if result.returncode:
                 raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
             if args.matching_exporter:
-                semantics = validate_matching_exporter(args.matching_exporter, work, root)
+                probe_result = None
+                for line in reversed((work / 'probe.log').read_text().splitlines()):
+                    try:
+                        candidate = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(candidate, dict) and isinstance(candidate.get('domain'), str):
+                        probe_result = candidate
+                        break
+                if probe_result is None:
+                    raise RuntimeError('SDK probe did not report its registered domain for exporter label validation')
+                semantics = validate_matching_exporter(
+                    args.matching_exporter, work, root, probe_result['domain'])
                 results['matchingExporterSemantics'] = semantics
                 (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
         finally:

@@ -123,8 +123,10 @@ def copy_evidence(destination, *, work, config_files, repository, binaries, resu
     for name in ('probe.log', 'results.json', 'run.exit', 'command.txt', 'db-observations.json',
                  'go-sdk.log', 'restart-sdk.log', 'graceful-drain-sdk.log', 'server.log',
                  'rust-build.log', 'build.log', 'prometheus-scrape.txt',
+                 'prometheus-scrape-samples.jsonl',
                  'prometheus-scrape-error.txt', 'statsd-packets.json', 'm3-packets.json',
-                 'm3-decoded.jsonl', 'matching-exporter-semantics.json'):
+                 'm3-decoder-go.log', 'm3-shutdown-decoder-go.log', 'm3-decoded.jsonl',
+                 'matching-exporter-semantics.json'):
         source = work / name
         if source.is_file():
             shutil.copy2(source, destination / name)
@@ -139,7 +141,7 @@ def copy_evidence(destination, *, work, config_files, repository, binaries, resu
     probe_dir = work / 'rust-matching'
     if probe_dir.is_dir():
         for name in ('db-observations.json', 'gc-backlog-sdk.log', 'go-sdk.log',
-                     'graceful-drain-sdk.log', 'restart-sdk.log'):
+                     'graceful-drain-sdk.log', 'restart-sdk.log', 'matching-shutdown.json'):
             source = probe_dir / name
             if source.is_file():
                 shutil.copy2(source, destination / name)

@@ -511,13 +511,27 @@ async function run() {
   }
   console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
   } finally {
-    if (productionMode) rust.kill('SIGTERM');
+    if (productionMode) {
+      const sigtermSentUnixNs = Date.now() * 1_000_000;
+      fs.writeFileSync(path.join(work, 'matching-shutdown.json'), JSON.stringify({
+        signal: 'SIGTERM', sigtermSentUnixNs,
+      }) + '\n');
+      rust.kill('SIGTERM');
+    }
     else fs.writeFileSync(stop, 'stop');
     let shutdownTimer;
     const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
     clearTimeout(shutdownTimer);
     if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
     if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
+    if (productionMode) {
+      const shutdownPath = path.join(work, 'matching-shutdown.json');
+      const shutdown = JSON.parse(fs.readFileSync(shutdownPath, 'utf8'));
+      shutdown.exitCode = result.code;
+      shutdown.childSignal = result.signal;
+      shutdown.completedAtUnixNs = Date.now() * 1_000_000;
+      fs.writeFileSync(shutdownPath, JSON.stringify(shutdown, null, 2) + '\n');
+    }
   }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));
