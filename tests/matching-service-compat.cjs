@@ -579,9 +579,58 @@ async function run() {
         persistedHoldAfterRecovery: { ownerId: afterRestart.owner_id, tokenId: afterRestart.token_id },
         recoveredOwner, recoveredTokenId: Number(recovered.tokenId),
       };
-      if (semaphoreEvidence.bucketOwnerIndex === 0) {
-        rust = startRust('after-semaphore-owner-recovery');
-        await waitForRustReady('after-semaphore-owner-recovery');
+      const release = spawnSync('go', ['run', './tests/matching-cassandra-interop', 'release-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], {
+        cwd: path.resolve(__dirname, '..', 'go'), env: process.env, encoding: 'utf8', timeout: 120000,
+      });
+      fs.writeFileSync(path.join(work, 'semaphore-release.log'), `${release.stdout || ''}\n${release.stderr || ''}`);
+      assert.equal(release.status, 0, `Go persistence release protocol failed; see ${work}/semaphore-release.log`);
+      const released = cassandraCommand(['verify-semaphore-free', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-after-release');
+      assert.equal(released.released_owner_absent, true);
+      assert.equal(released.holder_free, true);
+
+      // The recovered process has a cache built while the hold existed. Restart
+      // it after the actual Go persistence release so a fresh manager must load
+      // the now-free row before a new owner can claim it.
+      const recoveredOwnerIndex = 1 - semaphoreEvidence.bucketOwnerIndex;
+      const recoveredOwnerProcess = recoveredOwnerIndex === 0 ? rust : secondaryRust;
+      const remainingOwnerIndex = semaphoreEvidence.bucketOwnerIndex;
+      const remainingPeer = directMatchingClient(`127.0.0.1:${remainingOwnerIndex === 0 ? rustGrpcPort : process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
+      const recoveredOwnerExitPromise = new Promise(resolve => recoveredOwnerProcess.once('exit', (code, signal) => resolve({ code, signal })));
+      recoveredOwnerProcess.kill('SIGKILL');
+      const recoveredOwnerExit = await recoveredOwnerExitPromise;
+      assert.equal(recoveredOwnerExit.signal, 'SIGKILL', 'semaphore recovery host did not restart after persisted release');
+      const targetOwner = remainingOwnerIndex === 0
+        ? `127.0.0.1:${rustTChannel}` : `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`;
+      const freshOwnerDeadline = Date.now() + 45000;
+      let freshBucketOwner = '';
+      while (Date.now() < freshOwnerDeadline) {
+        try {
+          freshBucketOwner = await directPartitionOwner(remainingPeer, domain, semaphoreEvidence.ringKey);
+          if (freshBucketOwner === targetOwner) break;
+        } catch (_) {}
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      assert.equal(freshBucketOwner, targetOwner, 'remaining Rust host did not own the released semaphore bucket');
+      const freshOwnerID = `${id.length}:${id}:${randomUUID()}:3`;
+      const freshGrant = await acquireSemaphore(remainingPeer, {
+        domainId, semaphoreName: semaphoreEvidence.semaphoreName, bucket: 0, ownerId: freshOwnerID,
+      });
+      assert.equal(freshGrant.outcome, 'SEMAPHORE_ACQUIRE_OUTCOME_ACQUIRED', 'fresh owner did not acquire the released semaphore slot');
+      assert.equal(Number(freshGrant.tokenId), semaphoreEvidence.tokenId, 'fresh owner must acquire the released token slot');
+      const freshPersisted = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, freshOwnerID, String(semaphoreEvidence.tokenId)], 'semaphore-fresh-owner-after-release');
+      assert.equal(freshPersisted.owner_id, freshOwnerID);
+      assert.equal(freshPersisted.token_id, semaphoreEvidence.tokenId);
+      semaphoreEvidence.releaseAndFreshAcquire = {
+        releaseFixture: 'Cassandra storage fixture mirroring Go CDB.ReleaseSemaphoreToken; not SDK/API release evidence',
+        releaseFixtureOutput: release.stdout.trim(),
+        oldOwnerAbsentAndTokenFree: released,
+        freshOwnerId: freshOwnerID, freshTokenId: Number(freshGrant.tokenId),
+        persistedFreshHold: freshPersisted,
+      };
+
+      if (recoveredOwnerIndex === 0) {
+        rust = startRust('after-semaphore-release-recovery');
+        await waitForRustReady('after-semaphore-release-recovery');
       } else {
         secondaryRust = startSecondaryRust();
         const readyDeadline = Date.now() + 30000;
@@ -593,7 +642,7 @@ async function run() {
             break;
           } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
         }
-        assert(ready, 'crashed semaphore owner did not rejoin Go discovery');
+        assert(ready, 'restarted semaphore recovery host did not rejoin Go discovery');
       }
     }
   }

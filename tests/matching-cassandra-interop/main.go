@@ -23,7 +23,10 @@ const (
 	tasksTaskListRowType     = 1
 	decisionTaskListType     = 1
 	semaphoreOwnerRowType     = 2
+	semaphoreTokenRowType     = 1
 	semaphoreOwnerTokenIDNone = -1
+	semaphoreTokenOwnerNone   = "0::30000000-0000-f000-f000-000000000000:-1"
+	semaphoreFreeSentinel     = "0::30000000-0000-f000-f000-000000000000:-2"
 )
 
 func required(name string) string {
@@ -62,8 +65,8 @@ func connect() *gocql.Session {
 }
 
 func main() {
-	if len(os.Args) < 2 || (os.Args[1] != "seed" && os.Args[1] != "verify" && os.Args[1] != "observe-task" && os.Args[1] != "wait-empty" && os.Args[1] != "verify-semaphore") {
-		log.Fatal("usage: go run ./tests/matching-cassandra-interop {seed|verify|observe-task|wait-empty|verify-semaphore}")
+	if len(os.Args) < 2 || (os.Args[1] != "seed" && os.Args[1] != "verify" && os.Args[1] != "observe-task" && os.Args[1] != "wait-empty" && os.Args[1] != "verify-semaphore" && os.Args[1] != "release-semaphore" && os.Args[1] != "verify-semaphore-free") {
+		log.Fatal("usage: go run ./tests/matching-cassandra-interop {seed|verify|observe-task|wait-empty|verify-semaphore|release-semaphore|verify-semaphore-free}")
 	}
 	if os.Args[1] == "observe-task" || os.Args[1] == "wait-empty" {
 		if len(os.Args) != 5 {
@@ -72,11 +75,11 @@ func main() {
 		observeTask(os.Args[1], os.Args[2], os.Args[3], os.Args[4])
 		return
 	}
-	if os.Args[1] == "verify-semaphore" {
+	if os.Args[1] == "verify-semaphore" || os.Args[1] == "release-semaphore" || os.Args[1] == "verify-semaphore-free" {
 		if len(os.Args) != 6 {
-			log.Fatal("semaphore verifier expects domain-id semaphore-name owner-id expected-token-id")
+			log.Fatal("semaphore command expects domain-id semaphore-name owner-id token-id")
 		}
-		semaphore(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
+		semaphore(os.Args[1], os.Args[2], os.Args[3], os.Args[4], os.Args[5])
 		return
 	}
 	domainID := required("CADENCE_CASSANDRA_TEST_DOMAIN_ID")
@@ -128,7 +131,7 @@ func observeTask(command, domainID, name, timeoutText string) {
 	}
 }
 
-func semaphore(domainID, name, expectedOwnerID, expectedTokenText string) {
+func semaphore(command, domainID, name, ownerID, expectedTokenText string) {
 	domainUUID, err := gocql.ParseUUID(domainID)
 	if err != nil {
 		log.Fatal(err)
@@ -139,14 +142,63 @@ func semaphore(domainID, name, expectedOwnerID, expectedTokenText string) {
 	}
 	session := connect()
 	defer session.Close()
+	if command == "release-semaphore" {
+		// Storage fixture only: reproduce Go CDB.ReleaseSemaphoreToken's conditional
+		// logged batch after requiring the exact live owner/token rows and version.
+		var currentHolder string
+		var tokenVersion, ownerVersion time.Time
+		if err := session.Query("SELECT holder,updated_time FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=? AND token_id=? AND owner_id=?",
+			domainUUID, name, semaphoreTokenRowType, expectedToken, semaphoreTokenOwnerNone).Scan(&currentHolder, &tokenVersion); err != nil {
+			log.Fatalf("release fixture requires exact token row: %v", err)
+		}
+		var currentOwner string
+		var currentToken int
+		if err := session.Query("SELECT owner_id,held_token,updated_time FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=? AND token_id=? AND owner_id=?",
+			domainUUID, name, semaphoreOwnerRowType, semaphoreOwnerTokenIDNone, ownerID).Scan(&currentOwner, &currentToken, &ownerVersion); err != nil {
+			log.Fatalf("release fixture requires exact owner row: %v", err)
+		}
+		if currentHolder != ownerID || currentOwner != ownerID || currentToken != expectedToken || !tokenVersion.Equal(ownerVersion) {
+			log.Fatalf("release fixture precondition mismatch: holder=%q owner=%q held_token=%d token_version=%s owner_version=%s",
+				currentHolder, currentOwner, currentToken, tokenVersion.UTC().Format(time.RFC3339Nano), ownerVersion.UTC().Format(time.RFC3339Nano))
+		}
+		// This is not a Matching/SDK release API call. It mirrors Go persistence's
+		// actual conditional logged batch and preserves its holder guard.
+		batch := session.NewBatch(gocql.LoggedBatch)
+		batch.Query("UPDATE semaphore_tokens SET holder=?,updated_time=? WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=? AND token_id=? AND owner_id=? IF holder=?",
+			semaphoreFreeSentinel, time.Now().UTC(), domainUUID, name, semaphoreTokenRowType, expectedToken, semaphoreTokenOwnerNone, ownerID)
+		batch.Query("DELETE FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=? AND token_id=? AND owner_id=?",
+			domainUUID, name, semaphoreOwnerRowType, semaphoreOwnerTokenIDNone, ownerID)
+		previous := make(map[string]interface{})
+		applied, iter, err := session.MapExecuteBatchCAS(batch, previous)
+		if iter != nil { _ = iter.Close() }
+		if err != nil { log.Fatal(err) }
+		if !applied { log.Fatalf("Go persistence release batch did not apply for owner %q token %d", ownerID, expectedToken) }
+		fmt.Printf("{\"released_owner_id\":%q,\"released_token_id\":%d,\"precondition_version\":%q,\"operation\":\"storage fixture mirroring Go CDB.ReleaseSemaphoreToken conditional logged batch\"}\n",
+			ownerID, expectedToken, tokenVersion.UTC().Format(time.RFC3339Nano))
+		return
+	}
+	if command == "verify-semaphore-free" {
+		var holder string
+		err := session.Query("SELECT holder FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=? AND token_id=? AND owner_id=?",
+			domainUUID, name, semaphoreTokenRowType, expectedToken, semaphoreTokenOwnerNone).Scan(&holder)
+		if err != nil { log.Fatalf("Cassandra token row missing after release: %v", err) }
+		if holder != semaphoreFreeSentinel { log.Fatalf("Cassandra token holder after release=%q, want free sentinel", holder) }
+		var heldToken int
+		err = session.Query("SELECT held_token FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=? AND token_id=? AND owner_id=?",
+			domainUUID, name, semaphoreOwnerRowType, semaphoreOwnerTokenIDNone, ownerID).Scan(&heldToken)
+		if err == nil { log.Fatalf("Cassandra owner row remains after release with held token %d", heldToken) }
+		if err != gocql.ErrNotFound { log.Fatalf("reading released owner row: %v", err) }
+		fmt.Printf("{\"released_owner_absent\":true,\"token_id\":%d,\"holder_free\":true}\n", expectedToken)
+		return
+	}
 	var owner string
 	var token int
 	query := "SELECT owner_id,held_token FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=? AND token_id=? AND owner_id=?"
-	if err := session.Query(query, domainUUID, name, semaphoreOwnerRowType, semaphoreOwnerTokenIDNone, expectedOwnerID).Scan(&owner, &token); err != nil {
+	if err := session.Query(query, domainUUID, name, semaphoreOwnerRowType, semaphoreOwnerTokenIDNone, ownerID).Scan(&owner, &token); err != nil {
 		log.Fatalf("Cassandra semaphore owner row missing: %v", err)
 	}
 	if token <= 0 || token != expectedToken {
-		log.Fatalf("Cassandra semaphore owner token=%d, want positive token %d for owner %q", token, expectedToken, expectedOwnerID)
+		log.Fatalf("Cassandra semaphore owner token=%d, want positive token %d for owner %q", token, expectedToken, ownerID)
 	}
 	fmt.Printf("{\"domain_id\":%q,\"semaphore\":%q,\"owner_id\":%q,\"token_id\":%d}\n", domainID, name, owner, token)
 }
