@@ -138,3 +138,12 @@ before this audit can be treated as parity evidence.
   command was run in this source-only lane. The mixed PostgreSQL test remains
   unexecuted and must be run in the shared validation lane before accepting
   backend parity.
+
+## Status checkpoint (2026-10-21, WIP, mixed PostgreSQL gate NOT passed)
+
+- HEAD chain: ba3a84444 (observer task-type) -> d7a2f1c20 (range expectations) -> 732979b5d/2cc47c373 (verifier block + payload decode) -> d133439452 (observer timeout 120s).
+- Go lib/pq v1.10.2 ssl.go confirmed: require (+existing sslrootcert => verify-ca), verify-ca, verify-full, disable only; allow/prefer rejected. Rust TLS mode mapping (58d1d1e32) matches.
+- Rust tree unchanged since a8db27ab1; frozen binary sha256 4fbc0eb3...c40 in cadence-rust-evidence (built from a8db27ab1).
+- Gate attempts 3-7 failed on harness bugs now fixed: missing evidence path, stale range expectation (Go DescribeTaskList leases and advances range_id), raw vs JSON-decoded SDK result, observer timeout under load.
+- Attempt8 failed: go build -p 1 of cadence-server timed out after 1200s (host load ~7-8 on 2 CPUs from another worktree's cargo/rustc). No Go services were started in attempt8.
+- Remaining: rerun gate when host is idle; full clippy/persistence tests logs; SIGKILL/SIGTERM and pending-task exactly-once evidence; cleanup of cadence-rust-matching-pg-parity-20261021 container after evidence.
