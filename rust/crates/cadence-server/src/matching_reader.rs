@@ -466,7 +466,7 @@ impl TaskReader {
                             let queue = dispatch_queue.clone();
                             let id = task.task_id;
                             let result =
-                                tokio::task::spawn_blocking(move || queue.complete(id)).await;
+                                crate::matching_blocking::run(move || queue.complete(id)).await;
                             if !matches!(result, Ok(Ok(_))) {
                                 dispatch_queue.stop();
                                 break 'dispatch;
@@ -484,14 +484,7 @@ impl TaskReader {
                                 Ok(true) => {
                                     let queue = dispatch_queue.clone();
                                     let id = task.task_id;
-                                    if !matches!(
-                                        tokio::task::spawn_blocking(move || {
-                                            queue.complete(id)?;
-                                            queue.run_garbage_collection(false).map(|_| ())
-                                        })
-                                        .await,
-                                        Ok(Ok(_))
-                                    ) {
+                                    if !matches!(crate::matching_blocking::run(move || { queue.complete(id)?; queue.run_garbage_collection(false).map(|_| ()) }).await, Ok(Ok(_))) {
                                         dispatch_queue.stop();
                                         break 'dispatch;
                                     }
@@ -671,8 +664,9 @@ impl TaskReader {
                 let queue_copy = queue.clone();
                 // Go reads the scan range and batch size on every bounded read.
                 let (range, batch) = (config.read_range_size(), config.read_batch_size());
-                let result =
-                    tokio::task::spawn_blocking(move || queue_copy.reader_turn(range, batch)).await;
+                let result = crate::matching_blocking::run(move || {
+                    queue_copy.reader_turn(range, batch)
+                }).await;
                 if *pump_stop.borrow() || queue.is_stopped() {
                     break;
                 }
@@ -694,7 +688,7 @@ impl TaskReader {
                 loop {
                     // Admission shares queue state with lease renewal; keep a
                     // potentially contended mutex off the async runtime too.
-                    let admitted = tokio::task::spawn_blocking(move || {
+                    let admitted = crate::matching_blocking::run(move || {
                         let result = turn.next(now);
                         (turn, result)
                     })
@@ -1284,7 +1278,7 @@ mod tests {
             wait_read(&queue, 4).await;
             let available = tokio::time::timeout(
                 Duration::from_millis(500),
-                tokio::task::spawn_blocking(|| 42),
+                crate::matching_blocking::run(|| 42),
             )
             .await;
             stop(queue, reader).await;

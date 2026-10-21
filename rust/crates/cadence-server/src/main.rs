@@ -687,6 +687,32 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 false
             };
+            let matching_member_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let matching_persistence_limiter = if wanted.contains(&service::ServiceName::Matching)
+                && !embedded_development
+            {
+                Some(cadence_server::matching_persistence_limiter::MatchingPersistenceLimiter::new(
+                    state.admin.dynamic_config.clone(),
+                    matching_member_count.clone(),
+                ))
+            } else {
+                None
+            };
+            if let Some(limiter) = matching_persistence_limiter.as_ref() {
+                // Go constructs semaphore persistence from the configured
+                // default datastore and shares that datastore's limiter with
+                // task and domain persistence.
+                let store = cadence_server::matching_task_store::open_configured_semaphore_store(
+                    &cfg.persistence,
+                )
+                .await?;
+                state.semaphore_persistence = Some(
+                    cadence_server::matching_persistence::limit_semaphore_store(
+                        store,
+                        limiter.clone(),
+                    ),
+                );
+            }
             state.matching_http_isolated = wanted.contains(&service::ServiceName::Matching)
                 && cfg
                     .services
@@ -929,6 +955,24 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
+            if let Some(provider) = matching_ringpop_provider.as_ref() {
+                matching_member_count.store(
+                    provider.service_member_count(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                let provider = provider.clone();
+                let member_count = matching_member_count.clone();
+                tokio::spawn(async move {
+                    let mut refresh = tokio::time::interval(std::time::Duration::from_secs(1));
+                    loop {
+                        refresh.tick().await;
+                        member_count.store(
+                            provider.service_member_count(),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
+                });
+            }
             let matching_membership = matching_ringpop_provider.as_ref().map(|provider| {
                 cadence_server::matching_membership::Membership::new(
                     provider.local_identity().to_owned(),
@@ -1028,18 +1072,39 @@ async fn main() -> anyhow::Result<()> {
             let configured_matching_stores = if run_matching && !embedded_development {
                 let persistence = cfg.persistence.clone();
                 let cluster_name = state.current_cluster_name.clone();
-                Some(
-                    tokio::task::spawn_blocking(move || {
-                        cadence_server::matching_task_store::open_configured_default_store(
-                            &persistence,
-                            &cluster_name,
+                let dynamic_config = state.admin.dynamic_config.clone();
+                let all_consistency_delete: std::sync::Arc<dyn Fn() -> bool + Send + Sync> =
+                    std::sync::Arc::new(move || {
+                        let overlay = dynamic_config.lock().expect("admin lock");
+                        cadence_persistence::dynamic_config::boolean(
+                            overlay
+                                .property_values("system.enableCassandraAllConsistencyLevelDelete"),
+                            None,
+                            false,
                         )
-                    })
-                    .await
-                    .map_err(|error| {
-                        anyhow::anyhow!("joining Matching store startup: {error}")
-                    })??,
-                )
+                    });
+                let mut stores = tokio::task::spawn_blocking(move || {
+                    cadence_server::matching_task_store::open_configured_default_store(
+                        &persistence,
+                        &cluster_name,
+                        all_consistency_delete,
+                    )
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("joining Matching store startup: {error}"))??;
+                if let Some(limiter) = matching_persistence_limiter.as_ref() {
+                    stores.task_store = cadence_server::matching_persistence::limit_task_store(
+                        stores.task_store,
+                        limiter.clone(),
+                    );
+                    stores.domain_metadata_source = stores.domain_metadata_source.map(|source| {
+                        cadence_server::matching_persistence::limit_domain_source(
+                            source,
+                            limiter.clone(),
+                        )
+                    });
+                }
+                Some(stores)
             } else {
                 None
             };
@@ -1051,9 +1116,13 @@ async fn main() -> anyhow::Result<()> {
                     Some(source) => std::sync::Arc::new(
                         cadence_server::matching_domain_cache::MatchingDomainCache::new(source),
                     ),
-                    None => cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store(
+                    None => cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store_with_limiter(
                         &cfg.persistence,
                         &state.current_cluster_name,
+                        matching_persistence_limiter
+                            .as_ref()
+                            .expect("production Matching persistence limiter is initialized")
+                            .clone(),
                     )?,
                 })
             } else {
@@ -1063,6 +1132,9 @@ async fn main() -> anyhow::Result<()> {
             // opens Matching queues on the configured defaultStore. The
             // private data-dir database is only an embedded-development path.
             let mut matching_runtime = if run_matching {
+                // Keep this as a provider: Go reads the global drain property
+                // at shutdown, after membership withdrawal, rather than when
+                // the Matching runtime is constructed.
                 let drain = cadence_server::matching_runtime::live_shutdown_drain_duration(
                     state.admin.dynamic_config.clone(),
                 );

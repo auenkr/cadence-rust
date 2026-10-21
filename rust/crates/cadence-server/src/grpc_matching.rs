@@ -1466,6 +1466,7 @@ impl Matching {
                         partition_config,
                     });
                     request.set_timeout(timeout);
+                    crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
                     client
                         .add_decision_task(request)
                         .await
@@ -1484,6 +1485,7 @@ impl Matching {
                         activity_task_dispatch_info: None,
                     });
                     request.set_timeout(timeout);
+                    crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
                     client
                         .add_activity_task(request)
                         .await
@@ -2783,8 +2785,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let manager = self
                         .semaphores
                         .get_or_create(identifier)
+                        .await
                         .map_err(semaphore_status)?;
-                    let result = manager.acquire(&r.owner_id).map_err(semaphore_status)?;
+                    let result = manager.acquire(&r.owner_id).await.map_err(semaphore_status)?;
                     let outcome = match result.outcome {
                         SemaphoreAcquireOutcome::Acquired => 1,
                         SemaphoreAcquireOutcome::NoSlot => 2,

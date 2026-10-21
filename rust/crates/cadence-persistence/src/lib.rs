@@ -13,6 +13,7 @@ pub mod history_branch;
 pub mod raw_history;
 pub mod schedules;
 pub mod semaphores;
+pub mod cassandra;
 pub mod version_history;
 pub mod visibility;
 
@@ -24,11 +25,13 @@ pub use executions::{
 };
 pub use schedules::{ScheduleError, ScheduleRecord};
 pub use semaphores::{
-    AcquireError, GrantOutcome, SemaphoreError, SemaphoreHold, SemaphoreMetadata, SemaphoreRow,
+    AcquireError, GrantOutcome, SemaphoreError, SemaphoreHold, SemaphoreMetadata,
+    SemaphorePersistence, SemaphoreRow, SqlUnsupportedSemaphorePersistence,
 };
 
 pub mod matching_blob;
 pub mod matching_mysql;
+pub mod matching_cassandra;
 pub mod matching_postgres;
 pub mod matching_queue;
 pub mod matching_sqlite;

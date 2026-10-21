@@ -97,7 +97,8 @@ fn metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSo
         MatchingDomainMetadataError::MySql(_)
         | MatchingDomainMetadataError::MySqlAsync(_)
         | MatchingDomainMetadataError::MySqlPool(_)
-        | MatchingDomainMetadataError::Postgres(_) => true,
+        | MatchingDomainMetadataError::Postgres(_)
+        | MatchingDomainMetadataError::Cassandra(_) => true,
         _ => false,
     };
     DomainMetadataSourceError {
@@ -172,6 +173,42 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
             .map_err(metadata_source_error)?;
         validate_typed_domain_config(&domain)?;
         Ok(domain)
+    }
+}
+
+impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore {
+    fn metadata_version(&self, _timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
+        self.metadata_version().map_err(|error| DomainMetadataSourceError::transient(error.to_string()))
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+        _timeout: Duration,
+    ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page = cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::list_domains(
+            self, page_size, next_page_token,
+        ).map_err(|error| match error {
+            MatchingDomainMetadataError::InvalidPageSize | MatchingDomainMetadataError::InvalidBlob(_) => DomainMetadataSourceError::permanent(error.to_string()),
+            _ => DomainMetadataSourceError::transient(error.to_string()),
+        })?;
+        for domain in &page.domains { validate_typed_domain_config(domain)?; }
+        Ok(DomainMetadataPage { domains: page.domains, next_page_token: page.next_page_token })
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+        _timeout: Duration,
+    ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(self, name, id)
+            .map_err(|error| match error {
+                MatchingDomainMetadataError::NotFound(_) | MatchingDomainMetadataError::BothIdAndName
+                | MatchingDomainMetadataError::EmptyIdentity | MatchingDomainMetadataError::InvalidUuid(_) => DomainMetadataSourceError::permanent(error.to_string()),
+                _ => DomainMetadataSourceError::transient(error.to_string()),
+            })
     }
 }
 
@@ -376,6 +413,22 @@ impl MatchingDomainCache {
         persistence: &crate::config::PersistenceConfig,
         current_cluster: &str,
     ) -> anyhow::Result<Arc<Self>> {
+        Self::from_default_store_inner(persistence, current_cluster, None)
+    }
+
+    pub fn from_default_store_with_limiter(
+        persistence: &crate::config::PersistenceConfig,
+        current_cluster: &str,
+        limiter: Arc<crate::matching_persistence_limiter::MatchingPersistenceLimiter>,
+    ) -> anyhow::Result<Arc<Self>> {
+        Self::from_default_store_inner(persistence, current_cluster, Some(limiter))
+    }
+
+    fn from_default_store_inner(
+        persistence: &crate::config::PersistenceConfig,
+        current_cluster: &str,
+        limiter: Option<Arc<crate::matching_persistence_limiter::MatchingPersistenceLimiter>>,
+    ) -> anyhow::Result<Arc<Self>> {
         // Go indexes persistence.datastores by the literal defaultStore value.
         let name = persistence.default_store.as_str();
         if name.is_empty() {
@@ -445,7 +498,12 @@ impl MatchingDomainCache {
             uri_mode,
             busy_timeout,
         )?;
-        Ok(Arc::new(Self::new(Arc::new(source))))
+        let source: Arc<dyn DomainMetadataSource> = Arc::new(source);
+        let source = match limiter {
+            Some(limiter) => crate::matching_persistence::limit_domain_source(source, limiter),
+            None => source,
+        };
+        Ok(Arc::new(Self::new(source)))
     }
 
     pub fn new(source: Arc<dyn DomainMetadataSource>) -> Self {

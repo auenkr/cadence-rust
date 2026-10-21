@@ -155,6 +155,11 @@ impl MatchingRingpopProvider {
             .clone()
     }
 
+    /// Number of visible members for this provider's service label.
+    pub fn service_member_count(&self) -> usize {
+        Self::service_members(&self.snapshot().members, &self.service).len()
+    }
+
     fn current_members(node: &RingpopNode) -> Vec<PeerMember> {
         let (members, _) = node.membership_snapshot();
         members

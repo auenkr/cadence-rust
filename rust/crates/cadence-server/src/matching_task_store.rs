@@ -23,11 +23,89 @@ pub struct ConfiguredMatchingStores {
     pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
 }
 
-/// Open Matching's configured default SQL store. MySQL and PostgreSQL task and
-/// domain reads share one pool so their combined connections obey Go maxConns.
+/// Open Matching's configured default store.
+fn cassandra_config(
+    nosql: &crate::config::NosqlConfig,
+) -> anyhow::Result<cadence_persistence::cassandra::CassandraSessionConfig> {
+    let proto_version = if nosql.proto_version == 0 {
+        std::env::var("CASSANDRA_PROTO_VERSION")
+            .ok()
+            .map(|version| version.parse::<i32>())
+            .transpose()?
+            .unwrap_or(4)
+    } else {
+        nosql.proto_version
+    };
+    let tls = nosql.tls.as_ref().filter(|tls| tls.enabled).map(|tls| {
+        cadence_persistence::cassandra::CassandraTlsConfig {
+            ca_files: tls
+                .ca_files
+                .iter()
+                .chain((!tls.ca_file.is_empty()).then_some(&tls.ca_file))
+                .map(std::path::PathBuf::from)
+                .collect(),
+            cert_file: (!tls.cert_file.is_empty()).then(|| tls.cert_file.clone().into()),
+            key_file: (!tls.key_file.is_empty()).then(|| tls.key_file.clone().into()),
+            verify_hostname: tls.enable_host_verification,
+            server_name: (!tls.server_name.is_empty()).then(|| tls.server_name.clone()),
+        }
+    });
+    let options = cadence_persistence::cassandra::CassandraSessionOptions {
+        timeout_nanos: nosql.timeout_nanos,
+        connect_timeout_nanos: nosql.connect_timeout_nanos,
+        consistency: nosql.consistency.clone(),
+        serial_consistency: nosql.serial_consistency.clone(),
+        max_conns: nosql.max_conns,
+        datacenter: nosql.datacenter.clone(),
+        region: nosql.region.clone(),
+        tls,
+        allowed_authenticators: nosql.allowed_authenticators.clone(),
+        proto_version,
+        connect_attributes: nosql.connect_attributes.clone(),
+        host_selection_policy: nosql.host_selection_policy.clone(),
+    };
+    cadence_persistence::cassandra::CassandraSessionConfig::from_parts(
+        nosql.hosts_list(),
+        nosql.port,
+        nosql.user.clone(),
+        nosql.password.clone(),
+        nosql.keyspace.clone(),
+    )?
+    .with_go_options(options)
+}
+
+/// Open the configured default store's semaphore adapter. SQL deliberately
+/// returns Go's unsupported implementation; Cassandra uses the same async
+/// session primitives as the task/domain adapters.
+pub async fn open_configured_semaphore_store(
+    persistence: &crate::config::PersistenceConfig,
+) -> anyhow::Result<Arc<dyn cadence_persistence::SemaphorePersistence>> {
+    let name = persistence.default_store.as_str();
+    let datastore = persistence.datastores.get(name).ok_or_else(|| {
+        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
+    })?;
+    if let Some(nosql) = datastore.nosql.as_ref() {
+        if nosql.plugin_name != "cassandra" {
+            anyhow::bail!("Matching NoSQL persistence does not support plugin {:?}; supported plugin is cassandra", nosql.plugin_name);
+        }
+        let config = cassandra_config(nosql)?;
+        let session = std::sync::Arc::new(config.connect().await?);
+        return Ok(Arc::new(
+            cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session),
+        ));
+    }
+    if datastore.sql.is_some() {
+        return Ok(Arc::new(
+            cadence_persistence::SqlUnsupportedSemaphorePersistence,
+        ));
+    }
+    anyhow::bail!("Matching defaultStore {name:?} has neither SQL nor NoSQL configuration")
+}
+
 pub fn open_configured_default_store(
     persistence: &crate::config::PersistenceConfig,
     active_cluster_name: &str,
+    all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> anyhow::Result<ConfiguredMatchingStores> {
     let name = persistence.default_store.as_str();
     if name.is_empty() {
@@ -36,8 +114,30 @@ pub fn open_configured_default_store(
     let datastore = persistence.datastores.get(name).ok_or_else(|| {
         anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
     })?;
-    if datastore.nosql.is_some() {
-        anyhow::bail!("Matching task persistence does not support NoSQL defaultStore {name:?}");
+    if let Some(nosql) = datastore.nosql.as_ref() {
+        if datastore.sql.is_some() {
+            anyhow::bail!("Matching defaultStore {name:?} configures both SQL and NoSQL backends");
+        }
+        if nosql.plugin_name != "cassandra" {
+            anyhow::bail!("Matching NoSQL persistence does not support plugin {:?}; supported plugin is cassandra", nosql.plugin_name);
+        }
+        let config = cassandra_config(nosql)?;
+        let driver =
+            Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
+        return Ok(ConfiguredMatchingStores {
+            task_store: Arc::new(
+                cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::with_all_consistency_delete(
+                    driver.clone(),
+                    all_consistency_delete,
+                ),
+            ),
+            domain_metadata_source: Some(Arc::new(
+                cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
+                    driver,
+                    active_cluster_name,
+                ),
+            )),
+        });
     }
     let sql = datastore.sql.as_ref().ok_or_else(|| {
         anyhow::anyhow!("Matching defaultStore {name:?} has no supported SQL configuration")
@@ -372,7 +472,7 @@ mod tests {
             use_multiple_databases: true,
             ..Default::default()
         }));
-        let error = open_configured_default_store(&config, "active")
+        let error = open_configured_default_store(&config, "active", Arc::new(|| false))
             .err()
             .unwrap();
         assert!(error

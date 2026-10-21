@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = "1"
+async-trait = "0.1"
+scylla = { version = "=1.9.0", features = ["chrono-04", "rustls-023"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+rustls-native-certs = "0.8"
 cadence-thrift = { path = "../cadence-thrift" }
 cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
@@ -23,7 +29,7 @@ postgres-openssl = "0.5"
 openssl = "0.10"
 farmhash = "1.1.5"
 snap = "1.1.1"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 
 [dev-dependencies]
 tempfile = "3"
