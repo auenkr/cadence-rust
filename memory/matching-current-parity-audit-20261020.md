@@ -10,6 +10,37 @@ production evidence is recorded separately in
 `memory/evidence/matching-dns-build-20261020-2726808/`; it is bounded evidence,
 not a Matching acceptance audit.
 
+## Source refresh: Matching History outbound selector (2026-10-21)
+
+The former production-main note claiming TChannel History outbound is missing
+is stale. Pinned Go `go/common/rpc/params.go:76,120-134` samples
+`system.enableGRPCOutbound` at service construction, defaults true, and builds
+both History and Matching direct outbounds with that selection. The History
+peer resolver uses the matching named port (`go/client/history/peer_resolver.go`);
+Ringpop members expose `grpc` and `tchannel` named addresses. Matching obtains
+the retryable History client from its service resource (`go/service/matching/
+service.go:103`; `go/common/resource/resource_impl.go:286-300`).
+
+Rust already implements the same startup selector in `main.rs`, with the last
+unfiltered global dynamic-config value and true default. False selects the live
+Ringpop History `tchannel` address and `MatchingHistoryClient`'s native Thrift
+transport. The method path covers Matching's History `RefreshWorkflowTasks`,
+`DescribeWorkflowExecution`, `GetMutableState`, `RecordDecisionTaskStarted`,
+and `RecordActivityTaskStarted` calls, including retry/redirect and deadline
+handling. Focused source assertions and the existing Go TChannel peer oracle
+cover transport selection, payloads, typed errors, and cancellation.
+
+Same-source preliminary mixed TChannel evidence already exists at
+`memory/evidence/matching-dns-interop-20261020/mixed-tchannel-isolated/`; its
+Rust source commit `7030f2e` is an ancestor of this branch and the History
+transport source files are unchanged since that commit. The run completed an
+SDK workflow, query/isolation dispatch, partition config, process restart and
+graceful drain/recovery with Go Matching absent and Go Frontend/History/Worker
+alive. It is explicitly `acceptanceEligible: false`, and its transport
+assertion was configured through Rust dynamic config plus successful workload,
+not per-call tracing. A fresh post-slot mixed run is queued in
+`matching-history-outbound-transport-20261021.md`; Matching remains incomplete.
+
 ## Current positive evidence and limits
 
 - Production Rust Matching can be started beside Go Frontend, History, and

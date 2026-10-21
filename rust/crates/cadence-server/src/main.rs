@@ -60,6 +60,16 @@ fn dynamic_bool_property(
         .unwrap_or(default)
 }
 
+fn history_named_port(
+    grpc_outbound: bool,
+) -> cadence_server::matching_history_peer_resolver::NamedPort {
+    if grpc_outbound {
+        cadence_server::matching_history_peer_resolver::NamedPort::Grpc
+    } else {
+        cadence_server::matching_history_peer_resolver::NamedPort::Tchannel
+    }
+}
+
 fn dynamic_i64_property(
     overlay: std::sync::Arc<std::sync::Mutex<cadence_server::admin::DynamicConfigOverlay>>,
     name: &str,
@@ -393,6 +403,55 @@ async fn serve_matching_http_permissive(
 #[cfg(test)]
 mod matching_http_listener_tests {
     use super::*;
+    #[test]
+    fn history_outbound_selector_uses_last_unfiltered_global_value() {
+        use cadence_api::{
+            admin::{DynamicConfigFilter, DynamicConfigValue},
+            enums::EncodingType,
+            types::DataBlob,
+        };
+
+        let overlay = std::sync::Arc::new(std::sync::Mutex::new(
+            cadence_server::admin::DynamicConfigOverlay::default(),
+        ));
+        let selected = || {
+            dynamic_bool_property(overlay.clone(), "system.enableGRPCOutbound", true)
+        };
+        assert!(selected(), "Go defaults outbound RPCs to gRPC");
+        assert_eq!(history_named_port(selected()), cadence_server::matching_history_peer_resolver::NamedPort::Grpc);
+
+        let json = |value: &[u8]| Some(DataBlob::new(EncodingType::JSON, value.to_vec()));
+        let constrained = |value: &[u8]| DynamicConfigValue {
+            value: json(value),
+            filters: vec![DynamicConfigFilter {
+                name: "domainName".into(),
+                value: json(b"\"filtered-domain\""),
+            }],
+        };
+        overlay.lock().unwrap().update(
+            false,
+            "system.enableGRPCOutbound",
+            vec![
+                DynamicConfigValue { value: json(b"false"), filters: vec![] },
+                constrained(b"true"),
+            ],
+        );
+        assert!(!selected(), "a domain-filtered value is not the startup selector");
+        assert_eq!(history_named_port(selected()), cadence_server::matching_history_peer_resolver::NamedPort::Tchannel);
+
+        overlay.lock().unwrap().update(
+            false,
+            "system.enableGRPCOutbound",
+            vec![
+                DynamicConfigValue { value: json(b"true"), filters: vec![] },
+                DynamicConfigValue { value: json(b"false"), filters: vec![] },
+                constrained(b"true"),
+            ],
+        );
+        assert!(!selected(), "the last unfiltered global value selects TChannel");
+        assert_eq!(history_named_port(selected()), cadence_server::matching_history_peer_resolver::NamedPort::Tchannel);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn tls_handshake_timeout_is_injectable() {
         use tokio::io::AsyncWriteExt;
@@ -965,11 +1024,7 @@ async fn main() -> anyhow::Result<()> {
                     32 * 1024 * 1024,
                 );
                 if let Some(provider) = matching_ringpop_provider.as_ref() {
-                    let named_port = if grpc_outbound {
-                        cadence_server::matching_history_peer_resolver::NamedPort::Grpc
-                    } else {
-                        cadence_server::matching_history_peer_resolver::NamedPort::Tchannel
-                    };
+                    let named_port = history_named_port(grpc_outbound);
                     let history_membership = std::sync::Arc::new(
                         cadence_server::matching_history_membership::RingpopHistoryMembership::new(
                             std::sync::Arc::new(provider.node().clone()),
