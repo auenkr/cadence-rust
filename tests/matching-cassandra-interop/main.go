@@ -13,6 +13,19 @@ import (
 	"github.com/gocql/gocql"
 )
 
+// These values are pinned to common/persistence.SemaphoreRowTypeOwner and
+// the owner-row token_id sentinel in the Go Cassandra adapter. This helper
+// lives outside the Go module, so it cannot import those source constants.
+const (
+	// The tasks table has its own row-type encoding and is unrelated to
+	// semaphore_tokens' row types below.
+	tasksTaskRowType         = 0
+	tasksTaskListRowType     = 1
+	decisionTaskListType     = 1
+	semaphoreOwnerRowType     = 2
+	semaphoreOwnerTokenIDNone = -1
+)
+
 func required(name string) string {
 	value := os.Getenv(name)
 	if value == "" {
@@ -60,10 +73,10 @@ func main() {
 		return
 	}
 	if os.Args[1] == "verify-semaphore" {
-		if len(os.Args) != 4 {
-			log.Fatal("semaphore observer expects domain-id semaphore-name")
+		if len(os.Args) != 6 {
+			log.Fatal("semaphore verifier expects domain-id semaphore-name owner-id expected-token-id")
 		}
-		semaphore(os.Args[2], os.Args[3])
+		semaphore(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
 		return
 	}
 	domainID := required("CADENCE_CASSANDRA_TEST_DOMAIN_ID")
@@ -95,11 +108,11 @@ func observeTask(command, domainID, name, timeoutText string) {
 	deadline := time.Now().Add(timeout)
 	for {
 		var rangeID int64
-		err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=1 AND task_id=-12345", domainUUID, name, 1).Scan(&rangeID)
+		err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=-12345", domainUUID, name, decisionTaskListType, tasksTaskListRowType).Scan(&rangeID)
 		if err != nil && err != gocql.ErrNotFound {
 			log.Fatal(err)
 		}
-		iter := session.Query("SELECT task_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=0", domainUUID, name, 1).Iter()
+		iter := session.Query("SELECT task_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=?", domainUUID, name, decisionTaskListType, tasksTaskRowType).Iter()
 		count := 0
 		var taskID int64
 		for iter.Scan(&taskID) { count++ }
@@ -115,38 +128,38 @@ func observeTask(command, domainID, name, timeoutText string) {
 	}
 }
 
-func semaphore(domainID, name string) {
+func semaphore(domainID, name, expectedOwnerID, expectedTokenText string) {
 	domainUUID, err := gocql.ParseUUID(domainID)
 	if err != nil {
 		log.Fatal(err)
 	}
+	expectedToken, err := strconv.Atoi(expectedTokenText)
+	if err != nil || expectedToken <= 0 {
+		log.Fatalf("expected semaphore token must be positive: %q", expectedTokenText)
+	}
 	session := connect()
 	defer session.Close()
-	iter := session.Query("SELECT owner_id,held_token FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=1", domainUUID, name).Iter()
-	owners := map[string]int{}
 	var owner string
 	var token int
-	for iter.Scan(&owner, &token) { owners[owner] = token }
-	if err := iter.Close(); err != nil {
-		log.Fatal(err)
+	query := "SELECT owner_id,held_token FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=? AND token_id=? AND owner_id=?"
+	if err := session.Query(query, domainUUID, name, semaphoreOwnerRowType, semaphoreOwnerTokenIDNone, expectedOwnerID).Scan(&owner, &token); err != nil {
+		log.Fatalf("Cassandra semaphore owner row missing: %v", err)
 	}
-	if len(owners) != 1 {
-		log.Fatalf("Cassandra semaphore owner rows=%d, want exactly one: %#v", len(owners), owners)
+	if token <= 0 || token != expectedToken {
+		log.Fatalf("Cassandra semaphore owner token=%d, want positive token %d for owner %q", token, expectedToken, expectedOwnerID)
 	}
-	for owner, token := range owners {
-		fmt.Printf("{\"domain_id\":%q,\"semaphore\":%q,\"owner_id\":%q,\"token_id\":%d}\n", domainID, name, owner, token)
-	}
+	fmt.Printf("{\"domain_id\":%q,\"semaphore\":%q,\"owner_id\":%q,\"token_id\":%d}\n", domainID, name, owner, token)
 }
 
 func seed(session *gocql.Session, domainUUID gocql.UUID, domainID, name string) {
-	if err := session.Query("DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=?", domainUUID, name, 1).Exec(); err != nil {
+	if err := session.Query("DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=?", domainUUID, name, decisionTaskListType).Exec(); err != nil {
 		log.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	list := fmt.Sprintf("{domain_id:%s,name:'%s',type:1,ack_level:0,kind:0,last_updated:'%s',adaptive_partition_config:null}",
-		domainID, strings.ReplaceAll(name, "'", "''"), now.Format("2006-01-02 15:04:05.000-0700"))
-	query := fmt.Sprintf("INSERT INTO tasks (domain_id,task_list_name,task_list_type,type,task_id,range_id,task_list,created_time) VALUES (?,?,?,1,-12345,41,%s,?) IF NOT EXISTS", list)
-	applied, err := session.Query(query, domainUUID, name, 1, now).ScanCAS()
+	list := fmt.Sprintf("{domain_id:%s,name:'%s',type:%d,ack_level:0,kind:0,last_updated:'%s',adaptive_partition_config:null}",
+		domainID, strings.ReplaceAll(name, "'", "''"), decisionTaskListType, now.Format("2006-01-02 15:04:05.000-0700"))
+	query := fmt.Sprintf("INSERT INTO tasks (domain_id,task_list_name,task_list_type,type,task_id,range_id,task_list,created_time) VALUES (?,?,?,%d,-12345,41,%s,?) IF NOT EXISTS", tasksTaskListRowType, list)
+	applied, err := session.Query(query, domainUUID, name, decisionTaskListType, now).ScanCAS()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -158,7 +171,7 @@ func seed(session *gocql.Session, domainUUID gocql.UUID, domainID, name string) 
 
 func verify(session *gocql.Session, domainID gocql.UUID, name string) {
 	var rangeID int64
-	if err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=1 AND task_id=-12345", domainID, name, 1).Scan(&rangeID); err != nil {
+	if err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=-12345", domainID, name, decisionTaskListType, tasksTaskListRowType).Scan(&rangeID); err != nil {
 		log.Fatal(err)
 	}
 	if rangeID != 42 {
@@ -166,7 +179,7 @@ func verify(session *gocql.Session, domainID gocql.UUID, name string) {
 	}
 	var taskID int64
 	var task map[string]interface{}
-	if err := session.Query("SELECT task_id,task FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=0 AND task_id=101", domainID, name, 1).Scan(&taskID, &task); err != nil {
+	if err := session.Query("SELECT task_id,task FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=101", domainID, name, decisionTaskListType, tasksTaskRowType).Scan(&taskID, &task); err != nil {
 		log.Fatal(err)
 	}
 	if taskID != 101 || task["workflow_id"] != "rust-cassandra-interop" || task["schedule_id"] != int64(23) {

@@ -20,8 +20,9 @@ with `CADENCE_CASSANDRA_IMAGE` only when validating another documented Go
 compatible Cassandra version. Docker publishes only on loopback. The script
 creates a one-node disposable keyspace and applies the checked-in Go schema;
 it does not modify a user's existing database. Use a fresh container name and
-test keyspace. Preserve failed containers and evidence until the failure is
-understood.
+test keyspace. The runner saves evidence and removes its own container by
+default; set `CADENCE_CASSANDRA_RETAIN_CONTAINER=1` to preserve that container
+for debugging.
 
 The first invocation regenerates `rust/Cargo.lock` separately and stops if the
 lock differs from HEAD. Review the recorded diff for the `scylla` 1.9.0 local
@@ -89,3 +90,9 @@ instance, set `CADENCE_CASSANDRA_CONTACT_POINTS`,
 `CADENCE_CASSANDRA_VISIBILITY_KEYSPACE`; the runner still owns Go/Rust config
 generation and schema application. The current harness does not configure
 Cassandra authentication or TLS.
+
+The runner labels its disposable container with a unique per-invocation owner
+value. On success, failure, or interruption it saves the container logs and
+inspect metadata under the evidence directory, then removes only a container
+with that exact owner label. Pre-existing or differently owned containers are
+never removed.

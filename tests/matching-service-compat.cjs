@@ -303,12 +303,15 @@ async function run() {
       });
       const owners = [`${id.length}:${id}:${randomUUID()}:1`, `${id.length}:${id}:${randomUUID()}:2`];
       const grants = await Promise.all(owners.map(owner => semaphoreAcquire(owner)));
-      const acquired = grants.filter(grant => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_ACQUIRED');
+      const acquired = grants.map((grant, index) => ({ grant, owner: owners[index] }))
+        .filter(({ grant }) => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_ACQUIRED');
       const unavailable = grants.filter(grant => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT');
       assert.equal(acquired.length, 1, 'Cassandra semaphore capacity one must grant exactly one concurrent owner');
       assert.equal(unavailable.length, 1, 'Cassandra semaphore capacity one must reject the competing owner');
-      const stored = cassandraCommand(['verify-semaphore', domainId, semaphoreName], 'semaphore-before-recovery');
-      assert.equal(stored.token_id, Number(acquired[0].tokenId), 'Go gocql must observe the Rust semaphore token row');
+      const expectedToken = Number(acquired[0].grant.tokenId);
+      const stored = cassandraCommand(['verify-semaphore', domainId, semaphoreName, acquired[0].owner, String(expectedToken)], 'semaphore-before-recovery');
+      assert.equal(stored.owner_id, acquired[0].owner, 'Go gocql must observe the exact Rust semaphore owner row');
+      assert.equal(stored.token_id, expectedToken, 'Go gocql must observe the positive Rust semaphore token row');
       semaphoreOwner = stored.owner_id;
       semaphoreEvidence = { semaphoreName, createdThroughGoFrontend: true, ownerId: semaphoreOwner, tokenId: stored.token_id, concurrentGrants: acquired.length, noSlotResponses: unavailable.length };
     }
@@ -525,7 +528,8 @@ async function run() {
     if (cassandraGate && semaphoreEvidence) {
       const recovered = await semaphoreAcquire(semaphoreOwner);
       assert.equal(Number(recovered.tokenId), semaphoreEvidence.tokenId, 'semaphore hold must survive Matching owner crash and be recovered from Cassandra');
-      const afterRestart = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName], 'semaphore-after-recovery');
+      const afterRestart = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-after-recovery');
+      assert.equal(afterRestart.owner_id, semaphoreOwner);
       assert.equal(afterRestart.token_id, semaphoreEvidence.tokenId);
     }
   }

@@ -11,9 +11,36 @@ KEYSPACE=${CADENCE_CASSANDRA_KEYSPACE:-cadence}
 VISIBILITY_KEYSPACE=${CADENCE_CASSANDRA_VISIBILITY_KEYSPACE:-cadence_visibility}
 MIN_FREE_KB=${CADENCE_CASSANDRA_MIN_FREE_KB:-18000000}
 MIN_MEM_KB=${CADENCE_CASSANDRA_MIN_MEM_KB:-4000000}
+RETAIN_CONTAINER=${CADENCE_CASSANDRA_RETAIN_CONTAINER:-0}
+CONTAINER_RUN_ID="matching-cassandra-validation-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir -p "$ARTIFACTS"
 [[ "$KEYSPACE" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || { echo "Invalid Cassandra keyspace: $KEYSPACE" >&2; exit 2; }
 [[ "$VISIBILITY_KEYSPACE" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || { echo "Invalid Cassandra visibility keyspace: $VISIBILITY_KEYSPACE" >&2; exit 2; }
+
+cleanup_cassandra_container() {
+  local status=$?
+  trap - EXIT
+  if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+    local owner
+    owner=$(docker inspect --format '{{ index .Config.Labels "cadence-rust-validation-run" }}' "$CONTAINER" 2>/dev/null || true)
+    if [[ "$owner" == "$CONTAINER_RUN_ID" ]]; then
+      docker logs "$CONTAINER" > "$ARTIFACTS/cassandra-container.log" 2>&1 || true
+      docker inspect "$CONTAINER" > "$ARTIFACTS/cassandra-container-inspect.json" 2>&1 || true
+      if [[ "$RETAIN_CONTAINER" == 1 ]]; then
+        printf 'retained runner-owned Cassandra container %s\n' "$CONTAINER" > "$ARTIFACTS/cassandra-container-cleanup.txt"
+      else
+        if docker rm --force "$CONTAINER" > "$ARTIFACTS/cassandra-container-cleanup.txt" 2>&1; then
+          printf 'removed runner-owned Cassandra container %s\n' "$CONTAINER" >> "$ARTIFACTS/cassandra-container-cleanup.txt"
+        else
+          printf 'failed to remove runner-owned Cassandra container %s\n' "$CONTAINER" >> "$ARTIFACTS/cassandra-container-cleanup.txt"
+          status=1
+        fi
+      fi
+    fi
+  fi
+  exit "$status"
+}
+trap cleanup_cassandra_container EXIT
 
 phase() {
   local name=$1
@@ -89,8 +116,11 @@ phase strict-persistence-clippy cargo clippy --locked --manifest-path rust/Cargo
 phase matching-server-build cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server --bin cadence-server
 
 # Only now provision a pinned single-node test cluster and apply the existing
-# Go schema to a dedicated keyspace. This container is disposable test state.
-docker run --detach --name "$CONTAINER" --publish "127.0.0.1:${PORT}:9042" \
+# Go schema to a dedicated keyspace. The EXIT handler removes only the
+# container carrying this invocation's unique ownership label, after saving
+# its logs and inspect output under ARTIFACTS. Set
+# CADENCE_CASSANDRA_RETAIN_CONTAINER=1 to preserve that owned container.
+docker run --detach --name "$CONTAINER" --label "cadence-rust-validation-run=$CONTAINER_RUN_ID" --publish "127.0.0.1:${PORT}:9042" \
   --env CASSANDRA_CLUSTER_NAME=cadence-rust-matching-validation "$IMAGE" \
   | tee "$ARTIFACTS/cassandra-container-id.txt"
 for attempt in $(seq 1 120); do
