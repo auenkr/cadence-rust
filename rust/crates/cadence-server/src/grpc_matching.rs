@@ -302,8 +302,9 @@ pub struct Matching {
     task_list_ownership: Option<TaskListOwnershipCheck>,
     pub(crate) poll_expiration: std::time::Duration,
     metrics: crate::matching_metrics::MatchingMetrics,
-    domain_name_resolver: Option<Arc<dyn Fn(&str) -> Option<String> + Send + Sync>>,
+    domain_name_resolver: Option<DomainNameResolver>,
 }
+type DomainNameResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Runtime-provided ownership check. The cached flag is advisory and only
 /// allows the excluded-task-list Ring fast path; eligible names must still
 /// validate their local shard processor on every request.

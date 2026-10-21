@@ -759,6 +759,9 @@ impl MatchingMetrics {
         );
     }
 
+    // Keep the distinct metric names explicit so the caller cannot mix the
+    // attempt, latency, and histogram series for the two handoff paths.
+    #[allow(clippy::too_many_arguments)]
     fn async_match_handoff(
         &self,
         context: &PollMetricContext,

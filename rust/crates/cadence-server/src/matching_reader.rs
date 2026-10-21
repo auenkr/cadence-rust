@@ -369,6 +369,9 @@ impl TaskReader {
             None,
         )
     }
+    // This constructor keeps the existing dispatch dependencies and optional
+    // metric context together for the service's runtime wiring.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_dispatch_check_metrics(
         queue: Arc<DurableTaskQueue>,
         wake: Arc<Notify>,
@@ -1038,8 +1041,7 @@ mod tests {
         let backlog = sink
             .events()
             .into_iter()
-            .filter(|event| event.name == crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST)
-            .last()
+            .rfind(|event| event.name == crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST)
             .unwrap();
         assert_eq!(
             backlog.value,

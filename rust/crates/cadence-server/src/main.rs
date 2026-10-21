@@ -1487,12 +1487,13 @@ async fn main() -> anyhow::Result<()> {
             if let Err(error) = membership_shutdown {
                 shutdown_errors.push(format!("stopping Matching membership: {error:#}"));
             }
+            if let Some(metrics) = matching_metrics_runtime.as_mut() {
+                if let Err(error) = metrics.shutdown().await {
+                    shutdown_errors.push(format!("flushing Matching metrics: {error:#}"));
+                }
+            }
             if !shutdown_errors.is_empty() {
                 anyhow::bail!("Matching shutdown failed: {}", shutdown_errors.join("; "));
-            }
-            shutdown?;
-            if let Some(metrics) = matching_metrics_runtime.as_mut() {
-                metrics.shutdown().await?;
             }
             println!("shutting down");
         }

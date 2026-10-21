@@ -16,7 +16,7 @@ use std::{
 const DEFAULT_QUEUE: usize = 4096;
 const DEFAULT_PACKET_SIZE: usize = 32768;
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct M3MetricsConfig {
     #[serde(default)]
@@ -39,23 +39,6 @@ pub struct M3MetricsConfig {
     pub histogram_bucket_tag_precision: usize,
     #[serde(default)]
     pub internal_tags: BTreeMap<String, String>,
-}
-
-impl Default for M3MetricsConfig {
-    fn default() -> Self {
-        Self {
-            host_port: String::new(),
-            host_ports: Vec::new(),
-            service: String::new(),
-            env: String::new(),
-            tags: BTreeMap::new(),
-            queue: 0,
-            packet_size: 0,
-            include_host: false,
-            histogram_bucket_tag_precision: 0,
-            internal_tags: BTreeMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,8 +132,8 @@ impl M3MetricSink {
             sockets.push(socket);
         }
         let mut common = config.tags;
-        if common.get("service").map_or(true, String::is_empty) && config.service.is_empty()
-            || common.get("env").map_or(true, String::is_empty) && config.env.is_empty()
+        if common.get("service").is_none_or(String::is_empty) && config.service.is_empty()
+            || common.get("env").is_none_or(String::is_empty) && config.env.is_empty()
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -555,7 +538,7 @@ fn internal_metrics(inner: &Inner) -> Vec<M3Metric> {
         value_bucket_string(lower, inner.bucket_value_precision),
         value_bucket_string(upper, inner.bucket_value_precision)
     );
-    let bucket_tags = vec![
+    let bucket_tags = [
         M3Tag {
             name: "bucketid".into(),
             value: format!("{bucket:04}"),

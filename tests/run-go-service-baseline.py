@@ -8,6 +8,7 @@ Run in tmux cadence-rust. Default mode is an all-Go baseline.
 production Ringpop lane (grpc or tchannel).
 """
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,9 @@ import re
 import socket
 import subprocess
 import tempfile
+import threading
 import time
+import urllib.request
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--artifacts-dir', type=Path)
@@ -27,6 +30,8 @@ parser.add_argument('--go-mixed-server-bin', type=Path, help='reuse a Go test bi
 parser.add_argument('--rust-production-binary', type=Path, help='run an already built Rust server binary with the original Go Ringpop provider (requires production Matching Ringpop assembly)')
 parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
     help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
+parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'),
+    help='configure and capture one Rust Matching exporter in the production Ringpop lane')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
@@ -44,6 +49,8 @@ if args.history_transport != 'grpc' and not production_matching:
     parser.error('--history-transport applies only with --rust-production-binary')
 if args.mysql and not production_matching:
     parser.error('--mysql requires --rust-production-binary')
+if args.matching_exporter and not production_matching:
+    parser.error('--matching-exporter requires --rust-production-binary')
 mysql_addr = os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306')
 mysql_user = os.environ.get('CADENCE_MYSQL_USER', 'root')
 mysql_password = os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence')
@@ -155,6 +162,36 @@ if production_matching:
     )
     rust_dynamic_config.write_text(rust_dynamic_text)
     rust_text = (root / 'rust/config/development.yaml').read_text()
+    exporter_address = None
+    if args.matching_exporter:
+        # Keep exporters confined to Matching. The original Go services remain
+        # untouched and no Go Matching process is started in this lane.
+        if args.matching_exporter == 'prometheus':
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0))
+                exporter_address = f'127.0.0.1:{listener.getsockname()[1]}'
+            matching_metrics_yaml = (
+                '    metrics:\n'
+                '      prometheus:\n'
+                '        listenAddress: ' + json.dumps(exporter_address) + '\n'
+                '        timerType: histogram\n'
+            )
+        else:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as listener:
+                listener.bind(('127.0.0.1', 0))
+                exporter_address = f'127.0.0.1:{listener.getsockname()[1]}'
+            matching_metrics_yaml = (
+                f'    metrics:\n      {args.matching_exporter}:\n'
+                '        hostPort: ' + json.dumps(exporter_address) + '\n'
+            )
+        rust_text, replaced_metrics = re.subn(
+            r'(?ms)^  matching:\n(.*?)(?=^  (?:frontend|history|worker):|\Z)',
+            lambda match: '  matching:\n' + re.sub(
+                r'(?ms)^    metrics:\n.*?(?=^    [a-zA-Z][\w-]*:|\Z)',
+                '', match.group(1)) + matching_metrics_yaml,
+            rust_text, count=1)
+        if replaced_metrics != 1:
+            raise RuntimeError('could not configure isolated Rust Matching exporter')
     database_name = json.dumps(str(work / 'cadence.db'))
     if args.mysql:
         persistence_config = (
@@ -262,6 +299,23 @@ with (work / 'server.log').open('w') as log:
                 probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
                     f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
             probe_environment = None
+            udp_capture = None
+            udp_thread = None
+            udp_packets = []
+            udp_stop = threading.Event()
+            if args.matching_exporter in ('statsd', 'm3'):
+                udp_capture = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                udp_capture.bind(('127.0.0.1', int(exporter_address.rsplit(':', 1)[1])))
+                udp_capture.settimeout(0.1)
+                def collect_udp():
+                    while not udp_stop.is_set():
+                        try:
+                            packet, _ = udp_capture.recvfrom(65535)
+                            udp_packets.append(packet)
+                        except socket.timeout:
+                            continue
+                udp_thread = threading.Thread(target=collect_udp, daemon=True)
+                udp_thread.start()
             if matching_test_executable and (args.rust_matching or args.matching_restart):
                 probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
             if production_matching:
@@ -286,6 +340,19 @@ with (work / 'server.log').open('w') as log:
                         probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
             result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
                 env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
+            if udp_capture:
+                udp_stop.set()
+                udp_thread.join(timeout=2)
+                udp_capture.close()
+                (work / f'{args.matching_exporter}-packets.json').write_text(
+                    ''.join(json.dumps({'base64': base64.b64encode(packet).decode('ascii')}) + '\n'
+                            for packet in udp_packets))
+            elif args.matching_exporter == 'prometheus':
+                try:
+                    with urllib.request.urlopen(f'http://{exporter_address}/metrics', timeout=5) as response:
+                        (work / 'prometheus-scrape.txt').write_bytes(response.read())
+                except Exception as error:
+                    (work / 'prometheus-scrape-error.txt').write_text(str(error) + '\n')
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
             'topology': ('Go Frontend/History/Worker with Rust Matching via production Ringpop' if production_matching else ('Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'))),
             'goServicesPid': server.pid, 'goServicesAliveAfterProbe': server.poll() is None,
@@ -293,6 +360,8 @@ with (work / 'server.log').open('w') as log:
             'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
             'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
             'historyTransport': args.history_transport if production_matching else None,
+            'matchingExporter': args.matching_exporter,
+            'matchingExporterAddress': exporter_address,
             'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
             'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
             'acceptanceEligible': not production_matching,

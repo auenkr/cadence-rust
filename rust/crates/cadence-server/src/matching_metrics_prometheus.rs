@@ -31,7 +31,7 @@ const SUMMARY_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 const SUMMARY_STREAM_DURATION: Duration = Duration::from_secs(2 * 60);
 
 /// Field names and defaults correspond to Tally's Go Prometheus `Configuration`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrometheusMetricsConfig {
     #[serde(default)]
@@ -48,20 +48,6 @@ pub struct PrometheusMetricsConfig {
     pub default_summary_objectives: Vec<SummaryObjective>,
     #[serde(default)]
     pub on_error: String,
-}
-
-impl Default for PrometheusMetricsConfig {
-    fn default() -> Self {
-        Self {
-            handler_path: String::new(),
-            listen_network: String::new(),
-            listen_address: String::new(),
-            timer_type: String::new(),
-            default_histogram_buckets: Vec::new(),
-            default_summary_objectives: Vec::new(),
-            on_error: String::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
