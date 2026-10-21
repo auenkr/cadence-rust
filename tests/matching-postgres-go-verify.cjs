@@ -50,7 +50,8 @@ async function verify() {
     });
     const completionEvents = consumed.history.events.filter(event => event.workflowExecutionCompletedEventAttributes);
     assert.equal(completionEvents.length, 1, 'Go Matching must consume the Rust-produced task and complete it once');
-    assert.equal(completionEvents[0].workflowExecutionCompletedEventAttributes.result.data.toString(), 'restart-proof');
+    // The Go SDK stores the workflow result as JSON with a trailing newline.
+    assert.equal(JSON.parse(completionEvents[0].workflowExecutionCompletedEventAttributes.result.data.toString()), 'restart-proof');
     const consumedTaskList = await call('WorkflowAPI', 'DescribeTaskList', {
       domain, taskList: { name: consumedTaskList }, taskListType: 'TASK_LIST_TYPE_DECISION',
       includeTaskListStatus: true,
