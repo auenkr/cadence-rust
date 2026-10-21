@@ -28,12 +28,12 @@ Added `matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_call
 in `matching_rpc_tests.rs`. It calls the real Matching update handler, uses live
 membership and a real in-process gRPC Matching server for the later partition,
 and a TCP peer that accepts but does not answer for the earlier partition. The
-caller supplies a 500ms gRPC deadline. The test requires the later owner to
-persist the refreshed config, the handler to wait through the delayed peer's
-caller deadline, and the root update to succeed despite that peer failure. The
-ascending partition IDs make this distinguish the old sequential implementation:
-it would wait on the first peer until the deadline and leave no time to refresh
-the later owner.
+caller supplies an 800ms gRPC deadline. Before awaiting the update response, the
+test requires the later owner to persist the refresh within 600ms. It then
+requires the handler to wait through the delayed peer's caller deadline and the
+root update to succeed despite that peer failure. The ascending partition IDs
+make this distinguish the old sequential implementation: it would wait on the
+first peer until the deadline and leave no time to refresh the later owner.
 
 Queued telemetry-lane command (not run here):
 

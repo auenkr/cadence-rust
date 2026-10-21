@@ -2133,9 +2133,12 @@ async fn matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_ca
             let candidates = (1..=100).map(|partition| {
                 (partition, ring.lookup(&format!("/__cadence_sys/{name}/{partition}" )).unwrap().identity().to_owned())
             }).collect::<Vec<_>>();
-            let slow = candidates.iter().find(|(_, owner)| owner == "node-2")?.0;
-            let fast = candidates.iter().find(|(partition, owner)| owner == "node-1" && partition > slow)?.0;
-            Some((name, *slow, *fast))
+            let slow = *candidates.iter().find(|(_, owner)| owner == "node-2")?.0;
+            let fast = *candidates
+                .iter()
+                .find(|(partition, owner)| owner == "node-1" && partition > &slow)?
+                .0;
+            Some((name, slow, fast))
         })
         .expect("find root and ascending slow/fast partition owners");
 
@@ -2157,6 +2160,14 @@ async fn matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_ca
         std::future::pending::<()>().await;
     });
 
+    let fast_name = format!("/__cadence_sys/{root_name}/{fast_partition}");
+    let fast_queue = fast.durable_queue(
+        &key.domain_id.to_string(),
+        &p::TaskList { name: fast_name, kind: 1, ..Default::default() },
+        0,
+    ).await.unwrap();
+    assert!(fast_queue.partitions.get().is_none(), "the fast owner starts without the new config");
+
     let root_task_list = p::TaskList { name: root_name.clone(), kind: 1, ..Default::default() };
     let mut request = Request::new(m::UpdateTaskListPartitionConfigRequest {
         domain_id: key.domain_id.to_string(),
@@ -2166,21 +2177,28 @@ async fn matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_ca
     });
     // This is the caller's context deadline, forwarded by the real handler to
     // every peer refresh. There is deliberately no test-only service hook.
-    request.metadata_mut().insert("grpc-timeout", "500m".parse().unwrap());
+    request.metadata_mut().insert("grpc-timeout", "800m".parse().unwrap());
     let started = tokio::time::Instant::now();
-    root.update_task_list_partition_config(request).await.unwrap();
+    let updater = {
+        let root = root.clone();
+        tokio::spawn(async move { root.update_task_list_partition_config(request).await })
+    };
+    tokio::time::timeout(Duration::from_millis(600), async {
+        while fast_queue.partitions.get().is_none_or(|config| config.version != 1) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the later fast owner must receive its RPC before the caller deadline");
+    let fast_received_at = started.elapsed();
+    assert!(fast_received_at < Duration::from_millis(600));
+    updater.await.unwrap().unwrap();
     let elapsed = started.elapsed();
     tokio::time::timeout(Duration::from_secs(1), slow_connected_rx).await.unwrap().unwrap();
 
-    let fast_name = format!("/__cadence_sys/{root_name}/{fast_partition}");
-    let fast_queue = fast.durable_queue(
-        &key.domain_id.to_string(),
-        &p::TaskList { name: fast_name, kind: 1, ..Default::default() },
-        0,
-    ).await.unwrap();
     assert_eq!(fast_queue.partitions.get().unwrap().version, 1,
         "the later fast owner receives its refresh while the lower-ID slow peer is still pending");
-    assert!(elapsed >= Duration::from_millis(300), "the update waits for the caller deadline on the delayed peer");
+    assert!(elapsed >= Duration::from_millis(600), "the update waits for the caller deadline on the delayed peer");
     assert!(elapsed < Duration::from_secs(2), "the delayed peer is bounded by the caller deadline");
     assert_eq!(root_store.get_task_list(&key).unwrap().data.adaptive_partition_config.unwrap().version, 1,
         "peer timeout remains best effort after the root config is persisted");
