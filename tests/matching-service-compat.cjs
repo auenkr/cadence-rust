@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
+const { createTaskObserver } = require('./matching-task-observer.cjs');
 const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
 const grpc = webRequire('@grpc/grpc-js');
 const loader = webRequire('@grpc/proto-loader');
@@ -12,6 +13,7 @@ const root = path.resolve(__dirname, '../go/idls/proto');
 const files = ['domain', 'workflow', 'worker'].map(name => path.join(root, `uber/cadence/api/v1/service_${name}.proto`));
 const internalRoot = path.resolve(__dirname, '../go/proto/internal');
 files.push(path.join(internalRoot, 'uber/cadence/matching/v1/service.proto'));
+files.push(path.join(root, 'uber/cadence/api/v1/service_semaphore.proto'));
 const schema = grpc.loadPackageDefinition(loader.loadSync(files, {
   includeDirs: [root, internalRoot], enums: String, longs: String, bytes: Buffer, defaults: true, oneofs: true,
 })).uber.cadence;
@@ -24,8 +26,40 @@ const productionMode = process.argv[9] === 'production';
 const failureRecoveryMode = process.env.CADENCE_MATCHING_FAILURE_RECOVERY === '1';
 const shardManagerControl = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL;
 const shardManagerNamespace = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE || 'matching';
-const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
+const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
 clients.Matching = new schema.matching.v1.MatchingAPI(peer, grpc.credentials.createInsecure());
+const cassandraGate = process.env.CADENCE_MATCHING_CASSANDRA_GATE === '1';
+function cassandraCommand(args, label) {
+  const result = spawnSync('go', ['run', './tests/matching-cassandra-interop', ...args], {
+    cwd: path.resolve(__dirname, '..'), encoding: 'utf8', timeout: 120000, env: process.env,
+  });
+  fs.writeFileSync(path.join(path.resolve(process.argv[5]), `${label}.log`), `${result.stdout || ''}\n${result.stderr || ''}`);
+  if (result.status !== 0) throw new Error(`Cassandra ${label} failed (${result.error || result.status}); see ${path.resolve(process.argv[5], `${label}.log`)}`);
+  return JSON.parse(result.stdout.trim().split('\n').at(-1));
+}
+function sqliteTaskState(domainId, taskList, label) {
+  const database = productionMode ? process.env.CADENCE_MATCHING_SQLITE_DB : path.join(path.resolve(process.argv[5]), 'matching.db');
+  if (!database) throw new Error('SQLite production probe requires CADENCE_MATCHING_SQLITE_DB');
+  const result = spawnSync('python3', ['-c',
+    'import json,sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1],timeout=30); n=c.execute("select count(*) from tasks where task_list_name=? and task_type=0",(sys.argv[3],)).fetchone()[0]; r=c.execute("select range_id from task_lists where shard_id=0 and domain_id=? and name=? and task_type=0",(uuid.UUID(sys.argv[2]).bytes,sys.argv[3])).fetchone(); print(json.dumps({"queued_rows":n,"range_id":r[0] if r else 0}))',
+    database, domainId, taskList], { encoding: 'utf8' });
+  fs.writeFileSync(path.join(path.resolve(process.argv[5]), label + '.log'), (result.stdout || '') + '\n' + (result.stderr || ''));
+  if (result.status !== 0) throw new Error('SQLite task observation failed (' + (result.error || result.status) + '); see ' + path.resolve(process.argv[5], label + '.log'));
+  return JSON.parse(result.stdout.trim());
+}
+const taskObserver = createTaskObserver({
+  backend: cassandraGate ? 'cassandra' : 'sqlite',
+  cassandraCommand: (args, label) => cassandraCommand(args, label),
+  sqliteTaskState,
+});
+function acquireSemaphore(client, request) {
+  const metadata = new grpc.Metadata();
+  metadata.set('rpc-service', 'cadence-matching');
+  metadata.set('rpc-encoding', 'proto');
+  metadata.set('rpc-caller', 'cadence-cassandra-matching-gate');
+  return new Promise((resolve, reject) => client.AcquireSemaphore(request, metadata,
+    { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
+}
 let managedShardNames = new Set();
 let assignedExecutorId = '';
 let shardAssignmentLock = Promise.resolve();
@@ -105,6 +139,23 @@ async function run() {
   const domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
   await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
   const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
+  let pageTokenDomain, domainPages = 0;
+  if (cassandraGate) {
+    pageTokenDomain = `service-compat-page-${id}`;
+    await call('DomainAPI', 'RegisterDomain', { name: pageTokenDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+    let pageToken = Buffer.alloc(0);
+    const listedDomainNames = new Set();
+    do {
+      const page = await call('DomainAPI', 'ListDomains', { pageSize: 1, nextPageToken: pageToken });
+      for (const item of page.domains) listedDomainNames.add(item.name);
+      pageToken = page.nextPageToken;
+      domainPages++;
+      assert(domainPages < 1000, 'domain page token traversal did not terminate');
+    } while (pageToken?.length);
+    assert(domainPages > 1, 'Go Cassandra ListDomains must exercise at least one opaque page-token continuation');
+    assert(listedDomainNames.has(domain) && listedDomainNames.has(pageTokenDomain),
+      'Go Cassandra domain enumeration must return both registered domains through opaque page tokens');
+  }
   const work = path.resolve(process.argv[5]);
   fs.mkdirSync(work, { recursive: true });
   const ready = path.join(work, 'ready'), stop = path.join(work, 'stop'), fixture = path.join(work, 'fixture.json');
@@ -209,6 +260,9 @@ async function run() {
   let exited;
   let rust = startRust('before-restart');
   let secondaryRust;
+  let semaphoreEvidence;
+  let semaphoreAcquire;
+  let semaphoreOwner;
   try {
     await waitForRustReady('before-restart');
   const startRequest = {
@@ -232,6 +286,32 @@ async function run() {
       }
     }
     if (Date.now() >= convergenceDeadline) throw new Error('second Rust Matching instance did not join the original Ringpop cluster');
+    if (cassandraGate) {
+      const semaphoreName = `durable-${id}`;
+      const createdSemaphore = await call('SemaphoreAPI', 'CreateSemaphore', {
+        domain, semaphoreName, capacity: 1, bucketCapacity: 1,
+      });
+      assert.equal(createdSemaphore.semaphore.capacity, 1);
+      assert.equal(createdSemaphore.semaphore.bucketCapacity, 1);
+      const semaphoreClients = [clients.Matching, directMatchingClient(process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT)];
+      semaphoreAcquire = (owner, clientIndex = 0) => acquireSemaphore(semaphoreClients[clientIndex], {
+        domainId, semaphoreName, bucket: 0, ownerId: owner,
+      }).catch(error => {
+        if ((error.code === grpc.status.ABORTED || error.code === grpc.status.UNAVAILABLE)
+            && clientIndex + 1 < semaphoreClients.length) return semaphoreAcquire(owner, clientIndex + 1);
+        throw error;
+      });
+      const owners = [`${id.length}:${id}:${randomUUID()}:1`, `${id.length}:${id}:${randomUUID()}:2`];
+      const grants = await Promise.all(owners.map(owner => semaphoreAcquire(owner)));
+      const acquired = grants.filter(grant => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_ACQUIRED');
+      const unavailable = grants.filter(grant => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT');
+      assert.equal(acquired.length, 1, 'Cassandra semaphore capacity one must grant exactly one concurrent owner');
+      assert.equal(unavailable.length, 1, 'Cassandra semaphore capacity one must reject the competing owner');
+      const stored = cassandraCommand(['verify-semaphore', domainId, semaphoreName], 'semaphore-before-recovery');
+      assert.equal(stored.token_id, Number(acquired[0].tokenId), 'Go gocql must observe the Rust semaphore token row');
+      semaphoreOwner = stored.owner_id;
+      semaphoreEvidence = { semaphoreName, createdThroughGoFrontend: true, ownerId: semaphoreOwner, tokenId: stored.token_id, concurrentGrants: acquired.length, noSlotResponses: unavailable.length };
+    }
     const primaryMembershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
     const secondaryPeer = directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
     const primaryAddress = `127.0.0.1:${rustTChannel}`;
@@ -351,30 +431,14 @@ async function run() {
       ...startRequest, workflowId: crashID, workflowType: { name: 'main.EchoWorkflow' },
       taskList: crashTaskList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
     });
-    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
-    const queuedCount = () => spawnSync('python3', ['-c',
-      'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])',
-      database, crashList], { encoding: 'utf8' });
-    const queuedDeadline = Date.now() + 20000;
-    let queued;
-    while (Date.now() < queuedDeadline) {
-      queued = queuedCount();
-      if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    assert.equal(queued?.status, 0, `could not read shared Matching persistence before crash: ${queued?.stderr}`);
-    assert(Number(queued.stdout.trim()) > 0, 'decision task was not persisted before production owner crash');
+    const queued = await taskObserver.observe(domainId, crashList, 20, 'task-before-crash');
+    assert(queued.queued_rows > 0, 'decision task was not visible in Matching persistence before production owner crash');
     const beforeCrash = await call('WorkflowAPI', 'DescribeTaskList', {
       domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
     });
     const beforeAck = Number(beforeCrash.taskListStatus.ackLevel);
     const beforeEnd = Number(beforeCrash.taskListStatus.taskIdBlock.endId);
-    const rangeID = () => spawnSync('python3', ['-c',
-      'import sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1], timeout=30); row=c.execute("select range_id from task_lists where shard_id=0 and domain_id=? and name=? and task_type=0", (uuid.UUID(sys.argv[2]).bytes,sys.argv[3])).fetchone(); print(row[0] if row else -1)',
-      database, domainId, crashList], { encoding: 'utf8' });
-    const rangeBeforeResult = rangeID();
-    assert.equal(rangeBeforeResult.status, 0, `could not read persisted task-list range before crash: ${rangeBeforeResult.stderr}`);
-    const rangeBefore = Number(rangeBeforeResult.stdout.trim());
+    const rangeBefore = Number(queued.range_id);
     assert(rangeBefore > 0, 'task-list range was not leased before the owner crash');
     const failedPid = ownerIndex === 0 ? rust.pid : secondaryRust.pid;
     const secondaryExited = new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal })));
@@ -421,20 +485,10 @@ async function run() {
       afterAck = Number(status.taskListStatus.ackLevel);
     }
     assert(afterAck > beforeAck, 'recovered task acknowledgement did not advance beyond the pre-crash level');
-    const rangeAfterResult = rangeID();
-    assert.equal(rangeAfterResult.status, 0, `could not read persisted task-list range after recovery: ${rangeAfterResult.stderr}`);
-    const rangeAfter = Number(rangeAfterResult.stdout.trim());
+    const recoveredRows = await taskObserver.waitEmpty(domainId, crashList, 30, 'task-after-recovery');
+    const rangeAfter = Number(recoveredRows?.range_id);
     assert(rangeAfter > rangeBefore, 'surviving Rust Matching did not acquire a higher persisted task-list range');
-    const emptyDeadline = Date.now() + 30000;
-    let queuedAfter = queuedCount();
-    assert.equal(queuedAfter.status, 0, `could not read shared Matching task rows after recovery: ${queuedAfter.stderr}`);
-    let afterCount = Number(queuedAfter.stdout.trim());
-    while (afterCount !== 0 && Date.now() < emptyDeadline) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      queuedAfter = queuedCount();
-      assert.equal(queuedAfter.status, 0, `could not read shared Matching task rows after recovery: ${queuedAfter.stderr}`);
-      afterCount = Number(queuedAfter.stdout.trim());
-    }
+    const afterCount = Number(recoveredRows?.queued_rows);
     assert.equal(afterCount, 0, 'recovered task remained queued after SDK completion');
     fs.writeFileSync(path.join(work, 'production-failure-recovery-checkpoints.json'), JSON.stringify({
       topology: 'two Rust Matching hosts with Go Frontend/History/Worker',
@@ -449,6 +503,8 @@ async function run() {
         rangeBefore, rangeAfter, ackBefore: beforeAck, ackAfter: afterAck,
         queuedRowsAfterCompletion: afterCount,
       },
+      cassandraSemaphore: semaphoreEvidence,
+      cassandraDomainPageToken: cassandraGate ? { pages: domainPages, domains: [domain, pageTokenDomain] } : null,
     }, null, 2) + '\n');
     if (ownerIndex === 0) {
       rust = startRust('after-failure-recovery');
@@ -466,6 +522,12 @@ async function run() {
       }
       assert(secondaryReady, 'restarted Rust Matching member did not rejoin Go discovery');
     }
+    if (cassandraGate && semaphoreEvidence) {
+      const recovered = await semaphoreAcquire(semaphoreOwner);
+      assert.equal(Number(recovered.tokenId), semaphoreEvidence.tokenId, 'semaphore hold must survive Matching owner crash and be recovered from Cassandra');
+      const afterRestart = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName], 'semaphore-after-recovery');
+      assert.equal(afterRestart.token_id, semaphoreEvidence.tokenId);
+    }
   }
   let restartEvidence;
   if (restartMode) {
@@ -480,17 +542,8 @@ async function run() {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
-    const database = productionMode ? process.env.CADENCE_MATCHING_SQLITE_DB : path.join(work, 'matching.db');
-    const sqliteCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, restartTaskList], { encoding: 'utf8' });
-    const persistedDeadline = Date.now() + 20000;
-    let persisted;
-    while (Date.now() < persistedDeadline) {
-      persisted = sqliteCount();
-      if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    assert.equal(persisted?.status, 0, `could not inspect Matching SQLite queue: ${persisted?.stderr}`);
-    assert(Number(persisted.stdout.trim()) > 0, 'workflow task was not persisted before Matching restart');
+    const persisted = await taskObserver.observe(domainId, restartTaskList, 20, 'task-before-restart');
+    assert(persisted.queued_rows > 0, 'workflow task was not persisted before Matching restart');
     const beforePid = rust.pid;
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -504,7 +557,7 @@ async function run() {
     const finalHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: restartID, runId: restartStarted.runId } });
     const completions = finalHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(completions, 1, 'restart workflow must have exactly one visible completion');
-    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
+    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: persisted.queued_rows, taskRangeBeforeKill: persisted.range_id, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
     // Reuse the second live process for the existing compatibility coverage below.
   }
   let started;
@@ -560,26 +613,51 @@ async function run() {
     const drainID = `graceful-drain-${id}`, drainTaskList = `graceful-drain-tasks-${id}`;
     const drainRequest = { ...startRequest, workflowId: drainID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: drainTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     const drainStarted = await call('WorkflowAPI', 'StartWorkflowExecution', drainRequest);
-    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
-    if (!database) throw new Error('production Matching mode requires CADENCE_MATCHING_SQLITE_DB for drain/recovery evidence');
-    const taskCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, drainTaskList], { encoding: 'utf8' });
-    const taskDeadline = Date.now() + 20000;
-    let queued;
-    while (Date.now() < taskDeadline) {
-      queued = taskCount();
-      if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    assert.equal(queued?.status, 0, `could not inspect pre-drain Matching queue: ${queued?.stderr}`);
-    assert(Number(queued.stdout.trim()) > 0, 'Go History did not persist the graceful-drain decision task');
-    const drainingPid = rust.pid;
-    rust.kill('SIGTERM');
-    const drained = await Promise.race([exited, new Promise(resolve => setTimeout(() => resolve(null), 60000))]);
+    const queued = await taskObserver.observe(domainId, drainTaskList, 20, 'task-before-graceful-drain');
+    assert(queued.queued_rows > 0, 'Go History did not persist the graceful-drain decision task');
+    const drainMembershipPeer = directMatchingClient('127.0.0.1:' + rustGrpcPort);
+    const drainOwner = await directPartitionOwner(drainMembershipPeer, domain, drainTaskList);
+    const primaryAddress = '127.0.0.1:' + rustTChannel;
+    const secondaryAddress = '127.0.0.1:' + process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL;
+    const drainingPrimary = drainOwner === primaryAddress;
+    const drainingSecondary = drainOwner === secondaryAddress;
+    assert(drainingPrimary || drainingSecondary, 'graceful-drain task list owner ' + drainOwner + ' is not either Rust Matching host');
+    const drainingProcess = drainingPrimary ? rust : secondaryRust;
+    const drainExit = drainingPrimary ? exited : new Promise(resolve => drainingProcess.once('exit', (code, signal) => resolve({ code, signal })));
+    const drainingPid = drainingProcess.pid;
+    drainingProcess.kill('SIGTERM');
+    const drained = await Promise.race([drainExit, new Promise(resolve => setTimeout(() => resolve(null), 60000))]);
     assert(drained, `Rust Matching did not finish SIGTERM drain; see ${work}/rust-server-before-graceful-restart.log`);
     assert.equal(drained.code, 0, `Rust Matching graceful shutdown failed: ${JSON.stringify(drained)}`);
     if (goServicesPid) process.kill(goServicesPid, 0);
-    rust = startRust('after-graceful-drain');
-    await waitForRustReady('after-graceful-drain');
+    if (drainingPrimary) {
+      rust = startRust('after-graceful-drain');
+      await waitForRustReady('after-graceful-drain');
+    } else {
+      secondaryRust = startSecondaryRust();
+      const secondaryMembershipPeer = directMatchingClient('127.0.0.1:' + process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
+      const membershipDeadline = Date.now() + 60000;
+      let membershipRestored = false;
+      while (Date.now() < membershipDeadline) {
+        try {
+          const names = Array.from({ length: 16 }, (_, index) => 'graceful-rejoin-' + id + '-' + index);
+          const owners = await Promise.all(names.map(async name => [
+            await directPartitionOwner(drainMembershipPeer, domain, name),
+            await directPartitionOwner(secondaryMembershipPeer, domain, name),
+          ]));
+          if (owners.every(([primary, secondary]) => primary === secondary)
+              && owners.some(([primary]) => primary === secondaryAddress)) {
+            membershipRestored = true;
+            break;
+          }
+        } catch (_) {
+          // The restarted member may not have rebound its listener or joined
+          // the shared Ringpop view yet; retry until the bounded deadline.
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      assert(membershipRestored, 'gracefully restarted Rust Matching member did not rejoin the shared Ringpop ownership map');
+    }
     const drainSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
       ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
       CADENCE_MIXED_RESTART_WORKFLOW_ID: drainID, CADENCE_MIXED_RESTART_TASK_LIST: drainTaskList,
@@ -589,7 +667,8 @@ async function run() {
     const drainHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: drainID, runId: drainStarted.runId } });
     const drainCompletions = drainHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(drainCompletions, 1, 'gracefully drained workflow must have exactly one visible completion');
-    gracefulDrainEvidence = { workflowId: drainID, runId: drainStarted.runId, taskList: drainTaskList, queuedRowsBeforeSignal: Number(queued.stdout.trim()), drainingPid, recoveredByRustPid: rust.pid, completionEvents: drainCompletions, goServicesPid };
+    const drainedRows = await taskObserver.waitEmpty(domainId, drainTaskList, 30, 'task-after-graceful-drain');
+    gracefulDrainEvidence = { workflowId: drainID, runId: drainStarted.runId, taskList: drainTaskList, taskListOwner: drainOwner, queuedRowsBeforeSignal: queued.queued_rows, rangeBeforeSignal: queued.range_id, queuedRowsAfterRecovery: drainedRows.queued_rows, drainingPid, recoveredByRustPid: drainingPrimary ? rust.pid : secondaryRust.pid, completionEvents: drainCompletions, goServicesPid };
   } else {
   async function expireIdleOwners() {
     const done = path.join(work, 'idle-done');
@@ -738,7 +817,7 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), peer, domain, execution, attributes }));
   } finally {
     if (productionMode) rust.kill('SIGTERM');
     else fs.writeFileSync(stop, 'stop');

@@ -8,9 +8,12 @@ CONTAINER=${CADENCE_CASSANDRA_CONTAINER:-cadence-rust-matching-cassandra}
 IMAGE=${CADENCE_CASSANDRA_IMAGE:-cassandra:4.1.7}
 PORT=${CADENCE_CASSANDRA_PORT:-9042}
 KEYSPACE=${CADENCE_CASSANDRA_KEYSPACE:-cadence}
+VISIBILITY_KEYSPACE=${CADENCE_CASSANDRA_VISIBILITY_KEYSPACE:-cadence_visibility}
 MIN_FREE_KB=${CADENCE_CASSANDRA_MIN_FREE_KB:-18000000}
 MIN_MEM_KB=${CADENCE_CASSANDRA_MIN_MEM_KB:-4000000}
 mkdir -p "$ARTIFACTS"
+[[ "$KEYSPACE" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || { echo "Invalid Cassandra keyspace: $KEYSPACE" >&2; exit 2; }
+[[ "$VISIBILITY_KEYSPACE" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || { echo "Invalid Cassandra visibility keyspace: $VISIBILITY_KEYSPACE" >&2; exit 2; }
 
 phase() {
   local name=$1
@@ -99,23 +102,26 @@ for attempt in $(seq 1 120); do
   fi
   sleep 5
 done
-printf "CREATE KEYSPACE %s WITH replication = {'class':'SimpleStrategy','replication_factor':1};\n" "$KEYSPACE" \
+printf "CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class':'SimpleStrategy','replication_factor':1};\nCREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class':'SimpleStrategy','replication_factor':1};\n" "$KEYSPACE" "$VISIBILITY_KEYSPACE" \
   | docker exec -i "$CONTAINER" cqlsh
 
 docker exec -i "$CONTAINER" cqlsh -k "$KEYSPACE" \
   < "$ROOT/go/schema/cassandra/cadence/schema.cql" 2>&1 | tee "$ARTIFACTS/apply-go-schema.log"
+docker exec -i "$CONTAINER" cqlsh -k "$VISIBILITY_KEYSPACE" \
+  < "$ROOT/go/schema/cassandra/visibility/schema.cql" 2>&1 | tee "$ARTIFACTS/apply-go-visibility-schema.log"
 export CADENCE_CASSANDRA_CONTACT_POINTS=127.0.0.1
 export CADENCE_CASSANDRA_KEYSPACE=$KEYSPACE
+export CADENCE_CASSANDRA_VISIBILITY_KEYSPACE=$VISIBILITY_KEYSPACE
 export CADENCE_CASSANDRA_PORT=$PORT
 export CADENCE_CASSANDRA_ARTIFACTS="$ARTIFACTS/go-rust-go"
 phase go-seed-rust-restart-go-verify python3 tests/run-matching-cassandra-interop.py
 
-# Production acceptance remains separate from the adapter probe. The existing
-# two-Rust-node gate starts original Go Frontend/History/Worker and no Go Matching,
-# then runs Go SDK workflows across idle eviction, crash, restart, and recovery.
+# Mixed production gate: original Go Frontend/History/Worker and two Rust
+# Matching nodes share the Go Cassandra schema/keyspaces. No Go Matching starts.
 phase mixed-go-services-rust-matching-restart python3 tests/run-matching-production-failure-recovery.py \
   --rust-production-binary "$ROOT/rust/target/debug/cadence-server" \
+  --cassandra \
   --artifacts-dir "$ARTIFACTS/mixed-production-recovery"
 
 printf 'All scripted gates passed. Evidence: %s\n' "$ARTIFACTS"
-printf '%s\n' 'The mixed production gate uses its existing SQLite task store. It does not prove Cassandra-backed Matching store wiring or Cassandra semaphore durability.'
+printf '%s\n' 'The mixed service gate uses original Go Frontend/History/Worker and no Go Matching, with Rust Matching on the same Cassandra schema/keyspaces.'

@@ -52,16 +52,40 @@ wires the Cassandra semaphore factory into production startup, selecting the
 configured Cassandra metadata/token tables rather than in-memory state.
 Neither finding is runtime-validated.
 
-The current final runner invocation is still **not** a Cassandra service gate.
-`tests/run-go-service-baseline.py` generates a Rust SQLite default store and
-starts Go Frontend/History/Worker with the SQLite zone. Its SDK failure and
-restart coverage proves only the SQLite configuration. Do not describe the
-script as Cassandra mixed-service validation and do not mark Matching
-complete from it. A real gate must configure Go Frontend/History/Worker and
-Rust Matching against the same pre-existing Go Cassandra schema/keyspace,
-seed domains through Go services, start no Go Matching, and capture SDK
-workflow plus task, semaphore, paging, failure, restart, and recovery
-assertions. The adapter harness is separate and does not substitute for that
-gate. Runtime/build validation is pending the shared telemetry-owned heavy
-lane; until the mixed gate has reproducible evidence in `memory/evidence/`,
-Matching remains incomplete and History must not begin.
+The final runner now calls the production gate with `--cassandra`. It writes
+Go's Cassandra zone config and Rust's production config with the same default
+and visibility keyspaces, starts original Go Frontend/History/Worker and two
+Rust Matching nodes, and starts no Go Matching. It registers a domain through
+Go Frontend, traverses Go domain pages using opaque continuation tokens, and
+runs the existing SDK workflow across idle eviction and Matching owner
+crash/recovery. A Go gocql observer reads task-list range and pending/cleared
+rows directly from the Go `tasks` table. It also creates one unique
+capacity-one semaphore through the Go Frontend `CreateSemaphore` API, probes
+concurrent acquires through Rust Matching, verifies the owner/token row with
+Go gocql, and retries that owner after a Matching crash. The injected persistence
+observer retains the existing SQLite query path for other runner modes; in
+Cassandra mode it uses Go CQL for pending/cleared task rows and range IDs in
+the SIGKILL, optional process-restart, and SIGTERM drain/recovery branches.
+The offline `node tests/matching-task-observer-self-check.cjs` verifies that
+each backend selects only its own observer. Evidence and server logs go below
+the selected artifact directory. The adapter-only Go seed → Rust persistence
+→ Go verify phase remains separate.
+
+The gate is implemented but not yet executed in this source-only lane. Run
+`tests/run-matching-cassandra-validation.sh` after the shared telemetry-owned
+build lane is released. It applies the existing Go cadence and visibility
+schemas, then records the configured mixed gate under
+`memory/evidence/matching-cassandra-validation-<UTC timestamp>/`. Matching
+remains incomplete until the script passes and the resulting evidence is
+audited; do not begin History before that service parity decision.
+
+The runner's reproducible environment is an unauthenticated loopback Cassandra
+4.1.7 container, Go/Rust schema files from this checkout, Go, Node with
+`cadence-web/node_modules` installed, and the already-reviewed Rust server
+binary from the preceding build phases. It requires the disk/memory preflight
+thresholds above and a free container name. For an externally managed
+instance, set `CADENCE_CASSANDRA_CONTACT_POINTS`,
+`CADENCE_CASSANDRA_PORT`, `CADENCE_CASSANDRA_KEYSPACE`, and
+`CADENCE_CASSANDRA_VISIBILITY_KEYSPACE`; the runner still owns Go/Rust config
+generation and schema application. The current harness does not configure
+Cassandra authentication or TLS.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boot the original Go services with SQLite and check the shared service probe.
+"""Boot original Go services and check the shared service probe.
 
 Run in tmux cadence-rust. Default mode is an all-Go baseline.
 --matching-delivery checks the Rust Matching RPC/History boundary.
@@ -33,6 +33,11 @@ parser.add_argument('--matching-shard-distributor-namespace', help='configure on
 parser.add_argument('--matching-onboarding-percentage', type=int, help='set matching.percentageOnboardedToShardManager in Rust dynamic config')
 parser.add_argument('--matching-failure-recovery', action='store_true', help='run a two-instance production Matching failure/recovery probe')
 parser.add_argument('--matching-idle-check-seconds', type=int, help='override the Matching idle-task-list check interval in seconds')
+parser.add_argument('--cassandra', action='store_true', help='run production Rust Matching and original Go services against the same existing Go Cassandra schemas')
+parser.add_argument('--cassandra-hosts', default=os.environ.get('CADENCE_CASSANDRA_CONTACT_POINTS', '127.0.0.1'))
+parser.add_argument('--cassandra-port', type=int, default=int(os.environ.get('CADENCE_CASSANDRA_PORT', '9042')))
+parser.add_argument('--cassandra-keyspace', default=os.environ.get('CADENCE_CASSANDRA_KEYSPACE', 'cadence'))
+parser.add_argument('--cassandra-visibility-keyspace', default=os.environ.get('CADENCE_CASSANDRA_VISIBILITY_KEYSPACE', 'cadence_visibility'))
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 work = (args.artifacts_dir or Path(tempfile.mkdtemp(prefix='cadence-go-baseline-'))).resolve()
@@ -61,6 +66,16 @@ if args.matching_idle_check_seconds is not None and args.matching_idle_check_sec
     parser.error('--matching-idle-check-seconds must be positive')
 if args.matching_idle_check_seconds is not None and not production_matching:
     parser.error('--matching-idle-check-seconds requires --rust-production-binary')
+if args.cassandra and not (production_matching and args.matching_failure_recovery):
+    parser.error('--cassandra requires --rust-production-binary and --matching-failure-recovery')
+if args.cassandra and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', args.cassandra_keyspace):
+    parser.error('--cassandra-keyspace must be a CQL identifier')
+if args.cassandra and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', args.cassandra_visibility_keyspace):
+    parser.error('--cassandra-visibility-keyspace must be a CQL identifier')
+if args.cassandra and (not args.cassandra_hosts or any(char in args.cassandra_hosts for char in '\r\n"')):
+    parser.error('--cassandra-hosts must be a non-empty comma-separated host list without YAML control characters')
+if args.cassandra and not 1 <= args.cassandra_port <= 65535:
+    parser.error('--cassandra-port must be between 1 and 65535')
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
@@ -112,6 +127,8 @@ if args.rust_matching or args.matching_restart:
         'system.allIsolationGroups:\n'
         '  - value: ["zone-a", "zone-b"]\n'
     )
+if args.cassandra:
+    dynamic_text += '\nsystem.enableDistributedSemaphore:\n  - value: true\n'
 if args.matching_onboarding_percentage is not None:
     dynamic_text += (
         '\nmatching.percentageOnboardedToShardManager:\n'
@@ -157,10 +174,20 @@ text = text.replace('/tmp/cadence_archival/development', str(work / 'history-arc
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 text = text.replace('/tmp/blobstore', str(work / 'blobstore'))
 (config / 'development.yaml').write_text(text)
-text = (root / 'go/config/development_sqlite.yaml').read_text()
-text = text.replace('"cadence.db"', json.dumps(str(work / 'cadence.db')))
-text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_visibility.db')))
-(config / 'development_sqlite.yaml').write_text(text)
+if args.cassandra:
+    go_config = text
+    go_config = re.sub(r'(?m)^(\s+hosts:)\s*.*$',
+        lambda match: f'{match.group(1)} {json.dumps(args.cassandra_hosts)}\n{match.group(1)[:-len("hosts:")]}port: {args.cassandra_port}',
+        go_config)
+    go_config = go_config.replace('keyspace: "cadence"', f'keyspace: "{args.cassandra_keyspace}"')
+    go_config = go_config.replace('keyspace: "cadence_visibility"', f'keyspace: "{args.cassandra_visibility_keyspace}"')
+    go_config = go_config.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(dynamic_config)))
+    (config / 'development_cassandra.yaml').write_text(go_config)
+else:
+    text = (root / 'go/config/development_sqlite.yaml').read_text()
+    text = text.replace('"cadence.db"', json.dumps(str(work / 'cadence.db')))
+    text = text.replace('"cadence_visibility.db"', json.dumps(str(work / 'cadence_visibility.db')))
+    (config / 'development_sqlite.yaml').write_text(text)
 if production_matching:
     rust_config = work / 'rust-matching.yaml'
     rust_dynamic_config = work / 'rust-dynamic-config.yaml'
@@ -187,7 +214,37 @@ if production_matching:
         '        pluginName: sqlite\n'
         '        databaseName: ' + json.dumps(str(work / 'cadence_visibility.db')) + '\n'
     )
-    rust_text, replaced = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', sqlite_persistence, rust_text, count=1)
+    if args.cassandra:
+        cassandra_persistence = (
+            'persistence:\n'
+            '  defaultStore: cass-default\n'
+            '  visibilityStore: cass-visibility\n'
+            '  numHistoryShards: 4\n'
+            '  datastores:\n'
+            '    cass-default:\n'
+            '      nosql:\n'
+            '        pluginName: cassandra\n'
+            f'        hosts: {json.dumps(args.cassandra_hosts)}\n'
+            f'        port: {args.cassandra_port}\n'
+            f'        keyspace: {args.cassandra_keyspace}\n'
+            '        connectTimeout: 2s\n'
+            '        timeout: 5s\n'
+            '        consistency: LOCAL_QUORUM\n'
+            '        serialConsistency: LOCAL_SERIAL\n'
+            '    cass-visibility:\n'
+            '      nosql:\n'
+            '        pluginName: cassandra\n'
+            f'        hosts: {json.dumps(args.cassandra_hosts)}\n'
+            f'        port: {args.cassandra_port}\n'
+            f'        keyspace: {args.cassandra_visibility_keyspace}\n'
+        )
+        persistence_text = cassandra_persistence
+        rust_text = rust_text.replace('enableDistributedSemaphore: false', 'enableDistributedSemaphore: true')
+        if 'enableDistributedSemaphore:' not in rust_text:
+            rust_text = rust_text.replace('persistence:\n', 'enableDistributedSemaphore: true\npersistence:\n', 1)
+    else:
+        persistence_text = sqlite_persistence
+    rust_text, replaced = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', persistence_text, rust_text, count=1)
     if replaced != 1:
         raise RuntimeError('could not replace Rust Matching persistence config')
     seeds = ', '.join(json.dumps(f'127.0.0.1:{ports[key]}') for key in
@@ -227,7 +284,8 @@ if production_matching:
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
         '--data-dir', str(work / 'rust-matching-data')], indent=2) + '\n')
-command = [str(binary), '--config', str(config), '--zone', 'sqlite', 'start',
+go_zone = 'cassandra' if args.cassandra else 'sqlite'
+command = [str(binary), '--config', str(config), '--zone', go_zone, 'start',
            '--auto-setup', '--services', 'frontend,history,worker' if production_matching else 'frontend,history,matching,worker']
 environment = None
 if (args.rust_matching or args.matching_restart) and not production_matching:
@@ -276,8 +334,12 @@ with (work / 'server.log').open('w') as log:
                     'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
                     'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
-                    'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db'),
+                    **({'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')} if not args.cassandra else {}),
                     'CADENCE_MATCHING_TEST_ID': probe_id,
+                    'CADENCE_MATCHING_CASSANDRA_GATE': '1' if args.cassandra else '0',
+                    'CADENCE_CASSANDRA_CONTACT_POINTS': args.cassandra_hosts,
+                    'CADENCE_CASSANDRA_PORT': str(args.cassandra_port),
+                    'CADENCE_CASSANDRA_KEYSPACE': args.cassandra_keyspace,
                     'CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL': os.environ.get('CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL', ''),
                     'CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE': args.matching_shard_distributor_namespace or '',
                     'CADENCE_MATCHING_ONBOARDING_PERCENTAGE': str(args.matching_onboarding_percentage if args.matching_onboarding_percentage is not None else '')}
@@ -288,9 +350,22 @@ with (work / 'server.log').open('w') as log:
                     'CADENCE_MATCHING_FAILURE_RECOVERY': '1',
                 })
             result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                env=probe_environment, timeout=900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120))
+                env=probe_environment, timeout=1800 if args.matching_failure_recovery else (900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120)))
+        topology = (
+            'Go Frontend/History/Worker and Rust Matching on shared Cassandra via production Ringpop'
+            if args.cassandra else
+            'Go Frontend/History/Worker with Rust Matching via production Ringpop'
+            if production_matching else
+            'Go Frontend/History/Worker with Rust Matching RPC'
+            if args.rust_matching or args.matching_restart else
+            'Go services with Rust queue/History delivery boundary'
+            if args.matching_delivery else 'all-Go'
+        )
         (work / 'results.json').write_text(json.dumps({'probeExitCode': result.returncode,
-            'topology': ('Go Frontend/History/Worker with Rust Matching via production Ringpop' if production_matching else ('Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'))),
+            'topology': topology,
+            'persistence': ({'backend': 'cassandra', 'hosts': args.cassandra_hosts, 'port': args.cassandra_port,
+                'defaultKeyspace': args.cassandra_keyspace, 'visibilityKeyspace': args.cassandra_visibility_keyspace}
+                if args.cassandra else {'backend': 'sqlite'} if production_matching else None),
             'goServicesPid': server.pid, 'goServicesAliveAfterProbe': server.poll() is None,
             'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
             'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
@@ -298,7 +373,7 @@ with (work / 'server.log').open('w') as log:
             'historyTransport': args.history_transport if production_matching else None,
             'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
             'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
-            'acceptanceEligible': not production_matching,
+            'acceptanceEligible': bool(args.cassandra) if production_matching else True,
             'serverCommand': command}, indent=2) + '\n')
         if result.returncode:
             raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
@@ -310,6 +385,9 @@ with (work / 'server.log').open('w') as log:
             server.kill()
             server.wait(timeout=10)
 if production_matching:
-    print(f'Preliminary production process probe completed; it is not Matching acceptance evidence: {work / "results.json"}', flush=True)
+    if args.cassandra:
+        print(f'Cassandra mixed-service Matching gate passed: {work / "results.json"}', flush=True)
+    else:
+        print(f'Preliminary production process probe completed; it is not Matching acceptance evidence: {work / "results.json"}', flush=True)
 else:
     print(f'Service baseline passed: {work / "results.json"}', flush=True)

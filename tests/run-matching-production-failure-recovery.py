@@ -11,6 +11,7 @@ parser.add_argument('--rust-production-binary', type=Path, required=True)
 parser.add_argument('--artifacts-dir', type=Path, required=True)
 parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc')
 parser.add_argument('--idle-check-seconds', type=int, default=3)
+parser.add_argument('--cassandra', action='store_true', help='use the shared Go-compatible Cassandra keyspaces for the mixed service gate')
 args = parser.parse_args()
 if args.idle_check_seconds < 1:
     parser.error('--idle-check-seconds must be positive')
@@ -24,4 +25,6 @@ command = [
     '--matching-idle-check-seconds', str(args.idle_check_seconds),
     '--artifacts-dir', str(args.artifacts_dir.resolve()),
 ]
+if args.cassandra:
+    command.append('--cassandra')
 raise SystemExit(subprocess.run(command, cwd=ROOT, check=False).returncode)

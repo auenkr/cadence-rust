@@ -49,8 +49,22 @@ func connect() *gocql.Session {
 }
 
 func main() {
-	if len(os.Args) != 2 || (os.Args[1] != "seed" && os.Args[1] != "verify") {
-		log.Fatal("usage: go run ./tests/matching-cassandra-interop {seed|verify}")
+	if len(os.Args) < 2 || (os.Args[1] != "seed" && os.Args[1] != "verify" && os.Args[1] != "observe-task" && os.Args[1] != "wait-empty" && os.Args[1] != "verify-semaphore") {
+		log.Fatal("usage: go run ./tests/matching-cassandra-interop {seed|verify|observe-task|wait-empty|verify-semaphore}")
+	}
+	if os.Args[1] == "observe-task" || os.Args[1] == "wait-empty" {
+		if len(os.Args) != 5 {
+			log.Fatal("task observer expects domain-id task-list timeout-seconds")
+		}
+		observeTask(os.Args[1], os.Args[2], os.Args[3], os.Args[4])
+		return
+	}
+	if os.Args[1] == "verify-semaphore" {
+		if len(os.Args) != 4 {
+			log.Fatal("semaphore observer expects domain-id semaphore-name")
+		}
+		semaphore(os.Args[2], os.Args[3])
+		return
 	}
 	domainID := required("CADENCE_CASSANDRA_TEST_DOMAIN_ID")
 	parsedDomainID, err := gocql.ParseUUID(domainID)
@@ -64,6 +78,63 @@ func main() {
 		seed(session, parsedDomainID, domainID, name)
 	} else {
 		verify(session, parsedDomainID, name)
+	}
+}
+
+func observeTask(command, domainID, name, timeoutText string) {
+	domainUUID, err := gocql.ParseUUID(domainID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	timeout, err := time.ParseDuration(timeoutText + "s")
+	if err != nil {
+		log.Fatal(err)
+	}
+	session := connect()
+	defer session.Close()
+	deadline := time.Now().Add(timeout)
+	for {
+		var rangeID int64
+		err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=1 AND task_id=-12345", domainUUID, name, 1).Scan(&rangeID)
+		if err != nil && err != gocql.ErrNotFound {
+			log.Fatal(err)
+		}
+		iter := session.Query("SELECT task_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=0", domainUUID, name, 1).Iter()
+		count := 0
+		var taskID int64
+		for iter.Scan(&taskID) { count++ }
+		if err := iter.Close(); err != nil { log.Fatal(err) }
+		if (command == "observe-task" && count > 0) || (command == "wait-empty" && count == 0) {
+			fmt.Printf("{\"domain_id\":%q,\"task_list\":%q,\"queued_rows\":%d,\"range_id\":%d}\n", domainID, name, count, rangeID)
+			return
+		}
+		if time.Now().After(deadline) {
+			log.Fatalf("Cassandra task condition %s timed out: rows=%d range=%d", command, count, rangeID)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func semaphore(domainID, name string) {
+	domainUUID, err := gocql.ParseUUID(domainID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	session := connect()
+	defer session.Close()
+	iter := session.Query("SELECT owner_id,held_token FROM semaphore_tokens WHERE domain_id=? AND semaphore_name=? AND bucket=0 AND type=1", domainUUID, name).Iter()
+	owners := map[string]int{}
+	var owner string
+	var token int
+	for iter.Scan(&owner, &token) { owners[owner] = token }
+	if err := iter.Close(); err != nil {
+		log.Fatal(err)
+	}
+	if len(owners) != 1 {
+		log.Fatalf("Cassandra semaphore owner rows=%d, want exactly one: %#v", len(owners), owners)
+	}
+	for owner, token := range owners {
+		fmt.Printf("{\"domain_id\":%q,\"semaphore\":%q,\"owner_id\":%q,\"token_id\":%d}\n", domainID, name, owner, token)
 	}
 }
 
