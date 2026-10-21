@@ -11,7 +11,11 @@ use crate::{
         AllocatedTask, BackendErrorKind, MatchingTaskStore, Result, TaskListKey, TaskListRecord,
     },
 };
-use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+use openssl::{
+    pkey::PKey,
+    ssl::{SslConnector, SslMethod, SslVerifyMode},
+    x509::X509,
+};
 use postgres::{config::SslMode, types::ToSql, Client, Config, NoTls};
 use postgres_openssl::MakeTlsConnector;
 use crate::SemaphorePersistence;
@@ -95,6 +99,7 @@ pub(crate) struct PostgresConnectionPool {
 struct PostgresTlsConnectorConfig {
     verify_peer: bool,
     verify_hostname: bool,
+    ssl_inline: bool,
     root_cert: Option<String>,
     cert: Option<String>,
     key: Option<String>,
@@ -818,12 +823,14 @@ fn postgres_options(
     let mut key_file = active_tls
         .map(|tls| tls.key_file.clone())
         .unwrap_or_default();
+    let mut ssl_inline = false;
     for (key, value) in &shard.connect_attributes {
         match key.to_ascii_lowercase().as_str() {
             "sslmode" => ssl_mode = value.clone(),
             "sslrootcert" => root_cert = value.clone(),
             "sslcert" => cert = value.clone(),
             "sslkey" => key_file = value.clone(),
+            "sslinline" => ssl_inline = value == "true",
             "connect_timeout" => {
                 let seconds = value.parse::<u64>().map_err(|_| {
                     configuration_error(format!(
@@ -878,6 +885,7 @@ fn postgres_options(
         Some(PostgresTlsConnectorConfig {
             verify_peer,
             verify_hostname,
+            ssl_inline,
             root_cert: (root_cert_exists || verify_peer)
                 .then_some(root_cert)
                 .filter(|path| !path.is_empty()),
@@ -892,29 +900,80 @@ fn postgres_tls_connector(config: &PostgresTlsConnectorConfig) -> Result<MakeTls
     let mut builder = SslConnector::builder(SslMethod::tls()).map_err(|error| {
         configuration_error(format!("creating PostgreSQL TLS connector: {error}"))
     })?;
-    if let Some(ca) = &config.root_cert {
-        builder.set_ca_file(ca).map_err(|error| {
-            configuration_error(format!("loading PostgreSQL TLS CA {ca:?}: {error}"))
-        })?;
+    if config.ssl_inline && config.cert.is_none() {
+        return Err(configuration_error(
+            "loading inline PostgreSQL client certificate: certificate and key are required".into(),
+        ));
     }
     if let (Some(cert), Some(key)) = (&config.cert, &config.key) {
-        builder
-            .set_certificate_file(cert, openssl::ssl::SslFiletype::PEM)
-            .map_err(|error| {
-                configuration_error(format!(
-                    "loading PostgreSQL client certificate {cert:?}: {error}"
-                ))
+        if config.ssl_inline {
+            let mut certificates = X509::stack_from_pem(cert.as_bytes()).map_err(|_| {
+                configuration_error("parsing inline PostgreSQL client certificate".into())
             })?;
-        builder
-            .set_private_key_file(key, openssl::ssl::SslFiletype::PEM)
-            .map_err(|error| {
-                configuration_error(format!("loading PostgreSQL client key {key:?}: {error}"))
+            if certificates.is_empty() {
+                return Err(configuration_error(
+                    "parsing inline PostgreSQL client certificate: no PEM certificates".into(),
+                ));
+            }
+            let leaf = certificates.remove(0);
+            builder.set_certificate(&leaf).map_err(|_| {
+                configuration_error("loading inline PostgreSQL client certificate".into())
             })?;
+            for certificate in certificates {
+                builder.add_extra_chain_cert(certificate).map_err(|_| {
+                    configuration_error("loading inline PostgreSQL client certificate chain".into())
+                })?;
+            }
+            let key = PKey::private_key_from_pem(key.as_bytes())
+                .map_err(|_| configuration_error("parsing inline PostgreSQL client key".into()))?;
+            builder
+                .set_private_key(&key)
+                .map_err(|_| configuration_error("loading inline PostgreSQL client key".into()))?;
+        } else {
+            builder
+                .set_certificate_file(cert, openssl::ssl::SslFiletype::PEM)
+                .map_err(|error| {
+                    configuration_error(format!(
+                        "loading PostgreSQL TLS client certificate {cert:?}: {error}"
+                    ))
+                })?;
+            builder
+                .set_private_key_file(key, openssl::ssl::SslFiletype::PEM)
+                .map_err(|error| {
+                    configuration_error(format!(
+                        "loading PostgreSQL TLS client key {key:?}: {error}"
+                    ))
+                })?;
+        }
         builder.check_private_key().map_err(|error| {
             configuration_error(format!(
                 "checking PostgreSQL client certificate/key: {error}"
             ))
         })?;
+    }
+    if let Some(ca) = &config.root_cert {
+        if config.ssl_inline {
+            let certificates = X509::stack_from_pem(ca.as_bytes()).map_err(|_| {
+                configuration_error("parsing inline PostgreSQL TLS CA certificate".into())
+            })?;
+            if certificates.is_empty() {
+                return Err(configuration_error(
+                    "parsing inline PostgreSQL TLS CA certificate: no PEM certificates".into(),
+                ));
+            }
+            for certificate in certificates {
+                builder
+                    .cert_store_mut()
+                    .add_cert(certificate)
+                    .map_err(|_| {
+                        configuration_error("loading inline PostgreSQL TLS CA certificate".into())
+                    })?;
+            }
+        } else {
+            builder.set_ca_file(ca).map_err(|error| {
+                configuration_error(format!("loading PostgreSQL TLS CA {ca:?}: {error}"))
+            })?;
+        }
     }
     if config.verify_peer {
         builder.set_verify(SslVerifyMode::PEER);
@@ -1143,6 +1202,33 @@ mod tests {
     }
 
     #[test]
+    fn postgres_tls_inline_attributes_follow_libpq_ssl_inline_contract() {
+        let mut config = shard(&[
+            ("sslmode", "verify-ca"),
+            ("sslrootcert", "inline-ca-pem"),
+            ("sslcert", "inline-client-cert-pem"),
+            ("sslkey", "inline-client-key-pem"),
+            ("sslinline", "true"),
+        ]);
+        let (_, tls) = postgres_options(&config).unwrap();
+        let tls = tls.unwrap();
+        assert!(tls.ssl_inline);
+        assert_eq!(tls.root_cert.as_deref(), Some("inline-ca-pem"));
+        assert_eq!(tls.cert.as_deref(), Some("inline-client-cert-pem"));
+        assert_eq!(tls.key.as_deref(), Some("inline-client-key-pem"));
+
+        // lib/pq's require-mode os.Stat check treats inline PEM as a missing
+        // path and removes sslrootcert before its CA-loading pass.
+        config
+            .connect_attributes
+            .insert("sslmode".into(), "require".into());
+        let (_, tls) = postgres_options(&config).unwrap();
+        let tls = tls.unwrap();
+        assert!(!tls.verify_peer);
+        assert!(tls.root_cert.is_none());
+    }
+
+    #[test]
     #[ignore = "live TLS oracle; run against the labelled disposable PostgreSQL instance"]
     fn postgres_tls_live_oracle() {
         let mut config = shard(&[]);
@@ -1162,6 +1248,20 @@ mod tests {
                 cert_file: String::new(),
                 key_file: String::new(),
             });
+        }
+        if std::env::var("CADENCE_POSTGRES_SSLINLINE").as_deref() == Ok("true") {
+            config
+                .connect_attributes
+                .insert("sslinline".into(), "true".into());
+            for (attribute, variable) in [
+                ("sslrootcert", "CADENCE_POSTGRES_CA_INLINE"),
+                ("sslcert", "CADENCE_POSTGRES_CERT_INLINE"),
+                ("sslkey", "CADENCE_POSTGRES_KEY_INLINE"),
+            ] {
+                if let Ok(value) = std::env::var(variable) {
+                    config.connect_attributes.insert(attribute.into(), value);
+                }
+            }
         }
         let expected_success = std::env::var("CADENCE_POSTGRES_TLS_EXPECT_SUCCESS")
             .map(|value| value == "true")

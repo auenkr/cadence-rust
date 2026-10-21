@@ -2,8 +2,7 @@
 use cadence_persistence::{
     matching_blob::{Partition, PartitionConfig},
     matching_queue::{DurableTaskQueue, QueueError},
-    matching_sqlite::{StorageError, TaskListKey},
-    matching_task_store::MatchingTaskStore,
+    matching_task_store::{MatchingTaskStore, StorageError, TaskListKey},
     StoredPartitionConfig,
 };
 use std::sync::Mutex;
@@ -185,8 +184,7 @@ impl PartitionCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_persistence::matching_blob::BlobEncoding;
-    use cadence_persistence::matching_sqlite::SqliteTaskStore;
+    use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
     #[test]
     fn matching_native_partition_updates_match_original_go_fixtures() {
         let cases: serde_json::Value = serde_json::from_str(include_str!(
