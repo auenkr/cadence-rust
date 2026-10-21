@@ -18,6 +18,7 @@ use openssl::{
 };
 use postgres::{config::SslMode, types::ToSql, Client, Config, NoTls};
 use postgres_openssl::MakeTlsConnector;
+use crate::SemaphorePersistence;
 use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, Condvar, Mutex},
@@ -559,13 +560,16 @@ impl MatchingTaskStore for PostgresTaskStore {
         &self,
         key: &TaskListKey,
         range: i64,
+        now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()> {
         let task_type = postgres_task_type(key)?;
         let mut client = self.pool(key).checkout()?;
         let mut transaction = client.transaction().map_err(normalize_postgres_error)?;
         for (domain, task) in tasks {
-            let bytes = self.encoding.encode(&blob::encode_task(&task.data))?;
+            let mut data = task.data.clone();
+            data.created_nanos = now_nanos;
+            let bytes = self.encoding.encode(&blob::encode_task(&data))?;
             let encoding = self.encoding.as_str();
             let params: &[&(dyn ToSql + Sync)] = &[
                 &domain.as_bytes().as_slice(),
@@ -727,6 +731,59 @@ impl MatchingTaskStore for PostgresTaskStore {
         Ok(())
     }
 }
+
+#[async_trait::async_trait]
+impl crate::SemaphorePersistence for PostgresTaskStore {
+    async fn create_semaphore(
+        &self,
+        domain: &str,
+        name: &str,
+        size: i32,
+        bucket_size: i32,
+    ) -> std::result::Result<crate::SemaphoreMetadata, crate::SemaphoreError> {
+        crate::SqlUnsupportedSemaphorePersistence.create_semaphore(
+            domain,
+            name,
+            size,
+            bucket_size,
+        ).await
+    }
+
+    async fn scan_semaphore_bucket(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+    ) -> std::result::Result<Vec<crate::SemaphoreRow>, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.scan_semaphore_bucket(domain_id, name, bucket).await
+    }
+
+    async fn get_semaphore_ownership_by_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+    ) -> std::result::Result<String, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.get_semaphore_ownership_by_token(
+            domain_id, name, bucket, token_id,
+        ).await
+    }
+
+    async fn grant_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> std::result::Result<crate::GrantOutcome, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.grant_semaphore_token(
+            domain_id, name, bucket, token_id, owner_id,
+        ).await
+    }
+}
+
 
 fn postgres_options(
     shard: &PostgresShardConfig,

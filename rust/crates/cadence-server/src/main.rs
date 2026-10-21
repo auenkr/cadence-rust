@@ -60,6 +60,16 @@ fn dynamic_bool_property(
         .unwrap_or(default)
 }
 
+fn history_named_port(
+    grpc_outbound: bool,
+) -> cadence_server::matching_history_peer_resolver::NamedPort {
+    if grpc_outbound {
+        cadence_server::matching_history_peer_resolver::NamedPort::Grpc
+    } else {
+        cadence_server::matching_history_peer_resolver::NamedPort::Tchannel
+    }
+}
+
 fn dynamic_i64_property(
     overlay: std::sync::Arc<std::sync::Mutex<cadence_server::admin::DynamicConfigOverlay>>,
     name: &str,
@@ -395,6 +405,55 @@ async fn serve_matching_http_permissive(
 #[cfg(test)]
 mod matching_http_listener_tests {
     use super::*;
+    #[test]
+    fn history_outbound_selector_uses_last_unfiltered_global_value() {
+        use cadence_api::{
+            admin::{DynamicConfigFilter, DynamicConfigValue},
+            enums::EncodingType,
+            types::DataBlob,
+        };
+
+        let overlay = std::sync::Arc::new(std::sync::Mutex::new(
+            cadence_server::admin::DynamicConfigOverlay::default(),
+        ));
+        let selected = || {
+            dynamic_bool_property(overlay.clone(), "system.enableGRPCOutbound", true)
+        };
+        assert!(selected(), "Go defaults outbound RPCs to gRPC");
+        assert_eq!(history_named_port(selected()), cadence_server::matching_history_peer_resolver::NamedPort::Grpc);
+
+        let json = |value: &[u8]| Some(DataBlob::new(EncodingType::JSON, value.to_vec()));
+        let constrained = |value: &[u8]| DynamicConfigValue {
+            value: json(value),
+            filters: vec![DynamicConfigFilter {
+                name: "domainName".into(),
+                value: json(b"\"filtered-domain\""),
+            }],
+        };
+        overlay.lock().unwrap().update(
+            false,
+            "system.enableGRPCOutbound",
+            vec![
+                DynamicConfigValue { value: json(b"false"), filters: vec![] },
+                constrained(b"true"),
+            ],
+        );
+        assert!(!selected(), "a domain-filtered value is not the startup selector");
+        assert_eq!(history_named_port(selected()), cadence_server::matching_history_peer_resolver::NamedPort::Tchannel);
+
+        overlay.lock().unwrap().update(
+            false,
+            "system.enableGRPCOutbound",
+            vec![
+                DynamicConfigValue { value: json(b"true"), filters: vec![] },
+                DynamicConfigValue { value: json(b"false"), filters: vec![] },
+                constrained(b"true"),
+            ],
+        );
+        assert!(!selected(), "the last unfiltered global value selects TChannel");
+        assert_eq!(history_named_port(selected()), cadence_server::matching_history_peer_resolver::NamedPort::Tchannel);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn tls_handshake_timeout_is_injectable() {
         use tokio::io::AsyncWriteExt;
@@ -687,6 +746,32 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 false
             };
+            let matching_member_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let matching_persistence_limiter = if wanted.contains(&service::ServiceName::Matching)
+                && !embedded_development
+            {
+                Some(cadence_server::matching_persistence_limiter::MatchingPersistenceLimiter::new(
+                    state.admin.dynamic_config.clone(),
+                    matching_member_count.clone(),
+                ))
+            } else {
+                None
+            };
+            if let Some(limiter) = matching_persistence_limiter.as_ref() {
+                // Go constructs semaphore persistence from the configured
+                // default datastore and shares that datastore's limiter with
+                // task and domain persistence.
+                let store = cadence_server::matching_task_store::open_configured_semaphore_store(
+                    &cfg.persistence,
+                )
+                .await?;
+                state.semaphore_persistence = Some(
+                    cadence_server::matching_persistence::limit_semaphore_store(
+                        store,
+                        limiter.clone(),
+                    ),
+                );
+            }
             state.matching_http_isolated = wanted.contains(&service::ServiceName::Matching)
                 && cfg
                     .services
@@ -901,6 +986,11 @@ async fn main() -> anyhow::Result<()> {
             let matching_metric_sink = matching_metrics_runtime
                 .as_ref()
                 .map(|runtime| runtime.sink());
+            if let (Some(limiter), Some(sink)) =
+                (matching_persistence_limiter.as_ref(), matching_metric_sink.as_ref())
+            {
+                limiter.with_metric_sink(sink.clone());
+            }
             // Reserve production endpoints before Ringpop publishes them.
             let mut matching_grpc_listener = if run_matching && !embedded_development {
                 Some(tokio::net::TcpListener::bind(matching_addr).await?)
@@ -929,6 +1019,24 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
+            if let Some(provider) = matching_ringpop_provider.as_ref() {
+                matching_member_count.store(
+                    provider.service_member_count(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                let provider = provider.clone();
+                let member_count = matching_member_count.clone();
+                tokio::spawn(async move {
+                    let mut refresh = tokio::time::interval(std::time::Duration::from_secs(1));
+                    loop {
+                        refresh.tick().await;
+                        member_count.store(
+                            provider.service_member_count(),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
+                });
+            }
             let matching_membership = matching_ringpop_provider.as_ref().map(|provider| {
                 cadence_server::matching_membership::Membership::new(
                     provider.local_identity().to_owned(),
@@ -993,11 +1101,7 @@ async fn main() -> anyhow::Result<()> {
                     history.with_metrics(sink.clone())
                 });
                 if let Some(provider) = matching_ringpop_provider.as_ref() {
-                    let named_port = if grpc_outbound {
-                        cadence_server::matching_history_peer_resolver::NamedPort::Grpc
-                    } else {
-                        cadence_server::matching_history_peer_resolver::NamedPort::Tchannel
-                    };
+                    let named_port = history_named_port(grpc_outbound);
                     let history_membership = std::sync::Arc::new(
                         cadence_server::matching_history_membership::RingpopHistoryMembership::new(
                             std::sync::Arc::new(provider.node().clone()),
@@ -1028,18 +1132,39 @@ async fn main() -> anyhow::Result<()> {
             let configured_matching_stores = if run_matching && !embedded_development {
                 let persistence = cfg.persistence.clone();
                 let cluster_name = state.current_cluster_name.clone();
-                Some(
-                    tokio::task::spawn_blocking(move || {
-                        cadence_server::matching_task_store::open_configured_default_store(
-                            &persistence,
-                            &cluster_name,
+                let dynamic_config = state.admin.dynamic_config.clone();
+                let all_consistency_delete: std::sync::Arc<dyn Fn() -> bool + Send + Sync> =
+                    std::sync::Arc::new(move || {
+                        let overlay = dynamic_config.lock().expect("admin lock");
+                        cadence_persistence::dynamic_config::boolean(
+                            overlay
+                                .property_values("system.enableCassandraAllConsistencyLevelDelete"),
+                            None,
+                            false,
                         )
-                    })
-                    .await
-                    .map_err(|error| {
-                        anyhow::anyhow!("joining Matching store startup: {error}")
-                    })??,
-                )
+                    });
+                let mut stores = tokio::task::spawn_blocking(move || {
+                    cadence_server::matching_task_store::open_configured_default_store(
+                        &persistence,
+                        &cluster_name,
+                        all_consistency_delete,
+                    )
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("joining Matching store startup: {error}"))??;
+                if let Some(limiter) = matching_persistence_limiter.as_ref() {
+                    stores.task_store = cadence_server::matching_persistence::limit_task_store(
+                        stores.task_store,
+                        limiter.clone(),
+                    );
+                    stores.domain_metadata_source = stores.domain_metadata_source.map(|source| {
+                        cadence_server::matching_persistence::limit_domain_source(
+                            source,
+                            limiter.clone(),
+                        )
+                    });
+                }
+                Some(stores)
             } else {
                 None
             };
@@ -1051,9 +1176,13 @@ async fn main() -> anyhow::Result<()> {
                     Some(source) => std::sync::Arc::new(
                         cadence_server::matching_domain_cache::MatchingDomainCache::new(source),
                     ),
-                    None => cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store(
+                    None => cadence_server::matching_domain_cache::MatchingDomainCache::from_default_store_with_limiter(
                         &cfg.persistence,
                         &state.current_cluster_name,
+                        matching_persistence_limiter
+                            .as_ref()
+                            .expect("production Matching persistence limiter is initialized")
+                            .clone(),
                     )?,
                 })
             } else {
@@ -1063,6 +1192,9 @@ async fn main() -> anyhow::Result<()> {
             // opens Matching queues on the configured defaultStore. The
             // private data-dir database is only an embedded-development path.
             let mut matching_runtime = if run_matching {
+                // Keep this as a provider: Go reads the global drain property
+                // at shutdown, after membership withdrawal, rather than when
+                // the Matching runtime is constructed.
                 let drain = cadence_server::matching_runtime::live_shutdown_drain_duration(
                     state.admin.dynamic_config.clone(),
                 );
@@ -1315,128 +1447,127 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 app
             };
-            let mut serving = tokio::spawn(async move {
-                tokio::try_join!(
-                    async {
-                        axum::serve(listener, app)
+            let mut serving = tokio::task::JoinSet::new();
+            serving.spawn(async move {
+                (
+                    "HTTP API",
+                    axum::serve(listener, app)
+                        .await
+                        .map_err(anyhow::Error::from),
+                )
+            });
+            if run_frontend {
+                serving.spawn(async move {
+                    (
+                        "Frontend gRPC",
+                        cadence_server::grpc::serve(grpc_addr, grpc_state).await,
+                    )
+                });
+                serving.spawn(async move {
+                    (
+                        "Frontend TChannel",
+                        cadence_server::tchannel::serve(tchannel_addr, tchannel_state).await,
+                    )
+                });
+            }
+            if run_history {
+                serving.spawn(async move {
+                    (
+                        "History gRPC",
+                        cadence_server::grpc_internal::serve(history_addr, history_state).await,
+                    )
+                });
+            }
+            if run_matching {
+                let matching_tchannel_done = matching_tchannel_done.take();
+                serving.spawn(async move {
+                    let result = if let Some(done) = matching_tchannel_done {
+                        match done.await {
+                            Ok(result) => result,
+                            Err(error) => Err(anyhow::Error::new(error)),
+                        }
+                    } else {
+                        cadence_server::tchannel::serve_matching(
+                            matching_tchannel_addr,
+                            matching_tchannel_service,
+                        )
+                        .await
+                    };
+                    ("Matching TChannel/Ringpop", result)
+                });
+                let matching_grpc_service = matching_service.clone();
+                serving.spawn(async move {
+                    let result = if let Some(listener) = matching_grpc_listener.take() {
+                        cadence_server::grpc_matching::serve_with_listener(
+                            listener,
+                            matching_grpc_service,
+                        )
+                        .await
+                    } else {
+                        cadence_server::grpc_matching::serve_with(
+                            matching_addr,
+                            matching_grpc_service,
+                        )
+                        .await
+                    };
+                    ("Matching gRPC", result)
+                });
+                if let Some(addr) = matching_http_addr {
+                    let http = matching_rpc
+                        .as_ref()
+                        .and_then(|rpc| rpc.http.as_ref())
+                        .expect("configured Matching HTTP address");
+                    let procedures = http.procedures.clone();
+                    let tls_mode = http.tls_mode.clone();
+                    let tls_enabled = http.tls.as_ref().is_some_and(|tls| tls.enabled);
+                    let tls_config = matching_http_tls_config.clone();
+                    let http_service = matching_service.clone();
+                    serving.spawn(async move {
+                        let app = cadence_server::thrift_matching::router_with_procedures(
+                            http_service,
+                            procedures,
+                        );
+                        let result = if tls_mode.as_deref() == Some("enforced") && tls_enabled {
+                            axum_server::bind_rustls(
+                                addr,
+                                tls_config.expect("validated enforced TLS configuration"),
+                            )
+                            .serve(app.into_make_service())
                             .await
                             .map_err(anyhow::Error::from)
-                    },
-                    async {
-                        if run_frontend {
-                            cadence_server::grpc::serve(grpc_addr, grpc_state).await
+                        } else if tls_mode.as_deref() == Some("permissive") && tls_enabled {
+                            serve_matching_http_permissive(
+                                addr,
+                                app,
+                                tls_config.expect("validated permissive TLS configuration"),
+                            )
+                            .await
                         } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_frontend {
-                            cadence_server::tchannel::serve(tchannel_addr, tchannel_state).await
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_history {
-                            cadence_server::grpc_internal::serve(history_addr, history_state).await
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_matching {
-                            if let Some(done) = matching_tchannel_done.as_mut() {
-                                match done.await {
-                                    Ok(result) => result,
-                                    Err(error) => Err(anyhow::Error::new(error)),
-                                }
-                            } else {
-                                cadence_server::tchannel::serve_matching(
-                                    matching_tchannel_addr,
-                                    matching_tchannel_service,
-                                )
-                                .await
+                            match tokio::net::TcpListener::bind(addr).await {
+                                Ok(listener) => axum::serve(listener, app)
+                                    .await
+                                    .map_err(anyhow::Error::from),
+                                Err(error) => Err(anyhow::Error::from(error)),
                             }
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_matching {
-                            if let Some(listener) = matching_grpc_listener.take() {
-                                cadence_server::grpc_matching::serve_with_listener(
-                                    listener,
-                                    matching_service.clone(),
-                                )
-                                .await
-                            } else {
-                                cadence_server::grpc_matching::serve_with(
-                                    matching_addr,
-                                    matching_service.clone(),
-                                )
-                                .await
-                            }
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_matching {
-                            if let Some(addr) = matching_http_addr {
-                                let http = matching_rpc
-                                    .as_ref()
-                                    .and_then(|rpc| rpc.http.as_ref())
-                                    .expect("configured Matching HTTP address");
-                                let app = cadence_server::thrift_matching::router_with_procedures(
-                                    matching_service.clone(),
-                                    http.procedures.clone(),
-                                );
-                                let http = matching_rpc
-                                    .as_ref()
-                                    .and_then(|rpc| rpc.http.as_ref())
-                                    .expect("configured Matching HTTP");
-                                if http.tls_mode.as_deref() == Some("enforced")
-                                    && http.tls.as_ref().is_some_and(|tls| tls.enabled)
-                                {
-                                    let tls_config = matching_http_tls_config
-                                        .clone()
-                                        .expect("validated enforced TLS configuration");
-                                    axum_server::bind_rustls(addr, tls_config)
-                                        .serve(app.into_make_service())
-                                        .await
-                                        .map_err(anyhow::Error::from)
-                                } else if http.tls_mode.as_deref() == Some("permissive")
-                                    && http.tls.as_ref().is_some_and(|tls| tls.enabled)
-                                {
-                                    let tls_config = matching_http_tls_config
-                                        .clone()
-                                        .expect("validated permissive TLS configuration");
-                                    serve_matching_http_permissive(addr, app, tls_config).await
-                                } else {
-                                    let listener = tokio::net::TcpListener::bind(addr).await?;
-                                    axum::serve(listener, app)
-                                        .await
-                                        .map_err(anyhow::Error::from)
-                                }
-                            } else {
-                                std::future::pending::<anyhow::Result<()>>().await
-                            }
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                )?;
-                anyhow::Ok(())
-            });
-            let (mut serving_result, signal_result) = tokio::select! {
-                result = &mut serving => (
-                    Some(result.map_err(anyhow::Error::from).and_then(|result| result)),
-                    None,
-                ),
+                        };
+                        ("Matching HTTP", result)
+                    });
+                }
+            }
+            let (serving_result, signal_result) = tokio::select! {
+                result = serving.join_next() => {
+                    let result = match result {
+                        Some(Ok((name, Ok(())))) => Err(anyhow::anyhow!("{name} listener stopped unexpectedly")),
+                        Some(Ok((name, Err(error)))) => Err(anyhow::anyhow!("{name} listener failed: {error:#}")),
+                        Some(Err(error)) => Err(anyhow::anyhow!("listener task failed: {error}")),
+                        None => Err(anyhow::anyhow!("all service listeners stopped")),
+                    };
+                    (Some(result), None)
+                },
                 signal = shutdown_signal() => (None, Some(signal)),
             };
-            // On a signal, the listener task remains active while shutdown
-            // drains traffic. Listener errors have already ended that task.
+            // On a signal, or after one listener exits, the remaining listener
+            // tasks stay active while membership withdraws and Matching drains.
             let withdrawal = if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
                 lifecycle.withdraw().await.map_err(anyhow::Error::new)
             } else {
@@ -1459,17 +1590,18 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     Ok(())
                 };
-            if serving_result.is_none() {
-                if serving.is_finished() {
-                    serving_result = Some(
-                        serving
-                            .await
-                            .map_err(anyhow::Error::from)
-                            .and_then(|result| result),
-                    );
-                } else if signal_result.is_some() {
-                    serving.abort();
-                    let _ = serving.await;
+            let mut serving_shutdown_errors = Vec::new();
+            serving.abort_all();
+            while let Some(result) = serving.join_next().await {
+                match result {
+                    Ok((name, Ok(()))) => serving_shutdown_errors
+                        .push(format!("{name} listener stopped unexpectedly during drain")),
+                    Ok((name, Err(error))) => {
+                        serving_shutdown_errors.push(format!("{name} listener failed during drain: {error:#}"));
+                    }
+                    Err(error) if error.is_cancelled() => {}
+                    Err(error) => serving_shutdown_errors
+                        .push(format!("joining listener task: {error}")),
                 }
             }
             if let Some(task) = matching_tchannel_task.take() {
@@ -1480,6 +1612,7 @@ async fn main() -> anyhow::Result<()> {
             if let Some(Err(error)) = serving_result {
                 shutdown_errors.push(format!("serving Matching cluster: {error:#}"));
             }
+            shutdown_errors.extend(serving_shutdown_errors);
             if let Some(Err(error)) = signal_result {
                 shutdown_errors.push(format!("waiting for shutdown signal: {error:#}"));
             }

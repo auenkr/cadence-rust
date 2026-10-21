@@ -4,6 +4,7 @@
 #[cfg(test)]
 use crate::matching_blob::TaskData;
 use crate::matching_blob::{self as blob, BlobEncoding, TaskListData};
+use crate::SemaphorePersistence;
 pub use crate::matching_task_store::{
     AllocatedTask, MatchingTaskStoreError as StorageError, Result, TaskListKey, TaskListRecord,
 };
@@ -45,6 +46,7 @@ impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
         &self,
         key: &TaskListKey,
         range: i64,
+        _now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()> {
         SqliteTaskStore::create_tasks_with_domains(
@@ -84,6 +86,58 @@ impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
 
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
         SqliteTaskStore::delete_task_list(self, key, range)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::SemaphorePersistence for SqliteTaskStore {
+    async fn create_semaphore(
+        &self,
+        domain: &str,
+        name: &str,
+        size: i32,
+        bucket_size: i32,
+    ) -> std::result::Result<crate::SemaphoreMetadata, crate::SemaphoreError> {
+        crate::SqlUnsupportedSemaphorePersistence.create_semaphore(
+            domain,
+            name,
+            size,
+            bucket_size,
+        ).await
+    }
+
+    async fn scan_semaphore_bucket(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+    ) -> std::result::Result<Vec<crate::SemaphoreRow>, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.scan_semaphore_bucket(domain_id, name, bucket).await
+    }
+
+    async fn get_semaphore_ownership_by_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+    ) -> std::result::Result<String, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.get_semaphore_ownership_by_token(
+            domain_id, name, bucket, token_id,
+        ).await
+    }
+
+    async fn grant_semaphore_token(
+        &self,
+        domain_id: &str,
+        name: &str,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &str,
+    ) -> std::result::Result<crate::GrantOutcome, crate::AcquireError> {
+        crate::SqlUnsupportedSemaphorePersistence.grant_semaphore_token(
+            domain_id, name, bucket, token_id, owner_id,
+        ).await
     }
 }
 

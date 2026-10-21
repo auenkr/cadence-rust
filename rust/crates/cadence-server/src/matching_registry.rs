@@ -517,6 +517,44 @@ impl QueueRegistry {
         released
     }
 
+    /// Mirror Go `getTaskListsByDomainAndKind` followed by
+    /// `disconnectTaskListPollersAfterDomainFailover`: derive unique root
+    /// identifiers from managers already loaded for this domain, then load
+    /// the root manager and release its blocked polls. Go's method is backed
+    /// by `ManagersByDomainID`; it does not enumerate persisted task-list rows.
+    pub async fn release_domain_failover_polls(&self, domain: Uuid) {
+        let roots = {
+            let state = self.state.lock().expect("Matching registry lock");
+            let mut roots = std::collections::BTreeSet::new();
+            for ((id, name, task_type), owner) in &state.owners {
+                if *id != domain {
+                    continue;
+                }
+                let kind = owner.queue.task_list_kind();
+                let eligible =
+                    (kind == 0 && matches!(*task_type, 0 | 1)) || (kind == 1 && *task_type == 0);
+                if !eligible {
+                    continue;
+                }
+                if let Ok(parsed) = cadence_common::task_list::TaskListName::parse(name) {
+                    roots.insert((parsed.root().to_owned(), *task_type, kind));
+                }
+            }
+            roots
+        };
+        for (name, task_type, kind) in roots {
+            let key = TaskListKey {
+                domain_id: domain,
+                name,
+                task_type,
+            };
+            match self.get(key, kind, registry_now()).await {
+                Ok(owner) => owner.dispatcher.release_blocked_pollers(),
+                Err(error) => eprintln!("warning: loading Matching manager after domain failover failed: {error}"),
+            }
+        }
+    }
+
     /// Sum current QPS for loaded owners with this exact task-list name.
     pub(crate) fn qps_for_task_list_name(&self, name: &str) -> f64 {
         let owners = {
@@ -1610,16 +1648,34 @@ impl QueueRegistry {
         config: cadence_persistence::StoredPartitionConfig,
         now: i64,
     ) -> Result<(), Status> {
+        self.update_partition_config_with_deadline(key, handle, config, now, None)
+            .await
+    }
+
+    pub async fn update_partition_config_with_deadline(
+        &self,
+        key: TaskListKey,
+        handle: QueueHandle,
+        config: cadence_persistence::StoredPartitionConfig,
+        now: i64,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<(), Status> {
         let registry = self.clone();
-        tokio::task::spawn_blocking(move || {
+        let domain_id = key.domain_id;
+        let task_type = key.task_type;
+        let task_list_kind = handle.queue.task_list_kind();
+        let notification = tokio::task::spawn_blocking(move || {
             let Some((old, new)) = handle.partitions.update(&handle.queue, config, now)? else {
-                return Ok(());
+                return Ok(None);
             };
-            let mut notify = std::collections::HashSet::new();
+            // Pinned Go taskListManager.notifyPartitionConfig notifies the
+            // union of old/new non-root READ partitions only. Write partitions
+            // are not independently refreshed by this path.
+            let mut notify = std::collections::BTreeSet::new();
             for config in old.iter().chain(std::iter::once(&new)) {
                 notify.extend(config.read_partitions.keys().copied());
-                notify.extend(config.write_partitions.keys().copied());
             }
+            notify.remove(&0);
             let name = cadence_common::task_list::TaskListName::parse(&key.name)
                 .map_err(Status::invalid_argument)?;
             let state = registry.state.lock().expect("Matching registry lock");
@@ -1636,10 +1692,68 @@ impl QueueRegistry {
                     }
                 }
             }
-            Ok(())
+            Ok(Some((new, name.root().to_owned(), notify.into_iter().collect::<Vec<_>>())))
         })
         .await
-        .map_err(|error| Status::internal(error.to_string()))?
+        .map_err(|error| Status::internal(error.to_string()))??;
+
+        let Some((new_config, root_name, read_partitions)) = notification else {
+            return Ok(());
+        };
+        let Some(membership) = self.membership.clone() else {
+            return Ok(());
+        };
+        let partition_config =
+            crate::grpc_matching::partition_config_to_proto(new_config);
+        let mut notifications = tokio::task::JoinSet::new();
+        for partition in read_partitions {
+            let task_list_name = format!("/__cadence_sys/{root_name}/{partition}");
+            let (owner, channel) = match membership.channel_for_task_list_owner(&task_list_name) {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    eprintln!("warning: resolving Matching partition refresh owner for {task_list_name}: {error}");
+                    continue;
+                }
+            };
+            let request = cadence_proto::matching::RefreshTaskListPartitionConfigRequest {
+                domain_id: domain_id.to_string(),
+                task_list: Some(cadence_proto::api::TaskList {
+                    name: task_list_name.clone(),
+                    kind: i32::from(task_list_kind) + 1,
+                    ..Default::default()
+                }),
+                task_list_type: task_type + 1,
+                partition_config: Some(partition_config.clone()),
+            };
+            let owner_identity = owner.identity().to_owned();
+            notifications.spawn(async move {
+                let mut request = tonic::Request::new(request);
+                if let Some(deadline) = caller_deadline {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    request.set_timeout(remaining);
+                }
+                cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel)
+                    .refresh_task_list_partition_config(request)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| (task_list_name, owner_identity, error))
+            });
+        }
+        while let Some(result) = notifications.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err((task_list_name, owner, error))) => {
+                    // Go logs partition notification failures but does not fail
+                    // the root update RPC. Keep that error behavior while allowing
+                    // a later refresh or owner reload to converge.
+                    eprintln!("warning: refreshing Matching partition {task_list_name} on {owner} failed: {error}");
+                }
+                Err(error) => {
+                    eprintln!("warning: Matching partition notification task failed: {error}")
+                }
+            }
+        }
+        Ok(())
     }
     pub async fn refresh_partition_config(
         &self,
@@ -1976,6 +2090,7 @@ mod tests {
     use cadence_persistence::matching_blob::BlobEncoding;
     use cadence_persistence::matching_sqlite::SqliteTaskStore;
     use std::time::Duration;
+
     #[test]
     fn writer_owner_closure_keeps_registry_key_and_observes_provider_updates() {
         let observed = Arc::new(Mutex::new(Vec::new()));

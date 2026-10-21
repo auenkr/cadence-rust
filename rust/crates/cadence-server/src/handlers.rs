@@ -55,6 +55,10 @@ pub struct AppState {
     pub grpc_max_message_size: usize,
     pub domains: InMemoryDomainStore,
     pub executions: InMemoryExecutionStore,
+    /// Optional backend-specific semaphore persistence. None is the embedded
+    /// in-memory implementation; configured SQL installs Go's unsupported
+    /// backend adapter because Cadence SQL has no semaphore schema.
+    pub semaphore_persistence: Option<Arc<dyn cadence_persistence::SemaphorePersistence>>,
     pub limits: Limits,
     pub pollers: Arc<std::sync::Mutex<PollerMap>>,
     /// Shard-distributor namespaces and ownership. Memory-only like Go's
@@ -76,6 +80,7 @@ impl Default for AppState {
             grpc_max_message_size: 4 * 1024 * 1024,
             domains: InMemoryDomainStore::new(),
             executions: InMemoryExecutionStore::new(),
+            semaphore_persistence: None,
             limits: Limits::cadence_default(),
             pollers: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             shard_distributor: Arc::new(std::sync::Mutex::new(
@@ -86,6 +91,22 @@ impl Default for AppState {
 }
 
 impl AppState {
+    pub fn semaphore_store_for_domain(
+        &self,
+        domain: &str,
+    ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError> {
+        let metadata = self.domains.describe(&cadence_api::service_types::DescribeDomainRequest {
+            name: Some(domain.to_string()), uuid: None,
+        })?;
+        let domain_id = metadata.domain_info.map(|info| info.uuid).unwrap_or_default();
+        if let Some(store) = &self.semaphore_persistence {
+            // Preserve the frontend metadata lookup before calling persistence.
+            self.execution_store(domain)?;
+            return Ok((store.clone(), domain_id));
+        }
+        Ok((Arc::new(self.execution_store(domain)?), domain_id))
+    }
+
     pub fn domain_policy(&self, domain: &str) -> cadence_persistence::domain_update::DomainPolicy {
         use cadence_persistence::{domain_update::DomainPolicy, dynamic_config};
         let overlay = self.admin.dynamic_config.lock().expect("admin config lock");
@@ -336,16 +357,16 @@ async fn create_semaphore(
             ),
         );
     }
-    let executions = match state.execution_store(&req.domain) {
+    let (semaphores, domain_id) = match state.semaphore_store_for_domain(&req.domain) {
         Ok(store) => store,
         Err(error) => return entity_not_exists(error),
     };
-    match executions.create_semaphore(
-        &req.domain,
+    match semaphores.create_semaphore(
+        &domain_id,
         &req.semaphore_name,
         req.capacity,
         req.bucket_capacity,
-    ) {
+    ).await {
         Ok(meta) => (
             StatusCode::OK,
             Json(cadence_api::types::CreateSemaphoreResponse {
@@ -368,7 +389,18 @@ async fn create_semaphore(
         Err(cadence_persistence::SemaphoreError::Invalid(message)) => {
             error_response("BadRequestError", StatusCode::BAD_REQUEST, message)
         }
+        Err(cadence_persistence::SemaphoreError::UnsupportedBackend) => error_response(
+            "BadRequestError",
+            StatusCode::BAD_REQUEST,
+            cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE,
+        ),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::SemaphoreError::Internal(message)) => error_response(
+            "InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message,
+        ),
+        Err(cadence_persistence::SemaphoreError::Throttled(message)) => error_response(
+            "ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message,
+        ),
     }
 }
 

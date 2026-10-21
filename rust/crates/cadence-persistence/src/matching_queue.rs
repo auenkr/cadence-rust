@@ -290,9 +290,9 @@ impl DurableTaskQueue {
             .zip(data)
             .map(|(task, (domain, _))| (*domain, task))
             .collect::<Vec<_>>();
-        let result = self
-            .store
-            .create_tasks_with_domains(&self.key, range_id, &tasks_with_domains);
+        let result =
+            self.store
+                .create_tasks_with_domains(&self.key, range_id, now, &tasks_with_domains);
         // Go advances the read boundary after the write returns, even on error.
         // Allocated IDs are never reused after an uncertain persistence outcome.
         if let Some(last) = tasks.last() {
@@ -338,7 +338,7 @@ impl DurableTaskQueue {
         let _writer = self.writer.lock().expect("matching writer gate");
         self.append_serialized(data, now, None)
     }
-    pub fn append_pending(&self, pending: &[PendingTask]) -> Result<Vec<AllocatedTask>> {
+    pub fn append_pending(&self, pending: &[PendingTask], now_nanos: i64) -> Result<Vec<AllocatedTask>> {
         let data = pending
             .iter()
             .map(|task| (task.source_domain, task.data.clone()))
@@ -347,12 +347,8 @@ impl DurableTaskQueue {
             .iter()
             .map(|task| task.schedule_to_start_seconds)
             .collect::<Vec<_>>();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|time| time.as_nanos() as i64)
-            .unwrap_or_default();
         let _writer = self.writer.lock().expect("matching writer gate");
-        self.append_serialized(&data, now, Some(&timeouts))
+        self.append_serialized(&data, now_nanos, Some(&timeouts))
     }
     pub fn task_list_kind(&self) -> i16 {
         self.state

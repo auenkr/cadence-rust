@@ -146,6 +146,7 @@ impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTa
                         .await
                 }
                 Parent::Remote(channel) => {
+                    matching_yarpc_grpc_metadata(&mut request);
                     m::matching_api_client::MatchingApiClient::new(channel)
                         .poll_for_decision_task(request)
                         .await
@@ -195,6 +196,7 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
                         .await
                 }
                 Parent::Remote(channel) => {
+                    matching_yarpc_grpc_metadata(&mut request);
                     m::matching_api_client::MatchingApiClient::new(channel)
                         .poll_for_activity_task(request)
                         .await
@@ -206,6 +208,25 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
             .map(tonic::Response::into_inner)
         })
     }
+}
+
+/// Go Matching's generated YARPC gRPC client sends these routing headers on
+/// every outbound Matching call. Preserve them when Rust forwards a worker poll
+/// to a remote parent, alongside the remaining caller deadline above.
+pub(crate) fn matching_yarpc_grpc_metadata<T>(request: &mut tonic::Request<T>) {
+    let metadata = request.metadata_mut();
+    metadata.insert(
+        "rpc-service",
+        tonic::metadata::MetadataValue::from_static("cadence-matching"),
+    );
+    metadata.insert(
+        "rpc-caller",
+        tonic::metadata::MetadataValue::from_static("cadence-matching"),
+    );
+    metadata.insert(
+        "rpc-encoding",
+        tonic::metadata::MetadataValue::from_static("proto"),
+    );
 }
 #[cfg(test)]
 impl<R: Send + 'static> ForwardPollRequest<R> for () {
@@ -229,7 +250,7 @@ impl ForwardState {
         }
     }
 }
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|time| time.as_nanos() as i64)
@@ -325,7 +346,7 @@ impl TaskDispatcher {
                 .ok_or(ClaimError::Queue(QueueError::Stopped));
         }
         let queue = self.queue.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::matching_blocking::run(move || {
             queue.read_batch_with_clock(100000, NonZeroU32::new(1).unwrap(), now)
         })
         .await
@@ -367,7 +388,7 @@ impl TaskDispatcher {
     async fn rewrite(&self, task: i64) {
         if let Some(writer) = &self.writer {
             let queue = self.queue.clone();
-            let data = tokio::task::spawn_blocking(move || queue.retry_data(task)).await;
+            let data = crate::matching_blocking::run(move || queue.retry_data(task)).await;
             let result = match data {
                 Ok(Ok(data)) => writer
                     .append_rewrite(crate::matching_writer::WriteTask {
@@ -391,7 +412,7 @@ impl TaskDispatcher {
             return;
         }
         let queue = self.queue.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = crate::matching_blocking::run(move || {
             if let Err(error) = queue.rewrite_failed(task, now()) {
                 queue.stop();
                 return Err(error);
@@ -412,7 +433,7 @@ impl TaskDispatcher {
     }
     async fn complete(&self, task: i64) {
         let queue = self.queue.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = crate::matching_blocking::run(move || {
             queue.complete(task)?;
             queue.run_garbage_collection(false)?;
             Ok::<_, QueueError>(())
@@ -1072,6 +1093,63 @@ mod tests {
         assert_eq!(activity.identity, "worker");
         assert!(activity.domain.is_empty());
         assert!(activity.task_list_metadata.is_none());
+    }
+    #[tokio::test]
+    async fn matching_remote_forward_reaches_go_yarpc_peer() {
+        let Ok(address) = std::env::var("CADENCE_MATCHING_GO_PEER") else {
+            return;
+        };
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
+        let target = || ForwardPoll {
+            target: Parent::Remote(channel.clone()),
+            domain_id: "00000000-0000-0000-0000-000000000001".into(),
+            parent_name: "parent".into(),
+            forwarded_from: "child".into(),
+            poller_id: "oracle-poller".into(),
+            isolation_group: "oracle-group".into(),
+            deadline: tokio::time::Instant::now() + Duration::from_secs(8),
+        };
+        let decision = p::PollForDecisionTaskRequest {
+            identity: "oracle-worker".into(),
+            ..Default::default()
+        }
+        .forward(target())
+        .await
+        .unwrap();
+        let decision_observation = std::str::from_utf8(&decision.task_token).unwrap();
+        assert!(decision_observation.starts_with("go-yarpc-decision|"));
+        assert!(
+            decision_observation.contains("|cadence-matching|cadence-matching|true|proto"),
+            "unexpected Go YARPC decision observation: {decision_observation}"
+        );
+        assert_eq!(decision.started_event_id, 17);
+        assert_eq!(
+            decision.workflow_execution.unwrap().workflow_id,
+            "go-peer-workflow"
+        );
+        let activity = p::PollForActivityTaskRequest {
+            identity: "oracle-worker".into(),
+            ..Default::default()
+        }
+        .forward(target())
+        .await
+        .unwrap();
+        let activity_observation = std::str::from_utf8(&activity.task_token).unwrap();
+        assert!(activity_observation.starts_with("go-yarpc-activity|"));
+        assert!(
+            activity_observation.contains("|cadence-matching|cadence-matching|true|proto"),
+            "unexpected Go YARPC activity observation: {activity_observation}"
+        );
+        assert_eq!(activity.activity_id, "go-peer-activity");
+        assert_eq!(
+            activity.workflow_execution.unwrap().workflow_id,
+            "go-peer-workflow"
+        );
+
     }
     fn fixture(
         count: usize,

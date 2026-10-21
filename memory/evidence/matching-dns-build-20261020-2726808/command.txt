@@ -1,0 +1,1 @@
+cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server --bin cadence-server

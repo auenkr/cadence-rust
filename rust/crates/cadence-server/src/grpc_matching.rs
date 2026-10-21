@@ -300,6 +300,8 @@ pub struct Matching {
     membership: Option<crate::matching_membership::Membership>,
     shard_router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
     task_list_ownership: Option<TaskListOwnershipCheck>,
+    rpc_quota: Arc<crate::matching_quota::MatchingRpcQuota>,
+    throttled_logger: Arc<crate::matching_throttled_logger::MatchingThrottledLogger>,
     pub(crate) poll_expiration: std::time::Duration,
     metrics: crate::matching_metrics::MatchingMetrics,
     domain_name_resolver: Option<DomainNameResolver>,
@@ -319,6 +321,10 @@ pub type TaskListOwnershipCheck = Arc<
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
         let semaphores = crate::matching_semaphore::Registry::new(state.executions.clone());
+        let rpc_quota = Arc::new(crate::matching_quota::MatchingRpcQuota::with_metric_sink(
+            state.admin.dynamic_config.clone(), Arc::new(|_| {}),
+        ));
+        let throttled_logger = Arc::new(crate::matching_throttled_logger::MatchingThrottledLogger::new(state.admin.dynamic_config.clone()));
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
@@ -329,6 +335,8 @@ impl Matching {
             membership: None,
             shard_router: None,
             task_list_ownership: None,
+            rpc_quota,
+            throttled_logger,
             poll_expiration: std::time::Duration::from_secs(60),
             metrics: crate::matching_metrics::MatchingMetrics::default(),
             domain_name_resolver: None,
@@ -337,6 +345,10 @@ impl Matching {
     /// Install an optional inbound Matching metrics sink.
     pub fn with_metrics(mut self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
         self.metrics = crate::matching_metrics::MatchingMetrics::new(sink);
+        let quota_metrics = self.metrics.clone();
+        self.rpc_quota.set_metric_sink(Arc::new(move |rejection| {
+            quota_metrics.quota_rejection(rejection)
+        }));
         if let Some(queues) = self.queues.take() {
             self.queues = Some(queues.with_metrics(self.metrics.clone()));
         }
@@ -1466,6 +1478,7 @@ impl Matching {
                         partition_config,
                     });
                     request.set_timeout(timeout);
+                    crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
                     client
                         .add_decision_task(request)
                         .await
@@ -1484,6 +1497,7 @@ impl Matching {
                         activity_task_dispatch_info: None,
                     });
                     request.set_timeout(timeout);
+                    crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
                     client
                         .add_activity_task(request)
                         .await
@@ -1530,6 +1544,22 @@ impl Matching {
         }
         .domain_name(id)
     }
+    fn check_rpc_quota(
+        &self,
+        method: crate::matching_quota::MatchingRpc,
+        domain_id: Option<&str>,
+        domain_name: Option<&str>,
+    ) -> Result<(), Status> {
+        let resolved = domain_name.map(str::to_owned).or_else(|| domain_id.map(|id| self.domain_name(id).unwrap_or_default()));
+        if self.rpc_quota.allow(method, resolved.as_deref()) { Ok(()) } else {
+            Err(crate::grpc::detailed_status(
+                tonic::Code::ResourceExhausted,
+                "Matching host rps exceeded",
+                "ServiceBusyError",
+                cadence_proto::api::ServiceBusyError { reason: String::new() },
+            ))
+        }
+    }
     fn register_poll(&self, key: PollKey) -> PollGuard {
         let cancel = Arc::new(Notify::new());
         if let Some(previous) = self
@@ -1559,7 +1589,12 @@ impl m::matching_api_server::MatchingApi for Matching {
             request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForDecisionTask, Some(&request.get_ref().domain_id), None)?;
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
+        if incoming_deadline.is_none() {
+            self.throttled_logger.error("PollForDecisionTask", "Context timeout not set for long poll API.");
+            return Err(Status::invalid_argument("Context timeout is not set."));
+        }
         let r = request.get_ref().clone();
         let mut payload = r
             .request
@@ -1776,7 +1811,12 @@ impl m::matching_api_server::MatchingApi for Matching {
             request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForActivityTask, Some(&request.get_ref().domain_id), None)?;
         let incoming_deadline = crate::matching_sync::request_deadline(&request);
+        if incoming_deadline.is_none() {
+            self.throttled_logger.error("PollForActivityTask", "Context timeout not set for long poll API.");
+            return Err(Status::invalid_argument("Context timeout is not set."));
+        }
         let r = request.get_ref().clone();
         let mut payload = r
             .request
@@ -1974,6 +2014,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddDecisionTask, Some(&request.get_ref().domain_id), None)?;
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     task_list_name(
@@ -2169,6 +2210,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddActivityTask, Some(&request.get_ref().domain_id), None)?;
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     task_list_name(
@@ -2358,6 +2400,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::QueryWorkflow, Some(&request.get_ref().domain_id), None)?;
                     let incoming_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     let mut payload = r
@@ -2591,6 +2634,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::GetTaskListsByDomain, None, Some(&request.get_ref().domain))?;
                     let r = request.get_ref().clone();
                     if let Some(queues) = &self.queues {
                         let domain = self
@@ -2709,6 +2753,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::ListTaskListPartitions, None, Some(&request.get_ref().domain))?;
                     let r = request.get_ref().clone();
                     let task_list = r.task_list.unwrap_or_default();
                     // Go resolves `request.GetDomain()` through the domain cache; the
@@ -2758,6 +2803,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::AcquireSemaphore, Some(&request.get_ref().domain_id), None)?;
                     use crate::matching_semaphore::Identifier;
                     use cadence_api::enums::SemaphoreAcquireOutcome;
                     let r = request.get_ref().clone();
@@ -2783,8 +2829,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let manager = self
                         .semaphores
                         .get_or_create(identifier)
+                        .await
                         .map_err(semaphore_status)?;
-                    let result = manager.acquire(&r.owner_id).map_err(semaphore_status)?;
+                    let result = manager.acquire(&r.owner_id).await.map_err(semaphore_status)?;
                     let outcome = match result.outcome {
                         SemaphoreAcquireOutcome::Acquired => 1,
                         SemaphoreAcquireOutcome::NoSlot => 2,
@@ -2820,6 +2867,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::UpdateTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
                     let task_list = r
@@ -2958,6 +3006,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::RefreshTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
                     let task_list = r
@@ -3043,6 +3092,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::CancelOutstandingPoll, Some(&request.get_ref().domain_id), None)?;
                     let r = request.get_ref().clone();
                     self.domain_name(&r.domain_id)?;
                     if !matches!(r.task_list_type, 1 | 2) {
@@ -3083,6 +3133,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::RespondQueryTaskCompleted, Some(&request.get_ref().domain_id), None)?;
         use crate::grpc_convert as cv;
         let r = request.get_ref().clone();
         let mut payload = r
@@ -3186,6 +3237,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ),
                 ),
                 async {
+            self.check_rpc_quota(crate::matching_quota::MatchingRpc::DescribeTaskList, Some(&request.get_ref().domain_id), None)?;
                     let r = request.get_ref().clone();
                     let mut payload = r
                         .request

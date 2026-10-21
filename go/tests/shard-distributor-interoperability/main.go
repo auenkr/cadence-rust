@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type fixtureStore struct {
 	heartbeats  map[string]store.HeartbeatState
 	assignments map[string]*store.AssignedState
 	subscribers map[chan map[*store.ShardOwner][]string]struct{}
+	failLookup  bool
 }
 
 func newFixtureStore() *fixtureStore {
@@ -44,6 +46,9 @@ func key(namespace, id string) string { return namespace + "\x00" + id }
 func (s *fixtureStore) GetShardOwner(_ context.Context, namespace, shard string) (*store.ShardOwner, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failLookup {
+		return nil, fmt.Errorf("injected shard-manager lookup failure")
+	}
 	owner := s.owners[key(namespace, shard)]
 	if owner == nil {
 		return nil, store.ErrShardNotFound
@@ -104,6 +109,33 @@ func (s *fixtureStore) setAssignment(namespace, executor string, shardIDs []stri
 		}
 	}
 }
+func (s *fixtureStore) addAssignment(namespace, executor string, shardIDs []string, metadata map[string]string) {
+	s.mu.Lock()
+	assigned := s.assignments[key(namespace, executor)]
+	combined := []string{}
+	if assigned != nil {
+		for shard := range assigned.AssignedShards {
+			combined = append(combined, shard)
+		}
+	}
+	s.mu.Unlock()
+	seen := map[string]bool{}
+	for _, shard := range combined {
+		seen[shard] = true
+	}
+	for _, shard := range shardIDs {
+		if !seen[shard] {
+			combined = append(combined, shard)
+			seen[shard] = true
+		}
+	}
+	s.setAssignment(namespace, executor, combined, metadata)
+}
+func (s *fixtureStore) setLookupFailure(fail bool) {
+	s.mu.Lock()
+	s.failLookup = fail
+	s.mu.Unlock()
+}
 func clone(in map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range in {
@@ -124,6 +156,8 @@ type command struct {
 
 func main() {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	must(err)
+	controlListener, err := net.Listen("tcp", "127.0.0.1:0")
 	must(err)
 	fixture := newFixtureStore()
 	timeSource := clock.NewRealTimeSource()
@@ -147,7 +181,50 @@ func main() {
 	var baselineCancel context.CancelFunc
 	defer dispatcher.Stop()
 	defer api.Stop()
-	must(json.NewEncoder(os.Stdout).Encode(map[string]string{"address": listener.Addr().String(), "namespace": "matching"}))
+	control := http.NewServeMux()
+	control.HandleFunc("/command", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		var cmd command
+		if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch cmd.Op {
+		case "stats":
+			result = fixture.snapshot(cmd.Namespace)
+		case "watchers":
+			result = fixture.watcherCount()
+		case "assign":
+			fixture.setAssignment(cmd.Namespace, cmd.Executor, cmd.Shards, cmd.Metadata)
+			result = "ok"
+		case "add-shards":
+			fixture.addAssignment(cmd.Namespace, cmd.Executor, cmd.Shards, cmd.Metadata)
+			result = "ok"
+		case "fail-lookups":
+			fixture.setLookupFailure(true)
+			result = "ok"
+		case "recover-lookups":
+			fixture.setLookupFailure(false)
+			result = "ok"
+		default:
+			http.Error(w, fmt.Sprintf("unknown operation %q", cmd.Op), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": result})
+	})
+	control.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready", "namespace": "matching"})
+	})
+	go func() { _ = http.Serve(controlListener, control) }()
+	must(json.NewEncoder(os.Stdout).Encode(map[string]string{
+		"address": listener.Addr().String(), "control_address": controlListener.Addr().String(), "namespace": "matching",
+	}))
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		var cmd command
