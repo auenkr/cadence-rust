@@ -347,13 +347,16 @@ if args.postgres:
         pg_environment['PGSSLKEY'] = postgres_key
     sql_checks = {
         'goDomainRow': "SELECT count(*) FROM domains WHERE id=decode(replace(:'domain_id','-',''),'hex') AND name=:'domain'",
-        'rustTaskListRow': "SELECT count(*) FROM task_lists WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND name=:'task_list' AND task_type=0",
+        'rustTaskListRow': "SELECT count(*) FROM task_lists WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND name=:'task_list' AND task_type=:'task_type'::smallint AND range_id > 0 AND octet_length(data) > 0 AND data_encoding IN ('thriftrw','thriftrw_snappy')",
+        'goDomainMetadataRow': "SELECT count(*) FROM domain_metadata WHERE notification_version > 0",
+        'goDomainBlob': "SELECT count(*) FROM domains WHERE id=decode(replace(:'domain_id','-',''),'hex') AND octet_length(data) > 0 AND data_encoding IN ('thriftrw','thriftrw_snappy')",
     }
     sql_evidence = {}
     for name, statement in sql_checks.items():
         check = subprocess.run(['psql', '-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
             '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'domain={rust_evidence["domain"]}',
-            '-v', f'task_list={rust_evidence["taskList"]}', '-f', '-'],
+            '-v', f'task_list={rust_evidence["taskList"]}', '-v',
+            f'task_type={rust_evidence.get("taskType", 0)}', '-f', '-'],
             input=statement + '\n', env=pg_environment, capture_output=True, text=True, timeout=30)
         (work / f'{name}.log').write_text(check.stdout + check.stderr)
         if check.returncode:
@@ -365,6 +368,8 @@ if args.postgres:
     (work / 'postgres-record-verification.json').write_text(json.dumps({
         'domainRow': sql_evidence['goDomainRow'],
         'rustMatchingTaskListRow': sql_evidence['rustTaskListRow'],
+        'goDomainMetadataRow': sql_evidence['goDomainMetadataRow'],
+        'goDomainBlob': sql_evidence['goDomainBlob'],
         'database': postgres_database,
         'evidence': str(evidence_file),
     }, indent=2) + '\n')
@@ -399,6 +404,14 @@ if args.postgres:
                     timeout=180)
             if consume.returncode:
                 raise RuntimeError(f'Go Matching could not consume the Rust-produced PostgreSQL task; see {work / "go-matching-consume-sdk.log"}')
+            consume_rows = subprocess.run(['psql', '-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
+                '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'task_list={pending["taskList"]}',
+                '-v', f'task_type={pending.get("taskType", 0)}', '-f', '-'],
+                input="SELECT count(*) FROM tasks WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND task_list_name=:'task_list' AND task_type=:'task_type'::smallint;\n",
+                env=pg_environment, capture_output=True, text=True, timeout=30)
+            (work / 'go-consumed-task-row-count.log').write_text(consume_rows.stdout + consume_rows.stderr)
+            if consume_rows.returncode or consume_rows.stdout.strip() != '0':
+                raise RuntimeError(f'Go Matching completion left {consume_rows.stdout.strip()!r} pending task rows; see {work / "go-consumed-task-row-count.log"}')
             with (work / 'go-verification-probe.log').open('w') as output:
                 verification = subprocess.run(['node', str(root / 'tests/matching-postgres-go-verify.cjs'),
                     f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', rust_evidence['domain'],
@@ -411,6 +424,8 @@ if args.postgres:
                 'serverCommand': verify_command,
                 'schemaWasSeededByGoAutoSetup': True,
                 'goMatchingConsumedRustProducedPendingTask': True,
+                'rustProducedPendingTaskRowsAfterGoConsumption': 0,
+                'exactlyOnceEvidence': 'one workflow completion event and zero remaining task rows',
                 'goMatchingConsumeSDKLog': str(work / 'go-matching-consume-sdk.log'),
                 'evidenceLog': str(work / 'go-verification-probe.log'),
             }, indent=2) + '\n')
