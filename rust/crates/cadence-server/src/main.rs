@@ -1056,6 +1056,9 @@ async fn main() -> anyhow::Result<()> {
             // opens Matching queues on the configured defaultStore. The
             // private data-dir database is only an embedded-development path.
             let mut matching_runtime = if run_matching {
+                // Keep this as a provider: Go reads the global drain property
+                // at shutdown, after membership withdrawal, rather than when
+                // the Matching runtime is constructed.
                 let drain = cadence_server::matching_runtime::live_shutdown_drain_duration(
                     state.admin.dynamic_config.clone(),
                 );

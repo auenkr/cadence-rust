@@ -87,10 +87,15 @@ pub type DrainDuration = Arc<dyn Fn() -> Duration + Send + Sync>;
 pub type EvictFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 pub type EvictSelf = Arc<dyn Fn() -> EvictFuture + Send + Sync>;
 
-async fn drain_service(
+async fn drain_service<F, Fut>(
     evict_self: &mut Option<EvictSelf>,
     drain_duration: &DrainDuration,
-) -> anyhow::Result<()> {
+    wait: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(Duration) -> Fut,
+    Fut: Future<Output = ()>,
+{
     let evict_result = if let Some(evict) = evict_self.take() {
         evict().await
     } else {
@@ -98,7 +103,7 @@ async fn drain_service(
     };
     let drain = drain_duration();
     if !drain.is_zero() {
-        tokio::time::sleep(drain).await;
+        wait(drain).await;
     }
     evict_result
 }
@@ -462,13 +467,21 @@ impl MatchingRuntime {
     /// Begin Go's shutdown drain while listeners remain live. The caller
     /// drops listeners only after this future completes.
     pub async fn drain(&mut self) -> anyhow::Result<()> {
+        self.drain_with(tokio::time::sleep).await
+    }
+
+    async fn drain_with<F, Fut>(&mut self, wait: F) -> anyhow::Result<()>
+    where
+        F: FnOnce(Duration) -> Fut,
+        Fut: Future<Output = ()>,
+    {
         if self.drained {
             return Ok(());
         }
         if let Some(drain) = &self.shard_distributor_drain {
             let _ = drain.send(true);
         }
-        let result = drain_service(&mut self.evict_self, &self.drain_duration).await;
+        let result = drain_service(&mut self.evict_self, &self.drain_duration, wait).await;
         self.drained = true;
         result
     }
@@ -777,9 +790,60 @@ mod tests {
             Duration::ZERO
         });
         let mut evictor = Some(evict);
-        drain_service(&mut evictor, &duration).await.unwrap();
+        drain_service(&mut evictor, &duration, |_| std::future::ready(()))
+            .await
+            .unwrap();
         assert_eq!(order.load(Ordering::SeqCst), 2);
         assert!(evictor.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_uses_drain_duration_updated_after_runtime_startup() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        overlay.lock().unwrap().update(
+            false,
+            "matching.shutdownDrainDuration",
+            vec![cadence_api::admin::DynamicConfigValue {
+                filters: vec![],
+                value: Some(cadence_api::types::DataBlob {
+                    encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                    data: br#""5ms""#.to_vec(),
+                }),
+            }],
+        );
+        let drain_duration = live_shutdown_drain_duration(overlay.clone());
+        let runtime =
+            MatchingRuntime::in_memory(crate::handlers::AppState::default(), drain_duration);
+
+        // The runtime and provider exist before this shutdown-time change.
+        // Go evaluates the property only after its membership eviction.
+        let update_overlay = overlay.clone();
+        let evict: EvictSelf = Arc::new(move || {
+            update_overlay.lock().unwrap().update(
+                false,
+                "matching.shutdownDrainDuration",
+                vec![cadence_api::admin::DynamicConfigValue {
+                    filters: vec![],
+                    value: Some(cadence_api::types::DataBlob {
+                        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                        data: br#""137ms""#.to_vec(),
+                    }),
+                }],
+            );
+            Box::pin(async { Ok(()) })
+        });
+        let mut runtime = runtime.with_membership_evictor(evict);
+
+        let selected = Arc::new(Mutex::new(None));
+        let observed = selected.clone();
+        runtime
+            .drain_with(move |duration| {
+                *observed.lock().unwrap() = Some(duration);
+                std::future::ready(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(*selected.lock().unwrap(), Some(Duration::from_millis(137)));
     }
 
     #[tokio::test]
