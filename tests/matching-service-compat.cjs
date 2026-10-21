@@ -42,8 +42,8 @@ function taskCount(taskList, fallbackDatabase, domainId) {
       if (value) pgEnv[name] = value;
     }
     const result = spawnSync('psql', ['-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1', '-v', `task_list=${taskList}`,
-      '-v', `domain_id=${domainId}`,
-      '-c', "SELECT count(*) FROM tasks WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND task_list_name = :'task_list' AND task_type = 0"], {
+      '-v', `domain_id=${domainId}`, '-f', '-'], {
+      input: "SELECT count(*) FROM tasks WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND task_list_name = :'task_list' AND task_type = 0;\n",
       encoding: 'utf8', env: pgEnv,
     });
     if (result.status === 0) result.stdout = result.stdout.trim();

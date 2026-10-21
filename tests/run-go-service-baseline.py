@@ -353,8 +353,8 @@ if args.postgres:
     for name, statement in sql_checks.items():
         check = subprocess.run(['psql', '-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
             '-v', f'domain_id={rust_evidence["domainId"]}', '-v', f'domain={rust_evidence["domain"]}',
-            '-v', f'task_list={rust_evidence["taskList"]}', '-c', statement],
-            env=pg_environment, capture_output=True, text=True, timeout=30)
+            '-v', f'task_list={rust_evidence["taskList"]}', '-f', '-'],
+            input=statement + '\n', env=pg_environment, capture_output=True, text=True, timeout=30)
         (work / f'{name}.log').write_text(check.stdout + check.stderr)
         if check.returncode:
             raise RuntimeError(f'PostgreSQL {name} check failed; see {work / f"{name}.log"}')
