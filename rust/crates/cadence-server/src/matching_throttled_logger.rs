@@ -172,7 +172,12 @@ mod tests {
         now.store(REFRESH_NANOS, Ordering::SeqCst);
         logger.error("PollForDecisionTask", "missing deadline");
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-        now.store(REFRESH_NANOS + 1_000_000_000, Ordering::SeqCst);
+        // Refresh samples rate=1 at 5s, but the limiter's last recorded time
+        // is 1ns before that. It accumulates one token at 5.999999999s.
+        now.store(REFRESH_NANOS + 999_999_998, Ordering::SeqCst);
+        logger.error("PollForDecisionTask", "missing deadline");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        now.store(REFRESH_NANOS + 999_999_999, Ordering::SeqCst);
         logger.error("PollForDecisionTask", "missing deadline");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
