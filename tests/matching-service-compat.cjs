@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
+const { createTaskObserver } = require('./matching-task-observer.cjs');
 const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
 const grpc = webRequire('@grpc/grpc-js');
 const loader = webRequire('@grpc/proto-loader');
@@ -12,89 +13,149 @@ const root = path.resolve(__dirname, '../go/idls/proto');
 const files = ['domain', 'workflow', 'worker'].map(name => path.join(root, `uber/cadence/api/v1/service_${name}.proto`));
 const internalRoot = path.resolve(__dirname, '../go/proto/internal');
 files.push(path.join(internalRoot, 'uber/cadence/matching/v1/service.proto'));
+files.push(path.join(root, 'uber/cadence/api/v1/service_semaphore.proto'));
 const schema = grpc.loadPackageDefinition(loader.loadSync(files, {
   includeDirs: [root, internalRoot], enums: String, longs: String, bytes: Buffer, defaults: true, oneofs: true,
 })).uber.cadence;
 const api = schema.api.v1;
+const matchingApi = schema.matching.v1;
 const peer = process.argv[2] || '127.0.0.1:7833';
 const restartMode = process.argv[7] === 'restart';
 const goServicesPid = Number(process.argv[8] || 0);
 const productionMode = process.argv[9] === 'production';
-const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
+const failureRecoveryMode = process.env.CADENCE_MATCHING_FAILURE_RECOVERY === '1';
+const shardManagerControl = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL;
+const shardManagerNamespace = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE || 'matching';
+const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
+clients.Matching = new schema.matching.v1.MatchingAPI(peer, grpc.credentials.createInsecure());
+const cassandraGate = process.env.CADENCE_MATCHING_CASSANDRA_GATE === '1';
+function cassandraCommand(args, label) {
+  const result = spawnSync('go', ['run', './tests/matching-cassandra-interop', ...args], {
+    cwd: path.resolve(__dirname, '..'), encoding: 'utf8', timeout: 120000, env: process.env,
+  });
+  fs.writeFileSync(path.join(path.resolve(process.argv[5]), `${label}.log`), `${result.stdout || ''}\n${result.stderr || ''}`);
+  if (result.status !== 0) throw new Error(`Cassandra ${label} failed (${result.error || result.status}); see ${path.resolve(process.argv[5], `${label}.log`)}`);
+  return JSON.parse(result.stdout.trim().split('\n').at(-1));
+}
+function sqliteTaskState(domainId, taskList, label) {
+  const database = productionMode ? process.env.CADENCE_MATCHING_SQLITE_DB : path.join(path.resolve(process.argv[5]), 'matching.db');
+  if (!database) throw new Error('SQLite production probe requires CADENCE_MATCHING_SQLITE_DB');
+  const result = spawnSync('python3', ['-c',
+    'import json,sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1],timeout=30); n=c.execute("select count(*) from tasks where task_list_name=? and task_type=0",(sys.argv[3],)).fetchone()[0]; r=c.execute("select range_id from task_lists where shard_id=0 and domain_id=? and name=? and task_type=0",(uuid.UUID(sys.argv[2]).bytes,sys.argv[3])).fetchone(); print(json.dumps({"queued_rows":n,"range_id":r[0] if r else 0}))',
+    database, domainId, taskList], { encoding: 'utf8' });
+  fs.writeFileSync(path.join(path.resolve(process.argv[5]), label + '.log'), (result.stdout || '') + '\n' + (result.stderr || ''));
+  if (result.status !== 0) throw new Error('SQLite task observation failed (' + (result.error || result.status) + '); see ' + path.resolve(process.argv[5], label + '.log'));
+  return JSON.parse(result.stdout.trim());
+}
+const taskObserver = createTaskObserver({
+  backend: cassandraGate ? 'cassandra' : 'sqlite',
+  cassandraCommand: (args, label) => cassandraCommand(args, label),
+  sqliteTaskState,
+});
+function acquireSemaphore(client, request) {
+  const metadata = new grpc.Metadata();
+  metadata.set('rpc-service', 'cadence-matching');
+  metadata.set('rpc-encoding', 'proto');
+  metadata.set('rpc-caller', 'cadence-cassandra-matching-gate');
+  return new Promise((resolve, reject) => client.AcquireSemaphore(request, metadata,
+    { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
+}
+let managedShardNames = new Set();
+let assignedExecutorId = '';
+let shardAssignmentLock = Promise.resolve();
+async function shardManagerCommand(command) {
+  if (!shardManagerControl) return null;
+  const response = await fetch(`${shardManagerControl}/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ namespace: shardManagerNamespace, ...command }),
+  });
+  if (!response.ok) throw new Error(`Go shard-manager control ${command.op} failed: HTTP ${response.status}`);
+  return (await response.json()).result;
+}
+async function registerShardWithGoManager(shardName, force = false) {
+  if (!shardManagerControl) return;
+  const next = shardAssignmentLock.then(async () => {
+    const wasManaged = managedShardNames.has(shardName);
+    managedShardNames.add(shardName);
+    const deadline = Date.now() + 30000;
+    let executorId, heartbeat;
+    while (Date.now() < deadline) {
+      const stats = await shardManagerCommand({ op: 'stats' });
+      const entries = Object.entries(stats || {}).sort((a, b) =>
+        (Date.parse(b[1].LastHeartbeat || b[1].lastHeartbeat || '') || 0)
+          - (Date.parse(a[1].LastHeartbeat || a[1].lastHeartbeat || '') || 0));
+      if (entries.length) {
+        [executorId, heartbeat] = entries[0];
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!executorId) throw new Error('Rust Matching did not heartbeat to the configured Go shard-manager');
+    if (force || executorId !== assignedExecutorId || !wasManaged) {
+      await shardManagerCommand({
+        op: 'assign', executor: executorId, shards: [...managedShardNames],
+        metadata: heartbeat.Metadata || heartbeat.metadata || {},
+      });
+      assignedExecutorId = executorId;
+    }
+    const readyDeadline = Date.now() + 15000;
+    while (Date.now() < readyDeadline) {
+      const stats = await shardManagerCommand({ op: 'stats' });
+      const current = stats?.[executorId];
+      const reports = current?.ReportedShards || current?.reportedShards || {};
+      if ([...managedShardNames].every(name => {
+        const status = reports[name]?.Status ?? reports[name]?.status;
+        return status === 1 || status === 'READY' || status === 'ready' || status === 'ShardStatusREADY';
+      })) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error(`Rust Matching did not report assigned shard ${shardName} READY`);
+  });
+  shardAssignmentLock = next.catch(() => {});
+  return next;
+}
 function call(service, method, request) {
+  const taskListName = request.taskList?.name || request.request?.taskList?.name;
+  if (taskListName) return registerShardWithGoManager(taskListName).then(() => callRpc(service, method, request));
+  return callRpc(service, method, request);
+}
+function callRpc(service, method, request) {
+  const taskListName = request.taskList?.name || request.request?.taskList?.name;
   const metadata = new grpc.Metadata();
   metadata.set('rpc-service', service === 'Matching' ? 'cadence-matching' : 'cadence-frontend');
   metadata.set('rpc-encoding', 'proto');
   metadata.set('rpc-caller', 'cadence-service-compat');
   return new Promise((resolve, reject) => clients[service][method](request, metadata,
-    { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
+    { deadline: Date.now() + 20000 }, (error, response) => {
+      if (error) {
+        error.message = `${service}.${method} failed${taskListName ? ` for task list ${taskListName}` : ''}: ${error.message}`;
+        return reject(error);
+      }
+      resolve(response);
+    }));
 }
 const payload = data => ({ data: Buffer.from(data) });
-function sqlText(value) { return String(value).replaceAll("'", "''"); }
-function domainHex(domainId) { return String(domainId).replace(/-/g, '').toLowerCase(); }
-const MYSQL_OBSERVATION_TIMEOUT_MS = 30000;
-function mysqlQuery(sql) {
-  if (!process.env.CADENCE_MATCHING_MYSQL) return { status: 1, stdout: '', stderr: 'MySQL probe mode is not enabled' };
-  const container = process.env.CADENCE_MYSQL_DOCKER_CONTAINER;
-  const password = process.env.CADENCE_MYSQL_PASSWORD || '';
-  const database = process.env.CADENCE_MYSQL_DATABASE || 'cadence';
-  const command = container
-    ? ['docker', ['exec', container, 'mysql', '--batch', '--skip-column-names', '-uroot',
-      `-p${password}`, database, '-e', sql]]
-    : ['mysql', ['--batch', '--skip-column-names', '--host', process.env.CADENCE_MYSQL_HOST || '127.0.0.1',
-      '--port', process.env.CADENCE_MYSQL_PORT || '3306', '--user', process.env.CADENCE_MYSQL_USER || 'root',
-      `--password=${password}`, database, '-e', sql]];
-  // The observation is bounded so a stalled database or container cannot hang
-  // the gate; every failure mode is reported instead of a silent empty result.
-  const result = spawnSync(command[0], command[1], {
-    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: MYSQL_OBSERVATION_TIMEOUT_MS,
-  });
-  if (result.error) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation failed: ${result.error.message}` };
-  if (result.signal) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation was killed by ${result.signal} after ${MYSQL_OBSERVATION_TIMEOUT_MS}ms` };
-  return { status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
-}
-function mysqlRows(sql) {
-  const result = mysqlQuery(sql);
-  if (result.status !== 0) throw new Error(`MySQL query failed: ${(result.stderr || '').trim() || sql}`);
-  return result.stdout.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => line.split('\t'));
-}
-// Every task query is constrained by the canonical domain UUID, the task list
-// and the task type, exactly like Go's task table keys.
-function durableTaskCount(domainId, taskList, taskType, fallbackDatabase) {
-  if (process.env.CADENCE_MATCHING_MYSQL) {
-    const query = `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList)}' AND task_type=${taskType}`;
-    const result = mysqlQuery(query);
-    if (result.status === 0) result.stdout = result.stdout.trim();
-    return result;
-  }
-  if (process.env.CADENCE_MATCHING_POSTGRES) {
-    const env = { ...process.env,
-      PGHOST: process.env.CADENCE_POSTGRES_HOST, PGPORT: process.env.CADENCE_POSTGRES_PORT,
-      PGUSER: process.env.CADENCE_POSTGRES_USER, PGDATABASE: process.env.CADENCE_POSTGRES_DATABASE,
-      PGPASSWORD: process.env.CADENCE_POSTGRES_PASSWORD || '',
-      PGSSLMODE: process.env.CADENCE_POSTGRES_SSLMODE || 'disable' };
-    for (const [name, value] of [['PGSSLROOTCERT', process.env.CADENCE_POSTGRES_CA_FILE],
-      ['PGSSLCERT', process.env.CADENCE_POSTGRES_CERT_FILE], ['PGSSLKEY', process.env.CADENCE_POSTGRES_KEY_FILE]]) {
-      if (value) env[name] = value;
-    }
-    const result = spawnSync('psql', ['-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
-      '-v', `task_list=${taskList}`, '-v', `domain_id=${domainId}`, '-v', `task_type=${taskType}`,
-      '-c', "SELECT count(*) FROM tasks WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND task_list_name=:'task_list' AND task_type=:'task_type'"],
-      { encoding: 'utf8', env, timeout: 30000 });
-    if (result.status === 0) result.stdout = result.stdout.trim();
-    return result;
-  }
-  const database = process.env.CADENCE_MATCHING_SQLITE_DB || fallbackDatabase;
-  return spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where domain_id=? and task_list_name=? and task_type=?", (bytes.fromhex(sys.argv[2]), sys.argv[3], int(sys.argv[4]))).fetchone()[0])', database, domainHex(domainId), taskList, String(taskType)], { encoding: 'utf8', timeout: 60000 });
-}
-// The production MySQL gate (task garbage collection, persisted
-// acknowledgement, range consistency and Go's domain metadata) lives in
-// tests/matching-mysql-gate.cjs together with the ThriftRW blob decoder.
-const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder } = require('./matching-mysql-gate.cjs');
 async function run() {
-  const id = randomUUID(), domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
+  const id = process.env.CADENCE_MATCHING_TEST_ID || randomUUID();
+  const domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
   await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
   const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
+  let pageTokenDomain, domainPages = 0;
+  if (cassandraGate) {
+    pageTokenDomain = `service-compat-page-${id}`;
+    await call('DomainAPI', 'RegisterDomain', { name: pageTokenDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+    let pageToken = Buffer.alloc(0);
+    const listedDomainNames = new Set();
+    do {
+      const page = await call('DomainAPI', 'ListDomains', { pageSize: 1, nextPageToken: pageToken });
+      for (const item of page.domains) listedDomainNames.add(item.name);
+      pageToken = page.nextPageToken;
+      domainPages++;
+      assert(domainPages < 1000, 'domain page token traversal did not terminate');
+    } while (pageToken?.length);
+    assert(domainPages > 1, 'Go Cassandra ListDomains must exercise at least one opaque page-token continuation');
+    assert(listedDomainNames.has(domain) && listedDomainNames.has(pageTokenDomain),
+      'Go Cassandra domain enumeration must return both registered domains through opaque page tokens');
+  }
   const work = path.resolve(process.argv[5]);
   fs.mkdirSync(work, { recursive: true });
   const ready = path.join(work, 'ready'), stop = path.join(work, 'stop'), fixture = path.join(work, 'fixture.json');
@@ -135,8 +196,44 @@ async function run() {
     exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
     return child;
   }
+  function startSecondaryRust() {
+    const output = fs.openSync(path.join(work, 'rust-server-secondary.log'), 'w');
+    const child = spawn(productionBinary, [
+      'start', '--config', rustConfig, '--services', 'matching', '--port', '0',
+      '--history-grpc-port', historyGrpcPort,
+      '--matching-grpc-port', process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT,
+      '--matching-tchannel-port', process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL,
+      '--data-dir', path.join(path.dirname(rustDataDir), 'rust-matching-secondary-data'),
+    ], { cwd: path.resolve(__dirname, '..'), env: process.env, stdio: ['ignore', output, output] });
+    fs.closeSync(output);
+    return child;
+  }
+  function directMatchingClient(address) {
+    return new matchingApi.MatchingAPI(address, grpc.credentials.createInsecure());
+  }
+  function directDecisionPoll(client, domainId, taskListName, suffix) {
+    const metadata = new grpc.Metadata();
+    metadata.set('rpc-service', 'cadence-matching');
+    metadata.set('rpc-caller', 'cadence-matching-failure-recovery');
+    metadata.set('rpc-encoding', 'proto');
+    return new Promise((resolve, reject) => client.PollForDecisionTask({
+      domainId, pollerId: `failure-probe-${suffix}`, request: {
+        domain, taskList: { name: taskListName }, identity: `failure-probe-${suffix}`,
+      },
+    }, metadata, { deadline: Date.now() + 10000 }, (error, response) => error ? reject(error) : resolve(response)));
+  }
+  function directPartitionOwner(client, domainName, taskListName) {
+    return new Promise((resolve, reject) => client.ListTaskListPartitions({
+      domain: domainName, taskList: { name: taskListName },
+    }, new grpc.Metadata(), { deadline: Date.now() + 10000 }, (error, response) => {
+      if (error) return reject(error);
+      const partitions = response.decisionTaskListPartitions || [];
+      resolve(partitions.find(partition => partition.key === taskListName)?.ownerHostName || '');
+    }));
+  }
   async function waitForRustReady(label) {
     const deadline = Date.now() + 180000;
+    let lastReadinessError;
     while (Date.now() < deadline) {
       if (productionMode) {
         try {
@@ -147,7 +244,8 @@ async function run() {
             taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
           });
           return;
-        } catch (_) {
+        } catch (error) {
+          lastReadinessError = error;
           // JOIN, SWIM, label publication, or Go membership propagation may
           // still be in progress. The timeout below leaves the cause in logs.
         }
@@ -157,10 +255,14 @@ async function run() {
       if (rust.exitCode !== null || rust.signalCode !== null) throw new Error(`Rust Matching ${label} exited before readiness; see ${work}/rust-server-${label}.log`);
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    throw new Error(`Rust Matching ${label} did not become discoverable through Go Frontend; see ${work}/rust-server-${label}.log`);
+    throw new Error(`Rust Matching ${label} did not become discoverable through Go Frontend; last readiness error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; see ${work}/rust-server-${label}.log`);
   }
   let exited;
   let rust = startRust('before-restart');
+  let secondaryRust;
+  let semaphoreEvidence;
+  let semaphoreAcquire;
+  let semaphoreOwner;
   try {
     await waitForRustReady('before-restart');
   const startRequest = {
@@ -168,37 +270,337 @@ async function run() {
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
     taskStartToCloseTimeout: { seconds: '10' }, input: payload('start'),
   };
-  // The persisted watermark of a queue is read while its task is stored and
-  // undelivered. A task that a poller already holds may be collected before
-  // the poll returns, so the watermark is never read after a delivery.
-  const awaitPersistedTask = async (listName, taskType, timeoutMs = 20000) => {
-    if (!process.env.CADENCE_MATCHING_MYSQL && !process.env.CADENCE_MATCHING_POSTGRES) return null;
-    const deadline = Date.now() + timeoutMs;
-    if (process.env.CADENCE_MATCHING_POSTGRES) {
-      for (;;) {
-        const rows = durableTaskCount(domainId, listName, taskType, null);
-        if (rows.status !== 0) throw new Error(`PostgreSQL task observation failed: ${rows.stderr}`);
-        const count = Number(rows.stdout);
-        if (count > 0) return { taskType, rows: count, maxTaskId: null };
-        if (Date.now() >= deadline) return { taskType, rows: count, maxTaskId: null };
+  if (productionMode && failureRecoveryMode) {
+    if (!process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT || !process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL) {
+      throw new Error('two-instance failure recovery requires secondary Matching ports');
+    }
+    secondaryRust = startSecondaryRust();
+    const convergenceDeadline = Date.now() + 30000;
+    while (Date.now() < convergenceDeadline) {
+      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) throw new Error(`secondary Rust Matching exited; see ${work}/rust-server-secondary.log`);
+      try {
+        await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-ready-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+        break;
+      } catch (_) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
+    if (Date.now() >= convergenceDeadline) throw new Error('second Rust Matching instance did not join the original Ringpop cluster');
+    if (cassandraGate) {
+      const semaphoreName = `durable-${id}`;
+      const createdSemaphore = await call('SemaphoreAPI', 'CreateSemaphore', {
+        domain, semaphoreName, capacity: 1, bucketCapacity: 1,
+      });
+      assert.equal(createdSemaphore.semaphore.capacity, 1);
+      assert.equal(createdSemaphore.semaphore.bucketCapacity, 1);
+      const semaphoreClients = [clients.Matching, directMatchingClient(process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT)];
+      semaphoreAcquire = (owner, clientIndex = 0) => acquireSemaphore(semaphoreClients[clientIndex], {
+        domainId, semaphoreName, bucket: 0, ownerId: owner,
+      }).catch(error => {
+        if ((error.code === grpc.status.ABORTED || error.code === grpc.status.UNAVAILABLE)
+            && clientIndex + 1 < semaphoreClients.length) return semaphoreAcquire(owner, clientIndex + 1);
+        throw error;
+      });
+      const owners = [`${id.length}:${id}:${randomUUID()}:1`, `${id.length}:${id}:${randomUUID()}:2`];
+      const grants = await Promise.all(owners.map(owner => semaphoreAcquire(owner)));
+      const acquired = grants.map((grant, index) => ({ grant, owner: owners[index] }))
+        .filter(({ grant }) => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_ACQUIRED');
+      const unavailable = grants.filter(grant => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT');
+      assert.equal(acquired.length, 1, 'Cassandra semaphore capacity one must grant exactly one concurrent owner');
+      assert.equal(unavailable.length, 1, 'Cassandra semaphore capacity one must reject the competing owner');
+      const expectedToken = Number(acquired[0].grant.tokenId);
+      const stored = cassandraCommand(['verify-semaphore', domainId, semaphoreName, acquired[0].owner, String(expectedToken)], 'semaphore-before-recovery');
+      assert.equal(stored.owner_id, acquired[0].owner, 'Go gocql must observe the exact Rust semaphore owner row');
+      assert.equal(stored.token_id, expectedToken, 'Go gocql must observe the positive Rust semaphore token row');
+      semaphoreOwner = stored.owner_id;
+      // Go's semaphore.Identifier.RingKey is domainID_semaphoreName_bucket.
+      // Resolve that exact key through both production Rust handlers before any
+      // crash, so the durable hold is tied to the process that owns its manager.
+      const semaphoreRingKey = `${domainId}_${semaphoreName}_0`;
+      const primarySemaphoreOwner = await directPartitionOwner(
+        directMatchingClient(`127.0.0.1:${rustGrpcPort}`), domain, semaphoreRingKey,
+      );
+      const secondarySemaphoreOwner = await directPartitionOwner(
+        directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`), domain, semaphoreRingKey,
+      );
+      assert(primarySemaphoreOwner, 'primary did not resolve the semaphore bucket ring key');
+      assert.equal(secondarySemaphoreOwner, primarySemaphoreOwner, 'Rust instances disagree on the semaphore bucket owner');
+      const semaphoreOwnerIndex = primarySemaphoreOwner === `127.0.0.1:${rustTChannel}` ? 0
+        : primarySemaphoreOwner === `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}` ? 1 : -1;
+      assert(semaphoreOwnerIndex >= 0, `semaphore bucket resolves to an unknown Rust host: ${primarySemaphoreOwner}`);
+      semaphoreEvidence = {
+        semaphoreName, bucket: 0, ringKey: semaphoreRingKey,
+        bucketOwner: primarySemaphoreOwner, bucketOwnerIndex: semaphoreOwnerIndex,
+        createdThroughGoFrontend: true, ownerId: semaphoreOwner, tokenId: stored.token_id,
+        concurrentGrants: acquired.length, noSlotResponses: unavailable.length,
+        persistedHoldBeforeCrash: { ownerId: stored.owner_id, tokenId: stored.token_id },
+      };
+    }
+    const primaryMembershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    const secondaryPeer = directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
+    const primaryAddress = `127.0.0.1:${rustTChannel}`;
+    const secondaryAddress = `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`;
+    const ownerProbeNames = Array.from({ length: 64 }, (_, index) => `ringpop-convergence-${id}-${index}`);
+    const ringpopDeadline = Date.now() + 30000;
+    let observedOwners = new Map();
+    while (Date.now() < ringpopDeadline) {
+      const observations = await Promise.all(ownerProbeNames.map(async name => {
+        const [primaryOwner, secondaryOwner] = await Promise.all([
+          directPartitionOwner(primaryMembershipPeer, domain, name),
+          directPartitionOwner(secondaryPeer, domain, name),
+        ]);
+        return [name, primaryOwner, secondaryOwner];
+      }));
+      observedOwners = new Map(observations.map(([name, primaryOwner, secondaryOwner]) => [name, { primaryOwner, secondaryOwner }]));
+      const owners = new Set(observations.flatMap(([, primaryOwner, secondaryOwner]) => [primaryOwner, secondaryOwner]));
+      if (observations.every(([, primaryOwner, secondaryOwner]) => primaryOwner === secondaryOwner)
+          && owners.has(primaryAddress) && owners.has(secondaryAddress)) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    const convergedOwnership = [...observedOwners.values()];
+    const convergedOwnerSet = new Set(convergedOwnership.map(owner => owner.primaryOwner));
+    assert(convergedOwnership.length === ownerProbeNames.length
+      && convergedOwnership.every(owner => owner.primaryOwner === owner.secondaryOwner)
+      && convergedOwnerSet.has(primaryAddress) && convergedOwnerSet.has(secondaryAddress),
+    'both Rust Matching members must expose the same Ringpop ownership map, including keys owned by each host');
+    const idleList = { name: `production-idle-${id}` };
+    const pendingIdlePoll = call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: idleList, identity: 'production-idle-probe' });
+    const idleDeadline = Date.now() + 10000;
     for (;;) {
-      const rows = mysqlRows(`SELECT COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(listName)}' AND task_type=${taskType}`);
-      const count = Number(rows[0][0]);
-      const value = rows[0][1] && rows[0][1] !== 'NULL' ? Number(rows[0][1]) : null;
-      if (count > 0 && value !== null && Number.isFinite(value)) return { taskType, rows: count, maxTaskId: value };
-      if (Date.now() >= deadline) return { taskType, rows: count, maxTaskId: value === null ? null : value };
+      const info = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+      if (info.pollers.some(poller => poller.identity === 'production-idle-probe')) break;
+      if (Date.now() > idleDeadline) throw new Error('production idle probe poll was not registered');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    const evictionDeadline = Date.now() + 30000;
+    const idleResult = await Promise.race([pendingIdlePoll, new Promise(resolve => setTimeout(() => resolve(null), evictionDeadline - Date.now()))]);
+    if (!idleResult) throw new Error('production Matching idle manager did not evict and release its long poll');
+    assert.equal(idleResult.taskToken.length, 0, 'production idle manager eviction must release its long poll with an empty successful response');
+    const idleRecoveryID = `production-idle-recovery-${id}`;
+    await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: idleRecoveryID, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: idleList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const idleSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: idleRecoveryID, CADENCE_MIXED_RESTART_TASK_LIST: idleList.name,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'production-idle-recovery-sdk.log'), `${idleSdk.stdout || ''}\n${idleSdk.stderr || ''}`);
+    if (idleSdk.status !== 0) throw new Error(`existing SDK could not complete work after production idle eviction: ${idleSdk.error || idleSdk.status}; see ${work}/production-idle-recovery-sdk.log`);
+    const idleHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: idleRecoveryID } });
+    const idleCompletions = idleHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(idleCompletions, 1, 'production idle eviction recovery must complete exactly once');
+    fs.writeFileSync(path.join(work, 'production-failure-recovery-checkpoints.json'), JSON.stringify({
+      topology: 'two Rust Matching hosts with Go Frontend/History/Worker',
+      sameRingOwnershipMap: convergedOwnership,
+      idleEviction: {
+        taskList: idleList.name, releasedWithEmptyResponse: idleResult.taskToken.length === 0,
+        sdkCompletedWorkflow: idleRecoveryID, completionEvents: idleCompletions,
+      },
+    }, null, 2) + '\n');
+
+    const crashList = `production-crash-${id}`;
+    const crashProbeID = `production-crash-owner-probe-${id}`;
+    const crashTaskList = { name: crashList };
+    const probeStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: crashProbeID, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: crashTaskList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const directPeers = [
+      directMatchingClient(`127.0.0.1:${rustGrpcPort}`),
+      directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`),
+    ];
+    let directPolls;
+    const directDeadline = Date.now() + 30000;
+    while (Date.now() < directDeadline) {
+      directPolls = await Promise.allSettled(directPeers.map((client, index) =>
+        directDecisionPoll(client, domainId, crashList, `${index}-${randomUUID()}`)));
+      if (directPolls.some(result => result.status === 'fulfilled' && result.value.taskToken?.length > 0)) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-  };
+    const ownerIndex = directPolls?.findIndex(result => result.status === 'fulfilled' && result.value.taskToken?.length > 0) ?? -1;
+    assert(ownerIndex >= 0, 'neither production Rust Matching instance delivered the queued owner-probe task');
+    const staleResult = directPolls[1 - ownerIndex];
+    assert.equal(staleResult.status, 'rejected', 'direct request to non-owner must be rejected with Go-compatible typed ownership');
+    assert.equal(staleResult.reason.code, grpc.status.ABORTED, 'non-owner must return the typed TaskListNotOwnedByHost status');
+    assert.match(staleResult.reason.details || '', /task list is not owned by this host/i);
+    const nonOwnerIndex = 1 - ownerIndex;
+    const nonOwnerGrpcPort = nonOwnerIndex === 0
+      ? rustGrpcPort : process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT;
+    const goTypedOwnership = spawnSync('go', ['run', './tests/matching-error-oracle'], {
+      cwd: path.resolve(__dirname, '..', 'go'),
+      env: {
+        ...process.env,
+        CADENCE_MATCHING_ERROR_TARGET: `127.0.0.1:${nonOwnerGrpcPort}`,
+        CADENCE_MATCHING_ERROR_DOMAIN_ID: domainId,
+        CADENCE_MATCHING_ERROR_DOMAIN: domain,
+        CADENCE_MATCHING_ERROR_TASK_LIST: crashList,
+        CADENCE_MATCHING_ERROR_EXPECTED_OWNER: ownerIndex === 0 ? primaryAddress : secondaryAddress,
+        CADENCE_MATCHING_ERROR_EXPECTED_SELF: nonOwnerIndex === 0 ? primaryAddress : secondaryAddress,
+      }, encoding: 'utf8', timeout: 120000,
+    });
+    fs.writeFileSync(path.join(work, 'production-typed-ownership-go.log'), `${goTypedOwnership.stdout || ''}\n${goTypedOwnership.stderr || ''}`);
+    assert.equal(goTypedOwnership.status, 0, `pinned Go Matching client did not decode Rust's typed non-owner response; see ${work}/production-typed-ownership-go.log`);
+    const ownerProbeTask = directPolls[ownerIndex].value;
+    await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
+      taskToken: ownerProbeTask.taskToken,
+      identity: 'production-owner-probe',
+      decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('owner-probe') } }],
+    });
+    const probeHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: crashProbeID, runId: probeStart.runId } });
+    assert.equal(probeHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1, 'ownership probe must complete exactly once');
+
+    const crashID = `production-crash-recovery-${id}`;
+    const crashStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: crashID, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: crashTaskList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const queued = await taskObserver.observe(domainId, crashList, 20, 'task-before-crash');
+    assert(queued.queued_rows > 0, 'decision task was not visible in Matching persistence before production owner crash');
+    const beforeCrash = await call('WorkflowAPI', 'DescribeTaskList', {
+      domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+    });
+    const beforeAck = Number(beforeCrash.taskListStatus.ackLevel);
+    const beforeEnd = Number(beforeCrash.taskListStatus.taskIdBlock.endId);
+    const rangeBefore = Number(queued.range_id);
+    assert(rangeBefore > 0, 'task-list range was not leased before the owner crash');
+    const failedPid = ownerIndex === 0 ? rust.pid : secondaryRust.pid;
+    const secondaryExited = new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal })));
+    if (ownerIndex === 0) rust.kill('SIGKILL');
+    else secondaryRust.kill('SIGKILL');
+    const failedExit = ownerIndex === 0 ? await exited : await secondaryExited;
+    assert.equal(failedExit.signal, 'SIGKILL', 'selected Rust Matching owner did not crash');
+    const survivor = ownerIndex === 0 ? secondaryRust : rust;
+    const survivorDeadline = Date.now() + 45000;
+    let survivorVisible = false;
+    while (Date.now() < survivorDeadline) {
+      if (survivor.exitCode !== null || survivor.signalCode !== null) throw new Error(`surviving Rust Matching exited; see ${ownerIndex === 0 ? `${work}/rust-server-secondary.log` : `${work}/rust-server-before-restart.log`}`);
+      try {
+        await call('WorkflowAPI', 'DescribeTaskList', {
+          domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+        });
+        survivorVisible = true;
+        break;
+      } catch (_) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+    assert(survivorVisible, 'Go Frontend did not converge to the surviving Rust Matching host after primary loss');
+    const crashSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: crashID, CADENCE_MIXED_RESTART_TASK_LIST: crashList,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'production-crash-recovery-sdk.log'), `${crashSdk.stdout || ''}\n${crashSdk.stderr || ''}`);
+    if (crashSdk.status !== 0) throw new Error(`existing SDK could not finish work recovered after Rust owner crash: ${crashSdk.error || crashSdk.status}; see ${work}/production-crash-recovery-sdk.log`);
+    const crashHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: crashID, runId: crashStart.runId } });
+    const crashCompletions = crashHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(crashCompletions, 1, 'crash-recovered workflow must have exactly one visible completion');
+    const recoveredStatus = await call('WorkflowAPI', 'DescribeTaskList', {
+      domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+    });
+    assert(Number(recoveredStatus.taskListStatus.taskIdBlock.endId) >= beforeEnd, 'task ID range moved backwards after Matching owner crash');
+    const ackDeadline = Date.now() + 30000;
+    let afterAck = Number(recoveredStatus.taskListStatus.ackLevel);
+    while (afterAck <= beforeAck && Date.now() < ackDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const status = await call('WorkflowAPI', 'DescribeTaskList', {
+        domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
+      });
+      afterAck = Number(status.taskListStatus.ackLevel);
+    }
+    assert(afterAck > beforeAck, 'recovered task acknowledgement did not advance beyond the pre-crash level');
+    const recoveredRows = await taskObserver.waitEmpty(domainId, crashList, 30, 'task-after-recovery');
+    const rangeAfter = Number(recoveredRows?.range_id);
+    assert(rangeAfter > rangeBefore, 'surviving Rust Matching did not acquire a higher persisted task-list range');
+    const afterCount = Number(recoveredRows?.queued_rows);
+    assert.equal(afterCount, 0, 'recovered task remained queued after SDK completion');
+    fs.writeFileSync(path.join(work, 'production-failure-recovery-checkpoints.json'), JSON.stringify({
+      topology: 'two Rust Matching hosts with Go Frontend/History/Worker',
+      sameRingOwnershipMap: convergedOwnership,
+      idleEviction: {
+        taskList: idleList.name, releasedWithEmptyResponse: idleResult.taskToken.length === 0,
+        sdkCompletedWorkflow: idleRecoveryID, completionEvents: idleCompletions,
+      },
+      crashRecovery: {
+        taskList: crashList, crashedPid: failedPid, crashedHostIndex: ownerIndex,
+        survivorPid: survivor.pid, workflowId: crashID, completionEvents: crashCompletions,
+        rangeBefore, rangeAfter, ackBefore: beforeAck, ackAfter: afterAck,
+        queuedRowsAfterCompletion: afterCount,
+      },
+      cassandraSemaphore: semaphoreEvidence,
+      cassandraDomainPageToken: cassandraGate ? { pages: domainPages, domains: [domain, pageTokenDomain] } : null,
+    }, null, 2) + '\n');
+    if (ownerIndex === 0) {
+      rust = startRust('after-failure-recovery');
+      await waitForRustReady('after-failure-recovery');
+    } else {
+      secondaryRust = startSecondaryRust();
+      const secondaryReadyDeadline = Date.now() + 30000;
+      let secondaryReady = false;
+      while (Date.now() < secondaryReadyDeadline) {
+        try {
+          await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-restarted-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+          secondaryReady = true;
+          break;
+        } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
+      }
+      assert(secondaryReady, 'restarted Rust Matching member did not rejoin Go discovery');
+    }
+    if (cassandraGate && semaphoreEvidence) {
+      const heldBeforeOwnerCrash = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-immediately-before-owner-crash');
+      assert.equal(heldBeforeOwnerCrash.owner_id, semaphoreOwner);
+      assert.equal(heldBeforeOwnerCrash.token_id, semaphoreEvidence.tokenId);
+      const semaphoreFailed = semaphoreEvidence.bucketOwnerIndex === 0 ? rust : secondaryRust;
+      const semaphoreSurvivor = semaphoreEvidence.bucketOwnerIndex === 0 ? secondaryRust : rust;
+      const semaphoreFailedExitPromise = new Promise(resolve => semaphoreFailed.once('exit', (code, signal) => resolve({ code, signal })));
+      semaphoreFailed.kill('SIGKILL');
+      const semaphoreFailedExit = await semaphoreFailedExitPromise;
+      assert.equal(semaphoreFailedExit.signal, 'SIGKILL', 'persisted semaphore bucket owner did not crash');
+      const survivorPeer = directMatchingClient(`127.0.0.1:${semaphoreEvidence.bucketOwnerIndex === 0 ? process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT : rustGrpcPort}`);
+      const recoveryDeadline = Date.now() + 45000;
+      let recoveredOwner = '';
+      while (Date.now() < recoveryDeadline) {
+        try {
+          recoveredOwner = await directPartitionOwner(survivorPeer, domain, semaphoreEvidence.ringKey);
+          if (recoveredOwner === (semaphoreEvidence.bucketOwnerIndex === 0
+            ? `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}` : `127.0.0.1:${rustTChannel}`)) break;
+        } catch (_) {}
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      assert(recoveredOwner, 'surviving Rust host did not resolve the semaphore bucket after owner crash');
+      const recovered = await acquireSemaphore(survivorPeer, { domainId, semaphoreName: semaphoreEvidence.semaphoreName, bucket: 0, ownerId: semaphoreOwner });
+      assert.equal(Number(recovered.tokenId), semaphoreEvidence.tokenId, 'surviving semaphore owner must recover the persisted hold without granting a new token');
+      const afterRestart = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-after-owner-recovery');
+      assert.equal(afterRestart.owner_id, semaphoreOwner);
+      assert.equal(afterRestart.token_id, semaphoreEvidence.tokenId);
+      semaphoreEvidence.ownerCrash = {
+        crashedPid: semaphoreFailed.pid, survivorPid: semaphoreSurvivor.pid,
+        persistedHoldBeforeCrash: { ownerId: heldBeforeOwnerCrash.owner_id, tokenId: heldBeforeOwnerCrash.token_id },
+        persistedHoldAfterRecovery: { ownerId: afterRestart.owner_id, tokenId: afterRestart.token_id },
+        recoveredOwner, recoveredTokenId: Number(recovered.tokenId),
+      };
+      if (semaphoreEvidence.bucketOwnerIndex === 0) {
+        rust = startRust('after-semaphore-owner-recovery');
+        await waitForRustReady('after-semaphore-owner-recovery');
+      } else {
+        secondaryRust = startSecondaryRust();
+        const readyDeadline = Date.now() + 30000;
+        let ready = false;
+        while (Date.now() < readyDeadline) {
+          try {
+            await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-semaphore-restarted-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+            ready = true;
+            break;
+          } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
+        }
+        assert(ready, 'crashed semaphore owner did not rejoin Go discovery');
+      }
+    }
+  }
   let restartEvidence;
-  const restartState = { taskList: null, watermark: null };
   if (restartMode) {
-    const restartID = `restart-${id}`;
-    restartState.taskList = `restart-tasks-${id}`;
-    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartState.taskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
+    const restartID = `restart-${id}`, restartTaskList = `restart-tasks-${id}`;
+    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     let restartStarted;
     const restartProvisionDeadline = Date.now() + 15000;
     for (;;) {
@@ -208,17 +610,8 @@ async function run() {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
-    const persistedDeadline = Date.now() + 20000;
-    let persisted;
-    while (Date.now() < persistedDeadline) {
-      persisted = durableTaskCount(domainId, restartState.taskList, 0, path.join(work, 'matching.db'));
-      if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    assert.equal(persisted?.status, 0, `could not inspect Matching durable queue: ${persisted?.stderr}`);
-    assert(Number(persisted.stdout.trim()) > 0, 'workflow task was not persisted before Matching restart');
-    // The persisted watermark is read while the row is stored and undelivered.
-    restartState.watermark = await awaitPersistedTask(restartState.taskList, 0);
+    const persisted = await taskObserver.observe(domainId, restartTaskList, 20, 'task-before-restart');
+    assert(persisted.queued_rows > 0, 'workflow task was not persisted before Matching restart');
     const beforePid = rust.pid;
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -226,13 +619,13 @@ async function run() {
     if (goServicesPid) process.kill(goServicesPid, 0);
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
-    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartState.taskList }, encoding: 'utf8', timeout: 120000 });
+    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
     fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
     if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
     const finalHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: restartID, runId: restartStarted.runId } });
     const completions = finalHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(completions, 1, 'restart workflow must have exactly one visible completion');
-    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartState.taskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), durableWatermarkBeforeKill: restartState.watermark, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
+    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: persisted.queued_rows, taskRangeBeforeKill: persisted.range_id, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
     // Reuse the second live process for the existing compatibility coverage below.
   }
   let started;
@@ -245,81 +638,19 @@ async function run() {
     }
   }
   const execution = { workflowId: id, runId: started.runId };
-  const mainDecisionWatermark = await awaitPersistedTask(taskList.name, 0);
-  const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
-  assert.equal(decision.workflowExecution.runId, started.runId);
+  let decision;
+  const decisionDeadline = Date.now() + 30000;
+  while (Date.now() < decisionDeadline) {
+    decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
+    if (decision.taskToken?.length > 0) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert(decision?.taskToken?.length > 0, `Go Frontend did not return the started workflow task within 30s; task list ${taskList.name}`);
+  assert.equal(decision.workflowExecution?.runId, started.runId, 'Go Frontend returned a decision task for a different workflow run');
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
-  if (productionMode && failureRecoveryMode) {
-    const diagnosticPeers = [
-      { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
-      { name: 'secondary', address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
-    ];
-    const membershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
-    let pollOwner;
-    try { pollOwner = await directPartitionOwner(membershipPeer, domain, taskList.name); }
-    finally { membershipPeer.close(); }
-    const ownerPeer = diagnosticPeers.find(peer => peer.address === pollOwner);
-    assert(ownerPeer, `workflow poll task list owner ${pollOwner || '<empty>'} did not match either configured Matching member`);
-    const ownerClient = directMatchingClient(`127.0.0.1:${ownerPeer.grpc}`);
-    try {
-      const ownerDescription = await new Promise((resolve, reject) => ownerClient.DescribeTaskList({
-        domainId, request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true },
-      }, (error, value) => error ? reject(error) : resolve(value)));
-      const ownerPollers = (ownerDescription.pollers || []).map(poller => poller.identity);
-      fs.writeFileSync(path.join(work, 'production-poller-retention-owner.json'), JSON.stringify({
-        taskList: taskList.name, owner: ownerPeer.name, ownerAddress: pollOwner,
-        expectedPollerIdentity: 'service-probe', ownerPollers,
-        frontendPollers: (described.pollers || []).map(poller => poller.identity),
-      }, null, 2) + '\n');
-      assert(ownerPollers.includes('service-probe'),
-        `Matching owner ${ownerPeer.name} did not retain service-probe after completing its decision poll`);
-    } finally { ownerClient.close(); }
-  }
-  if (!described.pollers.some(poller => poller.identity === 'service-probe') && productionMode && failureRecoveryMode) {
-    const diagnosticPeers = [
-      { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
-      { name: 'secondary', address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
-    ];
-    const diagnostics = {
-      taskList: taskList.name,
-      frontendVisiblePollers: (described.pollers || []).map(poller => poller.identity),
-      frontendTaskIdBlock: described.taskListStatus?.taskIdBlock || null,
-      rustViews: [],
-    };
-    for (const peer of diagnosticPeers) {
-      const matching = directMatchingClient(`127.0.0.1:${peer.grpc}`);
-      const entry = { member: peer.name, address: peer.address };
-      try { entry.reportedOwner = await directPartitionOwner(matching, domain, taskList.name); }
-      catch (error) { entry.ownerError = error.details || error.message; }
-      try {
-        const response = await new Promise((resolve, reject) => matching.DescribeTaskList({
-          domainId, request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true },
-        }, (error, value) => error ? reject(error) : resolve(value)));
-        entry.pollers = (response.pollers || []).map(poller => poller.identity);
-        entry.taskIdBlock = response.taskListStatus?.taskIdBlock || null;
-      } catch (error) { entry.describeError = { code: error.code, details: error.details || error.message }; }
-      diagnostics.rustViews.push(entry);
-      matching.close();
-    }
-    fs.writeFileSync(path.join(work, 'production-poller-owner-diagnostics.json'), JSON.stringify(diagnostics, null, 2) + '\n');
-  }
   assert(described.pollers.some(poller => poller.identity === 'service-probe'));
-  const decisionBlock = described.taskListStatus.taskIdBlock;
-  const decisionBlockStart = Number(decisionBlock.startId), decisionBlockEnd = Number(decisionBlock.endId);
-  assert(decisionBlockStart >= 1, `task ID block must start at a positive ID: ${JSON.stringify(decisionBlock)}`);
-  assert.equal(decisionBlockEnd - decisionBlockStart + 1, 100000, 'task ID block must preserve Go Matching range size');
-  assert.equal((decisionBlockStart - 1) % 100000, 0, 'task ID block must align to Go Matching range boundaries');
-  if (productionMode && failureRecoveryMode) {
-    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
-    const persistedRange = spawnSync('python3', ['-c',
-      'import sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1]); r=c.execute("select range_id from task_lists where domain_id=? and name=? and task_type=0", (uuid.UUID(sys.argv[2]).bytes, sys.argv[3])).fetchone(); print(r[0] if r else -1)',
-      database, domainId, taskList.name], { encoding: 'utf8' });
-    assert.equal(persistedRange.status, 0, `could not read persisted decision task-list range: ${persistedRange.stderr}`);
-    assert.equal(decisionBlockEnd / 100000, Number(persistedRange.stdout.trim()), 'reported task ID block must match the persisted Go-compatible range lease');
-  } else {
-    assert.equal(decisionBlockStart, 1, 'a fresh single-owner task list must start at ID 1');
-    assert.equal(decisionBlockEnd, 100000, 'a fresh single-owner task list must expose the first 100000-ID block');
-  }
+  assert.equal(described.taskListStatus.taskIdBlock.startId, '1');
+  assert.equal(described.taskListStatus.taskIdBlock.endId, '100000');
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: decision.taskToken, identity: 'service-probe', decisions: [{ scheduleActivityTaskDecisionAttributes: {
       activityId: 'echo', activityType: { name: 'Echo' }, taskList, input: payload('activity'),
@@ -327,12 +658,10 @@ async function run() {
       startToCloseTimeout: { seconds: '30' }, heartbeatTimeout: { seconds: '10' },
     } }],
   });
-  const mainActivityWatermark = await awaitPersistedTask(taskList.name, 1);
   const activity = await call('WorkerAPI', 'PollForActivityTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(activity.input.data.toString(), 'activity');
   assert.equal((await call('WorkerAPI', 'RecordActivityTaskHeartbeat', { taskToken: activity.taskToken, details: payload('heartbeat') })).cancelRequested, false);
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: activity.taskToken, result: payload('activity-result'), identity: 'service-probe' });
-  const finalWatermark = await awaitPersistedTask(taskList.name, 0);
   const final = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: final.taskToken, identity: 'service-probe', decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('done') } }],
@@ -352,24 +681,51 @@ async function run() {
     const drainID = `graceful-drain-${id}`, drainTaskList = `graceful-drain-tasks-${id}`;
     const drainRequest = { ...startRequest, workflowId: drainID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: drainTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     const drainStarted = await call('WorkflowAPI', 'StartWorkflowExecution', drainRequest);
-    if (!process.env.CADENCE_MATCHING_SQLITE_DB && !process.env.CADENCE_MATCHING_MYSQL) throw new Error('production Matching mode requires a configured persistence probe target');
-    const taskDeadline = Date.now() + 20000;
-    let queued;
-    while (Date.now() < taskDeadline) {
-      queued = durableTaskCount(domainId, drainTaskList, 0, path.join(work, 'matching.db'));
-      if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    assert.equal(queued?.status, 0, `could not inspect pre-drain Matching queue: ${queued?.stderr}`);
-    assert(Number(queued.stdout.trim()) > 0, 'Go History did not persist the graceful-drain decision task');
-    const drainingPid = rust.pid;
-    rust.kill('SIGTERM');
-    const drained = await Promise.race([exited, new Promise(resolve => setTimeout(() => resolve(null), 60000))]);
+    const queued = await taskObserver.observe(domainId, drainTaskList, 20, 'task-before-graceful-drain');
+    assert(queued.queued_rows > 0, 'Go History did not persist the graceful-drain decision task');
+    const drainMembershipPeer = directMatchingClient('127.0.0.1:' + rustGrpcPort);
+    const drainOwner = await directPartitionOwner(drainMembershipPeer, domain, drainTaskList);
+    const primaryAddress = '127.0.0.1:' + rustTChannel;
+    const secondaryAddress = '127.0.0.1:' + process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL;
+    const drainingPrimary = drainOwner === primaryAddress;
+    const drainingSecondary = drainOwner === secondaryAddress;
+    assert(drainingPrimary || drainingSecondary, 'graceful-drain task list owner ' + drainOwner + ' is not either Rust Matching host');
+    const drainingProcess = drainingPrimary ? rust : secondaryRust;
+    const drainExit = drainingPrimary ? exited : new Promise(resolve => drainingProcess.once('exit', (code, signal) => resolve({ code, signal })));
+    const drainingPid = drainingProcess.pid;
+    drainingProcess.kill('SIGTERM');
+    const drained = await Promise.race([drainExit, new Promise(resolve => setTimeout(() => resolve(null), 60000))]);
     assert(drained, `Rust Matching did not finish SIGTERM drain; see ${work}/rust-server-before-graceful-restart.log`);
     assert.equal(drained.code, 0, `Rust Matching graceful shutdown failed: ${JSON.stringify(drained)}`);
     if (goServicesPid) process.kill(goServicesPid, 0);
-    rust = startRust('after-graceful-drain');
-    await waitForRustReady('after-graceful-drain');
+    if (drainingPrimary) {
+      rust = startRust('after-graceful-drain');
+      await waitForRustReady('after-graceful-drain');
+    } else {
+      secondaryRust = startSecondaryRust();
+      const secondaryMembershipPeer = directMatchingClient('127.0.0.1:' + process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
+      const membershipDeadline = Date.now() + 60000;
+      let membershipRestored = false;
+      while (Date.now() < membershipDeadline) {
+        try {
+          const names = Array.from({ length: 16 }, (_, index) => 'graceful-rejoin-' + id + '-' + index);
+          const owners = await Promise.all(names.map(async name => [
+            await directPartitionOwner(drainMembershipPeer, domain, name),
+            await directPartitionOwner(secondaryMembershipPeer, domain, name),
+          ]));
+          if (owners.every(([primary, secondary]) => primary === secondary)
+              && owners.some(([primary]) => primary === secondaryAddress)) {
+            membershipRestored = true;
+            break;
+          }
+        } catch (_) {
+          // The restarted member may not have rebound its listener or joined
+          // the shared Ringpop view yet; retry until the bounded deadline.
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      assert(membershipRestored, 'gracefully restarted Rust Matching member did not rejoin the shared Ringpop ownership map');
+    }
     const drainSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
       ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
       CADENCE_MIXED_RESTART_WORKFLOW_ID: drainID, CADENCE_MIXED_RESTART_TASK_LIST: drainTaskList,
@@ -379,7 +735,8 @@ async function run() {
     const drainHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: drainID, runId: drainStarted.runId } });
     const drainCompletions = drainHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(drainCompletions, 1, 'gracefully drained workflow must have exactly one visible completion');
-    gracefulDrainEvidence = { workflowId: drainID, runId: drainStarted.runId, taskList: drainTaskList, queuedRowsBeforeSignal: Number(queued.stdout.trim()), drainingPid, recoveredByRustPid: rust.pid, completionEvents: drainCompletions, goServicesPid };
+    const drainedRows = await taskObserver.waitEmpty(domainId, drainTaskList, 30, 'task-after-graceful-drain');
+    gracefulDrainEvidence = { workflowId: drainID, runId: drainStarted.runId, taskList: drainTaskList, taskListOwner: drainOwner, queuedRowsBeforeSignal: queued.queued_rows, rangeBeforeSignal: queued.range_id, queuedRowsAfterRecovery: drainedRows.queued_rows, drainingPid, recoveredByRustPid: drainingPrimary ? rust.pid : secondaryRust.pid, completionEvents: drainCompletions, goServicesPid };
   } else {
   async function expireIdleOwners() {
     const done = path.join(work, 'idle-done');
@@ -480,49 +837,8 @@ async function run() {
   // Real Go History start through an isolated Rust queue. Create a scheduled
   // activity normally, then reference that schedule from a second task list to
   // control its isolation metadata without changing Go History configuration.
-  let isolatedListName = `isolated-${id}`;
-  let isolatedMatchingGrpc = process.argv[4];
-  if (productionMode && failureRecoveryMode) {
-    // The direct Matching client used by the isolation probe must target the
-    // Ringpop owner. A random task list can hash to either member, and this
-    // probe intentionally bypasses Frontend routing to set isolation groups.
-    const peers = [
-      { address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
-      { address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
-    ];
-    const membershipPeers = peers.map(peer => directMatchingClient(`127.0.0.1:${peer.grpc}`));
-    let selectedOwner;
-    let lastObservation = 'no common owner observed';
-    const ownerDeadline = Date.now() + 30000;
-    try {
-      for (let index = 0; index < 128 && Date.now() < ownerDeadline; index++) {
-        const candidate = `${isolatedListName}-${index}`;
-        try {
-          const owners = await Promise.all(membershipPeers.map(client => directPartitionOwner(client, domain, candidate)));
-          if (owners[0] !== owners[1]) {
-            lastObservation = `members disagreed: ${owners.join(', ')}`;
-          } else {
-            selectedOwner = peers.find(peer => peer.address === owners[0]);
-            if (selectedOwner) {
-              isolatedListName = candidate;
-              isolatedMatchingGrpc = `127.0.0.1:${selectedOwner.grpc}`;
-              break;
-            }
-            lastObservation = `owner ${owners[0]} did not match either configured member`;
-          }
-        } catch (error) {
-          lastObservation = error.details || error.message;
-        }
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      assert(selectedOwner, `could not find an isolation task list with a common live Ringpop owner: ${lastObservation}`);
-    } finally {
-      membershipPeers.forEach(client => client.close());
-    }
-  }
-  assert.match(isolatedMatchingGrpc, /^127\.0\.0\.1:\d+$/, 'direct isolation Matching client must receive a host:port address');
-  clients.Matching = new schema.matching.v1.MatchingAPI(isolatedMatchingGrpc, grpc.credentials.createInsecure());
-  const isolatedList = { name: isolatedListName };
+  clients.Matching = new schema.matching.v1.MatchingAPI(process.argv[4], grpc.credentials.createInsecure());
+  const isolatedList = { name: `isolated-${id}` };
   const isoStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
     ...startRequest, workflowId: `isolated-${id}`, taskList: isolatedList, requestId: randomUUID(),
   });
@@ -538,8 +854,7 @@ async function run() {
     scheduled = history.history.events.find(event => event.activityTaskScheduledEventAttributes);
     if (!scheduled && Date.now() > scheduleDeadline) throw new Error('isolated activity not scheduled');
   }
-  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } })
-    .then(response => ({ response }), error => ({ error }));
+  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } });
   const pollerB = randomUUID();
   const pollB = call('Matching', 'PollForActivityTask', { domainId, pollerId: pollerB, isolationGroup: 'zone-b', request: { taskList: isolatedList, identity: 'isolated-worker-b' } }).then(response => ({ response }), error => ({ error }));
   const registeredDeadline = Date.now() + 10000;
@@ -550,9 +865,7 @@ async function run() {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   await call('Matching', 'AddActivityTask', { domainId, sourceDomainId: domainId, workflowExecution: { workflowId: `isolated-${id}`, runId: isoStart.runId }, taskList: isolatedList, scheduleId: scheduled.eventId, partitionConfig: { 'isolation-group': 'zone-a' } });
-  const isolatedPollResult = await pollA;
-  if (isolatedPollResult.error) throw isolatedPollResult.error;
-  const isolatedTask = isolatedPollResult.response;
+  const isolatedTask = await pollA;
   assert.equal(isolatedTask.activityId, 'isolated');
   await call('Matching', 'CancelOutstandingPoll', { domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', pollerId: pollerB });
   assert.equal((await pollB).error?.code, grpc.status.CANCELLED, 'other isolation group must not consume the isolated activity');
@@ -572,152 +885,24 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  if (productionMode && process.env.CADENCE_MATCHING_POSTGRES) {
-    const pendingWorkflowId = `rust-postgres-pending-${id}`;
-    const pendingTaskList = `rust-postgres-pending-tasks-${id}`;
-    const pending = await call('WorkflowAPI', 'StartWorkflowExecution', {
-      ...startRequest, workflowId: pendingWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
-      taskList: { name: pendingTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
-    });
-    const deadline = Date.now() + 20000;
-    let rows;
-    do {
-      rows = durableTaskCount(domainId, pendingTaskList, 0, undefined);
-      if (rows.status === 0 && Number(rows.stdout) > 0) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    } while (Date.now() < deadline);
-    assert.equal(rows?.status, 0, `could not inspect Rust-produced PostgreSQL task: ${rows?.stderr}`);
-    assert(Number(rows.stdout) > 0, 'Go History did not persist a pending PostgreSQL task through Rust Matching');
-    fs.writeFileSync(path.join(work, 'rust-postgres-evidence.json'), JSON.stringify({
-      domain, domainId, workflowId: pending.workflowId || pendingWorkflowId, runId: pending.runId,
-      taskList: pendingTaskList, taskRowsBeforeConsumption: Number(rows.stdout),
-    }, null, 2) + '\n');
-  }
-  let productionDatabaseEvidence;
-  if (productionMode && process.env.CADENCE_MATCHING_MYSQL) {
-    // The GC assertions below decode Go's task-list metadata, so the decoder
-    // is checked against the committed blob fixtures first.
-    const decoderFixtureCases = verifyTaskListBlobDecoder();
-    // A dedicated backlog on a task list without any poller. Its persisted
-    // watermark is read while the decision task is stored and undelivered,
-    // and the existing SDK drains it afterwards.
-    const backlogList = { name: `gc-backlog-${id}` };
-    const backlogWorkflowId = `gc-backlog-${id}`;
-    const backlogStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
-      ...startRequest, workflowId: backlogWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
-      taskList: backlogList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
-    });
-    const backlogWatermark = await awaitPersistedTask(backlogList.name, 0);
-    assert(backlogWatermark && backlogWatermark.maxTaskId !== null,
-      'Go History did not persist the dedicated garbage collection backlog task');
-    const backlogSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
-      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
-      CADENCE_MIXED_RESTART_WORKFLOW_ID: backlogWorkflowId, CADENCE_MIXED_RESTART_TASK_LIST: backlogList.name,
-    }, encoding: 'utf8', timeout: 120000 });
-    fs.writeFileSync(path.join(work, 'gc-backlog-sdk.log'), `${backlogSdk.stdout || ''}\n${backlogSdk.stderr || ''}`);
-    if (backlogSdk.status !== 0) throw new Error(`Existing SDK did not drain the garbage collection backlog: ${backlogSdk.error || backlogSdk.status}; see ${work}/gc-backlog-sdk.log`);
-    const backlogHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: backlogWorkflowId, runId: backlogStarted.runId } });
-    const backlogCompletions = backlogHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
-    assert.equal(backlogCompletions, 1, 'the drained garbage collection backlog must have exactly one visible completion');
-    // A task that is never acknowledged must survive the collector.
-    const pendingList = { name: `gc-pending-${id}` };
-    const pendingStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
-      ...startRequest, workflowId: `gc-pending-${id}`, taskList: pendingList, requestId: randomUUID(),
-    });
-    const pendingWatermark = await awaitPersistedTask(pendingList.name, 0);
-    assert(pendingWatermark && pendingWatermark.maxTaskId !== null, 'Go History did not persist the unacknowledged control task');
-    const liveBlockProvider = async (listName, taskType) => {
-      const taskListType = taskType === 0 ? 'TASK_LIST_TYPE_DECISION' : 'TASK_LIST_TYPE_ACTIVITY';
-      const status = (await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: listName }, taskListType, includeTaskListStatus: true })).taskListStatus;
-      return { startId: Number(status.taskIdBlock.startId), endId: Number(status.taskIdBlock.endId) };
-    };
-    const mainDecisionMax = Math.max(mainDecisionWatermark?.maxTaskId ?? 0, finalWatermark?.maxTaskId ?? 0);
-    const gateExpectations = [
-      { label: 'backlogDecision', name: backlogList.name, taskType: 0, observedMaxTaskId: backlogWatermark.maxTaskId },
-      // The activity row of the backlog was created and completed by the SDK
-      // without an observation, so this queue has no durable task id. Go
-      // persists the acknowledgement 0 for a queue that never acknowledged a
-      // task, so 0 is the valid lower bound and the queue carries no durable
-      // garbage collection evidence.
-      { label: 'backlogActivity', name: backlogList.name, taskType: 1, minAck: 0, durableGcEvidence: false },
-      { label: 'mainDecision', name: taskList.name, taskType: 0, observedMaxTaskId: mainDecisionMax },
-      { label: 'mainActivity', name: taskList.name, taskType: 1, observedMaxTaskId: mainActivityWatermark?.maxTaskId ?? 1 },
-    ];
-    if (restartMode && restartState.watermark && restartState.watermark.maxTaskId !== null) {
-      gateExpectations.push({ label: 'restartDecision', name: restartState.taskList, taskType: 0, observedMaxTaskId: restartState.watermark.maxTaskId });
-      // The restart activity row was created and completed by the SDK without
-      // an observation, so this queue carries no durable garbage collection
-      // evidence and the valid lower bound of its acknowledgement is 0.
-      gateExpectations.push({ label: 'restartActivity', name: restartState.taskList, taskType: 1, minAck: 0, durableGcEvidence: false });
-    }
-    const taskGarbageCollection = await verifyProductionMySqlTaskGc({
-      query: mysqlRows,
-      domainId,
-      taskLists: gateExpectations,
-      pendingListName: pendingList.name,
-      liveBlockProvider,
-      rangeSize: 100000,
-      sleep: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
-    });
-    const domainMetadata = observeProductionMySqlDomain({ query: mysqlRows, domain, domainId });
-    productionDatabaseEvidence = {
-      decoderFixtureCases,
-      taskGarbageCollection,
-      domainMetadata,
-      backlog: { taskList: backlogList.name, workflowId: backlogWorkflowId, watermark: backlogWatermark, completionEvents: backlogCompletions },
-      pendingControl: { taskList: pendingList.name, workflowId: pendingStarted.workflowId || `gc-pending-${id}`, watermark: pendingWatermark },
-    };
-    fs.writeFileSync(path.join(work, 'db-observations.json'), JSON.stringify(productionDatabaseEvidence, null, 2) + '\n');
-  }
-  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), peer, domain, execution, attributes }));
   } finally {
-
-    const cleanupErrors = [];
-    async function stopRust(child, label, waitForExit) {
-      if (!child) return;
-      if (child.exitCode === null && child.signalCode === null) {
-        if (productionMode) {
-          if (label === 'primary') {
-            const sigtermSentUnixNs = Date.now() * 1_000_000;
-            fs.writeFileSync(path.join(work, 'matching-shutdown.json'), JSON.stringify({
-              signal: 'SIGTERM', sigtermSentUnixNs,
-            }) + '\n');
-          }
-          child.kill('SIGTERM');
-        }
-        else if (label === 'primary') fs.writeFileSync(stop, 'stop');
-      }
-      let timer;
-      let result = await Promise.race([
-        waitForExit,
-        new Promise(resolve => { timer = setTimeout(() => resolve(null), 20000); }),
+    if (productionMode) rust.kill('SIGTERM');
+    else fs.writeFileSync(stop, 'stop');
+    let shutdownTimer;
+    const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
+    clearTimeout(shutdownTimer);
+    if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
+    if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
+    if (secondaryRust && secondaryRust.exitCode === null && secondaryRust.signalCode === null) {
+      secondaryRust.kill('SIGTERM');
+      const secondaryExit = await Promise.race([
+        new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal }))),
+        new Promise(resolve => setTimeout(() => resolve(null), 20000)),
       ]);
-      clearTimeout(timer);
-      if (result === null) {
-        child.kill('SIGKILL');
-        result = await waitForExit;
-        cleanupErrors.push(`${label} Rust Matching required SIGKILL after shutdown timeout`);
-      }
-      if (productionMode && label === 'primary' && result?.code === 0) {
-        const shutdownPath = path.join(work, 'matching-shutdown.json');
-        const shutdown = JSON.parse(fs.readFileSync(shutdownPath, 'utf8'));
-        shutdown.exitCode = result.code;
-        shutdown.childSignal = result.signal;
-        shutdown.completedAtUnixNs = Date.now() * 1_000_000;
-        fs.writeFileSync(shutdownPath, JSON.stringify(shutdown, null, 2) + '\n');
-      }
-      if (result?.code !== 0) cleanupErrors.push(`${label} Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-${label === 'primary' ? 'after-restart' : 'secondary'}.log`);
-
+      if (secondaryExit === null) { secondaryRust.kill('SIGKILL'); throw new Error('secondary Rust Matching did not stop'); }
+      if (secondaryExit.code !== 0) throw new Error(`secondary Rust Matching exited ${JSON.stringify(secondaryExit)}; see ${work}/rust-server-secondary.log`);
     }
-    // Each process gets its own bounded shutdown attempt. Collect errors so a
-    // stuck primary never prevents us from reaping the secondary instance.
-    const secondaryExit = secondaryRust && new Promise(resolve => {
-      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) resolve({ code: secondaryRust.exitCode, signal: secondaryRust.signalCode });
-      else secondaryRust.once('exit', (code, signal) => resolve({ code, signal }));
-    });
-    await stopRust(rust, 'primary', exited);
-    if (secondaryRust) await stopRust(secondaryRust, 'secondary', secondaryExit);
-    if (cleanupErrors.length) throw new Error(cleanupErrors.join('; '));
   }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));
