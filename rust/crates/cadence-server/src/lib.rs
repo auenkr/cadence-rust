@@ -56,6 +56,8 @@ pub mod matching_sync;
 pub mod matching_writer;
 
 pub mod matching_domain_cache;
+pub mod matching_persistence;
+pub mod matching_persistence_limiter;
 pub mod matching_limiter;
 pub mod matching_task_store;
 

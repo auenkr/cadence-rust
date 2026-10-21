@@ -1179,6 +1179,7 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
             let error = cadence_api::errors::InternalServiceError::new(message.clone());
             Err(AppError { exc_name: "InternalServiceError", value: error.to_thrift(), message })
         }
+        Err(cadence_persistence::SemaphoreError::Throttled(message)) => Err(AppError::busy(message)),
     }
 }
 

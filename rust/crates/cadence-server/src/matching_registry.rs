@@ -14,6 +14,18 @@ use std::{
 use tonic::Status;
 use uuid::Uuid;
 
+fn task_persistence_status(error: cadence_persistence::matching_queue::QueueError) -> Status {
+    match error {
+        cadence_persistence::matching_queue::QueueError::Storage(
+            cadence_persistence::matching_task_store::MatchingTaskStoreError::Backend {
+                kind: cadence_persistence::matching_task_store::BackendErrorKind::Throttled,
+                message,
+            },
+        ) => Status::resource_exhausted(message),
+        error => Status::unavailable(error.to_string()),
+    }
+}
+
 fn registry_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -96,7 +108,7 @@ impl Owner {
         let ack = self.queue.persist_final_ack(now);
         let garbage = self.queue.run_garbage_collection(true);
         ack.and(garbage.map(|_| ()))
-            .map_err(|error| Status::unavailable(error.to_string()))
+            .map_err(task_persistence_status)
     }
 }
 impl Drop for Owner {
@@ -358,7 +370,7 @@ impl QueueHandle {
             let tasks = handle
                 .queue
                 .append(&tasks, now)
-                .map_err(|error| Status::unavailable(error.to_string()))?;
+                .map_err(task_persistence_status)?;
             handle.dispatcher.notify_new_tasks();
             Ok(tasks)
         })
@@ -377,7 +389,7 @@ impl QueueHandle {
             let tasks = handle
                 .queue
                 .append_in_domain(&tasks, source_domain, now)
-                .map_err(|error| Status::unavailable(error.to_string()))?;
+                .map_err(task_persistence_status)?;
             handle.dispatcher.notify_new_tasks();
             Ok(tasks)
         })
@@ -876,7 +888,7 @@ impl QueueRegistry {
                             registry.range_size,
                             now,
                         )
-                        .map_err(|error| Status::unavailable(error.to_string()))?,
+                        .map_err(task_persistence_status)?,
                     );
                     {
                         let provider = registry.max_task_delete_batch_size.clone();

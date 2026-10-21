@@ -63,6 +63,8 @@ pub enum SemaphoreError {
     Exists(String),
     #[error("{0}")]
     Internal(String),
+    #[error("{0}")]
+    Throttled(String),
     /// The Go SQL metadata/token stores deliberately do not implement these
     /// operations. Do not invent a Rust-only schema in an existing database.
     #[error("distributed semaphore is not supported on the SQL persistence backend")]
@@ -80,6 +82,8 @@ pub enum AcquireError {
     Invalid(String),
     #[error("{0}")]
     Internal(String),
+    #[error("{0}")]
+    Throttled(String),
 }
 
 /// Persistence boundary for Matching's semaphore metadata and bucket rows.

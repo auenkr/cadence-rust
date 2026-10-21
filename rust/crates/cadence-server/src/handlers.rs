@@ -398,6 +398,9 @@ async fn create_semaphore(
         Err(cadence_persistence::SemaphoreError::Internal(message)) => error_response(
             "InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message,
         ),
+        Err(cadence_persistence::SemaphoreError::Throttled(message)) => error_response(
+            "ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message,
+        ),
     }
 }
 

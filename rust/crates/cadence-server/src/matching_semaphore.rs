@@ -91,6 +91,8 @@ pub enum ManagerError {
     NotFound(String),
     /// `types.InternalServiceError`.
     Internal(String),
+    /// `types.ServiceBusyError` returned by the Go persistence limiter.
+    ServiceBusy(String),
 }
 
 impl From<AcquireError> for ManagerError {
@@ -99,6 +101,7 @@ impl From<AcquireError> for ManagerError {
             AcquireError::NotFound(error) => ManagerError::NotFound(error.message),
             AcquireError::Invalid(message) => ManagerError::BadRequest(message),
             AcquireError::Internal(message) => ManagerError::Internal(message),
+            AcquireError::Throttled(message) => ManagerError::ServiceBusy(message),
         }
     }
 }

@@ -153,6 +153,7 @@ fn semaphore_status(error: crate::matching_semaphore::ManagerError) -> Status {
             },
         ),
         ManagerError::Internal(message) => Status::internal(message),
+        ManagerError::ServiceBusy(message) => Status::resource_exhausted(message),
     }
 }
 use std::{

@@ -364,6 +364,22 @@ impl MatchingDomainCache {
         persistence: &crate::config::PersistenceConfig,
         current_cluster: &str,
     ) -> anyhow::Result<Arc<Self>> {
+        Self::from_default_store_inner(persistence, current_cluster, None)
+    }
+
+    pub fn from_default_store_with_limiter(
+        persistence: &crate::config::PersistenceConfig,
+        current_cluster: &str,
+        limiter: Arc<crate::matching_persistence_limiter::MatchingPersistenceLimiter>,
+    ) -> anyhow::Result<Arc<Self>> {
+        Self::from_default_store_inner(persistence, current_cluster, Some(limiter))
+    }
+
+    fn from_default_store_inner(
+        persistence: &crate::config::PersistenceConfig,
+        current_cluster: &str,
+        limiter: Option<Arc<crate::matching_persistence_limiter::MatchingPersistenceLimiter>>,
+    ) -> anyhow::Result<Arc<Self>> {
         // Go indexes persistence.datastores by the literal defaultStore value.
         let name = persistence.default_store.as_str();
         if name.is_empty() {
@@ -433,7 +449,12 @@ impl MatchingDomainCache {
             uri_mode,
             busy_timeout,
         )?;
-        Ok(Arc::new(Self::new(Arc::new(source))))
+        let source: Arc<dyn DomainMetadataSource> = Arc::new(source);
+        let source = match limiter {
+            Some(limiter) => crate::matching_persistence::limit_domain_source(source, limiter),
+            None => source,
+        };
+        Ok(Arc::new(Self::new(source)))
     }
 
     pub fn new(source: Arc<dyn DomainMetadataSource>) -> Self {
