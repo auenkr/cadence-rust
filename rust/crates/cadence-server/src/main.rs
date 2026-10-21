@@ -1442,124 +1442,123 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 app
             };
-            let mut serving = tokio::spawn(async move {
-                tokio::try_join!(
-                    async {
-                        axum::serve(listener, app)
+            let mut serving = tokio::task::JoinSet::new();
+            serving.spawn(async move {
+                (
+                    "HTTP API",
+                    axum::serve(listener, app)
+                        .await
+                        .map_err(anyhow::Error::from),
+                )
+            });
+            if run_frontend {
+                serving.spawn(async move {
+                    (
+                        "Frontend gRPC",
+                        cadence_server::grpc::serve(grpc_addr, grpc_state).await,
+                    )
+                });
+                serving.spawn(async move {
+                    (
+                        "Frontend TChannel",
+                        cadence_server::tchannel::serve(tchannel_addr, tchannel_state).await,
+                    )
+                });
+            }
+            if run_history {
+                serving.spawn(async move {
+                    (
+                        "History gRPC",
+                        cadence_server::grpc_internal::serve(history_addr, history_state).await,
+                    )
+                });
+            }
+            if run_matching {
+                let matching_tchannel_done = matching_tchannel_done.take();
+                serving.spawn(async move {
+                    let result = if let Some(done) = matching_tchannel_done {
+                        match done.await {
+                            Ok(result) => result,
+                            Err(error) => Err(anyhow::Error::new(error)),
+                        }
+                    } else {
+                        cadence_server::tchannel::serve_matching(
+                            matching_tchannel_addr,
+                            matching_tchannel_service,
+                        )
+                        .await
+                    };
+                    ("Matching TChannel/Ringpop", result)
+                });
+                let matching_grpc_service = matching_service.clone();
+                serving.spawn(async move {
+                    let result = if let Some(listener) = matching_grpc_listener.take() {
+                        cadence_server::grpc_matching::serve_with_listener(
+                            listener,
+                            matching_grpc_service,
+                        )
+                        .await
+                    } else {
+                        cadence_server::grpc_matching::serve_with(
+                            matching_addr,
+                            matching_grpc_service,
+                        )
+                        .await
+                    };
+                    ("Matching gRPC", result)
+                });
+                if let Some(addr) = matching_http_addr {
+                    let http = matching_rpc
+                        .as_ref()
+                        .and_then(|rpc| rpc.http.as_ref())
+                        .expect("configured Matching HTTP address");
+                    let procedures = http.procedures.clone();
+                    let tls_mode = http.tls_mode.clone();
+                    let tls_enabled = http.tls.as_ref().is_some_and(|tls| tls.enabled);
+                    let tls_config = matching_http_tls_config.clone();
+                    let http_service = matching_service.clone();
+                    serving.spawn(async move {
+                        let app = cadence_server::thrift_matching::router_with_procedures(
+                            http_service,
+                            procedures,
+                        );
+                        let result = if tls_mode.as_deref() == Some("enforced") && tls_enabled {
+                            axum_server::bind_rustls(
+                                addr,
+                                tls_config.expect("validated enforced TLS configuration"),
+                            )
+                            .serve(app.into_make_service())
                             .await
                             .map_err(anyhow::Error::from)
-                    },
-                    async {
-                        if run_frontend {
-                            cadence_server::grpc::serve(grpc_addr, grpc_state).await
+                        } else if tls_mode.as_deref() == Some("permissive") && tls_enabled {
+                            serve_matching_http_permissive(
+                                addr,
+                                app,
+                                tls_config.expect("validated permissive TLS configuration"),
+                            )
+                            .await
                         } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_frontend {
-                            cadence_server::tchannel::serve(tchannel_addr, tchannel_state).await
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_history {
-                            cadence_server::grpc_internal::serve(history_addr, history_state).await
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_matching {
-                            if let Some(done) = matching_tchannel_done.as_mut() {
-                                match done.await {
-                                    Ok(result) => result,
-                                    Err(error) => Err(anyhow::Error::new(error)),
-                                }
-                            } else {
-                                cadence_server::tchannel::serve_matching(
-                                    matching_tchannel_addr,
-                                    matching_tchannel_service,
-                                )
-                                .await
+                            match tokio::net::TcpListener::bind(addr).await {
+                                Ok(listener) => axum::serve(listener, app)
+                                    .await
+                                    .map_err(anyhow::Error::from),
+                                Err(error) => Err(anyhow::Error::from(error)),
                             }
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_matching {
-                            if let Some(listener) = matching_grpc_listener.take() {
-                                cadence_server::grpc_matching::serve_with_listener(
-                                    listener,
-                                    matching_service.clone(),
-                                )
-                                .await
-                            } else {
-                                cadence_server::grpc_matching::serve_with(
-                                    matching_addr,
-                                    matching_service.clone(),
-                                )
-                                .await
-                            }
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                    async {
-                        if run_matching {
-                            if let Some(addr) = matching_http_addr {
-                                let http = matching_rpc
-                                    .as_ref()
-                                    .and_then(|rpc| rpc.http.as_ref())
-                                    .expect("configured Matching HTTP address");
-                                let app = cadence_server::thrift_matching::router_with_procedures(
-                                    matching_service.clone(),
-                                    http.procedures.clone(),
-                                );
-                                let http = matching_rpc
-                                    .as_ref()
-                                    .and_then(|rpc| rpc.http.as_ref())
-                                    .expect("configured Matching HTTP");
-                                if http.tls_mode.as_deref() == Some("enforced")
-                                    && http.tls.as_ref().is_some_and(|tls| tls.enabled)
-                                {
-                                    let tls_config = matching_http_tls_config
-                                        .clone()
-                                        .expect("validated enforced TLS configuration");
-                                    axum_server::bind_rustls(addr, tls_config)
-                                        .serve(app.into_make_service())
-                                        .await
-                                        .map_err(anyhow::Error::from)
-                                } else if http.tls_mode.as_deref() == Some("permissive")
-                                    && http.tls.as_ref().is_some_and(|tls| tls.enabled)
-                                {
-                                    let tls_config = matching_http_tls_config
-                                        .clone()
-                                        .expect("validated permissive TLS configuration");
-                                    serve_matching_http_permissive(addr, app, tls_config).await
-                                } else {
-                                    let listener = tokio::net::TcpListener::bind(addr).await?;
-                                    axum::serve(listener, app)
-                                        .await
-                                        .map_err(anyhow::Error::from)
-                                }
-                            } else {
-                                std::future::pending::<anyhow::Result<()>>().await
-                            }
-                        } else {
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    },
-                )?;
-                anyhow::Ok(())
-            });
+                        };
+                        ("Matching HTTP", result)
+                    });
+                }
+            }
             let (mut serving_result, signal_result) = tokio::select! {
-                result = &mut serving => (
-                    Some(result.map_err(anyhow::Error::from).and_then(|result| result)),
-                    None,
-                ),
+                result = serving.join_next() => {
+                    let result = match result {
+                        Some(Ok((name, Ok(())))) => Err(anyhow::anyhow!("{name} listener stopped unexpectedly")),
+                        Some(Ok((name, Err(error)))) => Err(anyhow::anyhow!("{name} listener failed: {error:#}")),
+                        Some(Err(error)) => Err(anyhow::anyhow!("listener task failed: {error}")),
+                        None => Err(anyhow::anyhow!("all service listeners stopped")),
+                    };
+                    (Some(result), None)
+                },
                 signal = shutdown_signal() => (None, Some(signal)),
             };
             // On a signal, the listener task remains active while shutdown
@@ -1586,17 +1585,18 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     Ok(())
                 };
-            if serving_result.is_none() {
-                if serving.is_finished() {
-                    serving_result = Some(
-                        serving
-                            .await
-                            .map_err(anyhow::Error::from)
-                            .and_then(|result| result),
-                    );
-                } else if signal_result.is_some() {
-                    serving.abort();
-                    let _ = serving.await;
+            let mut serving_shutdown_errors = Vec::new();
+            serving.abort_all();
+            while let Some(result) = serving.join_next().await {
+                match result {
+                    Ok((name, Ok(()))) => serving_shutdown_errors
+                        .push(format!("{name} listener stopped unexpectedly during drain")),
+                    Ok((name, Err(error))) => {
+                        serving_shutdown_errors.push(format!("{name} listener failed during drain: {error:#}"));
+                    }
+                    Err(error) if error.is_cancelled() => {}
+                    Err(error) => serving_shutdown_errors
+                        .push(format!("joining listener task: {error}")),
                 }
             }
             if let Some(task) = matching_tchannel_task.take() {
@@ -1607,6 +1607,7 @@ async fn main() -> anyhow::Result<()> {
             if let Some(Err(error)) = serving_result {
                 shutdown_errors.push(format!("serving Matching cluster: {error:#}"));
             }
+            shutdown_errors.extend(serving_shutdown_errors);
             if let Some(Err(error)) = signal_result {
                 shutdown_errors.push(format!("waiting for shutdown signal: {error:#}"));
             }

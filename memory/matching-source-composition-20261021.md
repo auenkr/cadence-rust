@@ -49,14 +49,22 @@ The combined `main.rs` has one configured Matching runtime/store/metrics
 assembly, carries the shared quota source, attaches the outbound History client
 to the same metrics sink, uses configured discovery, retains listeners during
 drain, stops the runtime before exporter flush, and unwinds startup ownership
-failures. These are source observations only; lifecycle behavior still needs
-the serialized production gate.
+failures. A follow-up to the runtime checkpoint replaced `try_join!` listener
+supervision with independently owned listener tasks: the first listener exit
+triggers membership withdrawal and the configured runtime drain while the
+other listeners remain alive; all listener tasks are then stopped and joined
+before metrics flush. This mirrors the Go shutdown ordering in
+`service.go:143`. These are source observations only; lifecycle behavior still
+needs the serialized production gate.
 
 The runtime composition checkpoint counts rejected RPCs through the inbound
 request wrapper. The dedicated quota rejection callback/event is a separate
-metrics follow-up commit. The persistence host/cluster QPS rejection counter
-still has no explicit export path in `matching_queue.rs`/`matching_registry.rs`;
-do not treat either RPC metric path as covering that persistence counter.
+metrics follow-up commit. PostgreSQL lib/pq behavior correction
+`58d1d1e32` is available for the next source integration; the owner is still
+working on inline PEM (`sslinline=true`) handling and paired compile/oracle
+fixes. The persistence host/cluster QPS rejection counter still has no explicit
+export path in `matching_queue.rs`/`matching_registry.rs`; do not treat either
+RPC metric path as covering that persistence counter.
 
 The root worktree's uncommitted `lib`/registry/runtime/user-owned shard
 processor overlay was not copied, replaced, or staged. Careful integration of
