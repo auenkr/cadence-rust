@@ -1,0 +1,19 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.05s
+     Running tests/shard_distributor_go_interop.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/shard_distributor_go_interop-c5fc3658809733de)
+
+running 1 test
+
+thread 'rust_executor_and_spectator_interoperate_with_pinned_go_handlers' (2278802) panicked at crates/cadence-server/tests/shard_distributor_go_interop.rs:112:6:
+interop condition timed out: Elapsed(())
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test rust_executor_and_spectator_interoperate_with_pinned_go_handlers ... FAILED
+
+failures:
+
+failures:
+    rust_executor_and_spectator_interoperate_with_pinned_go_handlers
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.67s
+
+error: test failed, to rerun pass `-p cadence-server --test shard_distributor_go_interop`

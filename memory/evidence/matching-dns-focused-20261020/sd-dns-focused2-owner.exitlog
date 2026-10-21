@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.92s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 1 test
+test matching_registry::tests::shard_policy_accepts_local_assignment_and_rechecks_before_publish ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 348 filtered out; finished in 0.01s
+

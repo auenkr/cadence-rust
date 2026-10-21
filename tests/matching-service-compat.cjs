@@ -30,6 +30,67 @@ function call(service, method, request) {
     { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
 }
 const payload = data => ({ data: Buffer.from(data) });
+function sqlText(value) { return String(value).replaceAll("'", "''"); }
+function domainHex(domainId) { return String(domainId).replace(/-/g, '').toLowerCase(); }
+const MYSQL_OBSERVATION_TIMEOUT_MS = 30000;
+function mysqlQuery(sql) {
+  if (!process.env.CADENCE_MATCHING_MYSQL) return { status: 1, stdout: '', stderr: 'MySQL probe mode is not enabled' };
+  const container = process.env.CADENCE_MYSQL_DOCKER_CONTAINER;
+  const password = process.env.CADENCE_MYSQL_PASSWORD || '';
+  const database = process.env.CADENCE_MYSQL_DATABASE || 'cadence';
+  const command = container
+    ? ['docker', ['exec', container, 'mysql', '--batch', '--skip-column-names', '-uroot',
+      `-p${password}`, database, '-e', sql]]
+    : ['mysql', ['--batch', '--skip-column-names', '--host', process.env.CADENCE_MYSQL_HOST || '127.0.0.1',
+      '--port', process.env.CADENCE_MYSQL_PORT || '3306', '--user', process.env.CADENCE_MYSQL_USER || 'root',
+      `--password=${password}`, database, '-e', sql]];
+  // The observation is bounded so a stalled database or container cannot hang
+  // the gate; every failure mode is reported instead of a silent empty result.
+  const result = spawnSync(command[0], command[1], {
+    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: MYSQL_OBSERVATION_TIMEOUT_MS,
+  });
+  if (result.error) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation failed: ${result.error.message}` };
+  if (result.signal) return { status: null, stdout: result.stdout || '', stderr: `MySQL observation was killed by ${result.signal} after ${MYSQL_OBSERVATION_TIMEOUT_MS}ms` };
+  return { status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
+}
+function mysqlRows(sql) {
+  const result = mysqlQuery(sql);
+  if (result.status !== 0) throw new Error(`MySQL query failed: ${(result.stderr || '').trim() || sql}`);
+  return result.stdout.split('\n').map(line => line.trim()).filter(line => line.length > 0).map(line => line.split('\t'));
+}
+// Every task query is constrained by the canonical domain UUID, the task list
+// and the task type, exactly like Go's task table keys.
+function durableTaskCount(domainId, taskList, taskType, fallbackDatabase) {
+  if (process.env.CADENCE_MATCHING_MYSQL) {
+    const query = `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList)}' AND task_type=${taskType}`;
+    const result = mysqlQuery(query);
+    if (result.status === 0) result.stdout = result.stdout.trim();
+    return result;
+  }
+  if (process.env.CADENCE_MATCHING_POSTGRES) {
+    const env = { ...process.env,
+      PGHOST: process.env.CADENCE_POSTGRES_HOST, PGPORT: process.env.CADENCE_POSTGRES_PORT,
+      PGUSER: process.env.CADENCE_POSTGRES_USER, PGDATABASE: process.env.CADENCE_POSTGRES_DATABASE,
+      PGPASSWORD: process.env.CADENCE_POSTGRES_PASSWORD || '',
+      PGSSLMODE: process.env.CADENCE_POSTGRES_SSLMODE || 'disable' };
+    for (const [name, value] of [['PGSSLROOTCERT', process.env.CADENCE_POSTGRES_CA_FILE],
+      ['PGSSLCERT', process.env.CADENCE_POSTGRES_CERT_FILE], ['PGSSLKEY', process.env.CADENCE_POSTGRES_KEY_FILE]]) {
+      if (value) env[name] = value;
+    }
+    const result = spawnSync('psql', ['-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1',
+      '-v', `task_list=${taskList}`, '-v', `domain_id=${domainId}`, '-v', `task_type=${taskType}`,
+      '-c', "SELECT count(*) FROM tasks WHERE domain_id=decode(replace(:'domain_id','-',''),'hex') AND task_list_name=:'task_list' AND task_type=:'task_type'"],
+      { encoding: 'utf8', env, timeout: 30000 });
+    if (result.status === 0) result.stdout = result.stdout.trim();
+    return result;
+  }
+  const database = process.env.CADENCE_MATCHING_SQLITE_DB || fallbackDatabase;
+  return spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where domain_id=? and task_list_name=? and task_type=?", (bytes.fromhex(sys.argv[2]), sys.argv[3], int(sys.argv[4]))).fetchone()[0])', database, domainHex(domainId), taskList, String(taskType)], { encoding: 'utf8', timeout: 60000 });
+}
+// The production MySQL gate (task garbage collection, persisted
+// acknowledgement, range consistency and Go's domain metadata) lives in
+// tests/matching-mysql-gate.cjs together with the ThriftRW blob decoder.
+const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder } = require('./matching-mysql-gate.cjs');
 async function run() {
   const id = randomUUID(), domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
   await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
@@ -107,10 +168,37 @@ async function run() {
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
     taskStartToCloseTimeout: { seconds: '10' }, input: payload('start'),
   };
+  // The persisted watermark of a queue is read while its task is stored and
+  // undelivered. A task that a poller already holds may be collected before
+  // the poll returns, so the watermark is never read after a delivery.
+  const awaitPersistedTask = async (listName, taskType, timeoutMs = 20000) => {
+    if (!process.env.CADENCE_MATCHING_MYSQL && !process.env.CADENCE_MATCHING_POSTGRES) return null;
+    const deadline = Date.now() + timeoutMs;
+    if (process.env.CADENCE_MATCHING_POSTGRES) {
+      for (;;) {
+        const rows = durableTaskCount(domainId, listName, taskType, null);
+        if (rows.status !== 0) throw new Error(`PostgreSQL task observation failed: ${rows.stderr}`);
+        const count = Number(rows.stdout);
+        if (count > 0) return { taskType, rows: count, maxTaskId: null };
+        if (Date.now() >= deadline) return { taskType, rows: count, maxTaskId: null };
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    for (;;) {
+      const rows = mysqlRows(`SELECT COUNT(*), MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(listName)}' AND task_type=${taskType}`);
+      const count = Number(rows[0][0]);
+      const value = rows[0][1] && rows[0][1] !== 'NULL' ? Number(rows[0][1]) : null;
+      if (count > 0 && value !== null && Number.isFinite(value)) return { taskType, rows: count, maxTaskId: value };
+      if (Date.now() >= deadline) return { taskType, rows: count, maxTaskId: value === null ? null : value };
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  };
   let restartEvidence;
+  const restartState = { taskList: null, watermark: null };
   if (restartMode) {
-    const restartID = `restart-${id}`, restartTaskList = `restart-tasks-${id}`;
-    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
+    const restartID = `restart-${id}`;
+    restartState.taskList = `restart-tasks-${id}`;
+    const restartRequest = { ...startRequest, workflowId: restartID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: restartState.taskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     let restartStarted;
     const restartProvisionDeadline = Date.now() + 15000;
     for (;;) {
@@ -120,17 +208,17 @@ async function run() {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
-    const database = productionMode ? process.env.CADENCE_MATCHING_SQLITE_DB : path.join(work, 'matching.db');
-    const sqliteCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, restartTaskList], { encoding: 'utf8' });
     const persistedDeadline = Date.now() + 20000;
     let persisted;
     while (Date.now() < persistedDeadline) {
-      persisted = sqliteCount();
+      persisted = durableTaskCount(domainId, restartState.taskList, 0, path.join(work, 'matching.db'));
       if (persisted.status === 0 && Number(persisted.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    assert.equal(persisted?.status, 0, `could not inspect Matching SQLite queue: ${persisted?.stderr}`);
+    assert.equal(persisted?.status, 0, `could not inspect Matching durable queue: ${persisted?.stderr}`);
     assert(Number(persisted.stdout.trim()) > 0, 'workflow task was not persisted before Matching restart');
+    // The persisted watermark is read while the row is stored and undelivered.
+    restartState.watermark = await awaitPersistedTask(restartState.taskList, 0);
     const beforePid = rust.pid;
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -138,13 +226,13 @@ async function run() {
     if (goServicesPid) process.kill(goServicesPid, 0);
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
-    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
+    const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartState.taskList }, encoding: 'utf8', timeout: 120000 });
     fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
     if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
     const finalHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: restartID, runId: restartStarted.runId } });
     const completions = finalHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(completions, 1, 'restart workflow must have exactly one visible completion');
-    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
+    restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartState.taskList, durableTaskRowsBeforeKill: Number(persisted.stdout.trim()), durableWatermarkBeforeKill: restartState.watermark, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
     // Reuse the second live process for the existing compatibility coverage below.
   }
   let started;
@@ -157,12 +245,81 @@ async function run() {
     }
   }
   const execution = { workflowId: id, runId: started.runId };
+  const mainDecisionWatermark = await awaitPersistedTask(taskList.name, 0);
   const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(decision.workflowExecution.runId, started.runId);
   const described = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+  if (productionMode && failureRecoveryMode) {
+    const diagnosticPeers = [
+      { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { name: 'secondary', address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const membershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    let pollOwner;
+    try { pollOwner = await directPartitionOwner(membershipPeer, domain, taskList.name); }
+    finally { membershipPeer.close(); }
+    const ownerPeer = diagnosticPeers.find(peer => peer.address === pollOwner);
+    assert(ownerPeer, `workflow poll task list owner ${pollOwner || '<empty>'} did not match either configured Matching member`);
+    const ownerClient = directMatchingClient(`127.0.0.1:${ownerPeer.grpc}`);
+    try {
+      const ownerDescription = await new Promise((resolve, reject) => ownerClient.DescribeTaskList({
+        domainId, request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true },
+      }, (error, value) => error ? reject(error) : resolve(value)));
+      const ownerPollers = (ownerDescription.pollers || []).map(poller => poller.identity);
+      fs.writeFileSync(path.join(work, 'production-poller-retention-owner.json'), JSON.stringify({
+        taskList: taskList.name, owner: ownerPeer.name, ownerAddress: pollOwner,
+        expectedPollerIdentity: 'service-probe', ownerPollers,
+        frontendPollers: (described.pollers || []).map(poller => poller.identity),
+      }, null, 2) + '\n');
+      assert(ownerPollers.includes('service-probe'),
+        `Matching owner ${ownerPeer.name} did not retain service-probe after completing its decision poll`);
+    } finally { ownerClient.close(); }
+  }
+  if (!described.pollers.some(poller => poller.identity === 'service-probe') && productionMode && failureRecoveryMode) {
+    const diagnosticPeers = [
+      { name: 'primary', address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { name: 'secondary', address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const diagnostics = {
+      taskList: taskList.name,
+      frontendVisiblePollers: (described.pollers || []).map(poller => poller.identity),
+      frontendTaskIdBlock: described.taskListStatus?.taskIdBlock || null,
+      rustViews: [],
+    };
+    for (const peer of diagnosticPeers) {
+      const matching = directMatchingClient(`127.0.0.1:${peer.grpc}`);
+      const entry = { member: peer.name, address: peer.address };
+      try { entry.reportedOwner = await directPartitionOwner(matching, domain, taskList.name); }
+      catch (error) { entry.ownerError = error.details || error.message; }
+      try {
+        const response = await new Promise((resolve, reject) => matching.DescribeTaskList({
+          domainId, request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true },
+        }, (error, value) => error ? reject(error) : resolve(value)));
+        entry.pollers = (response.pollers || []).map(poller => poller.identity);
+        entry.taskIdBlock = response.taskListStatus?.taskIdBlock || null;
+      } catch (error) { entry.describeError = { code: error.code, details: error.details || error.message }; }
+      diagnostics.rustViews.push(entry);
+      matching.close();
+    }
+    fs.writeFileSync(path.join(work, 'production-poller-owner-diagnostics.json'), JSON.stringify(diagnostics, null, 2) + '\n');
+  }
   assert(described.pollers.some(poller => poller.identity === 'service-probe'));
-  assert.equal(described.taskListStatus.taskIdBlock.startId, '1');
-  assert.equal(described.taskListStatus.taskIdBlock.endId, '100000');
+  const decisionBlock = described.taskListStatus.taskIdBlock;
+  const decisionBlockStart = Number(decisionBlock.startId), decisionBlockEnd = Number(decisionBlock.endId);
+  assert(decisionBlockStart >= 1, `task ID block must start at a positive ID: ${JSON.stringify(decisionBlock)}`);
+  assert.equal(decisionBlockEnd - decisionBlockStart + 1, 100000, 'task ID block must preserve Go Matching range size');
+  assert.equal((decisionBlockStart - 1) % 100000, 0, 'task ID block must align to Go Matching range boundaries');
+  if (productionMode && failureRecoveryMode) {
+    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
+    const persistedRange = spawnSync('python3', ['-c',
+      'import sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1]); r=c.execute("select range_id from task_lists where domain_id=? and name=? and task_type=0", (uuid.UUID(sys.argv[2]).bytes, sys.argv[3])).fetchone(); print(r[0] if r else -1)',
+      database, domainId, taskList.name], { encoding: 'utf8' });
+    assert.equal(persistedRange.status, 0, `could not read persisted decision task-list range: ${persistedRange.stderr}`);
+    assert.equal(decisionBlockEnd / 100000, Number(persistedRange.stdout.trim()), 'reported task ID block must match the persisted Go-compatible range lease');
+  } else {
+    assert.equal(decisionBlockStart, 1, 'a fresh single-owner task list must start at ID 1');
+    assert.equal(decisionBlockEnd, 100000, 'a fresh single-owner task list must expose the first 100000-ID block');
+  }
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: decision.taskToken, identity: 'service-probe', decisions: [{ scheduleActivityTaskDecisionAttributes: {
       activityId: 'echo', activityType: { name: 'Echo' }, taskList, input: payload('activity'),
@@ -170,10 +327,12 @@ async function run() {
       startToCloseTimeout: { seconds: '30' }, heartbeatTimeout: { seconds: '10' },
     } }],
   });
+  const mainActivityWatermark = await awaitPersistedTask(taskList.name, 1);
   const activity = await call('WorkerAPI', 'PollForActivityTask', { domain, taskList, identity: 'service-probe' });
   assert.equal(activity.input.data.toString(), 'activity');
   assert.equal((await call('WorkerAPI', 'RecordActivityTaskHeartbeat', { taskToken: activity.taskToken, details: payload('heartbeat') })).cancelRequested, false);
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: activity.taskToken, result: payload('activity-result'), identity: 'service-probe' });
+  const finalWatermark = await awaitPersistedTask(taskList.name, 0);
   const final = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'service-probe' });
   await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
     taskToken: final.taskToken, identity: 'service-probe', decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('done') } }],
@@ -193,13 +352,11 @@ async function run() {
     const drainID = `graceful-drain-${id}`, drainTaskList = `graceful-drain-tasks-${id}`;
     const drainRequest = { ...startRequest, workflowId: drainID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: drainTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     const drainStarted = await call('WorkflowAPI', 'StartWorkflowExecution', drainRequest);
-    const database = process.env.CADENCE_MATCHING_SQLITE_DB;
-    if (!database) throw new Error('production Matching mode requires CADENCE_MATCHING_SQLITE_DB for drain/recovery evidence');
-    const taskCount = () => spawnSync('python3', ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=30); print(c.execute("select count(*) from tasks where task_list_name=? and task_type=0", (sys.argv[2],)).fetchone()[0])', database, drainTaskList], { encoding: 'utf8' });
+    if (!process.env.CADENCE_MATCHING_SQLITE_DB && !process.env.CADENCE_MATCHING_MYSQL) throw new Error('production Matching mode requires a configured persistence probe target');
     const taskDeadline = Date.now() + 20000;
     let queued;
     while (Date.now() < taskDeadline) {
-      queued = taskCount();
+      queued = durableTaskCount(domainId, drainTaskList, 0, path.join(work, 'matching.db'));
       if (queued.status === 0 && Number(queued.stdout.trim()) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -323,8 +480,49 @@ async function run() {
   // Real Go History start through an isolated Rust queue. Create a scheduled
   // activity normally, then reference that schedule from a second task list to
   // control its isolation metadata without changing Go History configuration.
-  clients.Matching = new schema.matching.v1.MatchingAPI(process.argv[4], grpc.credentials.createInsecure());
-  const isolatedList = { name: `isolated-${id}` };
+  let isolatedListName = `isolated-${id}`;
+  let isolatedMatchingGrpc = process.argv[4];
+  if (productionMode && failureRecoveryMode) {
+    // The direct Matching client used by the isolation probe must target the
+    // Ringpop owner. A random task list can hash to either member, and this
+    // probe intentionally bypasses Frontend routing to set isolation groups.
+    const peers = [
+      { address: `127.0.0.1:${rustTChannel}`, grpc: rustGrpcPort },
+      { address: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, grpc: process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT },
+    ];
+    const membershipPeers = peers.map(peer => directMatchingClient(`127.0.0.1:${peer.grpc}`));
+    let selectedOwner;
+    let lastObservation = 'no common owner observed';
+    const ownerDeadline = Date.now() + 30000;
+    try {
+      for (let index = 0; index < 128 && Date.now() < ownerDeadline; index++) {
+        const candidate = `${isolatedListName}-${index}`;
+        try {
+          const owners = await Promise.all(membershipPeers.map(client => directPartitionOwner(client, domain, candidate)));
+          if (owners[0] !== owners[1]) {
+            lastObservation = `members disagreed: ${owners.join(', ')}`;
+          } else {
+            selectedOwner = peers.find(peer => peer.address === owners[0]);
+            if (selectedOwner) {
+              isolatedListName = candidate;
+              isolatedMatchingGrpc = `127.0.0.1:${selectedOwner.grpc}`;
+              break;
+            }
+            lastObservation = `owner ${owners[0]} did not match either configured member`;
+          }
+        } catch (error) {
+          lastObservation = error.details || error.message;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert(selectedOwner, `could not find an isolation task list with a common live Ringpop owner: ${lastObservation}`);
+    } finally {
+      membershipPeers.forEach(client => client.close());
+    }
+  }
+  assert.match(isolatedMatchingGrpc, /^127\.0\.0\.1:\d+$/, 'direct isolation Matching client must receive a host:port address');
+  clients.Matching = new schema.matching.v1.MatchingAPI(isolatedMatchingGrpc, grpc.credentials.createInsecure());
+  const isolatedList = { name: isolatedListName };
   const isoStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
     ...startRequest, workflowId: `isolated-${id}`, taskList: isolatedList, requestId: randomUUID(),
   });
@@ -340,7 +538,8 @@ async function run() {
     scheduled = history.history.events.find(event => event.activityTaskScheduledEventAttributes);
     if (!scheduled && Date.now() > scheduleDeadline) throw new Error('isolated activity not scheduled');
   }
-  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } });
+  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } })
+    .then(response => ({ response }), error => ({ error }));
   const pollerB = randomUUID();
   const pollB = call('Matching', 'PollForActivityTask', { domainId, pollerId: pollerB, isolationGroup: 'zone-b', request: { taskList: isolatedList, identity: 'isolated-worker-b' } }).then(response => ({ response }), error => ({ error }));
   const registeredDeadline = Date.now() + 10000;
@@ -351,7 +550,9 @@ async function run() {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   await call('Matching', 'AddActivityTask', { domainId, sourceDomainId: domainId, workflowExecution: { workflowId: `isolated-${id}`, runId: isoStart.runId }, taskList: isolatedList, scheduleId: scheduled.eventId, partitionConfig: { 'isolation-group': 'zone-a' } });
-  const isolatedTask = await pollA;
+  const isolatedPollResult = await pollA;
+  if (isolatedPollResult.error) throw isolatedPollResult.error;
+  const isolatedTask = isolatedPollResult.response;
   assert.equal(isolatedTask.activityId, 'isolated');
   await call('Matching', 'CancelOutstandingPoll', { domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', pollerId: pollerB });
   assert.equal((await pollB).error?.code, grpc.status.CANCELLED, 'other isolation group must not consume the isolated activity');
@@ -371,15 +572,152 @@ async function run() {
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
-  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: productionMode ? 'not acceptance evidence until Rust Matching Ringpop assembly, discovered Matching-to-History routing, and parity audit are reviewed' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
+  if (productionMode && process.env.CADENCE_MATCHING_POSTGRES) {
+    const pendingWorkflowId = `rust-postgres-pending-${id}`;
+    const pendingTaskList = `rust-postgres-pending-tasks-${id}`;
+    const pending = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: pendingWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: { name: pendingTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const deadline = Date.now() + 20000;
+    let rows;
+    do {
+      rows = durableTaskCount(domainId, pendingTaskList, 0, undefined);
+      if (rows.status === 0 && Number(rows.stdout) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } while (Date.now() < deadline);
+    assert.equal(rows?.status, 0, `could not inspect Rust-produced PostgreSQL task: ${rows?.stderr}`);
+    assert(Number(rows.stdout) > 0, 'Go History did not persist a pending PostgreSQL task through Rust Matching');
+    fs.writeFileSync(path.join(work, 'rust-postgres-evidence.json'), JSON.stringify({
+      domain, domainId, workflowId: pending.workflowId || pendingWorkflowId, runId: pending.runId,
+      taskList: pendingTaskList, taskRowsBeforeConsumption: Number(rows.stdout),
+    }, null, 2) + '\n');
+  }
+  let productionDatabaseEvidence;
+  if (productionMode && process.env.CADENCE_MATCHING_MYSQL) {
+    // The GC assertions below decode Go's task-list metadata, so the decoder
+    // is checked against the committed blob fixtures first.
+    const decoderFixtureCases = verifyTaskListBlobDecoder();
+    // A dedicated backlog on a task list without any poller. Its persisted
+    // watermark is read while the decision task is stored and undelivered,
+    // and the existing SDK drains it afterwards.
+    const backlogList = { name: `gc-backlog-${id}` };
+    const backlogWorkflowId = `gc-backlog-${id}`;
+    const backlogStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: backlogWorkflowId, workflowType: { name: 'main.EchoWorkflow' },
+      taskList: backlogList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+    });
+    const backlogWatermark = await awaitPersistedTask(backlogList.name, 0);
+    assert(backlogWatermark && backlogWatermark.maxTaskId !== null,
+      'Go History did not persist the dedicated garbage collection backlog task');
+    const backlogSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
+      ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
+      CADENCE_MIXED_RESTART_WORKFLOW_ID: backlogWorkflowId, CADENCE_MIXED_RESTART_TASK_LIST: backlogList.name,
+    }, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(work, 'gc-backlog-sdk.log'), `${backlogSdk.stdout || ''}\n${backlogSdk.stderr || ''}`);
+    if (backlogSdk.status !== 0) throw new Error(`Existing SDK did not drain the garbage collection backlog: ${backlogSdk.error || backlogSdk.status}; see ${work}/gc-backlog-sdk.log`);
+    const backlogHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: backlogWorkflowId, runId: backlogStarted.runId } });
+    const backlogCompletions = backlogHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
+    assert.equal(backlogCompletions, 1, 'the drained garbage collection backlog must have exactly one visible completion');
+    // A task that is never acknowledged must survive the collector.
+    const pendingList = { name: `gc-pending-${id}` };
+    const pendingStarted = await call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...startRequest, workflowId: `gc-pending-${id}`, taskList: pendingList, requestId: randomUUID(),
+    });
+    const pendingWatermark = await awaitPersistedTask(pendingList.name, 0);
+    assert(pendingWatermark && pendingWatermark.maxTaskId !== null, 'Go History did not persist the unacknowledged control task');
+    const liveBlockProvider = async (listName, taskType) => {
+      const taskListType = taskType === 0 ? 'TASK_LIST_TYPE_DECISION' : 'TASK_LIST_TYPE_ACTIVITY';
+      const status = (await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: listName }, taskListType, includeTaskListStatus: true })).taskListStatus;
+      return { startId: Number(status.taskIdBlock.startId), endId: Number(status.taskIdBlock.endId) };
+    };
+    const mainDecisionMax = Math.max(mainDecisionWatermark?.maxTaskId ?? 0, finalWatermark?.maxTaskId ?? 0);
+    const gateExpectations = [
+      { label: 'backlogDecision', name: backlogList.name, taskType: 0, observedMaxTaskId: backlogWatermark.maxTaskId },
+      // The activity row of the backlog was created and completed by the SDK
+      // without an observation, so this queue has no durable task id. Go
+      // persists the acknowledgement 0 for a queue that never acknowledged a
+      // task, so 0 is the valid lower bound and the queue carries no durable
+      // garbage collection evidence.
+      { label: 'backlogActivity', name: backlogList.name, taskType: 1, minAck: 0, durableGcEvidence: false },
+      { label: 'mainDecision', name: taskList.name, taskType: 0, observedMaxTaskId: mainDecisionMax },
+      { label: 'mainActivity', name: taskList.name, taskType: 1, observedMaxTaskId: mainActivityWatermark?.maxTaskId ?? 1 },
+    ];
+    if (restartMode && restartState.watermark && restartState.watermark.maxTaskId !== null) {
+      gateExpectations.push({ label: 'restartDecision', name: restartState.taskList, taskType: 0, observedMaxTaskId: restartState.watermark.maxTaskId });
+      // The restart activity row was created and completed by the SDK without
+      // an observation, so this queue carries no durable garbage collection
+      // evidence and the valid lower bound of its acknowledgement is 0.
+      gateExpectations.push({ label: 'restartActivity', name: restartState.taskList, taskType: 1, minAck: 0, durableGcEvidence: false });
+    }
+    const taskGarbageCollection = await verifyProductionMySqlTaskGc({
+      query: mysqlRows,
+      domainId,
+      taskLists: gateExpectations,
+      pendingListName: pendingList.name,
+      liveBlockProvider,
+      rangeSize: 100000,
+      sleep: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
+    });
+    const domainMetadata = observeProductionMySqlDomain({ query: mysqlRows, domain, domainId });
+    productionDatabaseEvidence = {
+      decoderFixtureCases,
+      taskGarbageCollection,
+      domainMetadata,
+      backlog: { taskList: backlogList.name, workflowId: backlogWorkflowId, watermark: backlogWatermark, completionEvents: backlogCompletions },
+      pendingControl: { taskList: pendingList.name, workflowId: pendingStarted.workflowId || `gc-pending-${id}`, watermark: pendingWatermark },
+    };
+    fs.writeFileSync(path.join(work, 'db-observations.json'), JSON.stringify(productionDatabaseEvidence, null, 2) + '\n');
+  }
+  console.log(JSON.stringify({ result: productionMode ? 'preliminary-passed' : 'passed', acceptanceEligible: !productionMode, topology: productionMode ? 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery' : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'adapter-only fixture behavior; production process uses SIGTERM drain/recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'adapter fixture stop path only', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', parityGate: productionMode ? 'production mixed SDK/restart evidence only; Matching acceptance still requires the complete parity audit and remaining failure/recovery cases' : 'adapter compatibility evidence only', peer, domain, execution, attributes }));
   } finally {
-    if (productionMode) rust.kill('SIGTERM');
-    else fs.writeFileSync(stop, 'stop');
-    let shutdownTimer;
-    const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
-    clearTimeout(shutdownTimer);
-    if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
-    if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
+
+    const cleanupErrors = [];
+    async function stopRust(child, label, waitForExit) {
+      if (!child) return;
+      if (child.exitCode === null && child.signalCode === null) {
+        if (productionMode) {
+          if (label === 'primary') {
+            const sigtermSentUnixNs = Date.now() * 1_000_000;
+            fs.writeFileSync(path.join(work, 'matching-shutdown.json'), JSON.stringify({
+              signal: 'SIGTERM', sigtermSentUnixNs,
+            }) + '\n');
+          }
+          child.kill('SIGTERM');
+        }
+        else if (label === 'primary') fs.writeFileSync(stop, 'stop');
+      }
+      let timer;
+      let result = await Promise.race([
+        waitForExit,
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), 20000); }),
+      ]);
+      clearTimeout(timer);
+      if (result === null) {
+        child.kill('SIGKILL');
+        result = await waitForExit;
+        cleanupErrors.push(`${label} Rust Matching required SIGKILL after shutdown timeout`);
+      }
+      if (productionMode && label === 'primary' && result?.code === 0) {
+        const shutdownPath = path.join(work, 'matching-shutdown.json');
+        const shutdown = JSON.parse(fs.readFileSync(shutdownPath, 'utf8'));
+        shutdown.exitCode = result.code;
+        shutdown.childSignal = result.signal;
+        shutdown.completedAtUnixNs = Date.now() * 1_000_000;
+        fs.writeFileSync(shutdownPath, JSON.stringify(shutdown, null, 2) + '\n');
+      }
+      if (result?.code !== 0) cleanupErrors.push(`${label} Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-${label === 'primary' ? 'after-restart' : 'secondary'}.log`);
+
+    }
+    // Each process gets its own bounded shutdown attempt. Collect errors so a
+    // stuck primary never prevents us from reaping the secondary instance.
+    const secondaryExit = secondaryRust && new Promise(resolve => {
+      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) resolve({ code: secondaryRust.exitCode, signal: secondaryRust.signalCode });
+      else secondaryRust.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    await stopRust(rust, 'primary', exited);
+    if (secondaryRust) await stopRust(secondaryRust, 'secondary', secondaryExit);
+    if (cleanupErrors.length) throw new Error(cleanupErrors.join('; '));
   }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));

@@ -1,0 +1,8 @@
+starting matching (api v1-thrift)
+cadence-server running on 0.0.0.0:0: matching
+Cadence internal matching gRPC listening on 127.0.0.1:52065
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:36323
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+Matching membership cleanup failed: status: Internal, message: "Not enough hosts to serve the request", details: [], metadata: MetadataMap { headers: {} }
+shutting down

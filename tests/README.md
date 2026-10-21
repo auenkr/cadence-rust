@@ -447,3 +447,18 @@ request and response, application error decoding, malformed JSON rejection, syst
 framing for unknown service and method, deadline expiry, and cancellation by dropping the
 Rust call future. It is transport coverage only; Ringpop membership/bootstrap
 remain a separate concern.
+
+Matching shard-distributor client interoperability against the pinned Go
+handlers and generated YARPC gRPC wrappers:
+
+```sh
+tests/run-shard-distributor-go-interop.sh
+```
+
+This ignored Rust test covers executor/spectator assignment, metadata and load
+reports, reassignment, shard TTL status, assignment loss, processor stop and
+the final draining heartbeat. Its deterministic Go store fixture exercises the
+real Go handlers over gRPC; see
+[`shard-distributor-interoperability/README.md`](shard-distributor-interoperability/README.md)
+for the scope and current source-review status. It does not establish full
+Matching parity or production process assembly.

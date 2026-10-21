@@ -4,17 +4,18 @@
 //! implementation is in-memory so the Rust server runs standalone; durable
 //! backends (SQL/NoSQL) implement the same traits in follow-ups.
 
-pub mod domains;
 pub mod domain_replication;
 pub mod domain_update;
+pub mod domains;
 pub mod dynamic_config;
-pub mod history_branch;
 pub mod executions;
+pub mod history_branch;
+pub mod raw_history;
 pub mod schedules;
 pub mod semaphores;
-pub mod visibility;
+pub mod cassandra;
 pub mod version_history;
-pub mod raw_history;
+pub mod visibility;
 
 pub use domains::{DomainRecord, FailoverError, InMemoryDomainStore};
 pub use executions::{
@@ -24,15 +25,22 @@ pub use executions::{
 };
 pub use schedules::{ScheduleError, ScheduleRecord};
 pub use semaphores::{
-    AcquireError, GrantOutcome, SemaphoreError, SemaphoreHold, SemaphoreMetadata, SemaphoreRow,
+    AcquireError, GrantOutcome, SemaphoreError, SemaphoreHold, SemaphoreMetadata,
+    SemaphorePersistence, SemaphoreRow, SqlUnsupportedSemaphorePersistence,
 };
 
 pub mod matching_blob;
-pub mod matching_sqlite;
+pub mod matching_mysql;
+pub mod matching_cassandra;
+pub mod matching_postgres;
 pub mod matching_queue;
+pub mod matching_sqlite;
+pub mod matching_task_store;
 pub mod matching_writer_actor;
 
 pub mod matching_gc;
 
-pub mod matching_retry;
 pub mod matching_domain_metadata;
+pub mod matching_domain_mysql;
+pub mod matching_domain_postgres;
+pub mod matching_retry;

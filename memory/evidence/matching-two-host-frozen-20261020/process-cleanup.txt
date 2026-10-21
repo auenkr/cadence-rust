@@ -1,0 +1,3 @@
+checked_at=2026-10-20T18:18:53Z
+query=ps -eo pid,ppid,args | matching service/harness process filter
+result=PASS; no matching service or harness processes remain

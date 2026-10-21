@@ -1,0 +1,101 @@
+22b9275c62ebd7a98b5b8478f8f032886351ff617590e4d81c410263cc41f28a
+mysql: [Warning] Using a password on the command line interface can be insecure.
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-persistence)
+warning: unused import: `TaskData`
+ --> crates/cadence-persistence/src/matching_sqlite.rs:4:56
+  |
+4 | use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskList...
+  |                                                        ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `StorageError`
+ --> crates/cadence-persistence/src/matching_retry.rs:3:38
+  |
+3 | use crate::matching_sqlite::{Result, StorageError};
+  |                                      ^^^^^^^^^^^^
+
+warning: field `stopped` is never read
+  --> crates/cadence-persistence/src/matching_mysql.rs:98:5
+   |
+94 | struct QueryRuntimeOwner {
+   |        ----------------- field in this struct
+...
+98 |     stopped: Arc<AtomicBool>,
+   |     ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `discard_flag` is never used
+   --> crates/cadence-persistence/src/matching_mysql.rs:364:19
+    |
+363 | impl ConnectionLease {
+    | -------------------- method in this implementation
+364 |     pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
+    |                   ^^^^^^^^^^^^
+
+warning: `cadence-persistence` (lib) generated 4 warnings (run `cargo fix --lib -p cadence-persistence` to apply 2 suggestions)
+warning: method `discard_flag` is never used
+   --> crates/cadence-persistence/src/matching_mysql.rs:364:19
+    |
+363 | impl ConnectionLease {
+    | -------------------- method in this implementation
+364 |     pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
+    |                   ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-persistence` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 07s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_persistence-961fc7e2f428f683)
+
+running 16 tests
+test matching_mysql::tests::farmhash_32_uses_go_compatible_fingerprint ... ok
+test matching_mysql::tests::go_tcp_connect_addresses_default_missing_port_to_3306 ... ok
+test matching_mysql::tests::connectivity_errors_poison_only_their_connection_lease ... ok
+test matching_mysql::tests::mysql_async_tls_uses_go_socket_timeout_options ... ignored, requires the opt-in MySQL interoperability server with TLS enabled
+test matching_mysql::tests::mysql_driver_errors_keep_go_retry_categories ... ok
+
+thread 'matching_mysql::tests::mysql_matching_schema_contract_matches_go_v8_primary_keys' (2453789) panicked at crates/cadence-persistence/src/matching_mysql.rs:1372:14:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test matching_mysql::tests::mysql_async_options_apply_go_socket_timeout_attributes ... ok
+test matching_mysql::tests::mysql_matching_schema_contract_matches_go_v8_primary_keys ... FAILED
+
+thread 'matching_mysql::tests::mysql_timeout_duration_matches_go_composite_and_boundary_forms' (2453790) panicked at crates/cadence-persistence/src/matching_mysql.rs:1451:13:
+assertion `left == right` failed: -0s
+  left: GoTimeout { negative: true, magnitude: 0ns }
+ right: GoTimeout { negative: false, magnitude: 0ns }
+test matching_mysql::tests::mysql_timeout_duration_matches_go_composite_and_boundary_forms ... FAILED
+test matching_mysql::tests::timed_domain_query_bounds_connect_failure_and_releases_slot ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::query_runtime_can_be_dropped_from_a_tokio_context ... ok
+test matching_mysql::tests::timed_domain_query_cancels_only_its_dedicated_connection ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_cancels_while_draining_a_slow_result_set ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_completes_before_deadline_and_disconnects ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_releases_single_pool_slot_after_cancellation ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::unsupported_mysql_connect_attributes_fail_closed ... ok
+test matching_mysql::tests::timed_domain_query_cancels_a_stalled_mysql_handshake ... ok
+
+failures:
+
+failures:
+    matching_mysql::tests::mysql_matching_schema_contract_matches_go_v8_primary_keys
+    matching_mysql::tests::mysql_timeout_duration_matches_go_composite_and_boundary_forms
+
+test result: FAILED. 8 passed; 2 failed; 6 ignored; 0 measured; 211 filtered out; finished in 0.30s
+
+error: test failed, to rerun pass `-p cadence-persistence --lib`
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/tests/run-matching-mysql-interop.py", line 123, in <module>
+    main()
+    ~~~~^^
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/tests/run-matching-mysql-interop.py", line 110, in main
+    run(mysql_unit_command, cwd=ROOT, env=environment)
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/tests/run-matching-mysql-interop.py", line 27, in run
+    return subprocess.run(command, check=check, text=True, **kwargs)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['cargo', 'test', '--locked', '--manifest-path', '/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/Cargo.toml', '-p', 'cadence-persistence', 'matching_mysql::tests::', '--', '--nocapture']' returned non-zero exit status 101.

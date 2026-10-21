@@ -1,0 +1,1 @@
+NODE_PATH=/home/ubuntu/github/auenkr/cadence-rust/cadence-web/node_modules python3 tests/run-matching-shard-distributor-production.py --rust-production-binary /home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/cadence-server --artifacts-dir memory/evidence/matching-dns-build-20261020-2726808/configured-sd

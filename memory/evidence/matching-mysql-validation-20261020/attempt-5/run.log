@@ -1,0 +1,213 @@
+warning: unused import: `TaskData`
+ --> crates/cadence-persistence/src/matching_sqlite.rs:4:56
+  |
+4 | use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskList...
+  |                                                        ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `StorageError`
+ --> crates/cadence-persistence/src/matching_retry.rs:3:38
+  |
+3 | use crate::matching_sqlite::{Result, StorageError};
+  |                                      ^^^^^^^^^^^^
+
+warning: method `discard_flag` is never used
+   --> crates/cadence-persistence/src/matching_mysql.rs:274:19
+    |
+273 | impl ConnectionLease {
+    | -------------------- method in this implementation
+274 |     pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
+    |                   ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-persistence` (lib) generated 3 warnings (run `cargo fix --lib -p cadence-persistence` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+warning: unused import: `TaskData`
+ --> crates/cadence-persistence/src/matching_sqlite.rs:4:56
+  |
+4 | use crate::matching_blob::{self as blob, BlobEncoding, TaskData, TaskList...
+  |                                                        ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `StorageError`
+ --> crates/cadence-persistence/src/matching_retry.rs:3:38
+  |
+3 | use crate::matching_sqlite::{Result, StorageError};
+  |                                      ^^^^^^^^^^^^
+
+warning: method `discard_flag` is never used
+   --> crates/cadence-persistence/src/matching_mysql.rs:274:19
+    |
+273 | impl ConnectionLease {
+    | -------------------- method in this implementation
+274 |     pub(crate) fn discard_flag(&self) -> Arc<AtomicBool> {
+    |                   ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-persistence` (lib) generated 3 warnings (run `cargo fix --lib -p cadence-persistence` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+    Updating crates.io index
+     Locking 254 packages to highest compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding lru v0.18.5 (available: v0.19.0)
+      Adding mysql_common v0.37.3 (available: v0.38.2)
+      Adding pem v3.0.6 (available: v4.0.0)
+   Compiling syn v3.0.9
+   Compiling libc v0.2.191
+   Compiling synstructure v0.14.0
+   Compiling zerofrom-derive v0.1.8
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling yoke v0.8.3
+   Compiling zerovec-derive v0.11.6
+   Compiling zerovec v0.11.8
+   Compiling displaydoc v0.2.7
+   Compiling find-msvc-tools v0.1.15
+   Compiling cc v1.9.0
+   Compiling tinystr v0.8.4
+   Compiling typenum v1.20.1
+   Compiling icu_locale_core v2.3.0
+   Compiling generic-array v0.14.7
+   Compiling ring v0.17.14
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling icu_collections v2.3.0
+   Compiling icu_provider v2.3.1
+   Compiling num-traits v0.2.19
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling getrandom v0.2.17
+   Compiling rand_core v0.10.1
+   Compiling smallvec v1.16.3
+   Compiling foldhash v0.2.0
+   Compiling hashbrown v0.17.1
+   Compiling icu_normalizer v2.3.0
+   Compiling digest v0.10.7
+   Compiling icu_properties v2.3.0
+   Compiling aho-corasick v1.1.5
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling cpufeatures v0.2.17
+   Compiling tokio-macros v2.7.2
+   Compiling rustls v0.23.46
+   Compiling adler2 v2.0.1
+   Compiling regex-syntax v0.8.11
+   Compiling simd-adler32 v0.3.10
+   Compiling miniz_oxide v0.9.1
+   Compiling regex-automata v0.4.18
+   Compiling tokio v1.54.0
+   Compiling idna_adapter v1.2.2
+   Compiling getrandom v0.4.3
+   Compiling rustls-webpki v0.103.16
+   Compiling num-integer v0.1.47
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_derive v1.0.229
+   Compiling form_urlencoded v1.2.2
+   Compiling indexmap v2.14.2
+   Compiling serde v1.0.229
+   Compiling thiserror v2.0.21
+   Compiling num-bigint v0.4.8
+   Compiling flate2 v1.1.10
+   Compiling idna v1.1.0
+   Compiling getrandom v0.3.4
+   Compiling crossbeam-utils v0.8.23
+   Compiling regex v1.13.1
+   Compiling sha1 v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling chacha20 v0.10.2
+   Compiling btoi v0.5.0
+   Compiling futures-macro v0.3.34
+   Compiling uuid v1.28.0
+   Compiling saturating v0.1.0
+   Compiling byteorder v1.5.0
+   Compiling slab v0.4.12
+   Compiling mysql_common v0.37.3
+   Compiling futures-util v0.3.34
+   Compiling tokio-util v0.7.20
+   Compiling tempfile v3.27.0
+   Compiling rand v0.10.3
+   Compiling arc-swap v1.9.3
+   Compiling crossbeam-queue v0.3.14
+   Compiling url v2.5.8
+   Compiling keyed_priority_queue v0.4.2
+   Compiling tokio-rustls v0.26.6
+   Compiling lru v0.18.5
+   Compiling webpki-roots v1.0.10
+   Compiling twox-hash v2.1.5
+   Compiling waker-fn v1.2.0
+   Compiling mysql_async v0.37.1 (/tmp/cadence-mysql-vendor-tests.R7oE1E/mysql_async-0.37.1)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 59s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/mysql_async-7828ad46b35181c7)
+
+running 2 tests
+test io::test::tls_upgrade_uses_inherited_absolute_read_deadline ... ok
+test io::test::tls_upgrade_stalled_read_and_write_use_inherited_deadlines ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 90 filtered out; finished in 0.05s
+
+Unable to find image 'mysql:8.0.36' locally
+8.0.36: Pulling from library/mysql
+f718345410af: Pulling fs layer
+6e01a6ece3af: Pulling fs layer
+6cfdeffd9140: Pulling fs layer
+39c3b4c317a6: Pulling fs layer
+de375e24a2a7: Pulling fs layer
+d5ad96b86b99: Pulling fs layer
+c6a0976a2dbe: Pulling fs layer
+73fed55ee93c: Pulling fs layer
+8dd4f8e415ca: Pulling fs layer
+4e39d469d2ab: Pulling fs layer
+5241e2cffaa1: Pulling fs layer
+8dd4f8e415ca: Download complete
+6cfdeffd9140: Download complete
+39c3b4c317a6: Download complete
+d5ad96b86b99: Download complete
+73fed55ee93c: Download complete
+6e01a6ece3af: Download complete
+4e39d469d2ab: Download complete
+f718345410af: Download complete
+c6a0976a2dbe: Download complete
+de375e24a2a7: Download complete
+75c941a65074: Download complete
+5241e2cffaa1: Download complete
+42d88374fdb5: Download complete
+c6a0976a2dbe: Pull complete
+8dd4f8e415ca: Pull complete
+6e01a6ece3af: Pull complete
+6cfdeffd9140: Pull complete
+73fed55ee93c: Pull complete
+39c3b4c317a6: Pull complete
+d5ad96b86b99: Pull complete
+de375e24a2a7: Pull complete
+4e39d469d2ab: Pull complete
+f718345410af: Pull complete
+5241e2cffaa1: Pull complete
+Digest: sha256:a532724022429812ec797c285c1b540a644c15e248579c6bfdf12a8fbaab4964
+Status: Downloaded newer image for mysql:8.0.36
+040e803d400e9920b4005da88ec121404e97f6a4c99aa1c779dc7b2b31faa524
+mysql: [Warning] Using a password on the command line interface can be insecure.
+ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: YES)
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/tests/run-matching-mysql-interop.py", line 114, in <module>
+    main()
+    ~~~~^^
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/tests/run-matching-mysql-interop.py", line 64, in main
+    run([
+    ~~~^^
+        "docker", "exec", "--interactive", CONTAINER,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "mysql", "-uroot", f"-p{password}", "cadence",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ], stdin=source)
+    ^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/tests/run-matching-mysql-interop.py", line 27, in run
+    return subprocess.run(command, check=check, text=True, **kwargs)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['docker', 'exec', '--interactive', 'cadence-matching-mysql-7632a3d62a', 'mysql', '-uroot', '-pcadence', 'cadence']' returned non-zero exit status 1.

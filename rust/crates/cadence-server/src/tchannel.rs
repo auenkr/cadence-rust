@@ -227,6 +227,14 @@ struct Call {
     arg: usize,
     size: usize,
 }
+fn matching_metric_context(call: &Call) -> crate::matching_metrics::InboundMetricContext {
+    crate::matching_metrics::InboundMetricContext {
+        // TChannel reserves `cn` for the originating caller. `as` identifies
+        // the argument encoding and must never be reported as caller.
+        caller: call.headers.get("cn").cloned(),
+        transport: Some("tchannel".to_owned()),
+    }
+}
 impl Call {
     fn initial(payload: &[u8], limit: usize) -> Result<(Self, bool)> {
         let mut input = Cursor::new(payload);
@@ -520,7 +528,13 @@ async fn handle_call(
         remaining,
         async {
             match matching {
-                Some(matching) => crate::thrift_matching::dispatch(&matching, procedure, &request, deadline).await,
+                Some(matching) => crate::thrift_matching::dispatch_with_context(
+                    &matching,
+                    procedure,
+                    &request,
+                    deadline,
+                    matching_metric_context(&call),
+                ).await,
                 None => crate::yarpc::dispatch(&state, method, &request, deadline.min(Instant::now() + Duration::from_secs(60))).await,
             }
         },
@@ -806,5 +820,40 @@ mod tests {
         let mut cursor = Cursor::new(&[0]);
         cursor.take(1).unwrap();
         assert!(cursor.take(usize::MAX).is_err());
+    }
+
+    #[tokio::test]
+    async fn matching_tchannel_dispatch_uses_reserved_cn_as_caller() {
+        use crate::matching_metrics::{RecordingMetricSink, CADENCE_REQUESTS_PER_TASK_LIST};
+        let sink = Arc::new(RecordingMetricSink::default());
+        let state = crate::handlers::AppState::default();
+        state.domains.create(
+            cadence_api::types::DomainInfo { name: "domain-a".into(), uuid: "00000000-0000-0000-0000-000000000001".into(), ..Default::default() },
+            Default::default(),
+            Default::default(),
+            false,
+        ).unwrap();
+        let matching = crate::grpc_matching::Matching::new(state).with_metrics(sink.clone());
+        let call = Call {
+            started: Instant::now(), ttl: Duration::from_secs(1), trace: [0; 25],
+            service: "cadence-matching".into(),
+            headers: HashMap::from([("cn".into(), "worker-origin".into()), ("as".into(), "cadence-matching".into())]),
+            checksum: Checksum::new(0).unwrap(), args: Default::default(), arg: 0, size: 0,
+        };
+        let args = cadence_thrift::value::Struct {
+            fields: vec![(1, cadence_thrift::value::Value::Struct(cadence_thrift::value::Struct {
+                fields: vec![(10, cadence_thrift::value::Value::Bytes(b"domain-a".to_vec()))],
+            }))],
+        };
+        crate::thrift_matching::dispatch_with_context(
+            &matching,
+            "MatchingService::GetTaskListsByDomain",
+            &args,
+            Instant::now() + Duration::from_secs(1),
+            matching_metric_context(&call),
+        ).await.unwrap();
+        let request = sink.events().into_iter().find(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST).unwrap();
+        assert_eq!(request.tags.get("caller").map(String::as_str), Some("worker-origin"));
+        assert_eq!(request.tags.get("transport").map(String::as_str), Some("tchannel"));
     }
 }

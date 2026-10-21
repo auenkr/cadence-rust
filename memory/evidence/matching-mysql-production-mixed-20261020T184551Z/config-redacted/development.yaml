@@ -1,0 +1,144 @@
+persistence:
+  defaultStore: cass-default
+  visibilityStore: cass-visibility
+  numHistoryShards: 4
+  datastores:
+    cass-default:
+      nosql:
+        pluginName: "cassandra"
+        hosts: "127.0.0.1"
+        keyspace: "cadence"
+        connectTimeout: 2s # defaults to 2s if not defined
+        timeout: 5s # defaults to 10s if not defined
+        consistency: LOCAL_QUORUM # default value
+        serialConsistency: LOCAL_SERIAL # default value
+    cass-visibility:
+      nosql:
+        pluginName: "cassandra"
+        hosts: "127.0.0.1"
+        keyspace: "cadence_visibility"
+
+ringpop:
+  name: cadence
+  bootstrapMode: hosts
+  bootstrapHosts: [ "127.0.0.1:44517", "127.0.0.1:56659", "127.0.0.1:54585" ]
+  maxJoinDuration: 30s
+
+services:
+  frontend:
+    rpc:
+      port: 44517
+      grpcPort: 38081
+      bindOnLocalHost: true
+      grpcMaxMsgSize: 33554432
+    metrics:
+      statsd:
+        hostPort: "127.0.0.1:8125"
+        prefix: "cadence"
+    pprof:
+      port: 58623
+
+  matching:
+    rpc:
+      port: 46437
+      grpcPort: 49003
+      bindOnLocalHost: true
+      grpcMaxMsgSize: 33554432
+    metrics:
+      statsd:
+        hostPort: "127.0.0.1:8125"
+        prefix: "cadence"
+    pprof:
+      port: 52803
+
+  history:
+    rpc:
+      port: 56659
+      grpcPort: 44867
+      bindOnLocalHost: true
+      grpcMaxMsgSize: 33554432
+    metrics:
+      statsd:
+        hostPort: "127.0.0.1:8125"
+        prefix: "cadence"
+    pprof:
+      port: 34293
+
+  worker:
+    rpc:
+      port: 54585
+      bindOnLocalHost: true
+    metrics:
+      statsd:
+        hostPort: "127.0.0.1:8125"
+        prefix: "cadence"
+    pprof:
+      port: 35743
+
+clusterGroupMetadata:
+  failoverVersionIncrement: 10
+  primaryClusterName: "cluster0"
+  currentClusterName: "cluster0"
+  clusterGroup:
+    cluster0:
+      enabled: true
+      initialFailoverVersion: 0
+      newInitialFailoverVersion: 1 # migrating to this new failover version
+      rpcAddress: "localhost:38081" # this is to let worker service and XDC replicator connected to the frontend service. In cluster setup, localhost will not work
+      rpcTransport: "grpc"
+
+dcRedirectionPolicy:
+  policy: "noop"
+  toDC: ""
+
+archival:
+  history:
+    status: "enabled"
+    enableRead: true
+    provider:
+      filestore:
+        fileMode: "0666"
+        dirMode: "0766"
+      gstorage:
+        credentialsPath: "/tmp/gcloud/keyfile.json"
+  visibility:
+    status: "enabled"
+    enableRead: true
+    provider:
+      filestore:
+        fileMode: "0666"
+        dirMode: "0766"
+
+domainDefaults:
+  archival:
+    history:
+      status: "enabled"
+      URI: "file:///home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/artifacts/mixed-run-20261020T184551Z/history-archive"
+    visibility:
+      status: "enabled"
+      URI: "file:///home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/artifacts/mixed-run-20261020T184551Z/visibility-archive"
+
+dynamicconfig:
+  client: filebased
+  configstore:
+    pollInterval: "10s"
+    updateRetryAttempts: 2
+    FetchTimeout: "2s"
+    UpdateTimeout: "2s"
+  filebased:
+    filepath: "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/artifacts/mixed-run-20261020T184551Z/dynamic-config.yaml"
+    pollInterval: "10s"
+
+blobstore:
+  filestore:
+    outputDirectory: "/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/artifacts/mixed-run-20261020T184551Z/blobstore"
+
+shardDistributorClient:
+  hostPort: "localhost:7943"
+
+shard-distributor-matching:
+  namespaces:
+    - namespace: cadence-matching-dev
+      heartbeat_interval: 1s
+      ttl_shard: 5m
+      ttl_report: 1m

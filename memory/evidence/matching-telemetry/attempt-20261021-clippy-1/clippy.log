@@ -1,0 +1,46 @@
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/rust/crates/cadence-proto)
+   Compiling crc32c v0.6.8
+   Compiling enum-as-inner v0.6.1
+    Checking linux-raw-sys v0.12.1
+    Checking linked-hash-map v0.5.6
+    Checking strsim v0.11.1
+    Checking futures-io v0.3.34
+    Checking data-encoding v2.11.1
+    Checking ipnet v2.12.2
+    Checking clap_lex v1.1.1
+    Checking clap_builder v4.6.7
+    Checking hickory-proto v0.24.4
+    Checking lru-cache v0.1.2
+    Checking rustix v1.1.5
+    Checking fs-err v3.3.2
+    Checking serde_urlencoded v0.7.1
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/rust/crates/cadence-persistence)
+    Checking axum-core v0.5.6
+   Compiling clap_derive v4.6.7
+    Checking serde_path_to_error v0.1.20
+    Checking either v1.19.0
+    Checking time-core v0.1.9
+    Checking num-conv v0.2.2
+    Checking deranged v0.5.9
+    Checking fastrand v2.5.0
+    Checking matchit v0.8.4
+    Checking unsafe-libyaml v0.2.11
+    Checking powerfmt v0.2.1
+    Checking resolv-conf v0.7.6
+    Checking hickory-resolver v0.24.4
+    Checking time v0.3.55
+    Checking serde_yaml v0.9.34+deprecated
+    Checking axum v0.8.9
+    Checking tempfile v3.27.0
+    Checking axum-server v0.8.0
+    Checking clap v4.6.7
+    Checking tonic-reflection v0.12.3
+    Checking anyhow v1.0.104
+    Checking if-addrs v0.13.4
+    Checking yasna v0.5.2
+    Checking rcgen v0.13.2
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/rust/crates/cadence-server)
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/rust/crates/cadence-thrift)
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/rust/crates/cadence-api)
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/rust/crates/cadence-common)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 01s

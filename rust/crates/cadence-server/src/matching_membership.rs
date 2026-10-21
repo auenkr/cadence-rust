@@ -62,51 +62,130 @@ impl Membership {
             .cloned()
             .ok_or_else(|| Status::internal("Not enough hosts to serve the request"))
     }
+    /// Ring-only multi-host lookup used by Matching's shard-distributor
+    /// resolver, whose Go `LookupN` deliberately does not use the spectator.
+    pub(crate) fn owners_n(&self, key: &str, count: usize) -> Vec<Host> {
+        self.ring
+            .read()
+            .expect("Matching membership lock")
+            .lookup_n(key, count)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+    pub(crate) fn owner_by_address(&self, address: &str) -> Option<Host> {
+        self.ring
+            .read()
+            .expect("Matching membership lock")
+            .hosts()
+            .iter()
+            .find(|host| host.address.as_str() == address)
+            .cloned()
+    }
+    pub(crate) fn hosts(&self) -> Vec<Host> {
+        self.ring
+            .read()
+            .expect("Matching membership lock")
+            .hosts()
+            .to_vec()
+    }
     pub fn owns(&self, key: &str) -> Result<bool, Status> {
         Ok(self.owner(key)?.identity() == self.identity.as_ref())
     }
     pub fn remote_channel(&self, key: &str) -> Result<Option<tonic::transport::Channel>, Status> {
         let owner = self.owner(key)?;
-        if owner.identity() == self.identity.as_ref() {
+        self.remote_channel_for_owner(owner.identity(), &owner.grpc_address)
+    }
+    pub(crate) fn remote_channel_for_owner(
+        &self,
+        identity: &str,
+        grpc_address: &str,
+    ) -> Result<Option<tonic::transport::Channel>, Status> {
+        if identity == self.identity.as_ref() {
             return Ok(None);
         }
-        if owner.grpc_address.is_empty() {
+        if grpc_address.is_empty() {
             return Err(Status::unavailable("Matching owner has no gRPC address"));
         }
         let mut channels = self.channels.lock().expect("Matching channel cache lock");
-        if let Some(channel) = channels.get(&owner.grpc_address) {
+        if let Some(channel) = channels.get(grpc_address) {
             return Ok(Some(channel.clone()));
         }
-        let address = if owner.grpc_address.contains("://") {
-            owner.grpc_address.clone()
+        let address = if grpc_address.contains("://") {
+            grpc_address.to_owned()
         } else {
-            format!("http://{}", owner.grpc_address)
+            format!("http://{grpc_address}")
         };
         let channel = tonic::transport::Endpoint::from_shared(address)
             .map_err(|error| Status::internal(error.to_string()))?
             .connect_lazy();
-        channels.insert(owner.grpc_address, channel.clone());
+        channels.insert(grpc_address.to_owned(), channel.clone());
         Ok(Some(channel))
+    }
+    /// Resolve a host through the live ring and return its gRPC channel,
+    /// including when the owner is this process. Internal Matching refreshes
+    /// use the same RPC contract for local and remote partitions so an
+    /// unloaded local partition is created and refreshed just like Go's
+    /// Matching client call.
+    pub(crate) fn channel_for_task_list_owner(
+        &self,
+        key: &str,
+    ) -> Result<(Host, tonic::transport::Channel), Status> {
+        let owner = self.owner(key)?;
+        let grpc_address = if owner.identity() == self.identity.as_ref() {
+            self.ring
+                .read()
+                .expect("Matching membership lock")
+                .hosts()
+                .iter()
+                .find(|host| host.identity() == self.identity.as_ref())
+                .map(|host| host.grpc_address.clone())
+                .filter(|address| !address.is_empty())
+                .ok_or_else(|| Status::unavailable("Local Matching host has no gRPC address"))?
+        } else {
+            owner.grpc_address.clone()
+        };
+        if grpc_address.is_empty() {
+            return Err(Status::unavailable("Matching owner has no gRPC address"));
+        }
+        let mut channels = self.channels.lock().expect("Matching channel cache lock");
+        let channel = if let Some(channel) = channels.get(&grpc_address) {
+            channel.clone()
+        } else {
+            let address = if grpc_address.contains("://") {
+                grpc_address.clone()
+            } else {
+                format!("http://{grpc_address}")
+            };
+            let channel = tonic::transport::Endpoint::from_shared(address)
+                .map_err(|error| Status::internal(error.to_string()))?
+                .connect_lazy();
+            channels.insert(grpc_address, channel.clone());
+            channel
+        };
+        Ok((owner, channel))
     }
     pub fn check_task_list(&self, name: &str) -> Result<(), Status> {
         let owner = self.owner(name)?;
         if owner.identity() == self.identity.as_ref() {
             return Ok(());
         }
-        Err(crate::grpc::detailed_status_type(
+        Err(self.task_list_not_owned_by(name, owner.identity()))
+    }
+    pub(crate) fn task_list_not_owned_by(&self, name: &str, owner: &str) -> Status {
+        crate::grpc::detailed_status_type(
             tonic::Code::Aborted,
             format!(
                 "task list is not owned by this host: OwnedBy: {}, Me: {}, Tasklist: {name}",
-                owner.identity(),
-                self.identity
+                owner, self.identity
             ),
             "type.googleapis.com/uber.cadence.shared.v1.TaskListNotOwnedByHostError".into(),
             cadence_proto::shared::TaskListNotOwnedByHostError {
-                owned_by_identity: owner.identity().into(),
+                owned_by_identity: owner.into(),
                 my_identity: self.identity.to_string(),
                 task_list_name: name.into(),
             },
-        ))
+        )
     }
     pub fn check_semaphore(
         &self,

@@ -1,0 +1,86 @@
+{
+  "note": "Re-evaluation of the recorded run 20261020T184551Z with the corrected task list shard. Read only inspection of the live database.",
+  "domainHex": "01a15aa2640a7bdbabd480c75e8918b1",
+  "statement": "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a15aa2640a7bdbabd480c75e8918b1') AND name='<list>' ORDER BY task_type",
+  "checks": {
+    "backlogDecision": {
+      "taskList": "gc-backlog-2d31dc06-c271-4051-91d5-01770364808d",
+      "taskType": 0,
+      "remainingTaskRows": 0,
+      "persistedAckLevel": 1,
+      "expectedAckLowerBound": 1,
+      "strict": true,
+      "durableGcEvidence": true,
+      "persistedRange": 1,
+      "liveRange": 1,
+      "acknowledgementCoversRemovedRows": true,
+      "rangeMatchesLiveBlock": true
+    },
+    "backlogActivity": {
+      "taskList": "gc-backlog-2d31dc06-c271-4051-91d5-01770364808d",
+      "taskType": 1,
+      "remainingTaskRows": 0,
+      "persistedAckLevel": 0,
+      "expectedAckLowerBound": 0,
+      "strict": false,
+      "durableGcEvidence": false,
+      "persistedRange": 1,
+      "liveRange": 1,
+      "acknowledgementCoversRemovedRows": true,
+      "rangeMatchesLiveBlock": true
+    },
+    "mainDecision": {
+      "taskList": "tasks-2d31dc06-c271-4051-91d5-01770364808d",
+      "taskType": 0,
+      "remainingTaskRows": 0,
+      "persistedAckLevel": 100000,
+      "expectedAckLowerBound": 2,
+      "strict": true,
+      "durableGcEvidence": true,
+      "persistedRange": 2,
+      "liveRange": 2,
+      "acknowledgementCoversRemovedRows": true,
+      "rangeMatchesLiveBlock": true
+    },
+    "mainActivity": {
+      "taskList": "tasks-2d31dc06-c271-4051-91d5-01770364808d",
+      "taskType": 1,
+      "remainingTaskRows": 0,
+      "persistedAckLevel": 100000,
+      "expectedAckLowerBound": 1,
+      "strict": true,
+      "durableGcEvidence": true,
+      "persistedRange": 2,
+      "liveRange": 2,
+      "acknowledgementCoversRemovedRows": true,
+      "rangeMatchesLiveBlock": true
+    },
+    "restartDecision": {
+      "taskList": "restart-tasks-2d31dc06-c271-4051-91d5-01770364808d",
+      "taskType": 0,
+      "remainingTaskRows": 0,
+      "persistedAckLevel": 200000,
+      "expectedAckLowerBound": 1,
+      "strict": true,
+      "durableGcEvidence": true,
+      "persistedRange": 3,
+      "liveRange": 3,
+      "acknowledgementCoversRemovedRows": true,
+      "rangeMatchesLiveBlock": true
+    },
+    "restartActivity": {
+      "taskList": "restart-tasks-2d31dc06-c271-4051-91d5-01770364808d",
+      "taskType": 1,
+      "remainingTaskRows": 0,
+      "persistedAckLevel": 100000,
+      "expectedAckLowerBound": 0,
+      "strict": false,
+      "durableGcEvidence": false,
+      "persistedRange": 2,
+      "liveRange": 2,
+      "acknowledgementCoversRemovedRows": true,
+      "rangeMatchesLiveBlock": true
+    }
+  },
+  "allChecksPass": true
+}

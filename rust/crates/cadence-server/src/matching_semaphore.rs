@@ -15,7 +15,7 @@
 use cadence_api::enums::SemaphoreAcquireOutcome;
 use cadence_common::liveness::Liveness;
 use cadence_persistence::{
-    AcquireError, GrantOutcome, InMemoryExecutionStore, SemaphoreRow,
+    AcquireError, GrantOutcome, InMemoryExecutionStore, SemaphorePersistence, SemaphoreRow,
 };
 use std::{
     collections::HashMap,
@@ -91,6 +91,8 @@ pub enum ManagerError {
     NotFound(String),
     /// `types.InternalServiceError`.
     Internal(String),
+    /// `types.ServiceBusyError` returned by the Go persistence limiter.
+    ServiceBusy(String),
 }
 
 impl From<AcquireError> for ManagerError {
@@ -98,6 +100,8 @@ impl From<AcquireError> for ManagerError {
         match error {
             AcquireError::NotFound(error) => ManagerError::NotFound(error.message),
             AcquireError::Invalid(message) => ManagerError::BadRequest(message),
+            AcquireError::Internal(message) => ManagerError::Internal(message),
+            AcquireError::Throttled(message) => ManagerError::ServiceBusy(message),
         }
     }
 }
@@ -132,13 +136,17 @@ struct Index {
 /// One bucket's manager, mirroring Go's `semaphoreManagerImpl`.
 pub struct Manager {
     id: Identifier,
-    store: InMemoryExecutionStore,
+    store: Arc<dyn SemaphorePersistence>,
     liveness: Liveness,
     index: Mutex<Index>,
 }
 
 impl Manager {
-    fn new(id: Identifier, store: InMemoryExecutionStore, idle_ttl_nanos: i64) -> Self {
+    fn new(
+        id: Identifier,
+        store: Arc<dyn SemaphorePersistence>,
+        idle_ttl_nanos: i64,
+    ) -> Self {
         Self {
             id,
             store,
@@ -154,7 +162,7 @@ impl Manager {
     /// Go `Manager.Start`: only the caller that finds the manager unstarted
     /// runs the scan; an already starting/running manager is a no-op. A
     /// stopped manager is not ready.
-    pub fn start(&self) -> Result<(), ManagerError> {
+    pub async fn start(&self) -> Result<(), ManagerError> {
         {
             let mut index = self.index.lock().expect("semaphore manager lock");
             match index.state {
@@ -163,26 +171,33 @@ impl Manager {
                 State::Stopped => return Err(ManagerError::NotReady),
             }
         }
-        if let Err(error) = self.load() {
+        if let Err(error) = self.load().await {
             self.stop();
             return Err(error);
         }
         Ok(())
     }
 
-    fn load(&self) -> Result<(), ManagerError> {
+    async fn load(&self) -> Result<(), ManagerError> {
+        let metadata = self.store.get_semaphore_metadata(
+            &self.id.domain_id,
+            &self.id.semaphore_name,
+        ).await?;
         let rows = self.store.scan_semaphore_bucket(
             &self.id.domain_id,
             &self.id.semaphore_name,
             self.id.bucket,
-        )?;
-        let mut free: HashMap<i32, ()> = HashMap::new();
+        ).await?;
+        let budget = cadence_persistence::semaphores::bucket_budget(metadata.bucket_size);
+        let mut free: HashMap<i32, ()> = (1..=budget).map(|token_id| (token_id, ())).collect();
         let mut held: HashMap<String, i32> = HashMap::new();
         for row in rows {
             match row {
                 SemaphoreRow::Token { token_id, holder } => {
                     if holder.is_empty() && token_id > 0 {
                         free.insert(token_id, ());
+                    } else {
+                        free.remove(&token_id);
                     }
                 }
                 SemaphoreRow::Owner {
@@ -233,7 +248,7 @@ impl Manager {
     }
 
     /// Go `Manager.Acquire`: mark alive, require startup, then grant.
-    pub fn acquire(&self, owner_id: &str) -> Result<AcquireResult, ManagerError> {
+    pub async fn acquire(&self, owner_id: &str) -> Result<AcquireResult, ManagerError> {
         if owner_id.is_empty() {
             return Err(ManagerError::BadRequest("ownerID is required".into()));
         }
@@ -243,12 +258,12 @@ impl Manager {
         if !self.is_running() {
             return Err(ManagerError::NotReady);
         }
-        self.grant(owner_id)
+        self.grant(owner_id).await
     }
 
     /// Go `grant`: confirm an existing hold, else draw a free id and settle it
     /// with a conditional write.
-    fn grant(&self, owner_id: &str) -> Result<AcquireResult, ManagerError> {
+    async fn grant(&self, owner_id: &str) -> Result<AcquireResult, ManagerError> {
         let existing = self
             .index
             .lock()
@@ -257,7 +272,7 @@ impl Manager {
             .get(owner_id)
             .copied();
         if let Some(token_id) = existing {
-            if self.confirm_hold(owner_id, token_id)? {
+            if self.confirm_hold(owner_id, token_id).await? {
                 return Ok(AcquireResult {
                     outcome: SemaphoreAcquireOutcome::Acquired,
                     token_id,
@@ -274,7 +289,7 @@ impl Manager {
                 self.id.bucket,
                 token_id,
                 owner_id,
-            )? {
+            ).await? {
                 GrantOutcome::Applied => {
                     self.record_hold(owner_id, token_id);
                     return Ok(AcquireResult {
@@ -306,13 +321,13 @@ impl Manager {
     }
 
     /// Go `confirmHold`: verify the reverse-index entry against the token row.
-    fn confirm_hold(&self, owner_id: &str, token_id: i32) -> Result<bool, ManagerError> {
+    async fn confirm_hold(&self, owner_id: &str, token_id: i32) -> Result<bool, ManagerError> {
         match self.store.get_semaphore_ownership_by_token(
             &self.id.domain_id,
             &self.id.semaphore_name,
             self.id.bucket,
             token_id,
-        ) {
+        ).await {
             Ok(holder) if holder == owner_id => Ok(true),
             Ok(holder) => {
                 // The index is stale; return the slot only if the row says it
@@ -403,12 +418,12 @@ fn remove_from_free_set(index: &mut Index, token_id: i32) {
 #[derive(Clone)]
 pub struct Registry {
     managers: Arc<Mutex<HashMap<Identifier, Arc<Manager>>>>,
-    store: InMemoryExecutionStore,
+    store: Arc<dyn SemaphorePersistence>,
     idle_ttl_nanos: i64,
 }
 
 impl Registry {
-    pub fn new(store: InMemoryExecutionStore) -> Self {
+    pub fn new(store: Arc<dyn SemaphorePersistence>) -> Self {
         Self {
             managers: Arc::new(Mutex::new(HashMap::new())),
             store,
@@ -424,9 +439,9 @@ impl Registry {
     /// Go `GetOrCreate`: register before starting so a concurrent request
     /// reuses the manager; then always `Start`, since the request that
     /// registered it may not have started it.
-    pub fn get_or_create(&self, id: Identifier) -> Result<Arc<Manager>, ManagerError> {
+    pub async fn get_or_create(&self, id: Identifier) -> Result<Arc<Manager>, ManagerError> {
         if let Some(existing) = self.by_identifier(&id) {
-            existing.start()?;
+            existing.start().await?;
             return Ok(existing);
         }
         let manager = Arc::new(Manager::new(id.clone(), self.store.clone(), self.idle_ttl_nanos));
@@ -435,12 +450,12 @@ impl Registry {
             if let Some(existing) = managers.get(&id) {
                 let existing = existing.clone();
                 drop(managers);
-                existing.start()?;
+                existing.start().await?;
                 return Ok(existing);
             }
             managers.insert(id, manager.clone());
         }
-        if let Err(error) = manager.start() {
+        if let Err(error) = manager.start().await {
             self.unregister(&manager);
             return Err(error);
         }
@@ -513,63 +528,63 @@ mod tests {
         assert_eq!(identifier(2).ring_key(), "uuid-d_sem_2");
     }
 
-    #[test]
-    fn matching_semaphore_registry_shares_one_manager_per_bucket() {
-        let registry = Registry::new(store());
-        let first = registry.get_or_create(identifier(0)).unwrap();
-        let second = registry.get_or_create(identifier(0)).unwrap();
+    #[tokio::test]
+    async fn matching_semaphore_registry_shares_one_manager_per_bucket() {
+        let registry = Registry::new(Arc::new(store()));
+        let first = registry.get_or_create(identifier(0)).await.unwrap();
+        let second = registry.get_or_create(identifier(0)).await.unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(registry.all_managers().len(), 1);
         // Unregister only removes the manager it still holds.
         assert!(registry.unregister(&first));
         assert!(registry.by_identifier(&identifier(0)).is_none());
         assert!(!registry.unregister(&first));
-        let rebuilt = registry.get_or_create(identifier(0)).unwrap();
+        let rebuilt = registry.get_or_create(identifier(0)).await.unwrap();
         assert!(!Arc::ptr_eq(&first, &rebuilt));
     }
 
-    #[test]
-    fn matching_semaphore_grants_until_full_then_reports_no_slot() {
-        let registry = Registry::new(store());
-        let manager = registry.get_or_create(identifier(0)).unwrap();
-        let first = manager.acquire("1:w:r1:1").unwrap();
+    #[tokio::test]
+    async fn matching_semaphore_grants_until_full_then_reports_no_slot() {
+        let registry = Registry::new(Arc::new(store()));
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
+        let first = manager.acquire("1:w:r1:1").await.unwrap();
         assert_eq!(first.outcome, SemaphoreAcquireOutcome::Acquired);
         assert!((1..=2).contains(&first.token_id));
-        let second = manager.acquire("1:w:r2:1").unwrap();
+        let second = manager.acquire("1:w:r2:1").await.unwrap();
         assert_eq!(second.outcome, SemaphoreAcquireOutcome::Acquired);
         assert_ne!(first.token_id, second.token_id);
-        let full = manager.acquire("1:w:r3:1").unwrap();
+        let full = manager.acquire("1:w:r3:1").await.unwrap();
         assert_eq!(full.outcome, SemaphoreAcquireOutcome::NoSlot);
         assert_eq!(full.token_id, 0);
         // A re-acquire by a holder returns the same slot.
-        let again = manager.acquire("1:w:r1:1").unwrap();
+        let again = manager.acquire("1:w:r1:1").await.unwrap();
         assert_eq!(again.token_id, first.token_id);
         assert_eq!(manager.free_count(), 0);
     }
 
-    #[test]
-    fn matching_semaphore_load_rebuilds_index_from_persisted_holds() {
+    #[tokio::test]
+    async fn matching_semaphore_load_rebuilds_index_from_persisted_holds() {
         let store = store();
         // A hold granted by a previous host: the scan must exclude its slot.
         store
             .grant_semaphore_token("uuid-d", "sem", 0, 2, "1:w:r1:1")
             .unwrap();
-        let registry = Registry::new(store);
-        let manager = registry.get_or_create(identifier(0)).unwrap();
+        let registry = Registry::new(Arc::new(store));
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
         assert_eq!(manager.free_count(), 1);
         // The persisted holder keeps its slot without a new grant.
-        let held = manager.acquire("1:w:r1:1").unwrap();
+        let held = manager.acquire("1:w:r1:1").await.unwrap();
         assert_eq!((held.outcome, held.token_id), (SemaphoreAcquireOutcome::Acquired, 2));
-        let other = manager.acquire("1:w:r2:1").unwrap();
+        let other = manager.acquire("1:w:r2:1").await.unwrap();
         assert_eq!((other.outcome, other.token_id), (SemaphoreAcquireOutcome::Acquired, 1));
     }
 
-    #[test]
-    fn matching_semaphore_confirm_hold_drops_stale_index_entry() {
+    #[tokio::test]
+    async fn matching_semaphore_confirm_hold_drops_stale_index_entry() {
         let store = store();
-        let registry = Registry::new(store.clone());
-        let manager = registry.get_or_create(identifier(0)).unwrap();
-        let granted = manager.acquire("1:w:r1:1").unwrap();
+        let registry = Registry::new(Arc::new(store.clone()));
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
+        let granted = manager.acquire("1:w:r1:1").await.unwrap();
         // Simulate another host taking the slot behind this cache.
         store.release_semaphore_hold("uuid-d", "sem", 0, "1:w:r1:1");
         store
@@ -577,17 +592,17 @@ mod tests {
             .unwrap();
         // The stale reverse-index entry is dropped and r1 is given the slot
         // that is genuinely free, never the one r9 now holds.
-        let stale = manager.acquire("1:w:r1:1").unwrap();
+        let stale = manager.acquire("1:w:r1:1").await.unwrap();
         assert_eq!(stale.outcome, SemaphoreAcquireOutcome::Acquired);
         assert_ne!(stale.token_id, granted.token_id);
     }
 
-    #[test]
-    fn matching_semaphore_missing_semaphore_is_not_ready_after_scan() {
+    #[tokio::test]
+    async fn matching_semaphore_missing_semaphore_is_not_ready_after_scan() {
         let store = InMemoryExecutionStore::new();
         store.register_domain("d", "uuid-d");
-        let registry = Registry::new(store);
-        let error = match registry.get_or_create(identifier(0)) {
+        let registry = Registry::new(Arc::new(store));
+        let error = match registry.get_or_create(identifier(0)).await {
             Ok(_) => panic!("a missing semaphore must fail the startup scan"),
             Err(error) => error,
         };
@@ -596,16 +611,16 @@ mod tests {
         assert_eq!(registry.all_managers().len(), 0);
     }
 
-    #[test]
-    fn matching_semaphore_sweep_unloads_idle_buckets() {
-        let registry = Registry::new(store()).with_idle_ttl(1_000_000_000);
-        let manager = registry.get_or_create(identifier(0)).unwrap();
+    #[tokio::test]
+    async fn matching_semaphore_sweep_unloads_idle_buckets() {
+        let registry = Registry::new(Arc::new(store())).with_idle_ttl(1_000_000_000);
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
         registry.sweep_idle(now_nanos());
         assert!(registry.by_identifier(&identifier(0)).is_some());
         registry.sweep_idle(now_nanos() + 2_000_000_000);
         assert!(registry.by_identifier(&identifier(0)).is_none());
         assert!(!manager.is_running());
         // A stopped manager refuses further acquires until rebuilt.
-        assert_eq!(manager.acquire("1:w:r1:1"), Err(ManagerError::NotReady));
+        assert_eq!(manager.acquire("1:w:r1:1").await, Err(ManagerError::NotReady));
     }
 }

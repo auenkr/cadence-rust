@@ -1,0 +1,18 @@
+   Compiling cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-dns-provider/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 45.43s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_server-38a5878de2feb9ba)
+
+running 10 tests
+test matching_shard_routing::tests::eligible_route_uses_spectator_and_parses_named_ports_and_ipv6 ... ok
+test matching_shard_routing::tests::empty_ring_returns_typed_hash_ring_error ... ok
+test matching_shard_routing::tests::excluded_and_missing_spectator_routes_use_live_ring_snapshot ... ok
+test grpc_matching::durable_tests::matching_remote_routing_propagates_spectator_failure_without_ring_fallback ... ok
+test matching_shard_routing::tests::go_farmhash_percentage_and_uuid_exclusion_vectors ... ok
+test matching_shard_routing::tests::invalid_ports_are_omitted_and_tchannel_address_defaults_to_zero ... ok
+test matching_shard_routing::tests::lookup_n_and_address_conversion_always_delegate_to_ring ... ok
+test matching_shard_routing::tests::policy_is_read_per_lookup_and_uuid_exclusion_precedes_spectator ... ok
+test matching_shard_routing::tests::spectator_errors_and_missing_host_ip_do_not_fall_back ... ok
+test matching_shard_routing::tests::spectator_peer_cache_refreshes_use_and_evicts_at_ttl ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 339 filtered out; finished in 0.24s
+

@@ -1,0 +1,541 @@
+{
+  "capturedAt": "2026-10-20T18:45:05.389Z",
+  "note": "Manual observation of the shared Go MySQL schema after the failed production gate run 20261020T183524Z.",
+  "taskRows": [
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "gc-pending-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rows": 1,
+      "minTaskId": 1,
+      "maxTaskId": 1
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "isolated-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rows": 1,
+      "minTaskId": 1,
+      "maxTaskId": 1
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "paced-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rows": 1,
+      "minTaskId": 1,
+      "maxTaskId": 1
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "unpolled-activity-timeouts",
+      "taskType": 1,
+      "rows": 1,
+      "minTaskId": 1,
+      "maxTaskId": 1
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "unpolled-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 1,
+      "rows": 1,
+      "minTaskId": 1,
+      "maxTaskId": 1
+    }
+  ],
+  "taskLists": [
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "arm-instance:03793c11-b8cb-4e83-8e33-8af3ba3110d6",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "2ba61aca6c244e8a930ce568ce396ccc",
+      "taskList": "arm-instance:207b30f3-2f9f-4c01-9151-8477276fcf10",
+      "taskType": 0,
+      "rangeId": 2,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 100000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "arm-instance:56695912-3bac-4c66-b976-f64b2773873b",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "arm-instance:5b7a1a32-a91b-4e05-950c-9e51cc31b1ce",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "arm-instance:b3dd28f7-9623-4b96-9c4c-b07b4e56d8a5",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "arm-instance:b4857a53-4c60-4c34-a648-7c1a2b4e8c6f",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "3116607e419b478385fc47726a4c3fe9",
+      "taskList": "arm-instance:cfd4339e-4865-4043-8bd2-f0581062ba43",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "arm-instance:e4837ea5-3dac-49a2-8443-3bffb4ee2d1f",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "arm-instance:f0cc84b7-7d8b-4394-9713-0943ff6f2b5d",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 1,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "cadence-archival-tl",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "cadence-archival-tl",
+      "taskType": 1,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "2ba61aca6c244e8a930ce568ce396ccc",
+      "taskList": "cadence-scheduler",
+      "taskType": 0,
+      "rangeId": 2,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 100000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "2ba61aca6c244e8a930ce568ce396ccc",
+      "taskList": "cadence-scheduler",
+      "taskType": 1,
+      "rangeId": 2,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 100000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "3116607e419b478385fc47726a4c3fe9",
+      "taskList": "cadence-sys-batcher-tasklist",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "3116607e419b478385fc47726a4c3fe9",
+      "taskList": "cadence-sys-batcher-tasklist",
+      "taskType": 1,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "cadence-sys-failoverManager-tasklist",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "cadence-sys-failoverManager-tasklist",
+      "taskType": 1,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "cadence-sys-processor-parent-close-policy",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "cadence-sys-processor-parent-close-policy",
+      "taskType": 1,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "cadence-sys-tl-scanner-tasklist-0",
+      "taskType": 0,
+      "rangeId": 2,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 100000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "cadence-sys-tl-scanner-tasklist-0",
+      "taskType": 1,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "check-data-corruption-workflow-tl",
+      "taskType": 0,
+      "rangeId": 2,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 100000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "check-data-corruption-workflow-tl",
+      "taskType": 1,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "diagnostics-wf-tasklist",
+      "taskType": 0,
+      "rangeId": 2,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 100000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "diagnostics-wf-tasklist",
+      "taskType": 1,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "discovery-ready-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "domain-deprecation-tasklist",
+      "taskType": 0,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "taskList": "domain-deprecation-tasklist",
+      "taskType": 1,
+      "rangeId": 3,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 200000,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "gc-backlog-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 1,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "gc-backlog-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "gc-pending-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "graceful-drain-tasks-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 2,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 1,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "graceful-drain-tasks-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "isolated-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "isolated-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "mixed-sdk-d71af294-50fd-4449-b1e5-2a4bcb813c36",
+      "taskType": 0,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "mixed-sdk-d71af294-50fd-4449-b1e5-2a4bcb813c36",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "paced-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "paced-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 2,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "query-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "restart-tasks-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 2,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 1,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521797398141809"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "restart-tasks-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521797398141809"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "tasks-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 0,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 2,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521797398141809"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "tasks-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 1,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521797398141809"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "unpolled-activity-timeouts",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    },
+    {
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "taskList": "unpolled-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "taskType": 1,
+      "rangeId": 1,
+      "dataEncoding": "thriftrw",
+      "ackLevel": 0,
+      "kind": 0,
+      "lastUpdatedNanos": "1792521817822482414"
+    }
+  ],
+  "domains": [
+    {
+      "name": "cadence-batcher",
+      "domainId": "3116607e419b478385fc47726a4c3fe9",
+      "isGlobal": 0,
+      "dataEncoding": "thriftrw",
+      "dataLength": 326
+    },
+    {
+      "name": "cadence-system",
+      "domainId": "32049b68787240948e63d0dd59896a83",
+      "isGlobal": 0,
+      "dataEncoding": "thriftrw",
+      "dataLength": 325
+    },
+    {
+      "name": "default",
+      "domainId": "2ba61aca6c244e8a930ce568ce396ccc",
+      "isGlobal": 1,
+      "dataEncoding": "thriftrw",
+      "dataLength": 302
+    },
+    {
+      "name": "service-compat-bc9edbe5-2839-49dc-936f-69d045c3f902",
+      "domainId": "01a15a9ff0847de8959de44cca3ee8ff",
+      "isGlobal": 0,
+      "dataEncoding": "thriftrw",
+      "dataLength": 597
+    }
+  ],
+  "domainNotificationVersions": [
+    5
+  ]
+}

@@ -1,0 +1,10 @@
+tests/matching-service-compat.cjs: syntax ok
+tests/matching-mysql-gate.cjs: syntax ok
+tests/matching-thrift-blob.cjs: syntax ok
+tests/matching-mysql-gate-check.cjs: syntax ok
+tests/matching-service-compat.cjs: no undefined identifiers
+tests/matching-mysql-gate.cjs: no undefined identifiers
+tests/matching-thrift-blob.cjs: no undefined identifiers
+tests/matching-mysql-gate-check.cjs: no undefined identifiers
+tests/matching-mysql-gate-check.cjs: Matching MySQL gate self-check passed (4 blob fixtures, 4 failure cases, 1 allowed high acknowledgement, 1 queue without durable evidence)
+Matching probe static checks passed

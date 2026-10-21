@@ -2,6 +2,9 @@
 //! listing/getting entries and typed runtime properties are distinct APIs.
 use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static READ_ERROR_COUNT: AtomicU64 = AtomicU64::new(0);
 
 fn decode(blob: Option<&DataBlob>) -> Option<Value> {
     let blob = blob?;
@@ -58,6 +61,22 @@ fn selected_context(
     fallback
 }
 
+fn report_read_error(property_type: &str, reason: &str) {
+    // Go's dynamic-config Collection logs typed client errors before returning
+    // the property's default. This module has no injected server logger, so
+    // preserve that diagnostic on the process error stream.
+    if READ_ERROR_COUNT
+        .fetch_add(1, Ordering::Relaxed)
+        .is_multiple_of(1_000)
+    {
+        eprintln!("dynamic config {property_type} read failed ({reason}); using default");
+    }
+}
+
+fn integer_value(value: Value) -> Option<i64> {
+    value.as_i64()
+}
+
 /// Matching properties scoped by domain name, physical task-list name and the
 /// persistence task type (0 decision, 1 activity), not the public API enum.
 pub fn task_list_integer(
@@ -67,11 +86,16 @@ pub fn task_list_integer(
     task_type: i32,
     default: i64,
 ) -> i64 {
-    selected_context(values, domain, Some((task_list, task_type)))
-        .and_then(|value| value.as_f64())
-        .filter(|value| value.is_finite() && value.trunc() == *value)
-        .map(|value| value as i64)
-        .unwrap_or(default)
+    match selected_context(values, domain, Some((task_list, task_type))) {
+        Some(value) => integer_value(value).unwrap_or_else(|| {
+            report_read_error("integer", "selected value has the wrong type");
+            default
+        }),
+        None => {
+            report_read_error("integer", "value was not found");
+            default
+        }
+    }
 }
 
 pub fn task_list_boolean(
@@ -81,9 +105,15 @@ pub fn task_list_boolean(
     task_type: i32,
     default: bool,
 ) -> bool {
-    selected_context(values, domain, Some((task_list, task_type)))
+    match selected_context(values, domain, Some((task_list, task_type)))
         .and_then(|value| value.as_bool())
-        .unwrap_or(default)
+    {
+        Some(value) => value,
+        None => {
+            report_read_error("boolean", "value was missing or had the wrong type");
+            default
+        }
+    }
 }
 
 /// Go `GetFloat64PropertyFilteredByTaskListInfo` reads, e.g. the scaler's
@@ -95,10 +125,16 @@ pub fn task_list_float(
     task_type: i32,
     default: f64,
 ) -> f64 {
-    selected_context(values, domain, Some((task_list, task_type)))
+    match selected_context(values, domain, Some((task_list, task_type)))
         .and_then(|value| value.as_f64())
         .filter(|value| value.is_finite())
-        .unwrap_or(default)
+    {
+        Some(value) => value,
+        None => {
+            report_read_error("float", "value was missing or invalid");
+            default
+        }
+    }
 }
 
 pub fn task_list_duration(
@@ -108,40 +144,62 @@ pub fn task_list_duration(
     task_type: i32,
     default: i64,
 ) -> i64 {
-    selected_context(values, domain, Some((task_list, task_type)))
-        .and_then(|value| {
-            value
-                .as_str()
-                .and_then(cadence_common::duration::parse_nanos)
-        })
-        .unwrap_or(default)
+    match selected_context(values, domain, Some((task_list, task_type))).and_then(|value| {
+        value
+            .as_str()
+            .and_then(cadence_common::duration::parse_nanos)
+    }) {
+        Some(value) => value,
+        None => {
+            report_read_error(
+                "duration",
+                "value was missing, had the wrong type, or was invalid",
+            );
+            default
+        }
+    }
 }
 
 pub fn integer(values: &[DynamicConfigValue], domain: Option<&str>, default: i64) -> i64 {
-    selected(values, domain)
-        .and_then(|value| value.as_f64())
-        .filter(|value| value.is_finite() && value.trunc() == *value)
-        .map(|value| value as i64)
-        .unwrap_or(default)
+    match selected(values, domain).and_then(integer_value) {
+        Some(value) => value,
+        None => {
+            report_read_error("integer", "value was missing or had the wrong type");
+            default
+        }
+    }
 }
 
 pub fn boolean(values: &[DynamicConfigValue], domain: Option<&str>, default: bool) -> bool {
-    selected(values, domain).and_then(|value| value.as_bool()).unwrap_or(default)
+    match selected(values, domain).and_then(|value| value.as_bool()) {
+        Some(value) => value,
+        None => {
+            report_read_error("boolean", "value was missing or had the wrong type");
+            default
+        }
+    }
 }
 
 pub fn duration(values: &[DynamicConfigValue], domain: Option<&str>, default: i64) -> i64 {
-    selected(values, domain)
-        .and_then(|value| {
-            value
-                .as_str()
-                .and_then(cadence_common::duration::parse_nanos)
-        })
-        .unwrap_or(default)
+    match selected(values, domain).and_then(|value| {
+        value
+            .as_str()
+            .and_then(cadence_common::duration::parse_nanos)
+    }) {
+        Some(value) => value,
+        None => {
+            report_read_error(
+                "duration",
+                "value was missing, had the wrong type, or was invalid",
+            );
+            default
+        }
+    }
 }
 
 /// Go `MapAllIsolationGroupsResponse`: one non-string rejects the whole list.
 pub fn string_list(values: &[DynamicConfigValue]) -> Vec<String> {
-    selected(values, None)
+    match selected(values, None)
         .and_then(|value| {
             value.as_array().map(|items| {
                 items
@@ -151,7 +209,16 @@ pub fn string_list(values: &[DynamicConfigValue]) -> Vec<String> {
             })
         })
         .flatten()
-        .unwrap_or_default()
+    {
+        Some(value) => value,
+        None => {
+            report_read_error(
+                "string list",
+                "value was missing or contained non-string entries",
+            );
+            Vec::new()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -242,6 +309,17 @@ mod tests {
             entry(json!(6), &[("taskType", json!(0))]),
         ];
         assert_eq!(task_list_integer(&values, None, "queue", 0, 4), 4);
+        assert_eq!(
+            integer(&[entry(json!(5.0), &[])], None, 9),
+            9,
+            "Go GetIntValue rejects YAML float values even when mathematically integral"
+        );
+        assert!(!boolean(&[entry(json!("true"), &[])], None, false));
+        assert_eq!(
+            integer(&[], None, 9),
+            9,
+            "missing keys retain their default"
+        );
     }
 
     #[test]
