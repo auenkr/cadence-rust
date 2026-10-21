@@ -27,6 +27,8 @@ pub enum QueueError {
 }
 pub type Result<T> = std::result::Result<T, QueueError>;
 pub type LeaseObserver = Arc<dyn Fn(bool) + Send + Sync>;
+/// Called when a write or ack persistence call reports `ConditionFailed`.
+pub type ConditionFailedObserver = Arc<dyn Fn() + Send + Sync>;
 #[derive(Clone)]
 pub struct PendingTask {
     pub data: TaskData,
@@ -55,6 +57,7 @@ pub struct DurableTaskQueue {
     stopped: AtomicBool,
     stop_waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     lease_observer: Mutex<Option<LeaseObserver>>,
+    condition_failed_observer: Mutex<Option<ConditionFailedObserver>>,
 }
 #[derive(Default)]
 struct ReaderGate {
@@ -193,6 +196,7 @@ impl DurableTaskQueue {
             stopped: AtomicBool::new(false),
             stop_waker: Mutex::new(None),
             lease_observer: Mutex::new(None),
+            condition_failed_observer: Mutex::new(None),
             writer: Mutex::new(()),
             database: Mutex::new(()),
             reader: Arc::new(ReaderGate::default()),
@@ -229,8 +233,30 @@ impl DurableTaskQueue {
             observer(success);
         }
     }
+    /// Install the service-owned callback for Go `reportConditionFailed`.
+    pub fn set_condition_failed_observer(&self, observer: ConditionFailedObserver) {
+        *self
+            .condition_failed_observer
+            .lock()
+            .expect("matching condition observer lock") = Some(observer);
+    }
     fn check<T>(&self, result: StorageResult<T>) -> Result<T> {
+        self.check_with(result, true)
+    }
+    /// Go reports a lost lease only from the task writer and the reader's
+    /// periodic ack persistence, not partition-config updates or the final ack.
+    fn check_with<T>(&self, result: StorageResult<T>, report: bool) -> Result<T> {
         if matches!(result, Err(StorageError::ConditionFailed(_))) {
+            if report {
+                if let Some(observer) = self
+                    .condition_failed_observer
+                    .lock()
+                    .expect("matching condition observer lock")
+                    .clone()
+                {
+                    observer();
+                }
+            }
             self.stop();
         }
         result.map_err(Into::into)
@@ -538,9 +564,10 @@ impl DurableTaskQueue {
             (state.range_id, state.metadata.clone())
         };
         metadata.adaptive_partition_config = config;
-        self.check(
+        self.check_with(
             self.store
                 .update_task_list(&self.key, range, metadata.clone(), now),
+            false,
         )?;
         self.state.lock().expect("matching queue lock").metadata = metadata;
         Ok(())
@@ -566,7 +593,7 @@ impl DurableTaskQueue {
             let result = self
                 .store
                 .update_task_list(&self.key, range, metadata.clone(), now);
-            self.check(result)?;
+            self.check_with(result, !final_update)?;
             self.state.lock().expect("matching queue lock").metadata = metadata;
         }
         Ok(())
@@ -827,6 +854,36 @@ mod tests {
         assert_eq!(queue.run_garbage_collection(true).unwrap(), 1);
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert_eq!(later.len(), 1);
+    }
+    #[test]
+    fn matching_queue_reports_condition_failed_for_writer_and_ack_not_partition_update() {
+        use crate::matching_blob::PartitionConfig;
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let stale = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 1).unwrap();
+        let reports = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = reports.clone();
+        stale.set_condition_failed_observer(Arc::new(move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+        let _owner = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 3).unwrap();
+        // Lease takeover fences the stale owner's partition config update: not reported.
+        assert!(stale
+            .update_partition_config(Some(PartitionConfig::default()), 4)
+            .is_err());
+        assert_eq!(reports.load(std::sync::atomic::Ordering::SeqCst), 0);
+        // A fresh stale owner is reported from the writer path.
+        let stale = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 5).unwrap();
+        let seen = reports.clone();
+        stale.set_condition_failed_observer(Arc::new(move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+        let _owner = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 6).unwrap();
+        assert!(stale.append(&[data()], 7).is_err());
+        assert_eq!(reports.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
     #[test]
     fn matching_queue_partition_update_fences_stale_owner_without_publishing() {
