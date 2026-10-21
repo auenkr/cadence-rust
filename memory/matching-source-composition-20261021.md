@@ -19,6 +19,14 @@ pending an owner commit and must be incorporated when its hash is available.
 PG owns the only heavy lane. This source composition did not run Cargo, Go,
 containers, databases, or services.
 
+Candidate history after the composed checkpoint: `6d0f70351` is the
+two-parent telemetry/runtime merge (runtime input `806067b1`); `2e4696fa4`
+fixes listener lifetime through drain; `35464aa49` wires quota rejections into
+the configured metrics sink; `799e4770a` incorporates the committed lib/pq
+mode correction; `14fd35c14` removes an unnecessary mutable binding and
+clarifies the listener shutdown comment. The current branch head is
+`14fd35c142fab9c5b6ddb104df89b57e7e0416ad`.
+
 ## Integration decisions
 
 - Kept the telemetry candidate's inbound metric wrappers and queue/history
@@ -61,11 +69,15 @@ The runtime composition checkpoint counts rejected RPCs through the inbound
 request wrapper, and the metrics follow-up commit wires rejection details to
 the configured sink as `matching_rpc_quota_rejections`, tagging the exact RPC,
 `user`/`worker` class, and domain where supplied. PostgreSQL lib/pq behavior
-correction `58d1d1e32` is available for source integration; the owner is still
+correction `58d1d1e32` is incorporated in `799e4770a`; its owner is still
 working on inline PEM (`sslinline=true`) handling and paired compile/oracle
-fixes. The persistence host/cluster QPS rejection counter still has no explicit
-export path in `matching_queue.rs`/`matching_registry.rs`; do not treat either
-RPC metric path as covering that persistence counter.
+fixes. A Cassandra recovery gate review found that current held-semaphore
+recovery evidence does not correlate the held owner with the Rust process that
+is killed. Its owner is correcting that scope in the Cassandra worktree; leave
+that harness region untouched until the new commit is available. The
+persistence host/cluster QPS rejection counter still has no explicit export
+path in `matching_queue.rs`/`matching_registry.rs`; do not treat either RPC
+metric path as covering that persistence counter.
 
 The root worktree's uncommitted `lib`/registry/runtime/user-owned shard
 processor overlay was not copied, replaced, or staged. Careful integration of
