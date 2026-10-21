@@ -35,3 +35,45 @@ Three fresh reruns narrowed the remaining issues. `owner-rerun2/` passed the two
 `owner-rerun4/` used frozen binary `679e0b…4254aa` plus the same already-built Go baseline server, with no Rust build. It passed the direct typed Go ownership oracle, idle + SDK recovery, owner-crash + SDK recovery, ownership checks and the reported-versus-persisted task ID range check. It then failed because the Go Frontend `DescribeTaskList` response lacked recent poller `service-probe` immediately after returning that workflow's decision task. The test has not yet identified which Matching host handled the poll and which manager the Frontend queried. Rust `cadence_common::poller::Manager::end` retains a completed poller in its five-minute history, and Go `poller.manager.EndPoll` refreshes its history cache similarly; therefore this remains an owner/routing diagnosis, not evidence that the retention implementation is absent. Commit `9a2f08487` records both Rust members' direct owner view and direct task-list descriptions when this assertion fails. That diagnostic has not yet run.
 
 The rerun4 result is in `owner-rerun4/run/probe.log` and its `exit` file. The post-run process audit found no cadence services, Go runner, compatibility probe or typed oracle processes. The runner reused Go executable SHA-256 `d0d0bbada5bf18c87111144c482265b47d159f978d35e0cda733625c60eed543`; the frozen Rust binary checksum remains in `frozen-binary.sha256`.
+
+## Source-only poller diagnosis and parity recheck
+
+The failed assertion is after `PollForDecisionTask` has already returned the
+started workflow decision task to Go Frontend. The next `DescribeTaskList` goes
+through Go Frontend, which routes through its Matching client; the assertion
+does not pin that call to the host that served the poll. The Rust `Manager::end`
+and Go `poller.manager.EndPoll` both move a completed poller's identity into a
+five-minute history cache, but each cache belongs to its task-list manager.
+Consequently, the current evidence does not prove whether this is an owner
+selection/manager-lifetime issue or a Rust history retention defect.
+
+The already-committed diagnostic at `9a2f08487` writes
+`production-poller-owner-diagnostics.json` on this assertion failure. It
+records the public Frontend poller list and task ID block, then asks both live
+Rust gRPC endpoints for their reported owner and direct task-list poller list.
+The artifact is not present in rerun4 because that diagnostic was added after
+that run. Do not weaken the assertion. If only one direct manager reports
+`service-probe`, fix the harness to pin its retention check to that owner while
+keeping the public path assertion as a separate routing check. If neither does,
+trace whether the workflow poll request landed on another manager instance or
+whether the Rust history manager lost the entry while Go's matching owner
+retained it before changing implementation.
+
+Current Go-source comparison also corrects the previous domain callback note:
+`engine.go:1707-1785` only releases blocked polls for newly notified global,
+non-active-active domains. It lists persisted task lists and loads normal
+decision/activity plus sticky decision managers before release; it does not
+perform generic unload or config-change invalidation. Rust metadata synchronization
+signals the per-domain watch and poll handlers release currently loaded owners,
+so the remaining source gap is persisted task-list enumeration/manager creation.
+No code was changed in the protected runtime/registry WIP.
+
+The confirmed remote partition refresh gap also needs a mixed two-host gate:
+update the root config so a remote read partition is added, verify its owner's
+direct `DescribeTaskList` advances, remove that partition and verify the owner
+refreshes, deliver an older version after a newer one and verify it is ignored,
+then change owner placement and restart the owner to verify persisted refresh.
+Cover read and write map differences explicitly because Go notifies old/new
+read partition IDs while current Rust local fanout includes read and write IDs.
+This is a queued validation requirement, not a passing gate; no Cargo, Go,
+cluster, or Docker process was run for this source-only review.
