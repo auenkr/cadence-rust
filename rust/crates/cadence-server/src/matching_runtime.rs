@@ -691,6 +691,25 @@ pub fn live_shutdown_drain_duration(overlay: Arc<Mutex<DynamicConfigOverlay>>) -
     })
 }
 
+/// Go `domainChangeCallback` selection: a global, non-active-active domain whose
+/// failover notification version advanced past `previous` disconnects its
+/// pollers. Returns the highest version seen (the new baseline) and the UUIDs
+/// of the domains that must release their polls.
+fn notified_failover_domains(
+    previous: i64,
+    entries: impl Iterator<Item = (String, bool, bool, i64)>,
+) -> (i64, Vec<String>) {
+    let mut highest = previous;
+    let mut notified = Vec::new();
+    for (uuid, is_global, is_active_active, version) in entries {
+        highest = highest.max(version);
+        if is_global && !is_active_active && version > previous {
+            notified.push(uuid);
+        }
+    }
+    (highest, notified)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

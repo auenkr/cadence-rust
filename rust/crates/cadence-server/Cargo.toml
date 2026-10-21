@@ -9,6 +9,7 @@ name = "cadence-server"
 path = "src/main.rs"
 
 [dependencies]
+async-trait = "0.1"
 cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
 cadence-persistence = { path = "../cadence-persistence" }

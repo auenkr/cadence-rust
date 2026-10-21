@@ -1170,7 +1170,7 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
             Err(AppError::bad_request(message))
         }
         Err(cadence_persistence::SemaphoreError::UnsupportedBackend) => Err(AppError::bad_request(
-            cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE,
+            cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE.to_string(),
         )),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))

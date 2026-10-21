@@ -200,7 +200,7 @@ pub(crate) fn decode_go_cassandra_domain_metadata(
                 clusters
                     .into_iter()
                     .filter_map(|cluster| cluster.cluster_name)
-                    .map(|cluster| text(cluster))
+                    .map(text)
                     .collect(),
             ),
         );
@@ -320,11 +320,9 @@ impl CassandraDomainMetadataStore {
         match (name, id) {
             (Some(_), Some(_)) => Err(MatchingDomainMetadataError::BothIdAndName),
             (None, None) => Err(MatchingDomainMetadataError::EmptyIdentity),
-            (Some(name), None) if name.is_empty() => {
-                Err(MatchingDomainMetadataError::EmptyIdentity)
-            }
+            (Some(""), None) => Err(MatchingDomainMetadataError::EmptyIdentity),
             (Some(name), None) => self.get_by_name(name),
-            (None, Some(id)) if id.is_empty() => Err(MatchingDomainMetadataError::EmptyIdentity),
+            (None, Some("")) => Err(MatchingDomainMetadataError::EmptyIdentity),
             (None, Some(id)) => {
                 let id = uuid::Uuid::parse_str(id)
                     .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;

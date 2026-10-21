@@ -15,7 +15,7 @@
 use cadence_api::enums::SemaphoreAcquireOutcome;
 use cadence_common::liveness::Liveness;
 use cadence_persistence::{
-    AcquireError, GrantOutcome, InMemoryExecutionStore, SemaphorePersistence, SemaphoreRow,
+    AcquireError, GrantOutcome, SemaphorePersistence, SemaphoreRow,
 };
 use std::{
     collections::HashMap,
@@ -445,15 +445,21 @@ impl Registry {
             return Ok(existing);
         }
         let manager = Arc::new(Manager::new(id.clone(), self.store.clone(), self.idle_ttl_nanos));
-        {
+        // The registry lock is released before any await, so the guard never
+        // crosses a suspension point.
+        let existing = {
             let mut managers = self.managers.lock().expect("semaphore registry lock");
-            if let Some(existing) = managers.get(&id) {
-                let existing = existing.clone();
-                drop(managers);
-                existing.start().await?;
-                return Ok(existing);
+            match managers.get(&id).cloned() {
+                Some(existing) => Some(existing),
+                None => {
+                    managers.insert(id, manager.clone());
+                    None
+                }
             }
-            managers.insert(id, manager.clone());
+        };
+        if let Some(existing) = existing {
+            existing.start().await?;
+            return Ok(existing);
         }
         if let Err(error) = manager.start().await {
             self.unregister(&manager);

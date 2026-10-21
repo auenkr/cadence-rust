@@ -392,7 +392,7 @@ async fn create_semaphore(
         Err(cadence_persistence::SemaphoreError::UnsupportedBackend) => error_response(
             "BadRequestError",
             StatusCode::BAD_REQUEST,
-            cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE,
+            cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE.to_string(),
         ),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::SemaphoreError::Internal(message)) => error_response(

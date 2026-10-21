@@ -169,6 +169,14 @@ fn semaphore_status(error: crate::matching_semaphore::ManagerError) -> Status {
                 reason: String::new(),
             },
         ),
+        ManagerError::ServiceBusy(message) => crate::grpc::detailed_status(
+            tonic::Code::ResourceExhausted,
+            message,
+            "ServiceBusyError",
+            cadence_proto::api::ServiceBusyError {
+                reason: String::new(),
+            },
+        ),
         ManagerError::Internal(message) => Status::internal(message),
     }
 }
@@ -320,7 +328,7 @@ pub type TaskListOwnershipCheck = Arc<
 >;
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
-        let semaphores = crate::matching_semaphore::Registry::new(state.executions.clone());
+        let semaphores = crate::matching_semaphore::Registry::new(Arc::new(state.executions.clone()));
         let rpc_quota = Arc::new(crate::matching_quota::MatchingRpcQuota::with_metric_sink(
             state.admin.dynamic_config.clone(), Arc::new(|_| {}),
         ));

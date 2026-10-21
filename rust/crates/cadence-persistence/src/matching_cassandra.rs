@@ -271,171 +271,6 @@ fn task_not_expired(data: &TaskData, now_nanos: i64) -> bool {
     data.expiry_nanos <= 0 || data.expiry_nanos > now_nanos
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cassandra_task_ttl_is_not_promoted_to_matching_task_expiry() {
-        let created = DateTime::from_timestamp(1_700_000_000, 123_000_000).unwrap();
-        let task = CassandraTaskUdt {
-            domain_id: Uuid::from_u128(1),
-            workflow_id: "ttl-backed-task".into(),
-            run_id: None,
-            schedule_id: 7,
-            created_time: created,
-            partition_config: None,
-        };
-
-        for ttl in [Some(1), Some(0), None] {
-            let decoded = task_from_udt(9, task.clone(), ttl).unwrap();
-            assert_eq!(decoded.data.created_nanos, 1_700_000_000_123_000_000);
-            assert_eq!(decoded.data.expiry_nanos, 0);
-        }
-    }
-
-    #[test]
-    fn task_udt_literals_escape_go_strings_and_match_ttl_rounding() {
-        let task = TaskData {
-            workflow_id: "worker's workflow".into(),
-            created_nanos: 1_000_000_000,
-            expiry_nanos: 3_900_000_000,
-            partition_config: Some([("group".to_string(), "blue".to_string())].into()),
-            ..Default::default()
-        };
-        let literal = task_literal(Uuid::from_u128(1), &task).unwrap();
-        assert!(literal.contains("workflow_id: 'worker''s workflow'"));
-        assert!(literal.contains("partition_config: {'group': 'blue'}"));
-        assert_eq!(task_ttl(&task), Some(2), "Go truncates TTL seconds");
-        assert!(!task_not_expired(&task, task.expiry_nanos));
-        assert!(task_not_expired(&task, task.expiry_nanos - 1));
-        let capped = TaskData {
-            created_nanos: 1,
-            expiry_nanos: i64::MAX,
-            ..Default::default()
-        };
-        assert_eq!(
-            task_ttl(&capped),
-            Some(MAX_CASSANDRA_TTL_SECONDS as i32),
-            "Go caps task TTL at five years",
-        );
-        let subsecond = TaskData {
-            expiry_nanos: 1_900_000_000,
-            ..task
-        };
-        assert_eq!(task_ttl(&subsecond), None);
-    }
-
-    #[test]
-    fn task_list_partition_udt_round_trips_go_field_values() {
-        let key = TaskListKey {
-            domain_id: Uuid::from_u128(11),
-            name: "sticky".into(),
-            task_type: 1,
-        };
-        let data = TaskListData {
-            kind: 1,
-            ack_level: 73,
-            last_updated_nanos: 1_700_000_000_123_000_000,
-            adaptive_partition_config: Some(crate::matching_blob::PartitionConfig {
-                version: 9,
-                num_read_partitions: 1,
-                num_write_partitions: 1,
-                read_partitions: Some(
-                    [(
-                        0,
-                        crate::matching_blob::Partition {
-                            isolation_groups: Some(vec!["blue".into()]),
-                        },
-                    )]
-                    .into(),
-                ),
-                write_partitions: Some(
-                    [(
-                        0,
-                        crate::matching_blob::Partition {
-                            isolation_groups: Some(vec!["blue".into()]),
-                        },
-                    )]
-                    .into(),
-                ),
-            }),
-            ..Default::default()
-        };
-        let udt = CassandraMatchingTaskStore::task_list_udt(&key, &data).unwrap();
-        assert_eq!(udt.type_, 1);
-        assert_eq!(udt.adaptive_partition_config.as_ref().unwrap().version, 9);
-        assert_eq!(CassandraMatchingTaskStore::list_data(udt).unwrap(), data);
-    }
-
-    /// Cross-language probe: the Cassandra harness seeds this row from Go,
-    /// runs this test, then asks Go to verify Rust's write.
-    #[test]
-    #[ignore = "requires tests/run-matching-cassandra-interop.py"]
-    fn go_seed_rust_write_restart_go_verify() {
-        let hosts = std::env::var("CADENCE_CASSANDRA_CONTACT_POINTS")
-            .expect("harness sets contact points")
-            .split(',')
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        let port = std::env::var("CADENCE_CASSANDRA_PORT")
-            .ok()
-            .and_then(|port| port.parse::<i32>().ok())
-            .unwrap_or(9042);
-        let config = crate::cassandra::CassandraSessionConfig::from_parts(
-            hosts,
-            port,
-            std::env::var("CADENCE_CASSANDRA_USER").unwrap_or_default(),
-            std::env::var("CADENCE_CASSANDRA_PASSWORD").unwrap_or_default(),
-            std::env::var("CADENCE_CASSANDRA_KEYSPACE").expect("harness sets keyspace"),
-        )
-        .expect("valid Cassandra harness config");
-        let domain_id = Uuid::parse_str(
-            &std::env::var("CADENCE_CASSANDRA_TEST_DOMAIN_ID").expect("harness sets domain id"),
-        )
-        .expect("valid domain id");
-        let key = TaskListKey {
-            domain_id,
-            name: std::env::var("CADENCE_CASSANDRA_TEST_TASK_LIST")
-                .expect("harness sets task list"),
-            task_type: 1,
-        };
-        let driver = Arc::new(
-            CassandraBlockingSession::connect(&config).expect("connect to Go-seeded Cassandra"),
-        );
-        let store = CassandraMatchingTaskStore::new(driver.clone());
-        assert_eq!(store.get_task_list(&key).unwrap().range_id, 41);
-        let now = Utc::now()
-            .timestamp_nanos_opt()
-            .expect("current timestamp range");
-        let lease = store.lease(&key, 0, 41, now).unwrap();
-        assert_eq!(lease.range_id, 42);
-        let task = AllocatedTask {
-            task_id: 101,
-            data: TaskData {
-                workflow_id: "rust-cassandra-interop".into(),
-                schedule_id: 23,
-                created_nanos: now - 1_000_000_000,
-                ..Default::default()
-            },
-        };
-        store
-            .create_tasks_with_domains(&key, 42, now, &[(domain_id, &task)])
-            .unwrap();
-        drop(store);
-        drop(driver);
-
-        let restarted = Arc::new(
-            CassandraBlockingSession::connect(&config)
-                .expect("reconnect after persistence restart"),
-        );
-        let recovered = CassandraMatchingTaskStore::new(restarted);
-        let tasks = recovered.get_tasks(&key, 100, 101, 10).unwrap();
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].data.workflow_id, "rust-cassandra-interop");
-        assert_eq!(tasks[0].data.schedule_id, 23);
-    }
-}
 
 impl MatchingTaskStore for CassandraMatchingTaskStore {
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
@@ -636,7 +471,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         batch.append_statement(Statement::new(format!(
             "UPDATE tasks SET range_id={}, last_updated_time={} WHERE domain_id={} AND task_list_name={} AND task_list_type={} AND type={} AND task_id={} IF range_id={}",
             range, now_nanos.div_euclid(1_000_000), key.domain_id, cql_text(&key.name), key.task_type, LIST_ROW, LIST_SENTINEL, range)));
-        let values = std::iter::repeat(()).take(inserted + 1).collect::<Vec<_>>();
+        let values = vec![(); inserted + 1];
         let session = self.session();
         let result = self
             .driver
@@ -803,5 +638,171 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         } else {
             Err(MatchingTaskStoreError::DeleteCount(0))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cassandra_task_ttl_is_not_promoted_to_matching_task_expiry() {
+        let created = DateTime::from_timestamp(1_700_000_000, 123_000_000).unwrap();
+        let task = CassandraTaskUdt {
+            domain_id: Uuid::from_u128(1),
+            workflow_id: "ttl-backed-task".into(),
+            run_id: None,
+            schedule_id: 7,
+            created_time: created,
+            partition_config: None,
+        };
+
+        for ttl in [Some(1), Some(0), None] {
+            let decoded = task_from_udt(9, task.clone(), ttl).unwrap();
+            assert_eq!(decoded.data.created_nanos, 1_700_000_000_123_000_000);
+            assert_eq!(decoded.data.expiry_nanos, 0);
+        }
+    }
+
+    #[test]
+    fn task_udt_literals_escape_go_strings_and_match_ttl_rounding() {
+        let task = TaskData {
+            workflow_id: "worker's workflow".into(),
+            created_nanos: 1_000_000_000,
+            expiry_nanos: 3_900_000_000,
+            partition_config: Some([("group".to_string(), "blue".to_string())].into()),
+            ..Default::default()
+        };
+        let literal = task_literal(Uuid::from_u128(1), &task).unwrap();
+        assert!(literal.contains("workflow_id: 'worker''s workflow'"));
+        assert!(literal.contains("partition_config: {'group': 'blue'}"));
+        assert_eq!(task_ttl(&task), Some(2), "Go truncates TTL seconds");
+        assert!(!task_not_expired(&task, task.expiry_nanos));
+        assert!(task_not_expired(&task, task.expiry_nanos - 1));
+        let capped = TaskData {
+            created_nanos: 1,
+            expiry_nanos: i64::MAX,
+            ..Default::default()
+        };
+        assert_eq!(
+            task_ttl(&capped),
+            Some(MAX_CASSANDRA_TTL_SECONDS as i32),
+            "Go caps task TTL at five years",
+        );
+        let subsecond = TaskData {
+            expiry_nanos: 1_900_000_000,
+            ..task
+        };
+        assert_eq!(task_ttl(&subsecond), None);
+    }
+
+    #[test]
+    fn task_list_partition_udt_round_trips_go_field_values() {
+        let key = TaskListKey {
+            domain_id: Uuid::from_u128(11),
+            name: "sticky".into(),
+            task_type: 1,
+        };
+        let data = TaskListData {
+            kind: 1,
+            ack_level: 73,
+            last_updated_nanos: 1_700_000_000_123_000_000,
+            adaptive_partition_config: Some(crate::matching_blob::PartitionConfig {
+                version: 9,
+                num_read_partitions: 1,
+                num_write_partitions: 1,
+                read_partitions: Some(
+                    [(
+                        0,
+                        crate::matching_blob::Partition {
+                            isolation_groups: Some(vec!["blue".into()]),
+                        },
+                    )]
+                    .into(),
+                ),
+                write_partitions: Some(
+                    [(
+                        0,
+                        crate::matching_blob::Partition {
+                            isolation_groups: Some(vec!["blue".into()]),
+                        },
+                    )]
+                    .into(),
+                ),
+            }),
+            ..Default::default()
+        };
+        let udt = CassandraMatchingTaskStore::task_list_udt(&key, &data).unwrap();
+        assert_eq!(udt.type_, 1);
+        assert_eq!(udt.adaptive_partition_config.as_ref().unwrap().version, 9);
+        assert_eq!(CassandraMatchingTaskStore::list_data(udt).unwrap(), data);
+    }
+
+    /// Cross-language probe: the Cassandra harness seeds this row from Go,
+    /// runs this test, then asks Go to verify Rust's write.
+    #[test]
+    #[ignore = "requires tests/run-matching-cassandra-interop.py"]
+    fn go_seed_rust_write_restart_go_verify() {
+        let hosts = std::env::var("CADENCE_CASSANDRA_CONTACT_POINTS")
+            .expect("harness sets contact points")
+            .split(',')
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let port = std::env::var("CADENCE_CASSANDRA_PORT")
+            .ok()
+            .and_then(|port| port.parse::<i32>().ok())
+            .unwrap_or(9042);
+        let config = crate::cassandra::CassandraSessionConfig::from_parts(
+            hosts,
+            port,
+            std::env::var("CADENCE_CASSANDRA_USER").unwrap_or_default(),
+            std::env::var("CADENCE_CASSANDRA_PASSWORD").unwrap_or_default(),
+            std::env::var("CADENCE_CASSANDRA_KEYSPACE").expect("harness sets keyspace"),
+        )
+        .expect("valid Cassandra harness config");
+        let domain_id = Uuid::parse_str(
+            &std::env::var("CADENCE_CASSANDRA_TEST_DOMAIN_ID").expect("harness sets domain id"),
+        )
+        .expect("valid domain id");
+        let key = TaskListKey {
+            domain_id,
+            name: std::env::var("CADENCE_CASSANDRA_TEST_TASK_LIST")
+                .expect("harness sets task list"),
+            task_type: 1,
+        };
+        let driver = Arc::new(
+            CassandraBlockingSession::connect(&config).expect("connect to Go-seeded Cassandra"),
+        );
+        let store = CassandraMatchingTaskStore::new(driver.clone());
+        assert_eq!(store.get_task_list(&key).unwrap().range_id, 41);
+        let now = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("current timestamp range");
+        let lease = store.lease(&key, 0, 41, now).unwrap();
+        assert_eq!(lease.range_id, 42);
+        let task = AllocatedTask {
+            task_id: 101,
+            data: TaskData {
+                workflow_id: "rust-cassandra-interop".into(),
+                schedule_id: 23,
+                created_nanos: now - 1_000_000_000,
+                ..Default::default()
+            },
+        };
+        store
+            .create_tasks_with_domains(&key, 42, now, &[(domain_id, &task)])
+            .unwrap();
+        drop(store);
+        drop(driver);
+
+        let restarted = Arc::new(
+            CassandraBlockingSession::connect(&config)
+                .expect("reconnect after persistence restart"),
+        );
+        let recovered = CassandraMatchingTaskStore::new(restarted);
+        let tasks = recovered.get_tasks(&key, 100, 101, 10).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].data.workflow_id, "rust-cassandra-interop");
+        assert_eq!(tasks[0].data.schedule_id, 23);
     }
 }

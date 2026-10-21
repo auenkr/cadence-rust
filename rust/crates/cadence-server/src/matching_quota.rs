@@ -295,12 +295,14 @@ impl MatchingRpcQuota {
                 domain: domain.map(str::to_owned),
             };
             #[cfg(test)]
-            *self
-                .rejected
-                .lock()
-                .expect("Matching quota metric lock")
-                .entry((metric.method, metric.class, metric.domain.clone()))
-                .or_default() += 1;
+            let () = {
+                *self
+                    .rejected
+                    .lock()
+                    .expect("Matching quota metric lock")
+                    .entry((metric.method, metric.class, metric.domain.clone()))
+                    .or_default() += 1;
+            };
             (self.metric_sink.lock().expect("Matching quota metric sink lock"))(metric);
         }
         allowed || !reject

@@ -1666,7 +1666,7 @@ impl QueueRegistry {
         let task_list_kind = handle.queue.task_list_kind();
         let notification = tokio::task::spawn_blocking(move || {
             let Some((old, new)) = handle.partitions.update(&handle.queue, config, now)? else {
-                return Ok(None);
+                return Ok::<_, Status>(None);
             };
             // Pinned Go taskListManager.notifyPartitionConfig notifies the
             // union of old/new non-root READ partitions only. Write partitions
