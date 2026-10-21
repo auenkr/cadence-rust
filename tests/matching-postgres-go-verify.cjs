@@ -11,11 +11,18 @@ const files = ['domain', 'workflow'].map(name => path.join(root, `uber/cadence/a
 const api = grpc.loadPackageDefinition(loader.loadSync(files, {
   includeDirs: [root], enums: String, longs: String, bytes: Buffer, defaults: true, oneofs: true,
 })).uber.cadence.api.v1;
-const [peer, domain, workflowId, runId, taskList, consumedWorkflowId, consumedRunId, consumedTaskList] = process.argv.slice(2);
-if (![peer, domain, workflowId, runId, taskList].every(Boolean)
-    || [consumedWorkflowId, consumedRunId, consumedTaskList].some(Boolean)
-      && ![consumedWorkflowId, consumedRunId, consumedTaskList].every(Boolean)) {
-  throw new Error('usage: matching-postgres-go-verify.cjs FRONTEND_GRPC DOMAIN WORKFLOW_ID RUN_ID TASK_LIST');
+const [peer, domain, workflowId, runId, taskList, consumedWorkflowId, consumedRunId, consumedTaskList,
+  rangeId, consumedRangeId] = process.argv.slice(2);
+if (![peer, domain, workflowId, runId, taskList, rangeId].every(Boolean)
+    || [consumedWorkflowId, consumedRunId, consumedTaskList, consumedRangeId].some(Boolean)
+      && ![consumedWorkflowId, consumedRunId, consumedTaskList, consumedRangeId].every(Boolean)) {
+  throw new Error('usage: matching-postgres-go-verify.cjs FRONTEND_GRPC DOMAIN WORKFLOW_ID RUN_ID TASK_LIST RANGE_ID [CONSUMED_WORKFLOW_ID CONSUMED_RUN_ID CONSUMED_TASK_LIST CONSUMED_RANGE_ID]');
+}
+// Go's rangeIDToTaskIDBlock maps a persisted range to ((range-1)*size+1, range*size)
+// with the default 100000-wide block. The range row is read from PostgreSQL by the runner.
+function assertTaskIdBlock(status, range) {
+  assert.equal(status.taskIdBlock.startId, String((Number(range) - 1) * 100000 + 1));
+  assert.equal(status.taskIdBlock.endId, String(Number(range) * 100000));
 }
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI'].map(name => [name,
   new api[name](peer, grpc.credentials.createInsecure())]));
@@ -34,8 +41,7 @@ async function verify() {
     domain, taskList: { name: taskList }, taskListType: 'TASK_LIST_TYPE_DECISION',
     includeTaskListStatus: true,
   });
-  assert.equal(taskListInfo.taskListStatus.taskIdBlock.startId, '1');
-  assert.equal(taskListInfo.taskListStatus.taskIdBlock.endId, '100000');
+  assertTaskIdBlock(taskListInfo.taskListStatus, rangeId);
   const history = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
     domain, workflowExecution: { workflowId, runId },
   });
@@ -53,7 +59,7 @@ async function verify() {
       domain, taskList: { name: consumedTaskList }, taskListType: 'TASK_LIST_TYPE_DECISION',
       includeTaskListStatus: true,
     });
-    assert.equal(consumedTaskList.taskListStatus.taskIdBlock.startId, '1');
+    assertTaskIdBlock(consumedTaskList.taskListStatus, consumedRangeId);
     goConsumedRustTask = true;
   }
   console.log(JSON.stringify({ result: 'passed', domain, domainId, workflowId, runId, taskList,
