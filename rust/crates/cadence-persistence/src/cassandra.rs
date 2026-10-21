@@ -705,7 +705,7 @@ impl CassandraSessionConfig {
         self.allowed_authenticators = options.allowed_authenticators;
         self.host_selection_policy = options.host_selection_policy;
         if options.proto_version != 0 && options.proto_version != 4 {
-            anyhow::bail!("Cassandra protoVersion {} cannot be selected by the Scylla Rust driver (only negotiated protocol is supported)", options.proto_version);
+            anyhow::bail!("Cassandra protoVersion {} is not supported by the Scylla Rust driver (the driver only speaks CQL protocol v4)", options.proto_version);
         }
         // Go carries connectAttributes in NoSQL config but does not forward them
         // into gocql ClusterConfig, so intentionally leave them unused here too.
@@ -1457,6 +1457,36 @@ mod session_config_tests {
         );
         assert_eq!(configured.max_connections_per_host.unwrap().get(), 8);
         assert_eq!(configured.datacenter, "dc1");
+    }
+
+    #[test]
+    fn cassandra_rejects_protocol_versions_the_driver_cannot_speak() {
+        let config = CassandraSessionConfig::from_parts(
+            ["127.0.0.1".to_string()],
+            9042,
+            "".to_string(),
+            "".to_string(),
+            "cadence".to_string(),
+        )
+        .unwrap();
+        for version in [1, 2, 3, 5, 6] {
+            let error = config
+                .clone()
+                .with_go_options(CassandraSessionOptions {
+                    proto_version: version,
+                    ..Default::default()
+                })
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(&format!("protoVersion {version}")));
+            assert!(error.contains("only speaks CQL protocol v4"));
+        }
+        assert!(config
+            .with_go_options(CassandraSessionOptions {
+                proto_version: 4,
+                ..Default::default()
+            })
+            .is_ok());
     }
 
     #[test]
