@@ -83,6 +83,8 @@ def validate_matching_exporter(exporter, work, repository, expected_domain):
     # gRPC listener (the outbound History transport setting is independent).
     transport = 'grpc'
     shutdown_path = work / 'rust-matching' / 'matching-shutdown.json'
+    if not shutdown_path.is_file():
+        shutdown_path = work / 'matching-shutdown.json'
     shutdown = json.loads(shutdown_path.read_text()) if shutdown_path.is_file() else None
     if not shutdown or shutdown.get('exitCode') != 0 or shutdown.get('signal') != 'SIGTERM':
         raise RuntimeError('Rust Matching did not provide a successful SIGTERM shutdown record')
@@ -98,7 +100,16 @@ def validate_matching_exporter(exporter, work, repository, expected_domain):
         sample_count = 0
         metric_values = {metric: [] for metric in required}
         request_lines = set()
-        prometheus_domain = re.sub(r'[^A-Za-z0-9_]', '_', expected_domain)
+        prometheus_labels = {
+            label: re.sub(r'[^A-Za-z0-9_]', '_', value)
+            for label, value in {
+                'caller': caller,
+                'transport': transport,
+                'cadence_service': 'cadence-matching',
+                'domain': expected_domain,
+                'operation': 'RespondQueryTaskCompleted',
+            }.items()
+        }
         for scrape in scrape_iter:
             for line in scrape.splitlines():
                 if not line or line.startswith('#'):
@@ -110,11 +121,11 @@ def validate_matching_exporter(exporter, work, repository, expected_domain):
                         if match and float(match.group(1)) > 0:
                             metric_values[metric].append(float(match.group(1)))
                 if ('cadence_requests_per_tl' in line
-                    and f'caller="{caller}"' in line
-                    and f'transport="{transport}"' in line
-                    and 'cadence_service="cadence_matching"' in line
-                    and f'domain="{prometheus_domain}"' in line
-                    and 'operation="RespondQueryTaskCompleted"' in line):
+                    and f'caller="{prometheus_labels["caller"]}"' in line
+                    and f'transport="{prometheus_labels["transport"]}"' in line
+                    and f'cadence_service="{prometheus_labels["cadence_service"]}"' in line
+                    and f'domain="{prometheus_labels["domain"]}"' in line
+                    and f'operation="{prometheus_labels["operation"]}"' in line):
                     match = re.search(r'\s([-+0-9.eE]+)$', line)
                     if match and float(match.group(1)) > 0:
                         request_lines.add(line)
@@ -130,7 +141,7 @@ def validate_matching_exporter(exporter, work, repository, expected_domain):
             raise RuntimeError('Prometheus lacks a positive query request sample with the expected domain/caller/transport/service labels')
         semantic = {'format': exporter, 'sampleCount': sample_count,
                     'requiredMetrics': list(required), 'expectedDomain': expected_domain,
-                    'prometheusDomainLabel': prometheus_domain,
+                    'prometheusExpectedLabels': prometheus_labels,
                     'positiveRequiredMetricSamples': {key: len(value) for key, value in metric_values.items()},
                     'requestSamples': request_lines}
     elif exporter == 'statsd':

@@ -1,0 +1,9 @@
+Go baseline artifacts: /tmp/matching-telemetry-prometheus-retry
+Selected evidence copied to memory/evidence/matching-telemetry/attempt-20261021-exporters/prometheus-retry-history-metrics: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'prometheus-scrape.txt', 'prometheus-scrape-samples.jsonl.gz', 'db-observations.json', 'gc-backlog-sdk.log', 'go-sdk.log', 'graceful-drain-sdk.log', 'restart-sdk.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-after-graceful-drain.log', 'rust-server-logs/rust-server-after-restart.log', 'rust-server-logs/rust-server-before-restart.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_mysql.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Traceback (most recent call last):
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/tests/run-go-service-baseline.py", line 694, in <module>
+    semantics = validate_matching_exporter(
+        args.matching_exporter, work, root, probe_result['domain'])
+  File "/home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/tests/run-go-service-baseline.py", line 130, in validate_matching_exporter
+    raise RuntimeError('Prometheus lacks a positive query request sample with the expected domain/caller/transport/service labels')
+RuntimeError: Prometheus lacks a positive query request sample with the expected domain/caller/transport/service labels
