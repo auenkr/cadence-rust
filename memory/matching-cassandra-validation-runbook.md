@@ -42,15 +42,26 @@ build. Then the runner starts Cassandra 4.1.7, applies
 Rust lease/write/reconnect/read → Go verification harness. Use the resulting
 phase logs and Go assertions as narrow adapter interoperability evidence.
 
-Finally, the runner invokes the existing two-Rust-node failure/recovery gate:
-original Go Frontend, History, and Worker stay up; no Go Matching is started;
-the existing Go SDK exercises workflows across idle eviction, owner crash,
-restart, and recovery. This gate currently uses the service's SQLite task
-store, because the production Matching task-store factory does not yet wire
-`CassandraMatchingTaskStore`. It therefore cannot establish Cassandra-backed
-Matching service parity. Cassandra semaphore persistence likewise has adapter
-coverage and compilation, but no end-to-end service binding test. Keep both as
-explicit parity gaps until production wiring and a durable Cassandra-backed
-mixed Go/Rust SDK/restart test exist. Do not mark Matching complete from this
-script alone; finish the service audit and remaining failure, restart, and
-recovery scenarios first.
+Source inspection at this worktree HEAD confirms that
+`open_configured_default_store` already selects `CassandraMatchingTaskStore`
+and `CassandraDomainMetadataStore` for a Cassandra default store. The old claim
+above that the production task-store factory was missing is stale. Startup is
+wired through `rust/crates/cadence-server/src/main.rs` and
+`rust/crates/cadence-server/src/matching_task_store.rs`. This source change also
+wires the Cassandra semaphore factory into production startup, selecting the
+configured Cassandra metadata/token tables rather than in-memory state.
+Neither finding is runtime-validated.
+
+The current final runner invocation is still **not** a Cassandra service gate.
+`tests/run-go-service-baseline.py` generates a Rust SQLite default store and
+starts Go Frontend/History/Worker with the SQLite zone. Its SDK failure and
+restart coverage proves only the SQLite configuration. Do not describe the
+script as Cassandra mixed-service validation and do not mark Matching
+complete from it. A real gate must configure Go Frontend/History/Worker and
+Rust Matching against the same pre-existing Go Cassandra schema/keyspace,
+seed domains through Go services, start no Go Matching, and capture SDK
+workflow plus task, semaphore, paging, failure, restart, and recovery
+assertions. The adapter harness is separate and does not substitute for that
+gate. Runtime/build validation is pending the shared telemetry-owned heavy
+lane; until the mixed gate has reproducible evidence in `memory/evidence/`,
+Matching remains incomplete and History must not begin.
