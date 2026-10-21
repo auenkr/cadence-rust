@@ -8,14 +8,15 @@ Worktree: `/home/ubuntu/.t3/worktrees/cadence-rust/t3-db1d9740`, branch
 - Telemetry/MySQL: `864dcdbe9` (`matching-telemetry-mysql-candidate`), included
   through the source candidate merge.
 - PostgreSQL: original candidate `28c062496`, TLS callback/lock checkpoint
-  `eeaaf4bb0`, and lib/pq behavior correction `58d1d1e32`.
+  `eeaaf4bb0`, lib/pq behavior correction `58d1d1e32`, and inline TLS/cache
+  source `a8db27ab1` (integrated as `e219c4730`).
 - Cassandra/semaphore/QPS: `58fb1a17b`, with TTL parity correction
-  `4328b58d4`.
+  `4328b58d4`. Recovery harness commits `219758e37` and `21a7095dd` are not yet
+  integrated; the active combined runner requires semantic reconciliation.
 - Runtime ownership/logger: `c253324be` with logger corrections through
   `806067b117273cad6bcc3c49d22aa679a6ce1ee9`.
 
-The later PG `sslinline=true` inline PEM connector/oracle correction is still
-pending an owner commit and must be incorporated when its hash is available.
+The PG `sslinline=true` inline PEM connector is incorporated from `a8db27ab1`.
 PG owns the only heavy lane. This source composition did not run Cargo, Go,
 containers, databases, or services.
 
@@ -25,7 +26,7 @@ fixes listener lifetime through drain; `35464aa49` wires quota rejections into
 the configured metrics sink; `799e4770a` incorporates the committed lib/pq
 mode correction; `14fd35c14` removes an unnecessary mutable binding and
 clarifies the listener shutdown comment. The current branch head is
-`14fd35c142fab9c5b6ddb104df89b57e7e0416ad`.
+`0c9fc2d7d55a6cb3ead478f899204b9c3f9e945a`.
 
 ## Integration decisions
 
@@ -49,7 +50,8 @@ clarifies the listener shutdown comment. The current branch head is
   `matching-cassandra-ttl-expiry-audit-20261021.md`: decoded Cassandra task
   expiry remains zero and Cassandra TTL continues to delete expired rows.
 - The PostgreSQL `now_nanos` propagation from the composition is preserved.
-  The lib/pq mode correction is included; inline PEM support remains pending.
+  The lib/pq mode correction and inline PEM support are incorporated through
+  `e219c4730`.
 
 ## Production assembly review and remaining gaps
 
@@ -75,9 +77,19 @@ fixes. A Cassandra recovery gate review found that current held-semaphore
 recovery evidence does not correlate the held owner with the Rust process that
 is killed. Its owner is correcting that scope in the Cassandra worktree; leave
 that harness region untouched until the new commit is available. The
-persistence host/cluster QPS rejection counter still has no explicit export
-path in `matching_queue.rs`/`matching_registry.rs`; do not treat either RPC
-metric path as covering that persistence counter.
+Persistence QPS rejections now reach the configured Matching sink through the
+shared persistence limiter. Each rejected task/domain/semaphore backend call
+increments `matching_persistence_qps_rejections` once, tagged with operation
+and `persistence_scope` (`go` or `semaphore`). Task/domain calls also emit the
+Go metered-wrapper counters `persistence_requests`, `persistence_errors_busy`,
+and `persistence_failures`, or their `_per_domain` variants when a domain name
+is available. Go operation labels and `task_category=none` are preserved;
+domain values use Go's alphanumeric/underscore sanitizer. Go has no metrics
+scopes for the current Rust semaphore persistence API, so semaphore rejections
+use only the dedicated counter and are not mislabeled as Go persistence
+operations. Metrics do not consume another limiter permit. A source regression
+checks both counter families and confirms semaphore events do not invent Go
+scopes. This work is source-only; the PG heavy lane remains active.
 
 The root worktree's uncommitted `lib`/registry/runtime/user-owned shard
 processor overlay was not copied, replaced, or staged. Careful integration of

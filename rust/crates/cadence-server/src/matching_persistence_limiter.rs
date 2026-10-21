@@ -8,7 +8,7 @@
 use crate::admin::DynamicConfigOverlay;
 use cadence_common::rate_limiter::RateLimiter;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 const HOST_QPS_DEFAULT: i64 = 3000;
 const GLOBAL_QPS_DEFAULT: i64 = 0;
@@ -39,6 +39,7 @@ pub struct MatchingPersistenceLimiter {
     state: Mutex<LimiterState>,
     enabled: bool,
     rejected: AtomicU64,
+    metric_sink: RwLock<Arc<dyn crate::matching_metrics::MetricSink>>,
 }
 
 impl std::fmt::Debug for MatchingPersistenceLimiter {
@@ -79,7 +80,28 @@ impl MatchingPersistenceLimiter {
             }),
             enabled,
             rejected: AtomicU64::new(0),
+            metric_sink: RwLock::new(Arc::new(crate::matching_metrics::NoopMetricSink)),
         })
+    }
+
+    /// Attach the configured production sink before Matching listeners start.
+    pub fn with_metric_sink(&self, sink: Arc<dyn crate::matching_metrics::MetricSink>) {
+        *self.metric_sink.write().expect("Matching metrics sink lock") = sink;
+    }
+
+    pub(crate) fn record_rejection(
+        &self,
+        operation: &'static str,
+        domain: Option<&str>,
+        go_metered_operation: Option<&'static str>,
+    ) {
+        let sink = self.metric_sink.read().expect("Matching metrics sink lock");
+        crate::matching_metrics::record_persistence_qps_rejection(
+            sink.as_ref(),
+            operation,
+            domain,
+            go_metered_operation,
+        );
     }
 
     /// Consume one backend-operation permit without waiting, as Go's

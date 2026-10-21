@@ -986,6 +986,11 @@ async fn main() -> anyhow::Result<()> {
             let matching_metric_sink = matching_metrics_runtime
                 .as_ref()
                 .map(|runtime| runtime.sink());
+            if let (Some(limiter), Some(sink)) =
+                (matching_persistence_limiter.as_ref(), matching_metric_sink.as_ref())
+            {
+                limiter.with_metric_sink(sink.clone());
+            }
             // Reserve production endpoints before Ringpop publishes them.
             let mut matching_grpc_listener = if run_matching && !embedded_development {
                 Some(tokio::net::TcpListener::bind(matching_addr).await?)

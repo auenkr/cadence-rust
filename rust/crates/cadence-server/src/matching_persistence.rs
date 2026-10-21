@@ -47,10 +47,11 @@ struct RateLimitedTaskStore {
 }
 
 impl RateLimitedTaskStore {
-    fn permit(&self) -> TaskResult<()> {
+    fn permit(&self, operation: &'static str) -> TaskResult<()> {
         if self.limiter.allow() {
             Ok(())
         } else {
+            self.limiter.record_rejection(operation, None, Some(operation));
             Err(MatchingTaskStoreError::Backend {
                 kind: cadence_persistence::matching_task_store::BackendErrorKind::Throttled,
                 message: REJECTED.into(),
@@ -61,7 +62,7 @@ impl RateLimitedTaskStore {
 
 impl MatchingTaskStore for RateLimitedTaskStore {
     fn get_task_list(&self, key: &TaskListKey) -> TaskResult<TaskListRecord> {
-        self.permit()?;
+        self.permit("GetTaskList")?;
         self.store.get_task_list(key)
     }
     fn lease(
@@ -71,7 +72,7 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         previous_range: i64,
         now_nanos: i64,
     ) -> TaskResult<TaskListRecord> {
-        self.permit()?;
+        self.permit("LeaseTaskList")?;
         self.store.lease(key, kind, previous_range, now_nanos)
     }
     fn update_task_list(
@@ -81,7 +82,7 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         data: TaskListData,
         now_nanos: i64,
     ) -> TaskResult<()> {
-        self.permit()?;
+        self.permit("UpdateTaskList")?;
         self.store.update_task_list(key, range, data, now_nanos)
     }
     fn create_tasks_with_domains(
@@ -91,7 +92,7 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> TaskResult<()> {
-        self.permit()?;
+        self.permit("CreateTask")?;
         self.store
             .create_tasks_with_domains(key, range, now_nanos, tasks)
     }
@@ -102,16 +103,16 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         max_read_level: i64,
         batch_size: i64,
     ) -> TaskResult<Vec<AllocatedTask>> {
-        self.permit()?;
+        self.permit("GetTasks")?;
         self.store
             .get_tasks(key, read_level, max_read_level, batch_size)
     }
     fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> TaskResult<i64> {
-        self.permit()?;
+        self.permit("GetTaskListSize")?;
         self.store.task_list_size(key, ack_level)
     }
     fn complete_task(&self, key: &TaskListKey, task_id: i64) -> TaskResult<()> {
-        self.permit()?;
+        self.permit("CompleteTask")?;
         self.store.complete_task(key, task_id)
     }
     fn complete_tasks_less_than(
@@ -120,12 +121,12 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         inclusive_task_id: i64,
         limit: i64,
     ) -> TaskResult<usize> {
-        self.permit()?;
+        self.permit("CompleteTasksLessThan")?;
         self.store
             .complete_tasks_less_than(key, inclusive_task_id, limit)
     }
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> TaskResult<()> {
-        self.permit()?;
+        self.permit("DeleteTaskList")?;
         self.store.delete_task_list(key, range)
     }
 }
@@ -136,10 +137,11 @@ struct RateLimitedDomainSource {
 }
 
 impl RateLimitedDomainSource {
-    fn permit(&self) -> Result<(), DomainMetadataSourceError> {
+    fn permit(&self, operation: &'static str, domain: Option<&str>) -> Result<(), DomainMetadataSourceError> {
         if self.limiter.allow() {
             Ok(())
         } else {
+            self.limiter.record_rejection(operation, domain, Some(operation));
             Err(DomainMetadataSourceError::transient(REJECTED))
         }
     }
@@ -150,7 +152,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         &self,
         timeout: std::time::Duration,
     ) -> Result<i64, DomainMetadataSourceError> {
-        self.permit()?;
+        self.permit("GetMetadata", None)?;
         self.source.metadata_version(timeout)
     }
     fn list_domains(
@@ -159,7 +161,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         next_page_token: Option<&[u8]>,
         timeout: std::time::Duration,
     ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
-        self.permit()?;
+        self.permit("ListDomain", None)?;
         self.source
             .list_domains(page_size, next_page_token, timeout)
     }
@@ -172,7 +174,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
         DomainMetadataSourceError,
     > {
-        self.permit()?;
+        self.permit("GetDomain", name)?;
         self.source.get_domain(name, id, timeout)
     }
 }
@@ -184,17 +186,19 @@ struct RateLimitedSemaphoreStore {
 }
 
 impl RateLimitedSemaphoreStore {
-    fn permit_acquire(&self) -> Result<(), AcquireError> {
+    fn permit_acquire(&self, operation: &'static str, domain_id: &str) -> Result<(), AcquireError> {
         if self.limiter.allow() {
             Ok(())
         } else {
+            self.limiter.record_rejection(operation, Some(domain_id), None);
             Err(AcquireError::Throttled(REJECTED.into()))
         }
     }
-    fn permit_create(&self) -> Result<(), SemaphoreError> {
+    fn permit_create(&self, operation: &'static str, domain_id: &str) -> Result<(), SemaphoreError> {
         if self.limiter.allow() {
             Ok(())
         } else {
+            self.limiter.record_rejection(operation, Some(domain_id), None);
             Err(SemaphoreError::Throttled(REJECTED.into()))
         }
     }
@@ -209,7 +213,7 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
         size: i32,
         bucket_size: i32,
     ) -> Result<SemaphoreMetadata, SemaphoreError> {
-        self.permit_create()?;
+        self.permit_create("CreateSemaphore", domain_id)?;
         self.store
             .create_semaphore(domain_id, name, size, bucket_size)
             .await
@@ -219,7 +223,7 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
         domain_id: &str,
         name: &str,
     ) -> Result<SemaphoreMetadata, AcquireError> {
-        self.permit_acquire()?;
+        self.permit_acquire("GetSemaphoreMetadata", domain_id)?;
         self.store.get_semaphore_metadata(domain_id, name).await
     }
     async fn scan_semaphore_bucket(
@@ -228,7 +232,7 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
         name: &str,
         bucket: i32,
     ) -> Result<Vec<SemaphoreRow>, AcquireError> {
-        self.permit_acquire()?;
+        self.permit_acquire("ScanSemaphoreBucket", domain_id)?;
         self.store
             .scan_semaphore_bucket(domain_id, name, bucket)
             .await
@@ -240,7 +244,7 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
         bucket: i32,
         token_id: i32,
     ) -> Result<String, AcquireError> {
-        self.permit_acquire()?;
+        self.permit_acquire("GetSemaphoreOwnershipByToken", domain_id)?;
         self.store
             .get_semaphore_ownership_by_token(domain_id, name, bucket, token_id)
             .await
@@ -252,7 +256,7 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
         bucket: i32,
         owner_id: &str,
     ) -> Result<i32, AcquireError> {
-        self.permit_acquire()?;
+        self.permit_acquire("GetSemaphoreOwnershipByOwner", domain_id)?;
         self.store
             .get_semaphore_ownership_by_owner(domain_id, name, bucket, owner_id)
             .await
@@ -265,7 +269,7 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
         token_id: i32,
         owner_id: &str,
     ) -> Result<GrantOutcome, AcquireError> {
-        self.permit_acquire()?;
+        self.permit_acquire("GrantSemaphoreToken", domain_id)?;
         self.store
             .grant_semaphore_token(domain_id, name, bucket, token_id, owner_id)
             .await
@@ -278,7 +282,7 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
         token_id: i32,
         owner_id: &str,
     ) -> Result<bool, AcquireError> {
-        self.permit_acquire()?;
+        self.permit_acquire("ReleaseSemaphoreToken", domain_id)?;
         self.store
             .release_semaphore_token(domain_id, name, bucket, token_id, owner_id)
             .await

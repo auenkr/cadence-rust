@@ -185,6 +185,92 @@ pub const POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY_NS: &str =
     "poll_local_match_after_forward_failed_latency_per_tl_ns";
 pub const ISOLATION_GROUP_TAG: &str = "isolation_group";
 pub const POLLER_ISOLATION_GROUP_TAG: &str = "poller_isolation_group";
+pub const PERSISTENCE_REQUESTS: &str = "persistence_requests";
+pub const PERSISTENCE_FAILURES: &str = "persistence_failures";
+pub const PERSISTENCE_ERRORS_BUSY: &str = "persistence_errors_busy";
+pub const PERSISTENCE_REQUESTS_PER_DOMAIN: &str = "persistence_requests_per_domain";
+pub const PERSISTENCE_FAILURES_PER_DOMAIN: &str = "persistence_failures_per_domain";
+pub const PERSISTENCE_ERRORS_BUSY_PER_DOMAIN: &str = "persistence_errors_busy_per_domain";
+pub const MATCHING_PERSISTENCE_QPS_REJECTIONS: &str = "matching_persistence_qps_rejections";
+pub const TASK_CATEGORY_TAG: &str = "task_category";
+
+/// Emit the Go metered persistence counters for a call rejected by Matching's
+/// shared host/cluster persistence limiter. Go records the request before the
+/// rate-limited wrapper and classifies its ServiceBusyError as a persistence
+/// busy failure; a domain tag selects the per-domain metric family.
+pub(crate) fn record_persistence_qps_rejection(
+    sink: &dyn MetricSink,
+    operation: &'static str,
+    domain: Option<&str>,
+    go_metered_operation: Option<&'static str>,
+) {
+    let mut tags = BTreeMap::new();
+    tags.insert(OPERATION_TAG.to_owned(), operation.to_owned());
+    tags.insert("persistence_scope".to_owned(), if go_metered_operation.is_some() { "go" } else { "semaphore" }.to_owned());
+    if let Some(domain) = domain {
+        tags.insert(DOMAIN_TAG.to_owned(), go_sanitize_metric_value(domain));
+    }
+    sink.record(MetricEvent {
+        name: MATCHING_PERSISTENCE_QPS_REJECTIONS,
+        kind: MetricKind::Counter,
+        value: MetricValue::Count(1),
+        tags: tags.clone(),
+        histogram: None,
+    });
+    if let Some(go_operation) = go_metered_operation {
+        let per_domain = domain.is_some();
+        let mut go_tags = BTreeMap::new();
+        go_tags.insert(OPERATION_TAG.to_owned(), go_operation.to_owned());
+        go_tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".to_owned());
+        if let Some(domain) = domain {
+            go_tags.insert(DOMAIN_TAG.to_owned(), go_sanitize_metric_value(domain));
+        }
+        let counters = if per_domain {
+            [PERSISTENCE_REQUESTS_PER_DOMAIN, PERSISTENCE_ERRORS_BUSY_PER_DOMAIN, PERSISTENCE_FAILURES_PER_DOMAIN]
+        } else {
+            [PERSISTENCE_REQUESTS, PERSISTENCE_ERRORS_BUSY, PERSISTENCE_FAILURES]
+        };
+        for name in counters {
+            sink.record(MetricEvent {
+                name,
+                kind: MetricKind::Counter,
+                value: MetricValue::Count(1),
+                tags: go_tags.clone(),
+                histogram: None,
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod persistence_qps_metric_tests {
+    use super::*;
+
+    #[test]
+    fn qps_rejection_exports_dedicated_counter_and_go_busy_scope_once() {
+        let sink = RecordingMetricSink::default();
+        record_persistence_qps_rejection(&sink, "GetTaskList", None, Some("GetTaskList"));
+        let events = sink.events();
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].name, MATCHING_PERSISTENCE_QPS_REJECTIONS);
+        assert_eq!(events[0].tags["persistence_scope"], "go");
+        assert!(events.iter().any(|event| event.name == PERSISTENCE_REQUESTS));
+        assert!(events.iter().any(|event| event.name == PERSISTENCE_ERRORS_BUSY));
+        assert!(events.iter().any(|event| event.name == PERSISTENCE_FAILURES));
+        assert!(events.iter().filter(|event| event.name == MATCHING_PERSISTENCE_QPS_REJECTIONS).count() == 1);
+    }
+
+    #[test]
+    fn semaphore_qps_rejection_keeps_its_native_scope() {
+        let sink = RecordingMetricSink::default();
+        record_persistence_qps_rejection(&sink, "GrantSemaphoreToken", Some("domain-a"), None);
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, MATCHING_PERSISTENCE_QPS_REJECTIONS);
+        assert_eq!(events[0].tags["persistence_scope"], "semaphore");
+        assert_eq!(events[0].tags[DOMAIN_TAG], "domain_a");
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct PollMetricContext {
