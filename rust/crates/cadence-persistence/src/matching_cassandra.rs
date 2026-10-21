@@ -226,18 +226,7 @@ fn nanos(time: DateTime<Utc>) -> Result<i64> {
         ))
     })
 }
-fn task_from_udt(task_id: i64, task: CassandraTaskUdt, ttl: Option<i32>) -> Result<AllocatedTask> {
-    let expiry_nanos = match ttl {
-        Some(seconds) => Utc::now()
-            .timestamp_nanos_opt()
-            .ok_or_else(|| {
-                MatchingTaskStoreError::BackendConfiguration(
-                    "current time outside nanosecond range".into(),
-                )
-            })?
-            .saturating_add(i64::from(seconds).saturating_mul(1_000_000_000)),
-        None => 0,
-    };
+fn task_from_udt(task_id: i64, task: CassandraTaskUdt, _ttl: Option<i32>) -> Result<AllocatedTask> {
     Ok(AllocatedTask {
         task_id,
         data: TaskData {
@@ -245,7 +234,13 @@ fn task_from_udt(task_id: i64, task: CassandraTaskUdt, ttl: Option<i32>) -> Resu
             run_id: task.run_id.map(|id| id.as_bytes().to_vec()),
             schedule_id: task.schedule_id,
             created_nanos: nanos(task.created_time)?,
-            expiry_nanos,
+            // Cassandra TTL expires the row itself. Go's Cassandra
+            // persistence adapter reconstructs an expiry from TTL, but
+            // nosqlTaskStore.toTaskInfo intentionally does not copy that
+            // field into persistence.TaskInfo; Matching therefore relies on
+            // Cassandra removing the row instead of dropping a returned row
+            // based on a locally reconstructed deadline.
+            expiry_nanos: 0,
             partition_config: task
                 .partition_config
                 .map(|config| config.into_iter().collect()),
@@ -300,6 +295,25 @@ fn task_not_expired(data: &TaskData, now_nanos: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cassandra_task_ttl_is_not_promoted_to_matching_task_expiry() {
+        let created = DateTime::from_timestamp(1_700_000_000, 123_000_000).unwrap();
+        let task = CassandraTaskUdt {
+            domain_id: Uuid::from_u128(1),
+            workflow_id: "ttl-backed-task".into(),
+            run_id: None,
+            schedule_id: 7,
+            created_time: created,
+            partition_config: None,
+        };
+
+        for ttl in [Some(1), Some(0), None] {
+            let decoded = task_from_udt(9, task.clone(), ttl).unwrap();
+            assert_eq!(decoded.data.created_nanos, 1_700_000_000_123_000_000);
+            assert_eq!(decoded.data.expiry_nanos, 0);
+        }
+    }
 
     #[test]
     fn task_udt_literals_escape_go_strings_and_match_ttl_rounding() {
