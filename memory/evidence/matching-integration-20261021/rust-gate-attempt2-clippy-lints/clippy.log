@@ -1,0 +1,58 @@
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-persistence)
+    Checking axum v0.8.9
+    Checking hickory-resolver v0.24.4
+    Checking serde_yaml v0.9.34+deprecated
+    Checking clap v4.6.7
+    Checking axum-server v0.8.0
+    Checking crc32c v0.6.8
+    Checking cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-proto)
+error: this `repeat().take()` can be written more concisely
+   --> crates/cadence-persistence/src/matching_cassandra.rs:639:22
+    |
+639 | ...t values = std::iter::repeat(()).take(inserted + 1).collect::<Vec<_>...
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `repeat_n()` instead: `std::iter::repeat_n((), inserted + 1)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#manual_repeat_n
+    = note: `-D clippy::manual-repeat-n` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::manual_repeat_n)]`
+
+error: redundant closure
+   --> crates/cadence-persistence/src/matching_domain_metadata.rs:203:26
+    |
+203 |                     .map(|cluster| text(cluster))
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^ help: replace the closure with the function itself: `&text`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#redundant_closure
+    = note: `-D clippy::redundant-closure` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::redundant_closure)]`
+
+error: redundant guard
+   --> crates/cadence-persistence/src/matching_domain_metadata.rs:323:35
+    |
+323 |             (Some(name), None) if name.is_empty() => {
+    |                                   ^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#redundant_guards
+    = note: `-D clippy::redundant-guards` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::redundant_guards)]`
+help: try
+    |
+323 -             (Some(name), None) if name.is_empty() => {
+323 +             (Some(""), None) => {
+    |
+
+error: redundant guard
+   --> crates/cadence-persistence/src/matching_domain_metadata.rs:327:33
+    |
+327 | ...   (None, Some(id)) if id.is_empty() => Err(MatchingDomainMetadataEr...
+    |                           ^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#redundant_guards
+help: try
+    |
+327 -             (None, Some(id)) if id.is_empty() => Err(MatchingDomainMetadataError::EmptyIdentity),
+327 +             (None, Some("")) => Err(MatchingDomainMetadataError::EmptyIdentity),
+    |
+
+error: could not compile `cadence-persistence` (lib) due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...

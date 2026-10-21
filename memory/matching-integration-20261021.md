@@ -62,3 +62,13 @@ log `memory/evidence/matching-integration-20261021/persistence-check/`
   --history-transport grpc`, with `CADENCE_MYSQL_DOCKER_CONTAINER=cadence-mysql-test`.
   Not yet run.
 - PostgreSQL and Cassandra mixed gates: not run in this pass.
+
+## Status at pause (2026-10-21)
+
+- Branch t3/matching-integration-20261021 pushed (WIP commit, see git log).
+- Merged: telemetry 864dcdbe9 + PostgreSQL e3cfca7a6 + Cassandra 82dc7e32a (SQL multi-DB 695198be0 already included).
+- Persistence crate: cargo check exit 0 before the last HashMap-import removal; clippy lints since fixed (not re-run).
+- cadence-server: 23 compile errors from the Cassandra branch (source-only, never built). Batch fixes applied: async-trait dep, failover helper notified_failover_domains (Go domainChangeCallback rule), semaphore get_or_create lock scope, ServiceBusy arm, quota cfg(test) statement.
+- Cargo.lock NOT yet refreshed for the new async-trait edge (cargo metadata timed out at 110s); gate uses --locked, so it will fail until regenerated.
+- Not run: full clippy/test gate result, MySQL mixed gate, PG/Cassandra mixed gates, release binary, recovery, parity audit.
+- Evidence: memory/evidence/matching-integration-20261021/ (rust-gate-attempt1/2 are pre-fix failures).
