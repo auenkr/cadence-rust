@@ -345,6 +345,10 @@ impl Matching {
     /// Install an optional inbound Matching metrics sink.
     pub fn with_metrics(mut self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
         self.metrics = crate::matching_metrics::MatchingMetrics::new(sink);
+        let quota_metrics = self.metrics.clone();
+        self.rpc_quota.set_metric_sink(Arc::new(move |rejection| {
+            quota_metrics.quota_rejection(rejection)
+        }));
         if let Some(queues) = self.queues.take() {
             self.queues = Some(queues.with_metrics(self.metrics.clone()));
         }

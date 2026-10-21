@@ -132,7 +132,7 @@ pub(crate) struct MatchingRpcQuota {
     state: Mutex<State>,
     #[cfg(test)]
     rejected: Mutex<HashMap<(MatchingRpc, RpcClass, Option<String>), u64>>,
-    metric_sink: QuotaMetricSink,
+    metric_sink: Mutex<QuotaMetricSink>,
 }
 
 fn host_key(class: RpcClass) -> &'static str {
@@ -194,8 +194,12 @@ impl MatchingRpcQuota {
             }),
             #[cfg(test)]
             rejected: Mutex::new(HashMap::new()),
-            metric_sink,
+            metric_sink: Mutex::new(metric_sink),
         }
+    }
+
+    pub(crate) fn set_metric_sink(&self, metric_sink: QuotaMetricSink) {
+        *self.metric_sink.lock().expect("Matching quota metric sink lock") = metric_sink;
     }
 
     fn host_rate(overlay: &Arc<Mutex<DynamicConfigOverlay>>, class: RpcClass) -> f64 {
@@ -297,7 +301,7 @@ impl MatchingRpcQuota {
                 .expect("Matching quota metric lock")
                 .entry((metric.method, metric.class, metric.domain.clone()))
                 .or_default() += 1;
-            (self.metric_sink)(metric);
+            (self.metric_sink.lock().expect("Matching quota metric sink lock"))(metric);
         }
         allowed || !reject
     }

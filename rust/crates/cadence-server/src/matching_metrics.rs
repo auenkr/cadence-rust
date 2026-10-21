@@ -351,6 +351,29 @@ impl MatchingMetrics {
         Self(sink)
     }
 
+    pub(crate) fn quota_rejection(&self, rejection: crate::matching_quota::QuotaRejection) {
+        let mut tags = BTreeMap::new();
+        tags.insert("operation".to_owned(), format!("{:?}", rejection.method));
+        tags.insert(
+            "quota_class".to_owned(),
+            match rejection.class {
+                crate::matching_quota::RpcClass::User => "user",
+                crate::matching_quota::RpcClass::Worker => "worker",
+            }
+            .to_owned(),
+        );
+        if let Some(domain) = rejection.domain {
+            tags.insert(DOMAIN_TAG.to_owned(), domain);
+        }
+        self.0.record(MetricEvent {
+            name: "matching_rpc_quota_rejections",
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            tags,
+            histogram: None,
+        });
+    }
+
     pub fn context_from_metadata(
         metadata: &tonic::metadata::MetadataMap,
         transport: &str,

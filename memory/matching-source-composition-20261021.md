@@ -58,9 +58,10 @@ before metrics flush. This mirrors the Go shutdown ordering in
 needs the serialized production gate.
 
 The runtime composition checkpoint counts rejected RPCs through the inbound
-request wrapper. The dedicated quota rejection callback/event is a separate
-metrics follow-up commit. PostgreSQL lib/pq behavior correction
-`58d1d1e32` is available for the next source integration; the owner is still
+request wrapper, and the metrics follow-up commit wires rejection details to
+the configured sink as `matching_rpc_quota_rejections`, tagging the exact RPC,
+`user`/`worker` class, and domain where supplied. PostgreSQL lib/pq behavior
+correction `58d1d1e32` is available for source integration; the owner is still
 working on inline PEM (`sslinline=true`) handling and paired compile/oracle
 fixes. The persistence host/cluster QPS rejection counter still has no explicit
 export path in `matching_queue.rs`/`matching_registry.rs`; do not treat either
