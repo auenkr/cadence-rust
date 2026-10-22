@@ -87,6 +87,8 @@ pub(crate) struct ForwardState {
     source: String,
     local_wait: crate::matching_forward::Count,
     permits: Arc<crate::matching_forward::RequestTokens>,
+    add_permits: Arc<crate::matching_forward::RequestTokens>,
+    add_rate: Arc<crate::matching_forward::ForwardRate>,
 }
 pub(crate) enum Parent {
     Dispatcher(Box<TaskDispatcher>),
@@ -239,15 +241,95 @@ impl ForwardState {
     pub(crate) fn new(
         resolve: impl Fn() -> ParentFuture + Send + Sync + 'static,
         max_outstanding: crate::matching_forward::Count,
+        max_outstanding_adds: crate::matching_forward::Count,
+        add_rate: crate::matching_forward::Count,
         source: String,
         local_wait: crate::matching_forward::Count,
     ) -> Self {
+        let rate_now = now();
         Self {
             resolve: Arc::new(resolve),
             source,
             local_wait,
             permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding)),
+            add_permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding_adds)),
+            add_rate: Arc::new(crate::matching_forward::ForwardRate::new(add_rate, rate_now)),
         }
+    }
+
+    pub(crate) async fn forward_backlog_task(
+        &self,
+        task: AllocatedTask,
+        domain_id: &str,
+        task_type: i32,
+        kind: i16,
+    ) -> Result<(), crate::matching_forward::ForwardError> {
+        let _permit = self.add_permits.acquire().await.ok_or(crate::matching_forward::ForwardError::NoParent)?;
+        if !self.add_rate.allow(now()) {
+            return Err(crate::matching_forward::ForwardError::SlowDown);
+        }
+        let (parent, parent_name) = (self.resolve)().await.ok_or(crate::matching_forward::ForwardError::NoParent)?;
+        let run_id = task.data.run_id.as_deref()
+            .and_then(|id| uuid::Uuid::from_slice(id).ok())
+            .map(|id| id.to_string()).unwrap_or_default();
+        let execution = Some(p::WorkflowExecution { workflow_id: task.data.workflow_id.clone(), run_id });
+        let partition_config = task.data.partition_config.clone().unwrap_or_default().into_iter().collect();
+        let timeout_seconds = if task.data.expiry_nanos > 0 {
+            task.data.expiry_nanos.saturating_sub(task.data.created_nanos).div_euclid(1_000_000_000).clamp(0, i32::MAX as i64) as i32
+        } else { 0 };
+        let forwarded_from = self.source.clone();
+        let result = match parent {
+            Parent::Remote(channel) => {
+                let mut client = m::matching_api_client::MatchingApiClient::new(channel);
+                if task_type == 0 {
+                    let mut request = Request::new(m::AddDecisionTaskRequest {
+                        domain_id: domain_id.to_owned(), workflow_execution: execution,
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) }),
+                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
+                        source: 2, forwarded_from, partition_config,
+                    });
+                    request.set_timeout(Duration::from_secs(2));
+                    client.add_decision_task(request).await.map(|_| ())
+                } else {
+                    let mut request = Request::new(m::AddActivityTaskRequest {
+                        domain_id: domain_id.to_owned(), source_domain_id: domain_id.to_owned(),
+                        workflow_execution: execution,
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) }),
+                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
+                        source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
+                    });
+                    request.set_timeout(Duration::from_secs(2));
+                    client.add_activity_task(request).await.map(|_| ())
+                }
+            }
+            Parent::Service(service) => {
+                use m::matching_api_server::MatchingApi;
+                if task_type == 0 {
+                    let mut request = Request::new(m::AddDecisionTaskRequest {
+                        domain_id: domain_id.to_owned(), workflow_execution: execution,
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) }),
+                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
+                        source: 2, forwarded_from, partition_config,
+                    });
+                    request.set_timeout(Duration::from_secs(2));
+                    service.add_decision_task(request).await.map(|_| ())
+                } else {
+                    let mut request = Request::new(m::AddActivityTaskRequest {
+                        domain_id: domain_id.to_owned(), source_domain_id: domain_id.to_owned(),
+                        workflow_execution: execution,
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) }),
+                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
+                        source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
+                    });
+                    request.set_timeout(Duration::from_secs(2));
+                    service.add_activity_task(request).await.map(|_| ())
+                }
+            }
+            Parent::Dispatcher(dispatcher) => {
+                dispatcher.accept_forwarded_backlog(task, domain_id).await
+            }
+        };
+        result.map_err(crate::matching_forward::ForwardError::classify)
     }
 }
 pub(crate) fn now() -> i64 {
@@ -277,6 +359,22 @@ fn queue_status(error: QueueError) -> Status {
     Status::unavailable(error.to_string())
 }
 impl TaskDispatcher {
+    pub(crate) async fn accept_forwarded_backlog(
+        &self,
+        task: AllocatedTask,
+        source_domain: &str,
+    ) -> Result<(), Status> {
+        let source_domain = uuid::Uuid::parse_str(source_domain)
+            .map_err(|_| Status::invalid_argument("DomainUUID is not valid."))?;
+        let queue = self.queue.clone();
+        let data = task.data;
+        crate::matching_blocking::run(move || queue.append_in_domain(&[data], source_domain, now()))
+            .await
+            .map_err(|error| Status::internal(error.to_string()))?
+            .map_err(|error| Status::unavailable(error.to_string()))?;
+        self.notify_new_tasks();
+        Ok(())
+    }
     pub(crate) fn reader_should_reload(&self) -> bool {
         self.reader
             .as_ref()

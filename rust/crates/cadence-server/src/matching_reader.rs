@@ -227,6 +227,12 @@ struct Inner {
     loops: usize,
     should_reload: Arc<dyn Fn() -> bool + Send + Sync>,
     metric_context: Arc<Mutex<Option<ReaderMetricContext>>>,
+    backlog_forward: Arc<Mutex<Option<BacklogForward>>>,
+}
+#[derive(Clone)]
+pub struct BacklogForward {
+    pub forward: Arc<dyn Fn(AllocatedTask) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>> + Send + Sync>,
+    pub local_wait: Arc<dyn Fn() -> Duration + Send + Sync>,
 }
 #[derive(Clone)]
 struct ReaderMetricContext {
@@ -246,6 +252,8 @@ pub struct TaskReader {
 enum Attempt {
     /// Handed off to a poller.
     Offered,
+    Forwarded(u64),
+    OfferedAfterForwardFailure(u64),
     /// Retry the same head after dispatch throttling.
     Throttled,
     TimedOut,
@@ -291,6 +299,9 @@ pub type DispatchCheck = Arc<
         + Sync,
 >;
 impl TaskReader {
+    pub fn set_backlog_forwarder(&self, forward: BacklogForward) {
+        *self.inner.backlog_forward.lock().expect("matching reader forwarder lock") = Some(forward);
+    }
     pub fn with_metric_context(
         &self,
         metrics: crate::matching_metrics::MatchingMetrics,
@@ -405,6 +416,7 @@ impl TaskReader {
             metric_context: Arc::new(Mutex::new(
                 metric_context.map(|(metrics, context)| ReaderMetricContext { metrics, context }),
             )),
+            backlog_forward: Arc::new(Mutex::new(None)),
         });
         let mut buffer_senders = HashMap::new();
         for buffer_group in std::iter::once(String::new()).chain(isolated.keys().cloned()) {
@@ -434,6 +446,7 @@ impl TaskReader {
             let timeout_buffer = config.dispatch_timeout_buffer;
             let dispatch_config = config.clone();
             let dispatch_metrics = inner.metric_context.clone();
+            let backlog_forward = inner.backlog_forward.clone();
             tokio::spawn(async move {
                 let _completed = dispatched;
                 'dispatch: loop {
@@ -561,10 +574,55 @@ impl TaskReader {
                                     &task.data.partition_config,
                                     dispatch_group,
                                 );
-                            if target.offer(dispatched, dispatch_stop.clone()).await {
-                                Attempt::Offered
-                            } else {
-                                Attempt::Stopped
+                            let forwarder = backlog_forward
+                                .lock()
+                                .expect("matching reader forwarder lock")
+                                .clone();
+                            let Some(forwarder) = forwarder else {
+                                return if target.offer(dispatched, dispatch_stop.clone()).await {
+                                    Attempt::Offered
+                                } else {
+                                    Attempt::Stopped
+                                };
+                            };
+                            let first_deadline = tokio::time::Instant::now() + (forwarder.local_wait)();
+                            match tokio::time::timeout_at(first_deadline, target.offer(dispatched.clone(), dispatch_stop.clone())).await {
+                                Ok(true) => return Attempt::Offered,
+                                Ok(false) => return Attempt::Stopped,
+                                Err(_) => (),
+                            }
+                            let mut attempt = 0u64;
+                            loop {
+                                if *dispatch_stop.borrow() { return Attempt::Stopped; }
+                                let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+                                let call = (forwarder.forward)(task.clone());
+                                let result = tokio::select! {
+                                    result = tokio::time::timeout_at(forward_deadline, call) => Some(result),
+                                    local = target.offer(dispatched.clone(), dispatch_stop.clone()) => {
+                                        return if local { Attempt::OfferedAfterForwardFailure(attempt) } else { Attempt::Stopped };
+                                    }
+                                    _ = dispatch_stop.changed() => return Attempt::Stopped,
+                                };
+                                match result.expect("forward result") {
+                                    Ok(Ok(())) => return Attempt::Forwarded(attempt),
+                                    Ok(Err(error)) => {
+                                        if matches!(error, crate::matching_forward::ForwardError::SlowDown) {
+                                            if let Some(metrics) = dispatch_metrics.lock().expect("matching reader metrics lock").as_ref() {
+                                                metrics.metrics.async_forward_throttled(&metrics.context);
+                                            }
+                                        }
+                                    }
+                                    Err(_) => (),
+                                }
+                                let retry_deadline = forward_deadline;
+                                tokio::select! {
+                                    local = target.offer(dispatched.clone(), dispatch_stop.clone()) => {
+                                        return if local { Attempt::OfferedAfterForwardFailure(attempt) } else { Attempt::Stopped };
+                                    }
+                                    _ = tokio::time::sleep_until(retry_deadline) => (),
+                                    _ = dispatch_stop.changed() => return Attempt::Stopped,
+                                }
+                                attempt = attempt.saturating_add(1);
                             }
                         };
                         let outcome = match deadline {
@@ -619,6 +677,40 @@ impl TaskReader {
                                     reader_metrics.metrics.async_match_local(
                                         &reader_metrics.context,
                                         (dispatch_attempt > 0).then_some(dispatch_attempt),
+                                        dispatch_started.elapsed(),
+                                    );
+                                }
+                                break;
+                            }
+                            Attempt::Forwarded(attempt) => {
+                                if let Some(reader_metrics) = dispatch_metrics
+                                    .lock()
+                                    .expect("matching reader metrics lock")
+                                    .as_ref()
+                                {
+                                    reader_metrics.metrics.async_match_forward(
+                                        &reader_metrics.context,
+                                        attempt,
+                                        dispatch_started.elapsed(),
+                                    );
+                                }
+                                let queue = dispatch_queue.clone();
+                                let id = task.task_id;
+                                if !matches!(crate::matching_blocking::run(move || queue.complete(id)).await, Ok(Ok(_))) {
+                                    dispatch_queue.stop();
+                                    break 'dispatch;
+                                }
+                                break;
+                            }
+                            Attempt::OfferedAfterForwardFailure(attempt) => {
+                                if let Some(reader_metrics) = dispatch_metrics
+                                    .lock()
+                                    .expect("matching reader metrics lock")
+                                    .as_ref()
+                                {
+                                    reader_metrics.metrics.async_match_local_after_forward_failure(
+                                        &reader_metrics.context,
+                                        attempt,
                                         dispatch_started.elapsed(),
                                     );
                                 }
@@ -1044,6 +1136,38 @@ mod tests {
             backlog.value,
             crate::matching_metrics::MetricValue::Number(1.0)
         );
+        stop(queue, reader).await;
+    }
+
+    #[tokio::test]
+    async fn matching_reader_forwards_backlog_and_completes_durable_row() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        reader.with_metric_context(
+            crate::matching_metrics::MatchingMetrics::new(sink.clone()),
+            crate::matching_metrics::PollMetricContext {
+                domain: "reader-domain".into(), task_list: "child-list".into(),
+                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+            },
+        );
+        let forwarded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = forwarded.clone();
+        reader.set_backlog_forwarder(BacklogForward {
+            forward: Arc::new(move |_task| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData { schedule_id: 7, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while queue.levels().1 < 1 { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        assert_eq!(forwarded.load(Ordering::SeqCst), 1);
+        let events = sink.events();
+        assert!(events.iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_FORWARD_POLL));
+        assert!(events.iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_FORWARD_POLL_LATENCY));
         stop(queue, reader).await;
     }
     async fn wait_read(queue: &DurableTaskQueue, expected: i64) {
