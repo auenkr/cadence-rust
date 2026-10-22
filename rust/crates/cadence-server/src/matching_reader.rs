@@ -20,6 +20,8 @@ pub const DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS: i64 = 3_000_000_000;
 /// Go `taskDispatchTimeoutBuffer` (100 ms), added to the minimum timeout
 /// needed to drain the buffers at the configured dispatch rate.
 pub const DISPATCH_TIMEOUT_BUFFER_NANOS: i64 = 100_000_000;
+/// Go `matching.updateAckInterval` default (one minute).
+pub const DEFAULT_UPDATE_ACK_INTERVAL_NANOS: i64 = 60_000_000_000;
 
 /// Live reads of the reader's Go `TaskListConfig` properties. Go's `taskReader`
 /// consults each one per operation (buffer sizing, per-range batch, per-attempt
@@ -34,6 +36,8 @@ pub struct ReaderLive {
     pub read_range_size: LiveInt,
     /// Go `cfg.AsyncTaskDispatchTimeout()` in nanoseconds.
     pub dispatch_timeout: LiveInt,
+    /// Go `cfg.UpdateAckInterval()` in nanoseconds, read on every timer reset.
+    pub update_ack_interval: LiveInt,
 }
 impl ReaderLive {
     /// Go `taskReader` batch reads: a non-positive value uses the property
@@ -53,6 +57,9 @@ impl ReaderLive {
     }
     fn dispatch_timeout_nanos(&self) -> i64 {
         (self.dispatch_timeout)()
+    }
+    fn update_ack_interval(&self) -> Duration {
+        Duration::from_nanos((self.update_ack_interval)().max(1) as u64)
     }
 }
 #[derive(Clone)]
@@ -92,6 +99,14 @@ impl ReaderConfig {
             .map_or(self.dispatch_timeout.as_nanos() as i64, |live| {
                 live.dispatch_timeout_nanos()
             })
+    }
+    /// Interval of the pump's ack timer, which re-signals the pump (Go
+    /// `taskReader.getTasksPump` `updateAckTimer`).
+    fn update_ack_interval(&self) -> Duration {
+        self.live.as_ref().map_or(
+            Duration::from_nanos(DEFAULT_UPDATE_ACK_INTERVAL_NANOS as u64),
+            |live| live.update_ack_interval(),
+        )
     }
 }
 impl Default for ReaderConfig {
@@ -642,6 +657,7 @@ impl TaskReader {
         let reader_metrics = inner.metric_context.clone();
         tokio::spawn(async move {
             let _completed = pumped;
+            let mut ack_timer = Box::pin(tokio::time::sleep(config.update_ack_interval()));
             'pump: loop {
                 if *pump_stop.borrow() {
                     break;
@@ -780,6 +796,13 @@ impl TaskReader {
                 }
                 tokio::select! {
                     _ = notification => (),
+                    _ = ack_timer.as_mut() => {
+                        // Go re-signals the pump on every ack tick, so the
+                        // backlog is re-read even without an append wake.
+                        ack_timer
+                            .as_mut()
+                            .reset(tokio::time::Instant::now() + config.update_ack_interval());
+                    }
                     _ = pump_stop.changed() => break,
                 }
             }
@@ -885,6 +908,7 @@ mod tests {
         let batch = Arc::new(AtomicI64::new(4));
         let range = Arc::new(AtomicI64::new(7));
         let timeout = Arc::new(AtomicI64::new(2_000_000_000));
+        let ack = Arc::new(AtomicI64::new(20_000_000));
         let live = Arc::new(ReaderLive {
             batch_size: {
                 let batch = batch.clone();
@@ -898,6 +922,10 @@ mod tests {
                 let timeout = timeout.clone();
                 Arc::new(move || timeout.load(Ordering::SeqCst))
             },
+            update_ack_interval: {
+                let ack = ack.clone();
+                Arc::new(move || ack.load(Ordering::SeqCst))
+            },
         });
         let config = ReaderConfig {
             live: Some(live),
@@ -909,6 +937,11 @@ mod tests {
         assert_eq!(config.read_batch_size().get(), 4);
         assert_eq!(config.read_range_size(), 7);
         assert_eq!(config.dispatch_timeout_nanos(), 2_000_000_000);
+        assert_eq!(config.update_ack_interval(), Duration::from_millis(20));
+        ack.store(0, Ordering::SeqCst);
+        // Go `UpdateAckInterval` values below one nanosecond are clamped.
+        assert_eq!(config.update_ack_interval(), Duration::from_nanos(1));
+        ack.store(20_000_000, Ordering::SeqCst);
         batch.store(9, Ordering::SeqCst);
         range.store(11, Ordering::SeqCst);
         timeout.store(5_000_000, Ordering::SeqCst);
@@ -995,6 +1028,49 @@ mod tests {
             Arc::new(move || active),
         );
         (directory, queue, reader, wake)
+    }
+    #[tokio::test]
+    async fn matching_reader_ack_timer_rereads_backlog_without_append_signal() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store,
+                TaskListKey {
+                    domain_id: Uuid::from_u128(1),
+                    name: "reader".into(),
+                    task_type: 0,
+                },
+                0,
+                NonZeroU32::new(100).unwrap(),
+                now(),
+            )
+            .unwrap(),
+        );
+        let wake = Arc::new(Notify::new());
+        let live = Arc::new(ReaderLive {
+            batch_size: Arc::new(|| 3_i64),
+            read_range_size: Arc::new(|| 100_i64),
+            dispatch_timeout: Arc::new(|| 3_000_000_000_i64),
+            update_ack_interval: Arc::new(|| 20_000_000_i64),
+        });
+        let reader = TaskReader::with_domain_activity(
+            queue.clone(),
+            wake,
+            ReaderConfig {
+                live: Some(live),
+                ..ReaderConfig::default()
+            },
+            Arc::new(|| true),
+        );
+        // The row is appended without notifying the pump, so only the ack
+        // timer (Go `updateAckTimer` re-signal) can make the backlog read.
+        queue.append(&[TaskData::default()], now()).unwrap();
+        wait_read(&queue, 1).await;
+        stop(queue, reader).await;
     }
     async fn stop(queue: Arc<DurableTaskQueue>, reader: TaskReader) {
         reader.stop();
