@@ -1,0 +1,6 @@
+Go baseline artifacts: /mnt/storage/service/github/wt/mixedmysql/artifacts/mixed-run-1
+Selected evidence copied to /mnt/storage/service/github/wt/mixedmysql/memory/evidence/matching-mysql-mixed-20261023/run1: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_mysql.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Traceback (most recent call last):
+  File "/mnt/storage/service/github/wt/mixedmysql/tests/run-go-service-baseline.py", line 748, in <module>
+    raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+RuntimeError: Go baseline probe failed; see /mnt/storage/service/github/wt/mixedmysql/artifacts/mixed-run-1/probe.log

@@ -1,0 +1,3 @@
+Error: Rust Matching exited {"code":1,"signal":null}; see /mnt/storage/service/github/wt/mixedmysql/artifacts/mixed-run-2/rust-matching/rust-server-after-restart.log
+    at run (/mnt/storage/service/github/wt/mixedmysql/tests/matching-service-compat.cjs:1144:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

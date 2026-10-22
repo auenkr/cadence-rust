@@ -1,0 +1,11 @@
+{
+  "repository": "/mnt/storage/service/github/wt/mixedmysql",
+  "head": "4f5fb6722efc389c461f08fc3d782762f1ef4108",
+  "branch": "matching-mysql-mixed-20261023",
+  "status": [
+    "?? artifacts/frozen/",
+    "?? artifacts/mixed-run-2/",
+    "?? memory/evidence/matching-mysql-mixed-20261023/",
+    "?? tests/__pycache__/matching_evidence.cpython-314.pyc"
+  ]
+}
