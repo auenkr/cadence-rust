@@ -116,7 +116,12 @@ pub const TASK_LIST_POLLER_PARTITION_MISMATCH: &str = "tasklist_poller_partition
 pub const STANDBY_TASKS_COMPLETED: &str = "standby_cluster_tasks_completed_per_tl";
 pub const STANDBY_TASKS_NOT_STARTED: &str = "standby_cluster_tasks_not_started_per_tl";
 pub const STANDBY_TASKS_COMPLETION_FAILURE: &str = "standby_cluster_tasks_completion_failure_per_tl";
-pub const RESPOND_QUERY_TASK_FAILED: &str = "respond_query_task_failed_per_tl";
+pub const RESPOND_QUERY_TASK_FAILED: &str = "respond_query_failed_per_tl";
+pub const CONDITION_FAILED_ERRORS: &str = "condition_failed_errors_per_tl";
+pub const SYNC_MATCH_LATENCY: &str = "syncmatch_latency_per_tl";
+pub const SYNC_MATCH_LATENCY_NS: &str = "syncmatch_latency_per_tl_ns";
+pub const ASYNC_FORWARD_TASK_THROTTLE_ERRORS: &str = "async_forward_task_throttle_errors_per_tl";
+pub const SEMAPHORE_CONTEXT_TIMEOUT: &str = "cadence_errors_semaphore_context_timeout";
 pub const FORWARDED_PER_TASK_LIST: &str = "forwarded_per_tl";
 pub const FORWARD_POLL_LATENCY: &str = "forward_poll_latency_per_tl";
 pub const FORWARD_POLL_LATENCY_NS: &str = "forward_poll_latency_per_tl_ns";
@@ -1174,20 +1179,13 @@ impl MatchingMetrics {
         }
     }
 
-    /// Record one complete inbound Matching RPC. This is called at the shared
-    /// MatchingAPI trait boundary, which Thrift dispatch also invokes.
-    pub async fn matching_request<F, T, E>(
-        &self,
+    /// Tags of Go's per-request handler scope (`handlerContext.scope`).
+    fn request_tags(
         method: &'static str,
         domain: Option<&str>,
         task_list: Option<(&str, Option<i32>)>,
         context: Option<InboundMetricContext>,
-        future: F,
-    ) -> Result<T, E>
-    where
-        F: std::future::Future<Output = Result<T, E>>,
-        E: MatchingErrorClass,
-    {
+    ) -> BTreeMap<String, String> {
         let mut tags = BTreeMap::from([(OPERATION_TAG.to_owned(), method.to_owned())]);
         tags.insert(
             DOMAIN_TAG.to_owned(),
@@ -1228,6 +1226,89 @@ impl MatchingMetrics {
                 tags.insert(TRANSPORT_TAG.to_owned(), transport);
             }
         }
+        tags
+    }
+
+    /// Go `Add{Decision,Activity}Task` handler `SyncMatchLatencyPerTaskList`
+    /// timer and histogram, recorded on the request scope when the task was
+    /// sync matched.
+    pub fn handler_sync_match_latency(
+        &self,
+        method: &'static str,
+        domain: Option<&str>,
+        task_list: Option<(&str, Option<i32>)>,
+        context: Option<InboundMetricContext>,
+        elapsed: Duration,
+    ) {
+        let tags = Self::request_tags(method, domain, task_list, context);
+        for (name, kind, histogram) in [
+            (SYNC_MATCH_LATENCY, MetricKind::Timer, None),
+            (
+                SYNC_MATCH_LATENCY_NS,
+                MetricKind::Histogram,
+                Some(HistogramSpec::GoLow1ms100s),
+            ),
+        ] {
+            self.0.record(MetricEvent {
+                name,
+                kind,
+                value: MetricValue::Duration(elapsed),
+                tags: tags.clone(),
+                histogram,
+            });
+        }
+    }
+
+    /// Go `reportConditionFailed`: the task list lost its persistence lease.
+    pub fn condition_failed(&self, context: &PollMetricContext) {
+        self.task_list_counter(CONDITION_FAILED_ERRORS, context, BTreeMap::new());
+    }
+
+    /// Go `AsyncMatchForwardTaskThrottleErrorPerTasklist`.
+    pub fn async_forward_throttled(&self, context: &PollMetricContext) {
+        self.task_list_counter(
+            ASYNC_FORWARD_TASK_THROTTLE_ERRORS,
+            context,
+            BTreeMap::new(),
+        );
+    }
+
+    /// Go `CadenceErrSemaphoreContextTimeoutCounter` on the request scope.
+    pub fn semaphore_context_timeout(
+        &self,
+        domain: Option<&str>,
+        semaphore_name: &str,
+        context: Option<InboundMetricContext>,
+    ) {
+        self.0.record(MetricEvent {
+            name: SEMAPHORE_CONTEXT_TIMEOUT,
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            tags: Self::request_tags(
+                "AcquireSemaphore",
+                domain,
+                Some((semaphore_name, Some(0))),
+                context,
+            ),
+            histogram: None,
+        });
+    }
+
+    /// Record one complete inbound Matching RPC. This is called at the shared
+    /// MatchingAPI trait boundary, which Thrift dispatch also invokes.
+    pub async fn matching_request<F, T, E>(
+        &self,
+        method: &'static str,
+        domain: Option<&str>,
+        task_list: Option<(&str, Option<i32>)>,
+        context: Option<InboundMetricContext>,
+        future: F,
+    ) -> Result<T, E>
+    where
+        F: std::future::Future<Output = Result<T, E>>,
+        E: MatchingErrorClass,
+    {
+        let tags = Self::request_tags(method, domain, task_list, context);
         self.0.record(MetricEvent {
             name: CADENCE_REQUESTS_PER_TASK_LIST,
             kind: MetricKind::Counter,
@@ -1633,5 +1714,74 @@ mod matcher_metric_tests {
             .iter()
             .all(|event| event.value == MetricValue::Duration(elapsed)));
         assert_eq!(events[1].histogram, Some(HistogramSpec::GoLow1ms100s));
+    }
+
+    #[test]
+    fn handler_sync_match_latency_uses_request_scope_tags() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let elapsed = Duration::from_millis(5);
+        MatchingMetrics::new(sink.clone()).handler_sync_match_latency(
+            "AddDecisionTask",
+            Some("domain-a"),
+            Some(("queue/a", Some(0))),
+            Some(InboundMetricContext {
+                caller: Some("frontend".into()),
+                transport: Some("grpc".into()),
+            }),
+            elapsed,
+        );
+        let events = sink.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name, "syncmatch_latency_per_tl");
+        assert_eq!(events[0].kind, MetricKind::Timer);
+        assert_eq!(events[1].name, "syncmatch_latency_per_tl_ns");
+        assert_eq!(events[1].kind, MetricKind::Histogram);
+        assert_eq!(events[1].histogram, Some(HistogramSpec::GoLow1ms100s));
+        for event in &events {
+            assert_eq!(event.value, MetricValue::Duration(elapsed));
+            assert_eq!(event.tags[OPERATION_TAG], "AddDecisionTask");
+            assert_eq!(event.tags[DOMAIN_TAG], "domain-a");
+            assert_eq!(event.tags[TASK_LIST_TAG], "queue_a");
+            assert_eq!(event.tags[CALLER_TAG], "frontend");
+            assert_eq!(event.tags[TRANSPORT_TAG], "grpc");
+        }
+    }
+
+    #[test]
+    fn condition_failed_and_async_forward_throttle_are_tasklist_counters() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        metrics.condition_failed(&context());
+        metrics.async_forward_throttled(&context());
+        let events = sink.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name, "condition_failed_errors_per_tl");
+        assert_eq!(events[1].name, "async_forward_task_throttle_errors_per_tl");
+        for event in &events {
+            assert_eq!(event.kind, MetricKind::Counter);
+            assert_eq!(event.value, MetricValue::Count(1));
+            assert_eq!(event.tags[DOMAIN_TAG], "domain-a");
+        }
+    }
+
+    #[test]
+    fn semaphore_context_timeout_counts_on_request_scope() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        MatchingMetrics::new(sink.clone()).semaphore_context_timeout(
+            Some("domain-a"),
+            "sem",
+            None,
+        );
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, "cadence_errors_semaphore_context_timeout");
+        assert_eq!(events[0].kind, MetricKind::Counter);
+        assert_eq!(events[0].tags[OPERATION_TAG], "AcquireSemaphore");
+        assert_eq!(events[0].tags[SEMAPHORE_NAME_TAG], "sem");
+    }
+
+    #[test]
+    fn respond_query_failed_uses_go_name() {
+        assert_eq!(RESPOND_QUERY_TASK_FAILED, "respond_query_failed_per_tl");
     }
 }

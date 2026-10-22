@@ -1010,6 +1010,11 @@ impl QueueRegistry {
                     queue.set_lease_observer(Arc::new(move |success| {
                         lease_metrics.lease_attempt(&lease_context, !success);
                     }));
+                    let condition_metrics = registry.metrics.clone();
+                    let condition_context = metric_context.clone();
+                    queue.set_condition_failed_observer(Arc::new(move || {
+                        condition_metrics.condition_failed(&condition_context);
+                    }));
                     {
                         let provider = registry.max_task_delete_batch_size.clone();
                         let domain = domain.clone();

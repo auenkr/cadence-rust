@@ -2023,6 +2023,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 ),
                 async {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddDecisionTask, Some(&request.get_ref().domain_id), None)?;
+                    let add_started = tokio::time::Instant::now();
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     task_list_name(
@@ -2141,6 +2142,17 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 })
                                 .await?;
                             if let Some(partition_config) = matched {
+                                // Go records the handler-level latency only when AddTask sync matched.
+                                self.metrics.handler_sync_match_latency(
+                                    "AddDecisionTask",
+                                    Some(domain.as_str()),
+                                    r.task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+                                    Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                        request.metadata(),
+                                        "grpc",
+                                    )),
+                                    add_started.elapsed(),
+                                );
                                 return Ok(Response::new(m::AddDecisionTaskResponse {
                                     partition_config,
                                 }));
@@ -2219,6 +2231,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 ),
                 async {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddActivityTask, Some(&request.get_ref().domain_id), None)?;
+                    let add_started = tokio::time::Instant::now();
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     task_list_name(
@@ -2333,6 +2346,17 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 })
                                 .await?;
                             if let Some(partition_config) = matched {
+                                // Go records the handler-level latency only when AddTask sync matched.
+                                self.metrics.handler_sync_match_latency(
+                                    "AddActivityTask",
+                                    Some(domain.as_str()),
+                                    r.task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+                                    Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                        request.metadata(),
+                                        "grpc",
+                                    )),
+                                    add_started.elapsed(),
+                                );
                                 return Ok(Response::new(m::AddActivityTaskResponse {
                                     partition_config,
                                 }));
@@ -2812,6 +2836,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                 ),
                 async {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::AcquireSemaphore, Some(&request.get_ref().domain_id), None)?;
+                    let deadline = crate::matching_sync::request_deadline(&request);
+                    let result: Result<Response<m::AcquireSemaphoreResponse>, Status> = async {
                     use crate::matching_semaphore::Identifier;
                     use cadence_api::enums::SemaphoreAcquireOutcome;
                     let r = request.get_ref().clone();
@@ -2863,6 +2889,25 @@ impl m::matching_api_server::MatchingApi for Matching {
                         outcome,
                         token_id: result.token_id,
                     }))
+                    }
+                    .await;
+                    // Go `AcquireSemaphore`: an error after the caller's deadline is
+                    // counted and returned as an InternalServiceError.
+                    match result {
+                        Err(_) if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) => {
+                            self.metrics.semaphore_context_timeout(
+                                self.metric_domain_name(request.get_ref().domain_id.as_str())
+                                    .as_deref(),
+                                request.get_ref().semaphore_name.as_str(),
+                                Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                    request.metadata(),
+                                    "grpc",
+                                )),
+                            );
+                            Err(Status::internal("context deadline exceeded"))
+                        }
+                        other => other,
+                    }
                 },
             )
             .await
