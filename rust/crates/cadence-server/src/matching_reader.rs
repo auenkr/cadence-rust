@@ -610,7 +610,7 @@ impl TaskReader {
                             loop {
                                 if *dispatch_stop.borrow() { return Attempt::Stopped; }
                                 let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-                                let call = (forwarder.forward)(task.clone());
+                                let call = (forwarder.forward)(dispatched.clone());
                                 let result = tokio::select! {
                                     result = tokio::time::timeout_at(forward_deadline, call) => Some(result),
                                     local = target.offer(dispatched.clone(), dispatch_stop.clone()) => {
@@ -1244,6 +1244,36 @@ mod tests {
         let events = sink.events();
         assert!(events.iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_FORWARD_POLL));
         assert!(events.iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_FORWARD_POLL_LATENCY));
+        stop(queue, reader).await;
+    }
+
+    #[tokio::test]
+    async fn matching_reader_local_poller_wins_after_forward_error() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        reader.with_metric_context(
+            crate::matching_metrics::MatchingMetrics::new(sink.clone()),
+            crate::matching_metrics::PollMetricContext {
+                domain: "reader-domain".into(), task_list: "child-list".into(),
+                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+            },
+        );
+        let attempted = Arc::new(Notify::new());
+        let attempted_forward = attempted.clone();
+        reader.set_backlog_forwarder(BacklogForward {
+            forward: Arc::new(move |_task| {
+                attempted_forward.notify_one();
+                Box::pin(async { Err(crate::matching_forward::ForwardError::SlowDown) })
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData { schedule_id: 11, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        assert_eq!(delivered.data.schedule_id, 11);
+        assert!(sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_FORWARD_TASK_THROTTLE_ERRORS));
+        assert!(sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED));
         stop(queue, reader).await;
     }
     async fn wait_read(queue: &DurableTaskQueue, expected: i64) {
