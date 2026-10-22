@@ -1,0 +1,5 @@
+starting matching (api v1-thrift)
+cadence-server running on 0.0.0.0:0: matching
+Cadence internal matching gRPC listening on 127.0.0.1:59167
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:41033
+dynamic config integer read failed (value was missing or had the wrong type); using default

@@ -1,0 +1,2 @@
+env 
+/usr/bin/python3 tests/run-go-service-baseline.py --rust-matching --matching-restart --rust-production-binary artifacts/frozen/cadence-server-rust --binary artifacts/frozen/cadence-server-go --postgres --history-transport grpc --artifacts-dir artifacts/pg-run2 --evidence-dir memory/evidence/matching-pg-mixed-20261023/run2

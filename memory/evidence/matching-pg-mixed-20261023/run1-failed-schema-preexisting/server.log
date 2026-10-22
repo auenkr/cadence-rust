@@ -1,0 +1,14 @@
+2026/10/23 05:02:55 maxprocs: Leaving GOMAXPROCS=4: CPU quota undefined
+2026/10/23 05:02:55 Loading configFiles=[/mnt/storage/service/github/wt/mixedpg/artifacts/pg-run1/config/base.yaml /mnt/storage/service/github/wt/mixedpg/artifacts/pg-run1/config/development.yaml /mnt/storage/service/github/wt/mixedpg/artifacts/pg-run1/config/development_postgres.yaml]
+2026/10/23 05:02:55 [WARN] dcRedirectionPolicy config is deprecated. Please replace it with clusterRedirectionPolicy.
+{"level":"info","ts":1792711975.6710505,"caller":"schema/update.go:164","msg":"Database already set up","persistence-plugin-name":"postgres","persistence-db-type":"default","persistence-db-identifier":"127.0.0.1:5432/cadence","logging-call-at":"update.go:164"}
+{"level":"info","ts":1792711975.672989,"caller":"schema/update.go:164","msg":"Database already set up","persistence-plugin-name":"postgres","persistence-db-type":"visibility","persistence-db-identifier":"127.0.0.1:5432/cadence_visibility","logging-call-at":"update.go:164"}
+{"level":"info","ts":1792711975.7446663,"caller":"schema/update.go:311","msg":"Applying schema update...","persistence-plugin-name":"postgres","persistence-db-type":"default","persistence-db-identifier":"127.0.0.1:5432/cadence","schema-update-version":"0.8","mode":"strict","logging-call-at":"update.go:311"}
+{"level":"info","ts":1792711975.7472205,"caller":"sql/schema.go:69","msg":"updating schema","logging-call-at":"schema.go:69"}
+Error: failed auto-setup
+Error details:
+  update schema
+  failed applying schema update v0.8 to postgres/default/127.0.0.1:5432/cadence (a previous update may have been interrupted; retry with resume enabled to skip already applied statements)
+  failed to apply update
+  schema element already exists for DDL statement "CREATE TABLE domains(shard_id INTEGER NOT NULL DEFAULT 54321,id BYTEA NOT NULL,name VARCHAR(255) UNIQUE NOT NULL,data BYTEA NOT NULL,data_encoding VARCHAR(16) NOT NULL,is_global BOOLEAN NOT NULL,PRIMARY KEY(shard_id, id));"
+  pq: relation "domains" already exists
