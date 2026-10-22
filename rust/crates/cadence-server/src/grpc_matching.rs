@@ -285,13 +285,13 @@ struct ForwardedAdd<'a> {
 }
 impl Drop for PollGuard {
     fn drop(&mut self) {
-        let mut polls = self.polls.lock().expect("poll cancellation lock");
-        if polls
-            .get(&self.key)
-            .is_some_and(|cancel| Arc::ptr_eq(cancel, &self.cancel))
-        {
-            polls.remove(&self.key);
-        }
+        // Parity with Go poller.Manager.EndPoll: the entry is removed
+        // unconditionally, so a finishing poll can drop a newer poll's entry
+        // when poller IDs collide. Deliberate; do not add a ptr_eq guard.
+        self.polls
+            .lock()
+            .expect("poll cancellation lock")
+            .remove(&self.key);
     }
 }
 #[derive(Clone)]
@@ -501,6 +501,8 @@ impl Matching {
                     task_type,
                     20,
                 )
+                // Go task_list_manager clamps ForwarderMaxChildrenPerNode to >= 1.
+                .max(1)
             })
         };
         let forward_polls: crate::matching_registry::ForwardPollsProvider = {
@@ -1363,6 +1365,8 @@ impl Matching {
                 task_type,
                 20,
             )
+            // Go task_list_manager clamps ForwarderMaxChildrenPerNode to >= 1.
+            .max(1)
         };
         let mut list = list.clone();
         let mut handle = entry.clone();
@@ -1415,7 +1419,6 @@ impl Matching {
             }
             if name.is_root()
                 || list.kind == 2
-                || degree <= 0
                 || tokio::time::Instant::now() >= deadline
             {
                 for (started, context) in in_process_forward_metrics.drain(..) {
@@ -1570,14 +1573,12 @@ impl Matching {
     }
     fn register_poll(&self, key: PollKey) -> PollGuard {
         let cancel = Arc::new(Notify::new());
-        if let Some(previous) = self
-            .polls
+        // Parity with Go poller.Manager.StartPoll: a repeated poller ID replaces
+        // the map entry and does not cancel the earlier poll.
+        self.polls
             .lock()
             .expect("poll cancellation lock")
-            .insert(key.clone(), cancel.clone())
-        {
-            previous.notify_one();
-        }
+            .insert(key.clone(), cancel.clone());
         PollGuard {
             polls: self.polls.clone(),
             key,
@@ -1765,7 +1766,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ..Default::default()
                     }))
                 },
-                _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
+                // Go returns an empty poll response (nil error) when a poll is cancelled.
+                _=guard.cancel.notified()=>Ok(Response::new(m::PollForDecisionTaskResponse {
+                    auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+                    load_balancer_hints: queue.load_balancer_hints(matching_now()),
+                    partition_config: queue.partitions.get().map(partition_config_to_internal),
+                    ..Default::default()
+                })),
             };
         }
         let expiration =
@@ -1773,7 +1780,11 @@ impl m::matching_api_server::MatchingApi for Matching {
         let poll_started = std::time::Instant::now();
         let v = tokio::select! {
             result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForDecisionTaskResponse::default() },
-            _=guard.cancel.notified()=>return Err(Status::cancelled("Outstanding poll cancelled.")),
+            // Go returns an empty poll response (nil error) when a poll is cancelled.
+            _=guard.cancel.notified()=>return Ok(Response::new(m::PollForDecisionTaskResponse {
+                auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+                ..Default::default()
+            })),
         };
         let sticky_execution_enabled = !v.task_token.is_empty()
             && v.history
@@ -1958,7 +1969,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ..Default::default()
                     }))
                 },
-                _=guard.cancel.notified()=>Err(Status::cancelled("Outstanding poll cancelled.")),
+                // Go returns an empty poll response (nil error) when a poll is cancelled.
+                _=guard.cancel.notified()=>Ok(Response::new(m::PollForActivityTaskResponse {
+                    auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+                    load_balancer_hints: queue.load_balancer_hints(matching_now()),
+                    partition_config: queue.partitions.get().map(partition_config_to_internal),
+                    ..Default::default()
+                })),
             };
         }
         let expiration =
@@ -1966,7 +1983,11 @@ impl m::matching_api_server::MatchingApi for Matching {
         let poll_started = std::time::Instant::now();
         let v = tokio::select! {
             result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForActivityTaskResponse::default() },
-            _=guard.cancel.notified()=>return Err(Status::cancelled("Outstanding poll cancelled.")),
+            // Go returns an empty poll response (nil error) when a poll is cancelled.
+            _=guard.cancel.notified()=>return Ok(Response::new(m::PollForActivityTaskResponse {
+                auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+                ..Default::default()
+            })),
         };
         // Matching stamps a delivered activity with its own type, but an empty
         // poll with the decision type; the embedded engine mirrors that.
@@ -2078,7 +2099,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
                         let queue = self.durable_queue(&r.domain_id, list, 0).await?;
                         if queue.stop_if_isolation_changed() {
-                            return Err(Status::unavailable("task list shutting down"));
+                            return Err(Status::internal("task list shutting down"));
                         }
                         self.check_write_partition(&r.domain_id, list, 0, &queue)?;
                         check_sticky_poller(&queue, list)?;
@@ -2277,7 +2298,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         })?;
                         let queue = self.durable_queue(&r.domain_id, list, 1).await?;
                         if queue.stop_if_isolation_changed() {
-                            return Err(Status::unavailable("task list shutting down"));
+                            return Err(Status::internal("task list shutting down"));
                         }
                         self.check_write_partition(&r.domain_id, list, 1, &queue)?;
                         let data = cadence_persistence::matching_blob::TaskData {
@@ -2441,10 +2462,10 @@ impl m::matching_api_server::MatchingApi for Matching {
                     if self.queues.is_some() {
                         // Go `matcher.OfferQuery`: offer to a waiting local decision
                         // poller, else forward up the partition chain with a forward-task
-                        // token (no rate limit, unlike `ForwardTask`). The root fails
-                        // fast with `ErrNoParent` when no poller waits anywhere; sticky
-                        // lists never forward. Permits are held until the query resolves,
-                        // like Go releasing the token when `ForwardQueryTask` returns.
+                        // token (no rate limit, unlike `ForwardTask`). Sticky lists and the
+                        // root never forward and wait for a local poller until the deadline
+                        // (Go has no fail-fast here). Permits are held until the query
+                        // resolves, like Go releasing the token when `ForwardQueryTask` returns.
                         let task_list = r
                             .task_list
                             .clone()
@@ -2470,6 +2491,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 0,
                                 20,
                             )
+                            // Go task_list_manager clamps ForwarderMaxChildrenPerNode to >= 1.
+                            .max(1)
                         };
                         let deadline = incoming_deadline
                             .unwrap_or_else(|| tokio::time::Instant::now() + self.poll_expiration);
@@ -2503,9 +2526,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     Ok(Err(_)) => {
                                         Err(Status::unavailable("Matching query channel closed."))
                                     }
-                                    Err(_) => Err(Status::deadline_exceeded(
-                                        "Query task not completed before the deadline.",
-                                    )),
+                                    // Go ctx expiry in waitForQueryResult/OfferQuery is a raw
+                                    // ctx error, which handleErr maps to InternalServiceError.
+                                    Err(_) => Err(Status::internal("context deadline exceeded")),
                                 };
                                 for (started, context) in in_process_forward_metrics {
                                     self.metrics
@@ -2517,18 +2540,19 @@ impl m::matching_api_server::MatchingApi for Matching {
                             // unbuffered send likewise leaves nothing behind on failure.
                             let current = TaskListName::parse(&list.name)
                                 .map_err(|_| Status::invalid_argument("TaskList is not valid."))?;
-                            if list.kind == 2
-                                || current.is_root()
-                                || degree <= 0
-                                || tokio::time::Instant::now() >= deadline
-                            {
+                            // Go has no forwarder for root or sticky lists, so OfferQuery
+                            // blocks on the unbuffered queryTaskC send until a poller takes
+                            // the query or the RPC context ends. Wait on this level instead.
+                            if list.kind == 2 || current.is_root() {
+                                force_local = true;
+                                continue;
+                            }
+                            if tokio::time::Instant::now() >= deadline {
                                 for (started, context) in in_process_forward_metrics.drain(..) {
                                     self.metrics
                                         .forward_query_latency(&context, started.elapsed());
                                 }
-                                return Err(Status::internal(
-                                    "cannot find parent task list for forwarding",
-                                ));
+                                return Err(Status::internal("context deadline exceeded"));
                             }
                             let parent = current.parent(degree);
                             if parent.is_empty() {
@@ -3108,11 +3132,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                     if !matches!(r.task_list_type, 1 | 2) {
                         return Err(Status::invalid_argument("TaskListType is invalid."));
                     }
-                    let task_list = r
+                    let list = r
                         .task_list
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
-                        .name;
+                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                    let task_list = list.name.clone();
                     task_list_name(&task_list)?;
+                    // Go getOrCreateTaskListManager: a non-owner gets an error and
+                    // an unloaded list is loaded before the cancel.
+                    if self.queues.is_some() {
+                        self.durable_queue(&r.domain_id, &list, r.task_list_type - 1).await?;
+                    }
                     let key = PollKey {
                         domain: r.domain_id,
                         task_list,
@@ -3125,6 +3154,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .expect("poll cancellation lock")
                         .get(&key)
                         .cloned();
+                    // Go CancelPoller returns nil whether or not a poll matched.
                     if let Some(cancel) = cancel {
                         cancel.notify_one();
                     }

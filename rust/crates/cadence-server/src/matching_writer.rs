@@ -124,7 +124,8 @@ pub struct TaskWriter {
     inner: Arc<Inner>,
 }
 fn stopped() -> Status {
-    Status::unavailable("task list shutting down")
+    // Go errShutdown reaches handleErr's default branch: InternalServiceError.
+    Status::internal("task list shutting down")
 }
 fn full() -> Status {
     crate::grpc::detailed_status(
@@ -257,7 +258,8 @@ impl TaskWriter {
                             (QueueError::Storage(StorageError::ConditionFailed(_)), 1) => {
                                 Status::internal("StickyTaskConditionFailedError")
                             }
-                            _ => Status::unavailable(error.to_string()),
+                            // Go returns the raw persistence error, which handleErr maps to Internal.
+                            _ => Status::internal(error.to_string()),
                         };
                         Err(WriteError { status, retryable })
                     }
@@ -368,7 +370,8 @@ impl TaskWriter {
         tokio::select! {
             result = receiver => result.unwrap_or_else(|_| Err(stopped().into())),
             _ = stopped_rx.changed() => Err(stopped().into()),
-            _ = tokio::time::sleep_until(deadline) => Err(Status::deadline_exceeded("failed to receive a success response from the channel within a timeout threshold: context deadline exceeded").into()),
+            // Go wraps the ctx error (task_writer.go), which handleErr maps to Internal.
+            _ = tokio::time::sleep_until(deadline) => Err(Status::internal("failed to receive a success response from the channel within a timeout threshold: context deadline exceeded").into()),
         }
     }
 }
@@ -606,7 +609,7 @@ mod tests {
         writer.stop();
         crate::matching_blocking::run({ let release = release.clone(); move || release.wait() }).await.unwrap();
         let first_result = tokio::time::timeout(Duration::from_secs(1), first).await.unwrap().unwrap();
-        assert!(first_result.is_ok() || first_result.as_ref().unwrap_err().code() == tonic::Code::Unavailable,
+        assert!(first_result.is_ok() || first_result.as_ref().unwrap_err().code() == tonic::Code::Internal,
             "the accepted write may race its successful response with Stop");
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
@@ -661,7 +664,8 @@ mod tests {
             schedule_to_start_seconds: 0,
         };
         let error = writer.append(task.clone()).await.unwrap_err();
-        assert_eq!(error.code(), tonic::Code::DeadlineExceeded);
+        // Go wraps the ctx error, which handleErr maps to InternalServiceError.
+        assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("failed to receive"));
         let error = writer.append(task).await.unwrap_err();
         assert_eq!(error.code(), tonic::Code::ResourceExhausted);
@@ -698,7 +702,7 @@ mod tests {
             parked: Mutex::new(Some(receiver)),
         }) };
         let task = WriteTask { data: TaskData::default(), source_domain: domain_id, schedule_to_start_seconds: 0 };
-        assert_eq!(writer.append(task.clone()).await.unwrap_err().code(), tonic::Code::DeadlineExceeded,
+        assert_eq!(writer.append(task.clone()).await.unwrap_err().code(), tonic::Code::Internal,
             "an accepted request keeps waiting for its response until its original deadline");
         overlay.lock().unwrap().update(false, "matching.appendTaskTimeout", vec![timeout_value("0s")]);
         assert_eq!(writer.append(task).await.unwrap_err().code(), tonic::Code::ResourceExhausted,
@@ -833,7 +837,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .code(),
-            tonic::Code::Unavailable
+            tonic::Code::Internal
         );
     }
 }
