@@ -24,6 +24,50 @@ type Key = (Uuid, String, i32);
 type StartupGates = HashMap<Key, Weak<Mutex<()>>>;
 type LocalPollFactory = Arc<dyn Fn(QueueRegistry) -> crate::grpc_matching::Matching + Send + Sync>;
 
+/// One partition's DescribeTaskList state as the adaptive scaler consumes it
+/// (Go `toPartitionMetrics` inputs). `groups` holds each isolation group's
+/// arrival QPS and whether it has pollers.
+struct ScaledPartition {
+    qps: f64,
+    empty: bool,
+    has_write: bool,
+    groups: Vec<(String, f64, bool)>,
+}
+
+/// Go `toPartitionMetrics` for a partition described over RPC. Like Go, the
+/// owner's partition config decides `has_write`, defaulting to true when the
+/// response carries no config.
+fn scaled_partition_from_response(
+    id: i32,
+    response: &m::DescribeTaskListResponse,
+    empty_check: bool,
+) -> ScaledPartition {
+    let status = response.task_list_status.clone().unwrap_or_default();
+    ScaledPartition {
+        qps: status.new_tasks_per_second,
+        empty: if empty_check {
+            status.empty
+        } else {
+            status.backlog_count_hint == 0
+        },
+        has_write: response
+            .partition_config
+            .as_ref()
+            .is_none_or(|config| config.write_partitions.contains_key(&id)),
+        groups: status
+            .isolation_group_metrics
+            .iter()
+            .map(|(group, metrics)| {
+                (
+                    group.clone(),
+                    metrics.new_tasks_per_second,
+                    metrics.poller_count > 0,
+                )
+            })
+            .collect(),
+    }
+}
+
 /// Synchronous snapshot policy used while the queue registry lock is held.
 /// The RPC path refreshes assignment asynchronously before calling `get`;
 /// this policy closes races with assignment drain and startup publication.
@@ -1422,6 +1466,36 @@ impl QueueRegistry {
                                 }
                         }
                     }
+                    // Go `taskListManagerImpl.Start` pushes the loaded root config
+                    // to every non-root read partition in the background, bounded
+                    // by `notifyPartitionConfigTimeout` (5s).
+                    if kind == 0 {
+                        if let (Some(config), Ok(parsed)) = (
+                            owner.partitions.get(),
+                            cadence_common::task_list::TaskListName::parse(&key.name),
+                        ) {
+                            if parsed.is_root() {
+                                let notifier = registry.clone();
+                                let root_name = parsed.root().to_owned();
+                                let read_partitions = config.read_partitions.keys().copied().collect();
+                                let deadline = tokio::time::Instant::now()
+                                    + std::time::Duration::from_secs(5);
+                                tokio::spawn(async move {
+                                    notifier
+                                        .notify_read_partitions(
+                                            key.domain_id,
+                                            &root_name,
+                                            kind,
+                                            key.task_type,
+                                            read_partitions,
+                                            config,
+                                            Some(deadline),
+                                        )
+                                        .await;
+                                });
+                            }
+                        }
+                    }
                     // Go starts the adaptive scaler on root normal managers;
                     // the loop self-terminates when the owner stops.
                     if kind == 0 && registry.scaler_config.is_some() {
@@ -1534,6 +1608,85 @@ impl QueueRegistry {
             }
         }
     }
+    /// Go `adaptiveScalerImpl.describePartition`: the root is described from
+    /// this host, every other partition through a DescribeTaskList RPC to its
+    /// owner. Without a membership ring all partitions are local.
+    async fn describe_scaled_partition(
+        &self,
+        root: &TaskListKey,
+        name: &cadence_common::task_list::TaskListName,
+        id: i32,
+        config: &crate::matching_scaler::ScalerConfig,
+        current_write: &HashMap<i32, Vec<String>>,
+        now: i64,
+    ) -> Result<ScaledPartition, Status> {
+        if id != 0 && self.membership.is_some() {
+            let response = self.describe_partition_rpc(root, name, id).await?;
+            return Ok(scaled_partition_from_response(id, &response, config.empty_check));
+        }
+        let sub = TaskListKey {
+            name: name.partition_name(id as i64),
+            ..root.clone()
+        };
+        let other = self.get(sub, 0, now).await?;
+        let qps = other.qps.qps();
+        let (_, _, backlog_hint, _, _, empty) = other.queue.status();
+        let counts = other
+            .pollers
+            .lock()
+            .expect("poller history lock")
+            .count_by_group(now, now.saturating_sub(config.poller_window_nanos));
+        Ok(ScaledPartition {
+            qps,
+            empty: if config.empty_check {
+                empty
+            } else {
+                backlog_hint == 0
+            },
+            has_write: current_write.contains_key(&id),
+            groups: config
+                .isolation_groups
+                .iter()
+                .map(|group| {
+                    (
+                        group.clone(),
+                        other.qps.group_qps(group),
+                        counts.get(group).copied().unwrap_or(0) > 0,
+                    )
+                })
+                .collect(),
+        })
+    }
+    async fn describe_partition_rpc(
+        &self,
+        root: &TaskListKey,
+        name: &cadence_common::task_list::TaskListName,
+        id: i32,
+    ) -> Result<m::DescribeTaskListResponse, Status> {
+        let Some(membership) = self.membership.as_ref() else {
+            return Err(Status::unavailable("Matching membership is not configured"));
+        };
+        let partition = name.partition_name(id as i64);
+        let (_owner, channel) = membership.channel_for_task_list_owner(&partition)?;
+        let request = m::DescribeTaskListRequest {
+            domain_id: root.domain_id.to_string(),
+            request: Some(cadence_proto::api::DescribeTaskListRequest {
+                task_list: Some(cadence_proto::api::TaskList {
+                    name: partition,
+                    // Go `TaskListKindNormal` on the wire.
+                    kind: 1,
+                }),
+                task_list_type: root.task_type + 1,
+                include_task_list_status: true,
+                ..Default::default()
+            }),
+        };
+        let mut client = m::matching_api_client::MatchingApiClient::new(channel);
+        client
+            .describe_task_list(tonic::Request::new(request))
+            .await
+            .map(|response| response.into_inner())
+    }
     /// One Go `run()` tick. Returns false when the loop should stop. A
     /// metrics-collection failure resets the sustains like Go's error branch.
     async fn scaler_update(
@@ -1574,44 +1727,29 @@ impl QueueRegistry {
             let mut ids: Vec<i32> = current.read_partitions.keys().copied().collect();
             ids.sort();
             for id in ids {
-                let sub = TaskListKey {
-                    name: name.partition_name(id as i64),
-                    ..root.clone()
-                };
-                let other = match self.get(sub, 0, now).await {
-                    Ok(other) => other,
+                let partition = match self
+                    .describe_scaled_partition(root, &name, id, config, &current.write_partitions, now)
+                    .await
+                {
+                    Ok(partition) => partition,
                     Err(_) => {
+                        // Go `run()` resets the sustains when metrics collection fails.
                         scaler.reset();
                         return Ok(true);
                     }
                 };
-                let qps = other.qps.qps();
-                metrics.total_qps += qps;
-                let (_, _, backlog_hint, _, _, empty) = other.queue.status();
+                metrics.total_qps += partition.qps;
                 metrics.by_partition.insert(
                     id,
                     PartitionMetrics {
-                        qps,
-                        read_only: !current.write_partitions.contains_key(&id),
-                        empty: if config.empty_check {
-                            empty
-                        } else {
-                            backlog_hint == 0
-                        },
+                        qps: partition.qps,
+                        read_only: !partition.has_write,
+                        empty: partition.empty,
                     },
                 );
-                let counts = other
-                    .pollers
-                    .lock()
-                    .expect("poller history lock")
-                    .count_by_group(now, now.saturating_sub(config.poller_window_nanos));
-                for group in &config.isolation_groups {
-                    *metrics.qps_by_group.entry(group.clone()).or_insert(0.0) +=
-                        other.qps.group_qps(group);
-                    *metrics
-                        .has_pollers_by_group
-                        .entry(group.clone())
-                        .or_insert(false) |= counts.get(group).copied().unwrap_or(0) > 0;
+                for (group, qps, has_pollers) in partition.groups {
+                    *metrics.qps_by_group.entry(group.clone()).or_insert(0.0) += qps;
+                    *metrics.has_pollers_by_group.entry(group).or_insert(false) |= has_pollers;
                 }
             }
             metrics
@@ -1705,13 +1843,38 @@ impl QueueRegistry {
         let Some((new_config, root_name, read_partitions)) = notification else {
             return Ok(());
         };
+        self.notify_read_partitions(
+            domain_id,
+            &root_name,
+            task_list_kind,
+            task_type,
+            read_partitions,
+            new_config,
+            caller_deadline,
+        )
+        .await;
+        Ok(())
+    }
+    /// Go `taskListManagerImpl.notifyPartitionConfig`: refresh every non-root
+    /// read partition through its live owner, concurrently. Failures are
+    /// reported but never fail the caller, as in Go.
+    #[allow(clippy::too_many_arguments)]
+    async fn notify_read_partitions(
+        &self,
+        domain_id: Uuid,
+        root_name: &str,
+        task_list_kind: i16,
+        task_type: i32,
+        read_partitions: Vec<i32>,
+        config: cadence_persistence::StoredPartitionConfig,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) {
         let Some(membership) = self.membership.clone() else {
-            return Ok(());
+            return;
         };
-        let partition_config =
-            crate::grpc_matching::partition_config_to_proto(new_config);
+        let partition_config = crate::grpc_matching::partition_config_to_proto(config);
         let mut notifications = tokio::task::JoinSet::new();
-        for partition in read_partitions {
+        for partition in read_partitions.into_iter().filter(|partition| *partition != 0) {
             let task_list_name = format!("/__cadence_sys/{root_name}/{partition}");
             let (owner, channel) = match membership.channel_for_task_list_owner(&task_list_name) {
                 Ok(resolved) => resolved,
@@ -1767,7 +1930,6 @@ impl QueueRegistry {
                 }
             }
         }
-        Ok(())
     }
     pub async fn refresh_partition_config(
         &self,
@@ -2125,6 +2287,60 @@ mod tests {
             ("domain-uuid".into(), "physical-queue".into(), 1),
             ("domain-uuid".into(), "physical-queue".into(), 1),
         ]);
+    }
+    #[test]
+    fn scaled_partition_from_response_reads_owner_describe_like_go() {
+        use cadence_proto::api as p;
+        let response = m::DescribeTaskListResponse {
+            task_list_status: Some(p::TaskListStatus {
+                new_tasks_per_second: 3.0,
+                backlog_count_hint: 0,
+                empty: false,
+                isolation_group_metrics: HashMap::from([
+                    (
+                        "zone-a".to_owned(),
+                        p::IsolationGroupMetrics {
+                            new_tasks_per_second: 2.0,
+                            poller_count: 1,
+                        },
+                    ),
+                    (
+                        "zone-b".to_owned(),
+                        p::IsolationGroupMetrics {
+                            new_tasks_per_second: 0.0,
+                            poller_count: 0,
+                        },
+                    ),
+                ]),
+                ..Default::default()
+            }),
+            partition_config: Some(crate::grpc_matching::partition_config_to_proto(
+                cadence_persistence::StoredPartitionConfig {
+                    version: 1,
+                    read_partitions: HashMap::from([(0, Vec::new()), (2, Vec::new())]),
+                    write_partitions: HashMap::from([(0, Vec::new())]),
+                },
+            )),
+            ..Default::default()
+        };
+        let partition = scaled_partition_from_response(2, &response, false);
+        assert_eq!(partition.qps, 3.0);
+        // Go `toPartitionMetrics`: the backlog hint decides emptiness unless the
+        // partition-empty check is enabled, which reads the status flag instead.
+        assert!(partition.empty);
+        assert!(!scaled_partition_from_response(2, &response, true).empty);
+        // `hasWritePartition` comes from the owner's config.
+        assert!(!partition.has_write);
+        assert!(scaled_partition_from_response(0, &response, false).has_write);
+        let mut groups = partition.groups;
+        groups.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            groups,
+            vec![("zone-a".into(), 2.0, true), ("zone-b".into(), 0.0, false)]
+        );
+        // A response without a partition config leaves the partition writable.
+        let bare = m::DescribeTaskListResponse::default();
+        assert!(scaled_partition_from_response(2, &bare, false).has_write);
     }
     async fn take(registry: &QueueRegistry, handle: &QueueHandle) -> AllocatedTask {
         let reader = registry
