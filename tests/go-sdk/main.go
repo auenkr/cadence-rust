@@ -35,6 +35,22 @@ func SignalWorkflow(ctx workflow.Context) (string, error) {
 	workflow.GetSignalChannel(ctx, "wake").Receive(ctx, &value)
 	return value, nil
 }
+func CancelSleepActivity(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(30 * time.Second):
+		return nil
+	}
+}
+func CancelWorkflow(ctx workflow.Context) (string, error) {
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: time.Minute})
+	err := workflow.ExecuteActivity(ctx, CancelSleepActivity).Get(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	return "not-canceled", nil
+}
 func ChildWorkflow(workflow.Context) (string, error) { return "child-result", nil }
 func ParentWorkflow(ctx workflow.Context) (string, error) {
 	ctx = workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{ExecutionStartToCloseTimeout: time.Minute, TaskStartToCloseTimeout: 10 * time.Second})
