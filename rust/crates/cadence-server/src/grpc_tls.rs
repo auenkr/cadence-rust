@@ -164,7 +164,7 @@ fn ca_certs(tls: &TlsConfig) -> anyhow::Result<Vec<CertificateDer<'static>>> {
     }
     let mut certs = Vec::new();
     for file in files {
-        let mut pem = std::fs::read(file).with_context(|| format!("reading CA file {file}"))?;
+        let pem = std::fs::read(file).with_context(|| format!("reading CA file {file}"))?;
         // Go's AppendCertsFromPEM skips blocks it cannot parse.
         certs.extend(rustls_pemfile::certs(&mut pem.as_slice()).filter_map(Result::ok));
     }
