@@ -1675,6 +1675,7 @@ impl QueueRegistry {
                     name: partition,
                     // Go `TaskListKindNormal` on the wire.
                     kind: 1,
+                    ..Default::default()
                 }),
                 task_list_type: root.task_type + 1,
                 include_task_list_status: true,

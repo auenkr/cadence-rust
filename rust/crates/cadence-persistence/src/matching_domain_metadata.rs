@@ -218,7 +218,6 @@ pub(crate) fn decode_go_cassandra_domain_metadata(
     put(50, Value::I64(failover_end_time));
     put(52, Value::I64(previous_failover_version));
     put(54, Value::I64(last_updated_time));
-    drop(put);
     let uuid = info.id.to_string();
     let row = SqlDomainRow {
         id: info.id.as_bytes().to_vec(),

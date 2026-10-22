@@ -1107,6 +1107,7 @@ async fn matching_rpc_partition_config_rpcs_reject_non_normal_kinds() {
         let task_list = Some(cadence_proto::api::TaskList {
             name: "queue".into(),
             kind,
+            ..Default::default()
         });
         let update = matching
             .update_task_list_partition_config(Request::new(

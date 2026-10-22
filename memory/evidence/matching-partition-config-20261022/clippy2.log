@@ -1,0 +1,10 @@
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-proto)
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-persistence)
+error: failed to run custom build command for `cadence-proto v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-proto)`
+
+Caused by:
+  process didn't exit successfully: `/mnt/storage/service/cargo-target-shared/debug/build/cadence-proto-3a709f0824174b94/build-script-build` (exit status: 1)
+  --- stderr
+  Error: "Cadence IDL missing: run git submodule update --init go/idls"
+warning: build failed, waiting for other jobs to finish...
+EXIT 101
