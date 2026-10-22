@@ -459,7 +459,8 @@ async fn matching_rpc_isolation_toggle_stops_owner_before_admitting_add() {
         let request = || Request::new(m::AddDecisionTaskRequest {
             domain_id: key.domain_id.to_string(), task_list: list(), workflow_execution: execution(), schedule_id: 9, ..Default::default()
         });
-        assert_eq!(matching.add_decision_task(request()).await.unwrap_err().code(), tonic::Code::Unavailable);
+        // Go errShutdown reaches handleErr's default branch: InternalServiceError.
+        assert_eq!(matching.add_decision_task(request()).await.unwrap_err().code(), tonic::Code::Internal);
         matching.add_decision_task(request()).await.unwrap();
     }
     assert!(first.queue.is_stopped());
@@ -606,13 +607,88 @@ async fn matching_rpc_durable_cancel_unregisters_waiting_poller() {
         }))
         .await
         .unwrap();
-    let error = tokio::time::timeout(Duration::from_secs(2), poll)
+    // Go returns an empty poll response (nil error) for a cancelled poll.
+    let response = tokio::time::timeout(Duration::from_secs(2), poll)
         .await
         .unwrap()
         .unwrap()
-        .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::Cancelled);
+        .unwrap()
+        .into_inner();
+    assert!(response.task_token.is_empty());
+    assert!(response.auto_config_hint.is_some());
     assert!(matching.polls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn matching_rpc_cancel_without_matching_poll_returns_ok() {
+    let (_dir, _store, matching, key) = fixture();
+    // Go CancelPoller returns nil whether or not a poll matched.
+    matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: key.domain_id.to_string(),
+            task_list: list(),
+            task_list_type: 1,
+            poller_id: "nobody".into(),
+        }))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_duplicate_poller_id_replaces_entry_without_cancelling_first() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let poll_key = || PollKey {
+        domain: domain.clone(),
+        task_list: list().unwrap().name,
+        task_type: 1,
+        poller: "dup".into(),
+    };
+    let first = matching.register_poll(poll_key());
+    let second = matching.register_poll(poll_key());
+    // Go poller.Manager.StartPoll overwrites the entry and does not cancel the earlier poll.
+    assert!(tokio::time::timeout(Duration::from_millis(50), first.cancel.notified())
+        .await
+        .is_err());
+    matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain,
+            task_list: list(),
+            task_list_type: 1,
+            poller_id: "dup".into(),
+        }))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), second.cancel.notified())
+        .await
+        .expect("cancel targets the newest poll with the poller ID");
+    // Go EndPoll deletes unconditionally, so finishing the first poll drops the second's entry.
+    drop(first);
+    assert!(matching.polls.lock().unwrap().is_empty());
+    drop(second);
+}
+
+#[tokio::test]
+async fn matching_rpc_cancel_outstanding_poll_checks_task_list_ownership() {
+    use std::{pin::Pin, sync::Arc as StdArc};
+
+    let (_dir, _store, matching, key) = fixture();
+    let check = StdArc::new(move |_name: String, _cached: bool| {
+        Box::pin(async { Err(tonic::Status::unavailable("not owner")) })
+            as Pin<Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send>>
+    });
+    let matching = matching.with_task_list_ownership(check);
+    // Go getOrCreateTaskListManager runs the ownership check before CancelPoller.
+    let error = matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: key.domain_id.to_string(),
+            task_list: list(),
+            task_list_type: 1,
+            poller_id: "anyone".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.message(), "not owner");
 }
 
 #[tokio::test]
@@ -639,7 +715,8 @@ async fn matching_rpc_decision_poll_preserves_isolation_group_history() {
     matching.cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
         domain_id: key.domain_id.to_string(), task_list: list(), task_list_type: 1, poller_id: "group-poller".into(),
     })).await.unwrap();
-    assert_eq!(poll.await.unwrap().unwrap_err().code(), tonic::Code::Cancelled);
+    let response = poll.await.unwrap().unwrap().into_inner();
+    assert!(response.task_token.is_empty());
     let now = matching_now();
     let mut pollers = queue.pollers.lock().unwrap();
     assert_eq!(pollers.count_by_group(now, now - 2_000_000_000).get("zone-decision"), Some(&1));
@@ -721,10 +798,9 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
         }))
         .await
         .unwrap();
-    assert_eq!(
-        poll.await.unwrap().unwrap_err().code(),
-        tonic::Code::Cancelled
-    );
+    let response = poll.await.unwrap().unwrap().into_inner();
+    assert!(response.task_token.is_empty());
+    assert!(response.auto_config_hint.is_some());
     let ended = describe().await.unwrap().into_inner();
     assert_eq!(ended.pollers.len(), 1);
     assert_eq!(ended.task_list_status.unwrap().isolation_group_metrics["zone-a"].poller_count, 1);
@@ -1334,9 +1410,28 @@ async fn matching_rpc_cancelled_forwarded_poll_unregisters_parent_waiter() {
 }
 
 #[tokio::test]
+async fn matching_rpc_forwarder_max_children_below_one_clamps_to_one() {
+    // Go task_list_manager clamps matching.forwarderMaxChildrenPerNode to >= 1, so a
+    // configured 0 still forwards the child poll to its parent partition.
+    let address = start_starting_history().await;
+    let (_dir, _store, matching, key) = fixture_with_history(&address);
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.forwarderMaxChildrenPerNode", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, b"0".to_vec())), filters: vec![],
+    }]);
+    matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(), task_list: list(), workflow_execution: execution(), schedule_id: 61,
+        ..Default::default()
+    })).await.unwrap();
+    let child_list = p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() };
+    let child = matching.durable_queue(&key.domain_id.to_string(), &child_list, 0).await.unwrap();
+    let response = child.dispatcher.poll_decision(p::PollForDecisionTaskRequest { task_list: Some(child_list), ..Default::default() }, Duration::from_secs(2)).await.unwrap();
+    assert_eq!(response.started_event_id, 62, "a clamped degree of 1 forwards to the parent");
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
 async fn matching_rpc_forwarding_disabled_keeps_parent_backlog_untouched() {
     for (property, value) in [
-        ("matching.forwarderMaxChildrenPerNode", b"0".as_slice()),
         ("matching.forwarderMaxOutstandingPolls", b"0".as_slice()),
     ] {
         let address = start_starting_history().await;
@@ -1733,31 +1828,38 @@ async fn child_query_on(partition: p::TaskList) {
 }
 
 #[tokio::test]
-async fn matching_rpc_query_without_poller_fails_fast() {
+async fn matching_rpc_query_without_poller_waits_for_deadline() {
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
-    // Go `OfferQuery` at the root returns `ErrNoParent` when no poller waits
-    // instead of holding the query for the whole long-poll expiration.
-    let error = tokio::time::timeout(Duration::from_secs(2), matching.query_workflow(
-        Request::new(m::QueryWorkflowRequest {
-            request: Some(p::QueryWorkflowRequest {
-                domain: "domain".into(),
-                workflow_execution: execution(),
-                query: Some(p::WorkflowQuery {
-                    query_type: "ping".into(),
-                    query_args: None,
-                }),
-                ..Default::default()
+    // Go `OfferQuery` at the root has no fail-fast: with no poller it blocks on the
+    // unbuffered queryTaskC send until the RPC context ends. The raw ctx error then
+    // maps to InternalServiceError{"context deadline exceeded"} through handleErr.
+    let mut request = Request::new(m::QueryWorkflowRequest {
+        request: Some(p::QueryWorkflowRequest {
+            domain: "domain".into(),
+            workflow_execution: execution(),
+            query: Some(p::WorkflowQuery {
+                query_type: "ping".into(),
+                query_args: None,
             }),
-            domain_id: key.domain_id.to_string(),
-            task_list: list(),
-            forwarded_from: String::new(),
+            ..Default::default()
         }),
-    ))
-    .await
-    .expect("query without a poller must not wait out the poll expiration")
-    .expect_err("query without a poller must fail");
+        domain_id: key.domain_id.to_string(),
+        task_list: list(),
+        forwarded_from: String::new(),
+    });
+    request.set_timeout(Duration::from_millis(500));
+    let started = tokio::time::Instant::now();
+    let error = tokio::time::timeout(Duration::from_secs(5), matching.query_workflow(request))
+        .await
+        .expect("query must return once the RPC deadline elapses")
+        .expect_err("query without a poller must fail at the deadline");
+    assert!(
+        started.elapsed() >= Duration::from_millis(400),
+        "query returned before the RPC deadline"
+    );
     assert_eq!(error.code(), tonic::Code::Internal);
+    assert_eq!(error.message(), "context deadline exceeded");
     matching
         .queues
         .as_ref()

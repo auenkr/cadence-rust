@@ -1,0 +1,13 @@
+    Checking postgres-openssl v0.5.3
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/parityfix/rust/crates/cadence-proto)
+    Checking fs-err v3.3.2
+    Checking postgres v0.19.14
+    Checking axum v0.8.9
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/parityfix/rust/crates/cadence-persistence)
+    Checking hickory-resolver v0.24.4
+    Checking axum-server v0.8.0
+    Checking crc32c v0.6.8
+    Checking tonic-reflection v0.12.3
+    Checking if-addrs v0.13.4
+    Checking cadence-server v0.1.0 (/mnt/storage/service/github/wt/parityfix/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 40.58s
