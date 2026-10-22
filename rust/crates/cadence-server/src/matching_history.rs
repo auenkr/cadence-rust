@@ -130,6 +130,9 @@ pub struct MatchingHistoryClient {
     /// per call because a running owner keeps its client.
     record_started_timeout: Option<RecordStartedTimeout>,
     peer_resolver: Option<Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>>,
+    /// Go's History outbound TLS, taken from History's `rpc.tls`; applies to
+    /// peers resolved at runtime (the bootstrap channel is built by the caller).
+    tls: Option<crate::grpc_tls::ClientTls>,
     /// Resolver must select the `tchannel` named membership port.
     tchannel_peer_resolver:
         Option<Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>>,
@@ -163,9 +166,17 @@ impl MatchingHistoryClient {
             max_message_size,
             record_started_timeout: None,
             peer_resolver: None,
+            tls: None,
             tchannel_peer_resolver: None,
             metrics: crate::matching_metrics::MatchingMetrics::default(),
         }
+    }
+
+    /// Apply History's Go `rpc.tls` to channels dialed for resolved peers.
+    #[must_use]
+    pub fn with_tls(mut self, tls: Option<crate::grpc_tls::ClientTls>) -> Self {
+        self.tls = tls;
+        self
     }
     /// Install a metrics sink. The default sink is a no-op to preserve existing behavior.
     pub fn with_metrics(mut self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
@@ -243,16 +254,9 @@ impl MatchingHistoryClient {
         &self,
         peer: &str,
     ) -> Result<h::history_api_client::HistoryApiClient<Channel>, Status> {
-        let uri = if peer.contains("://") {
-            peer.to_owned()
-        } else {
-            format!("http://{peer}")
-        };
-        let channel = tonic::transport::Endpoint::from_shared(uri)
-            .map_err(|error| {
-                Status::unavailable(format!("Invalid resolved History endpoint: {error}"))
-            })?
-            .connect_lazy();
+        let channel = crate::grpc_tls::endpoint_channel(peer, self.tls.as_ref()).map_err(|error| {
+            Status::unavailable(format!("Invalid resolved History endpoint: {error}"))
+        })?;
         Ok(h::history_api_client::HistoryApiClient::new(channel)
             .max_decoding_message_size(self.max_message_size)
             .max_encoding_message_size(self.max_message_size))

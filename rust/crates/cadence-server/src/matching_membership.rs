@@ -12,6 +12,8 @@ pub struct Membership {
     ring: Arc<RwLock<Ring>>,
     channels: Arc<Mutex<HashMap<String, tonic::transport::Channel>>>,
     changed: tokio::sync::watch::Sender<u64>,
+    /// Go's Matching outbound TLS, taken from Matching's own `rpc.tls`.
+    peer_tls: Option<crate::grpc_tls::ClientTls>,
 }
 impl Membership {
     pub fn new(identity: impl Into<Arc<str>>, hosts: Vec<Host>) -> Self {
@@ -20,7 +22,16 @@ impl Membership {
             ring: Arc::new(RwLock::new(Ring::new(hosts))),
             channels: Arc::default(),
             changed: tokio::sync::watch::channel(0).0,
+            peer_tls: None,
         }
+    }
+    #[must_use]
+    pub fn with_peer_tls(mut self, peer_tls: Option<crate::grpc_tls::ClientTls>) -> Self {
+        self.peer_tls = peer_tls;
+        self
+    }
+    pub(crate) fn peer_tls(&self) -> Option<&crate::grpc_tls::ClientTls> {
+        self.peer_tls.as_ref()
     }
     /// Publish placement before waking unloaders. Readers see a complete ring.
     pub fn replace(&self, hosts: Vec<Host>) {
@@ -111,14 +122,8 @@ impl Membership {
         if let Some(channel) = channels.get(grpc_address) {
             return Ok(Some(channel.clone()));
         }
-        let address = if grpc_address.contains("://") {
-            grpc_address.to_owned()
-        } else {
-            format!("http://{grpc_address}")
-        };
-        let channel = tonic::transport::Endpoint::from_shared(address)
-            .map_err(|error| Status::internal(error.to_string()))?
-            .connect_lazy();
+        let channel = crate::grpc_tls::endpoint_channel(grpc_address, self.peer_tls.as_ref())
+            .map_err(|error| Status::internal(error.to_string()))?;
         channels.insert(grpc_address.to_owned(), channel.clone());
         Ok(Some(channel))
     }
@@ -152,14 +157,8 @@ impl Membership {
         let channel = if let Some(channel) = channels.get(&grpc_address) {
             channel.clone()
         } else {
-            let address = if grpc_address.contains("://") {
-                grpc_address.clone()
-            } else {
-                format!("http://{grpc_address}")
-            };
-            let channel = tonic::transport::Endpoint::from_shared(address)
-                .map_err(|error| Status::internal(error.to_string()))?
-                .connect_lazy();
+            let channel = crate::grpc_tls::endpoint_channel(&grpc_address, self.peer_tls.as_ref())
+                .map_err(|error| Status::internal(error.to_string()))?;
             channels.insert(grpc_address, channel.clone());
             channel
         };

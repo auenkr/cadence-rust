@@ -586,6 +586,10 @@ pub struct RpcConfig {
     pub bind_on_local_host: bool,
     #[serde(default, rename = "bindOnIP")]
     pub bind_on_ip: String,
+    /// Go `rpc.tls`: secures this service's gRPC listener, and is used by
+    /// gRPC peers that dial this service.
+    #[serde(default)]
+    pub tls: TlsConfig,
     #[serde(default)]
     pub http: Option<HttpConfig>,
 }
