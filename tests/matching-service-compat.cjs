@@ -1010,7 +1010,10 @@ async function run() {
   const isolatedTask = await pollA;
   assert.equal(isolatedTask.activityId, 'isolated');
   await call('Matching', 'CancelOutstandingPoll', { domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', pollerId: pollerB });
-  assert.equal((await pollB).error?.code, grpc.status.CANCELLED, 'other isolation group must not consume the isolated activity');
+  // Go's CancelOutstandingPoll ends the poll with an empty response (ErrNoTasks), not a gRPC error.
+  const cancelledB = await pollB;
+  assert(!cancelledB.error, `cancelled poll must not fail: ${cancelledB.error?.message}`);
+  assert(!cancelledB.response?.activityId && !cancelledB.response?.taskToken?.length, 'other isolation group must not consume the isolated activity');
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: isolatedTask.taskToken, result: payload('isolated-ok') });
   // Empty partition entries must survive Rust -> Go Frontend -> protobufjs.
   // The Go gogo decoder treats an omitted default map value as a nil pointer.

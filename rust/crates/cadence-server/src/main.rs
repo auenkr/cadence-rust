@@ -1652,8 +1652,10 @@ async fn main() -> anyhow::Result<()> {
                 shutdown_errors.push(format!("stopping Matching membership: {error:#}"));
             }
             if let Some(metrics) = matching_metrics_runtime.as_mut() {
+                // Go's tally reporters swallow sink write errors, so an
+                // unreachable metrics sink must not fail the shutdown.
                 if let Err(error) = metrics.shutdown().await {
-                    shutdown_errors.push(format!("flushing Matching metrics: {error:#}"));
+                    eprintln!("flushing Matching metrics failed: {error:#}");
                 }
             }
             if !shutdown_errors.is_empty() {
