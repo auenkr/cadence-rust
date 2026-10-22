@@ -440,11 +440,21 @@ impl Registry {
     /// reuses the manager; then always `Start`, since the request that
     /// registered it may not have started it.
     pub async fn get_or_create(&self, id: Identifier) -> Result<Arc<Manager>, ManagerError> {
+        self.get_or_create_with_idle_ttl(id, self.idle_ttl_nanos).await
+    }
+
+    /// Go passes `IdleTTL: cfg.SemaphoreIdleTime(domainName)` when it creates
+    /// the manager; an existing manager keeps the TTL it was created with.
+    pub async fn get_or_create_with_idle_ttl(
+        &self,
+        id: Identifier,
+        idle_ttl_nanos: i64,
+    ) -> Result<Arc<Manager>, ManagerError> {
         if let Some(existing) = self.by_identifier(&id) {
             existing.start().await?;
             return Ok(existing);
         }
-        let manager = Arc::new(Manager::new(id.clone(), self.store.clone(), self.idle_ttl_nanos));
+        let manager = Arc::new(Manager::new(id.clone(), self.store.clone(), idle_ttl_nanos.max(1)));
         // The registry lock is released before any await, so the guard never
         // crosses a suspension point.
         let existing = {

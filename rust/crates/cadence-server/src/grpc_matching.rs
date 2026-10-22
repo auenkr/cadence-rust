@@ -2819,7 +2819,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     cadence_common::semaphore::parse_owner(&r.owner_id)
                         .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
                     // The domain must exist, like Go's domain-cache lookup.
-                    self.domain_name(&r.domain_id)?;
+                    let domain_name = self.domain_name(&r.domain_id)?;
                     if !self.frontend.state.semaphore_enabled {
                         return Err(Status::invalid_argument(
                             "distributed semaphore is not enabled for this domain",
@@ -2834,9 +2834,22 @@ impl m::matching_api_server::MatchingApi for Matching {
                     }
                     // Idle buckets unload like Go's liveness callback.
                     self.semaphores.sweep_idle(semaphore_now());
+                    let idle_ttl = {
+                        let overlay = self
+                            .frontend
+                            .state
+                            .admin
+                            .dynamic_config
+                            .lock()
+                            .expect("admin lock");
+                        crate::matching_config::semaphore_idle_time(
+                            overlay.property_values("matching.semaphoreIdleTime"),
+                            &domain_name,
+                        )
+                    };
                     let manager = self
                         .semaphores
-                        .get_or_create(identifier)
+                        .get_or_create_with_idle_ttl(identifier, idle_ttl)
                         .await
                         .map_err(semaphore_status)?;
                     let result = manager.acquire(&r.owner_id).await.map_err(semaphore_status)?;
@@ -2914,11 +2927,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                         ));
                     }
                     if let Some(registry) = &self.queues {
-                        if !matches!(r.task_list_type, 1 | 2) {
-                            return Err(Status::invalid_argument("TaskListType is invalid."));
-                        }
                         let queue = self
-                            .durable_queue(&r.domain_id, &task_list, r.task_list_type - 1)
+                            .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
                             .await?;
                         let update = registry
                             .update_partition_config_with_deadline(
@@ -2926,7 +2936,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     domain_id: uuid::Uuid::parse_str(&r.domain_id)
                                         .expect("validated domain"),
                                     name: task_list.name.clone(),
-                                    task_type: r.task_list_type - 1,
+                                    task_type: crate::matching_config::persistence_task_list_type(r.task_list_type),
                                 },
                                 queue,
                                 partition_config_from_proto(config),
@@ -2958,7 +2968,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let update = store.update_partition_config(
                         &domain,
                         &task_list.name,
-                        r.task_list_type,
+                        crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
                         kind_is_normal,
                         stored,
                     );
@@ -3037,11 +3047,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                         ));
                     }
                     if let Some(registry) = &self.queues {
-                        if !matches!(r.task_list_type, 1 | 2) {
-                            return Err(Status::invalid_argument("TaskListType is invalid."));
-                        }
                         let queue = self
-                            .durable_queue(&r.domain_id, &task_list, r.task_list_type - 1)
+                            .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
                             .await?;
                         registry
                             .refresh_partition_config(
@@ -3049,7 +3056,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     domain_id: uuid::Uuid::parse_str(&r.domain_id)
                                         .expect("validated domain"),
                                     name: task_list.name,
-                                    task_type: r.task_list_type - 1,
+                                    task_type: crate::matching_config::persistence_task_list_type(r.task_list_type),
                                 },
                                 queue,
                                 r.partition_config.map(partition_config_from_proto),
@@ -3062,7 +3069,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     match store.refresh_partition_config_with(
                         &domain,
                         &task_list.name,
-                        r.task_list_type,
+                        crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
                         pushed,
                     ) {
                         Ok(()) => Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {})),
@@ -3105,9 +3112,6 @@ impl m::matching_api_server::MatchingApi for Matching {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::CancelOutstandingPoll, Some(&request.get_ref().domain_id), None)?;
                     let r = request.get_ref().clone();
                     self.domain_name(&r.domain_id)?;
-                    if !matches!(r.task_list_type, 1 | 2) {
-                        return Err(Status::invalid_argument("TaskListType is invalid."));
-                    }
                     let task_list = r
                         .task_list
                         .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
@@ -3116,7 +3120,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let key = PollKey {
                         domain: r.domain_id,
                         task_list,
-                        task_type: r.task_list_type,
+                        task_type: crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
                         poller: r.poller_id,
                     };
                     let cancel = self
@@ -3254,18 +3258,17 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
                     payload.domain = self.domain_name(&r.domain_id)?;
                     let task_list = payload.task_list.clone();
-                    let task_list_type = payload.task_list_type;
+                    let task_list_type =
+                        crate::matching_config::persistence_task_list_type(payload.task_list_type) + 1;
+                    payload.task_list_type = task_list_type;
                     let task_list_name = task_list.clone().map(|t| t.name).unwrap_or_default();
                     self::task_list_name(&task_list_name)?;
                     if self.queues.is_some() {
-                        if !matches!(task_list_type, 1 | 2) {
-                            return Err(Status::invalid_argument("TaskListType is invalid."));
-                        }
                         let queue = self
                             .durable_queue(
                                 &r.domain_id,
                                 task_list.as_ref().expect("validated task list"),
-                                task_list_type - 1,
+                                crate::matching_config::persistence_task_list_type(task_list_type),
                             )
                             .await?;
                         let pollers = queue
@@ -3311,7 +3314,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                             .property_values("matching.taskIsolationPollerWindow"),
                                         Some(&payload.domain),
                                         &task_list_name,
-                                        task_list_type - 1,
+                                        crate::matching_config::persistence_task_list_type(task_list_type),
                                         2_000_000_000,
                                     ),
                                 )

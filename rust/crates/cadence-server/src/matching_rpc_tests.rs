@@ -3075,3 +3075,21 @@ fn timed_poll<T>(mut request: Request<T>) -> Request<T> {
     request.set_timeout(Duration::from_secs(8));
     request
 }
+
+#[tokio::test]
+async fn matching_rpc_task_list_type_non_activity_maps_to_decision() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    // Go `engine.go` treats any type other than Activity as Decision, so an
+    // unset type is accepted instead of failing with "TaskListType is invalid.".
+    let cancel = matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain,
+            task_list: list(),
+            task_list_type: 0,
+            poller_id: "poller".into(),
+        }))
+        .await;
+    assert!(cancel.is_ok(), "{cancel:?}");
+}

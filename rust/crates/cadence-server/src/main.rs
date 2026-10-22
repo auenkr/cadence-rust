@@ -141,6 +141,7 @@ async fn shutdown_signal() -> anyhow::Result<()> {
 async fn matching_http_tls(
     http: &config::HttpConfig,
 ) -> anyhow::Result<Option<axum_server::tls_rustls::RustlsConfig>> {
+    cadence_server::thrift_matching::install_tls_crypto_provider();
     let mode = http.tls_mode.as_deref().unwrap_or("disabled");
     if !matches!(mode, "disabled" | "permissive" | "enforced") {
         anyhow::bail!("unknown TLSMode {mode:?}; expected disabled, permissive, or enforced");
