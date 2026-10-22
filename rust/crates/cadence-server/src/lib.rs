@@ -15,6 +15,7 @@ mod grpc_history;
 pub mod grpc_internal;
 #[allow(clippy::result_large_err)]
 pub mod grpc_matching;
+pub mod grpc_tls;
 #[allow(clippy::result_large_err)]
 pub mod grpc_shard;
 pub mod handlers;

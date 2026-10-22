@@ -18,8 +18,11 @@ cadence-thrift = { path = "../cadence-thrift" }
 cadence-proto = { path = "../cadence-proto" }
 prost = "0.13"
 prost-types = "0.13"
-tonic = "0.12"
+tonic = { version = "0.12", features = ["tls"] }
 tonic-reflection = "0.12"
+hyper-util = { version = "0.1", features = ["tokio"] }
+rustls-pemfile = "2"
+rustls-native-certs = "0.8"
 crc32fast = "1"
 crc32c = "0.6"
 anyhow = "1"

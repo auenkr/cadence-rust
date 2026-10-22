@@ -3441,8 +3441,17 @@ pub async fn serve(
 /// matcher so production traffic uses the same partition/forwarding path as
 /// the mixed-service harness instead of the in-memory engine.
 pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyhow::Result<()> {
+    serve_with_tls(addr, matching, None).await
+}
+
+/// Serve Matching on `addr` with the Go `rpc.tls` listener config, if any.
+pub async fn serve_with_tls(
+    addr: std::net::SocketAddr,
+    matching: Matching,
+    tls: Option<tonic::transport::ServerTlsConfig>,
+) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    serve_with_listener(listener, matching).await
+    serve_with_listener_tls(listener, matching, tls).await
 }
 
 /// Serve a prebound Matching socket so production can fail listener startup
@@ -3450,6 +3459,15 @@ pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyho
 pub async fn serve_with_listener(
     listener: tokio::net::TcpListener,
     matching: Matching,
+) -> anyhow::Result<()> {
+    serve_with_listener_tls(listener, matching, None).await
+}
+
+/// Like `serve_with_listener`, with the Go `rpc.tls` listener config applied.
+pub async fn serve_with_listener_tls(
+    listener: tokio::net::TcpListener,
+    matching: Matching,
+    tls: Option<tonic::transport::ServerTlsConfig>,
 ) -> anyhow::Result<()> {
     let limit = matching.frontend.state.grpc_max_message_size;
     // Go runs a per-bucket liveness timer; a shared ticker unloads idle
@@ -3468,7 +3486,7 @@ pub async fn serve_with_listener(
         .register_encoded_file_descriptor_set(cadence_proto::FILE_DESCRIPTOR_SET)
         .with_service_name("uber.cadence.matching.v1.MatchingAPI")
         .build_v1()?;
-    tonic::transport::Server::builder()
+    crate::grpc_tls::server_builder(tls)?
         .add_service(reflection)
         .add_service(
             m::matching_api_server::MatchingApiServer::new(matching)

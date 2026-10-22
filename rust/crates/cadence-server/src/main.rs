@@ -972,6 +972,18 @@ async fn main() -> anyhow::Result<()> {
             let run_matching = wanted.contains(&service::ServiceName::Matching);
             let default_matching_metrics = config::MetricsConfig::default();
             let matching_service_config = cfg.services.get("matching");
+            // Go's rpc.NewParams: the listener uses Matching's own rpc.tls, and
+            // Matching-to-Matching peers use the same block as their target.
+            let matching_server_tls = matching_rpc
+                .as_ref()
+                .map(|rpc| cadence_server::grpc_tls::server_tls(&rpc.tls))
+                .transpose()?
+                .flatten();
+            let matching_peer_tls = matching_rpc
+                .as_ref()
+                .map(|rpc| cadence_server::grpc_tls::client_tls(&rpc.tls))
+                .transpose()?
+                .flatten();
             let matching_metrics_config = matching_service_config
                 .map(|service| &service.metrics)
                 .unwrap_or(&default_matching_metrics);
@@ -1045,6 +1057,7 @@ async fn main() -> anyhow::Result<()> {
                     provider.local_identity().to_owned(),
                     Vec::new(),
                 )
+                .with_peer_tls(matching_peer_tls.clone())
             });
             let mut matching_membership_lifecycle = matching_ringpop_provider
                 .as_ref()
@@ -1090,14 +1103,22 @@ async fn main() -> anyhow::Result<()> {
                     "system.enableGRPCOutbound",
                     true,
                 );
+                // Go dials History with History's rpc.tls block.
+                let history_tls = cfg
+                    .services
+                    .get("history")
+                    .map(|service| cadence_server::grpc_tls::client_tls(&service.rpc.tls))
+                    .transpose()?
+                    .flatten();
                 let history_peer = format!("http://127.0.0.1:{}", history_addr.port());
                 let history_channel =
-                    tonic::transport::Endpoint::from_shared(history_peer)?.connect_lazy();
+                    cadence_server::grpc_tls::endpoint_channel(&history_peer, history_tls.as_ref())?;
                 let history = cadence_server::matching_history::MatchingHistoryClient::new(
                     history_channel,
                     std::time::Duration::from_secs(1),
                     32 * 1024 * 1024,
-                );
+                )
+                .with_tls(history_tls);
                 // Matching's outbound History client shares the service
                 // exporter and root tags with the inbound Matching handlers.
                 let history = matching_metric_sink.as_ref().map_or(history.clone(), |sink| {
@@ -1501,15 +1522,17 @@ async fn main() -> anyhow::Result<()> {
                 let matching_grpc_service = matching_service.clone();
                 serving.spawn(async move {
                     let result = if let Some(listener) = matching_grpc_listener.take() {
-                        cadence_server::grpc_matching::serve_with_listener(
+                        cadence_server::grpc_matching::serve_with_listener_tls(
                             listener,
                             matching_grpc_service,
+                            matching_server_tls,
                         )
                         .await
                     } else {
-                        cadence_server::grpc_matching::serve_with(
+                        cadence_server::grpc_matching::serve_with_tls(
                             matching_addr,
                             matching_grpc_service,
+                            matching_server_tls,
                         )
                         .await
                     };

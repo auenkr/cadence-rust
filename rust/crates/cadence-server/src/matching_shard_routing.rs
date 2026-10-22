@@ -276,16 +276,10 @@ impl MatchingShardRouter {
             *last_used = Instant::now();
             return Ok(Some(channel.clone()));
         }
-        let address = if grpc_address.contains("://") {
-            grpc_address.to_owned()
-        } else {
-            format!("http://{grpc_address}")
-        };
-        let channel = tonic::transport::Endpoint::from_shared(address)
+        let channel = crate::grpc_tls::endpoint_channel(grpc_address, self.ring.peer_tls())
             .map_err(|error| {
                 RoutingError::Endpoint(error.to_string(), RoutingPath::ShardDistributor)
-            })?
-            .connect_lazy();
+            })?;
         peers.insert(grpc_address.to_owned(), (channel.clone(), Instant::now()));
         Ok(Some(channel))
     }
