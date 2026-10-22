@@ -19,3 +19,12 @@ Codex limit reached; all workers now Claude Haiku 5.5 / Sonnet 5.5. All workers 
 4. Redo parity audit on the merged branch. Cassandra non-v4, per-DB mixed gates, recovery evidence.
 5. Root checkout has user's uncommitted WIP (lib.rs, matching_registry.rs, matching_runtime.rs, matching_shard_processor.rs, AGENTS.md): untouched.
 Matching is NOT complete; later services untouched.
+
+## Update 2026-10-22 (saved WIP, unverified unless stated)
+- t3/matching-integration-20261021 @ f17c25d95: dynconfig + metrics-gaps merged; evidence in memory/evidence/matching-integration-20261022/ (confirm final clippy/test ran on this head).
+- matching-go-parity-fixes-20261022 @ a478cd639: items 4,5,6,8 fixed; based on pre-merge c32a31e91, needs rebase onto integration.
+- matching-backlog-forward-20261022 @ 6676a9684: WIP (ForwardError only; backlog leg unfinished).
+- matching-partition-config-20261022 @ 2165ed645: WIP items 2,3,7.
+- matching-grpc-tls-20261022 @ c328e357f: WIP, never compiled.
+- Audits: audit/matching-parity-v2-20261022 @ 54f3688f1 (P0: mixed-cluster proof, gRPC TLS, sync-match config), audit/matching-verify-20261022 @ 0e4e65e2d, audit/matching-forward-plan-20261022 @ 9f306dca5.
+- Host has 2 CPUs: run one cargo job at a time (load hit 22 with parallel builds).
