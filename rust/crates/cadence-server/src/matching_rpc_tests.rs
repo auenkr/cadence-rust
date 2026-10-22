@@ -1100,6 +1100,45 @@ async fn matching_rpc_manual_partition_update_rejected_while_scaler_enabled() {
 }
 
 #[tokio::test]
+async fn matching_rpc_partition_config_rpcs_reject_non_normal_kinds() {
+    let (_dir, _store, matching, key) = fixture();
+    // Proto kinds: 2 sticky, 3 ephemeral; Go accepts only normal (invalid maps to normal).
+    for kind in [2, 3] {
+        let task_list = Some(cadence_proto::api::TaskList {
+            name: "queue".into(),
+            kind,
+        });
+        let update = matching
+            .update_task_list_partition_config(Request::new(
+                m::UpdateTaskListPartitionConfigRequest {
+                    domain_id: key.domain_id.to_string(),
+                    task_list: task_list.clone(),
+                    task_list_type: 1,
+                    partition_config: Some(native_config(1, &[0, 1], &[0, 1])),
+                },
+            ))
+            .await
+            .expect_err("Go rejects non-normal kinds");
+        assert_eq!(update.code(), tonic::Code::InvalidArgument);
+        assert_eq!(update.message(), "Only normal tasklist's partition config can be updated.");
+        let refresh = matching
+            .refresh_task_list_partition_config(Request::new(
+                m::RefreshTaskListPartitionConfigRequest {
+                    domain_id: key.domain_id.to_string(),
+                    task_list,
+                    task_list_type: 1,
+                    partition_config: None,
+                },
+            ))
+            .await
+            .expect_err("Go rejects non-normal kinds");
+        assert_eq!(refresh.code(), tonic::Code::InvalidArgument);
+        assert_eq!(refresh.message(), "Only normal tasklist's partition config can be updated.");
+    }
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
 async fn matching_rpc_adaptive_scaler_upscales_write_partitions_on_load() {
     let address = start_starting_history().await;
     let (_dir, store, matching, key) = fixture_with_history(&address);

@@ -1,9 +1,11 @@
 //! Go `service/matching/config` readers for keys that had no Rust reader,
 //! with the defaults from `common/dynamicconfig/dynamicproperties/constants.go`.
 //!
-//! Go defines `matching.enableSyncMatch` and `matching.maxTasklistIdleTime` on
-//! the task-list manager config but nothing in `service/matching` calls them,
-//! so these readers exist for config parity and gate no behavior.
+//! Go copies `matching.enableSyncMatch`, `matching.maxTasklistIdleTime` and
+//! `matching.activityTaskSyncMatchWaitTime` into `newTaskListConfig`
+//! (task_list_manager.go:1040-1062) but nothing in `service/matching` ever
+//! calls the resulting `TaskListConfig` fields, so these readers exist for
+//! config parity and gate no behavior; wiring them would change Go logic.
 use cadence_api::admin::DynamicConfigValue;
 use cadence_persistence::dynamic_config;
 
@@ -15,6 +17,9 @@ pub const DEFAULT_USER_RPS: i64 = 1200;
 pub const DEFAULT_DOMAIN_USER_RPS: i64 = 0;
 /// Go `MaxTasklistIdleTime` and `MatchingSemaphoreIdleTime` default (5m).
 pub const DEFAULT_IDLE_TIME_NANOS: i64 = 5 * 60 * 1_000_000_000;
+
+/// Go `MatchingActivityTaskSyncMatchWaitTime` default (50ms).
+pub const DEFAULT_ACTIVITY_SYNC_MATCH_WAIT_NANOS: i64 = 50_000_000;
 
 /// Go `MatchingUserRPS` (`matching.rps`).
 pub fn user_rps(values: &[DynamicConfigValue]) -> i64 {
@@ -62,6 +67,12 @@ pub fn max_tasklist_idle_time(
     )
 }
 
+/// Go `MatchingActivityTaskSyncMatchWaitTime`
+/// (`matching.activityTaskSyncMatchWaitTime`, default 50ms), not consumed by Go.
+pub fn activity_task_sync_match_wait_time(values: &[DynamicConfigValue], domain: &str) -> i64 {
+    dynamic_config::duration(values, Some(domain), DEFAULT_ACTIVITY_SYNC_MATCH_WAIT_NANOS)
+}
+
 /// Go `MatchingSemaphoreIdleTime` (`matching.semaphoreIdleTime`).
 pub fn semaphore_idle_time(values: &[DynamicConfigValue], domain: &str) -> i64 {
     dynamic_config::duration(values, Some(domain), DEFAULT_IDLE_TIME_NANOS)
@@ -105,6 +116,10 @@ mod tests {
         assert_eq!(semaphore_idle_time(&[], "d"), 300_000_000_000);
     }
 
+    #[test]
+    fn activity_sync_match_wait_defaults_to_go_50ms() {
+        assert_eq!(activity_task_sync_match_wait_time(&[], "d"), 50_000_000);
+    }
     #[test]
     fn configured_values_override_defaults() {
         assert_eq!(user_rps(&value(json!(5))), 5);
