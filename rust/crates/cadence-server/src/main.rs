@@ -1556,7 +1556,7 @@ async fn main() -> anyhow::Result<()> {
             }
             let (serving_result, signal_result) = tokio::select! {
                 result = serving.join_next() => {
-                    let result = match result {
+                    let result: anyhow::Result<()> = match result {
                         Some(Ok((name, Ok(())))) => Err(anyhow::anyhow!("{name} listener stopped unexpectedly")),
                         Some(Ok((name, Err(error)))) => Err(anyhow::anyhow!("{name} listener failed: {error:#}")),
                         Some(Err(error)) => Err(anyhow::anyhow!("listener task failed: {error}")),

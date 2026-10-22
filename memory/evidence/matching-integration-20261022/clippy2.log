@@ -1,0 +1,35 @@
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-server)
+    Checking cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-thrift)
+    Checking cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-api)
+    Checking cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-common)
+error: function `hard_rejection_emits_one_classified_metric_event_but_count_only_does_not` is never used
+   --> crates/cadence-server/src/matching_quota.rs:444:8
+    |
+444 | ...fn hard_rejection_emits_one_classified_metric_event_but_count_only_does_not() {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `-D dead-code` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: length comparison to zero
+  --> crates/cadence-server/src/matching_rpc_tests.rs:62:13
+   |
+62 |     assert!(user_error.details().len() > 0, "Go-compatible ServiceBusyEr...
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: using `!is_empty` is clearer and more explicit: `!user_error.details().is_empty()`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#len_zero
+   = note: `-D clippy::len-zero` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::len_zero)]`
+
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> crates/cadence-server/src/matching_quota.rs:134:15
+    |
+134 | ...ed: Mutex<HashMap<(MatchingRpc, RpcClass, Option<String>), u64>>,
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity
+    = note: `-D clippy::type-complexity` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: could not compile `cadence-server` (lib test) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...

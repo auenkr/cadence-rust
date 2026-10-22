@@ -34,7 +34,7 @@ async fn matching_long_polls_reject_missing_transport_deadlines_with_bad_request
 
 #[tokio::test]
 async fn matching_rpc_quotas_classify_shared_protocol_handlers_and_preserve_count_only_calls() {
-    let mut state = crate::handlers::AppState::default();
+    let state = crate::handlers::AppState::default();
     let domain_id = Uuid::from_u128(9001);
     state.domains.create(
         cadence_api::types::DomainInfo { name: "quota-domain".into(), uuid: domain_id.to_string(), ..Default::default() },
@@ -59,7 +59,7 @@ async fn matching_rpc_quotas_classify_shared_protocol_handlers_and_preserve_coun
     })).await.unwrap_err();
     assert_eq!(user_error.code(), tonic::Code::ResourceExhausted);
     assert_eq!(user_error.message(), "Matching host rps exceeded");
-    assert!(user_error.details().len() > 0, "Go-compatible ServiceBusyError detail is required");
+    assert!(!user_error.details().is_empty(), "Go-compatible ServiceBusyError detail is required");
 
     // Go counts these worker control calls but ignores a denied decision.
     let cancel = || Request::new(m::CancelOutstandingPollRequest {
@@ -2183,7 +2183,7 @@ async fn matching_rpc_partition_update_refreshes_remote_read_owner_and_ignores_w
     root.update_task_list_partition_config(update(&[0], &[0])).await.unwrap();
     assert_eq!(read_queue.partitions.get().unwrap().version, 2, "removing a remote read partition sends the new config to the old partition owner");
     remote.refresh_task_list_partition_config(Request::new(m::RefreshTaskListPartitionConfigRequest {
-        domain_id: domain, task_list: Some(p::TaskList { name: read_name, kind: 1, ..Default::default() }),
+        domain_id: domain.clone(), task_list: Some(p::TaskList { name: read_name, kind: 1, ..Default::default() }),
         task_list_type: 1, partition_config: Some(native_config(1, &[0, read_partition], &[0])),
     })).await.unwrap();
     assert_eq!(read_queue.partitions.get().unwrap().version, 2, "out-of-order older push must be ignored by the owner manager");
@@ -2230,8 +2230,8 @@ async fn matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_ca
             let candidates = (1..=100).map(|partition| {
                 (partition, ring.lookup(&format!("/__cadence_sys/{name}/{partition}" )).unwrap().identity().to_owned())
             }).collect::<Vec<_>>();
-            let slow = *candidates.iter().find(|(_, owner)| owner == "node-2")?.0;
-            let fast = *candidates
+            let slow = candidates.iter().find(|(_, owner)| owner == "node-2")?.0;
+            let fast = candidates
                 .iter()
                 .find(|(partition, owner)| owner == "node-1" && partition > &slow)?
                 .0;

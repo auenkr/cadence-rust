@@ -124,6 +124,9 @@ struct State {
     domains: HashMap<(RpcClass, String), Arc<Mutex<DynamicBucket>>>,
 }
 
+#[cfg(test)]
+type RejectedCounts = HashMap<(MatchingRpc, RpcClass, Option<String>), u64>;
+
 /// Per-Matching-process user and worker admission policy. Domain buckets are
 /// cached for the process lifetime, matching Go `quotas.Collection`.
 pub(crate) struct MatchingRpcQuota {
@@ -131,7 +134,7 @@ pub(crate) struct MatchingRpcQuota {
     clock: Clock,
     state: Mutex<State>,
     #[cfg(test)]
-    rejected: Mutex<HashMap<(MatchingRpc, RpcClass, Option<String>), u64>>,
+    rejected: Mutex<RejectedCounts>,
     metric_sink: Mutex<QuotaMetricSink>,
 }
 
@@ -441,6 +444,7 @@ mod tests {
         assert!(!quota.allow(MatchingRpc::GetTaskListsByDomain, None));
     }
 
+    #[test]
     fn hard_rejection_emits_one_classified_metric_event_but_count_only_does_not() {
         let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
         set(&overlay, "matching.rps", vec![entry(0, &[])]);

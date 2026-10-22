@@ -15,6 +15,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::run;
     use std::{
         sync::{
             atomic::{AtomicBool, Ordering},
