@@ -326,7 +326,7 @@ impl ForwardState {
                 }
             }
             Parent::Dispatcher(dispatcher) => {
-                dispatcher.accept_forwarded_backlog(task, domain_id).await
+                dispatcher.accept_forwarded_backlog(task, domain_id, &parent_name).await
             }
         };
         result.map_err(crate::matching_forward::ForwardError::classify)
@@ -363,17 +363,29 @@ impl TaskDispatcher {
         &self,
         task: AllocatedTask,
         source_domain: &str,
+        parent_name: &str,
     ) -> Result<(), Status> {
         let source_domain = uuid::Uuid::parse_str(source_domain)
             .map_err(|_| Status::invalid_argument("DomainUUID is not valid."))?;
-        let queue = self.queue.clone();
-        let data = task.data;
-        crate::matching_blocking::run(move || queue.append_in_domain(&[data], source_domain, now()))
-            .await
-            .map_err(|error| Status::internal(error.to_string()))?
-            .map_err(|error| Status::unavailable(error.to_string()))?;
-        self.notify_new_tasks();
-        Ok(())
+        let matcher = self.sync_matcher.as_ref().ok_or_else(|| Status::unavailable("remote sync match failed"))?;
+        let root = cadence_common::task_list::TaskListName::parse(parent_name)
+            .map_err(|_| Status::invalid_argument("TaskList is not valid."))?
+            .is_root();
+        let local_wait = if root {
+            Duration::from_secs(2)
+        } else {
+            self.forward.as_ref().map(|forward| Duration::from_nanos((forward.local_wait)().max(0) as u64))
+                .unwrap_or(Duration::from_millis(10))
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let group = task.data.partition_config.as_ref()
+            .and_then(|config| config.get("isolation-group"))
+            .map(String::as_str).unwrap_or_default();
+        if matcher.offer(task.data, group, &source_domain.to_string(), true, local_wait, deadline).await {
+            Ok(())
+        } else {
+            Err(Status::unavailable("remote sync match failed"))
+        }
     }
     pub(crate) fn reader_should_reload(&self) -> bool {
         self.reader
