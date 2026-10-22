@@ -231,6 +231,8 @@ struct Inner {
 }
 #[derive(Clone)]
 pub struct BacklogForward {
+    /// Go `fwdrAddReqTokenC`: a token is taken before each forward attempt.
+    pub tokens: Arc<crate::matching_forward::RequestTokens>,
     pub forward: Arc<dyn Fn(AllocatedTask) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>> + Send + Sync>,
     pub local_wait: Arc<dyn Fn() -> Duration + Send + Sync>,
 }
@@ -594,16 +596,35 @@ impl TaskReader {
                             let mut attempt = 0u64;
                             loop {
                                 if *dispatch_stop.borrow() { return Attempt::Stopped; }
-                                let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-                                let call = (forwarder.forward)(dispatched.clone());
-                                let result = tokio::select! {
-                                    result = tokio::time::timeout_at(forward_deadline, call) => Some(result),
+                                // Go selects between a local poller and an
+                                // outstanding-forward token; once the token is
+                                // taken the forward call itself is not raced.
+                                let token = tokio::select! {
                                     local = target.offer(dispatched.clone(), dispatch_stop.clone()) => {
-                                        return if local { Attempt::OfferedAfterForwardFailure(attempt) } else { Attempt::Stopped };
+                                        return if local { Attempt::Offered } else { Attempt::Stopped };
                                     }
+                                    token = forwarder.tokens.acquire() => match token {
+                                        Some(token) => token,
+                                        None => return Attempt::Stopped,
+                                    },
                                     _ = dispatch_stop.changed() => return Attempt::Stopped,
                                 };
-                                match result.expect("forward result") {
+                                let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+                                let forward_started = std::time::Instant::now();
+                                let result = tokio::time::timeout_at(forward_deadline, (forwarder.forward)(dispatched.clone())).await;
+                                drop(token);
+                                // Go times only calls that passed parent lookup and the rate limiter.
+                                let timed = !matches!(
+                                    result,
+                                    Ok(Err(crate::matching_forward::ForwardError::NoParent
+                                        | crate::matching_forward::ForwardError::SlowDown
+                                        | crate::matching_forward::ForwardError::TaskListKind
+                                        | crate::matching_forward::ForwardError::InvalidTaskListType))
+                                );
+                                if let (true, Some(metrics)) = (timed, dispatch_metrics.lock().expect("matching reader metrics lock").as_ref()) {
+                                    metrics.metrics.forward_task_latency(&metrics.context, forward_started.elapsed());
+                                }
+                                match result {
                                     Ok(Ok(())) => return Attempt::Forwarded(attempt),
                                     Ok(Err(error)) => {
                                         if matches!(error, crate::matching_forward::ForwardError::SlowDown) {
@@ -1153,6 +1174,7 @@ mod tests {
         let forwarded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let observed = forwarded.clone();
         reader.set_backlog_forwarder(BacklogForward {
+            tokens: test_tokens(1),
             forward: Arc::new(move |_task| {
                 observed.fetch_add(1, Ordering::SeqCst);
                 Box::pin(async { Ok(()) })
@@ -1185,6 +1207,7 @@ mod tests {
         let attempted = Arc::new(Notify::new());
         let attempted_forward = attempted.clone();
         reader.set_backlog_forwarder(BacklogForward {
+            tokens: test_tokens(1),
             forward: Arc::new(move |_task| {
                 attempted_forward.notify_one();
                 Box::pin(async { Err(crate::matching_forward::ForwardError::SlowDown) })
@@ -1198,6 +1221,53 @@ mod tests {
         assert_eq!(delivered.data.schedule_id, 11);
         assert!(sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_FORWARD_TASK_THROTTLE_ERRORS));
         assert!(sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED));
+        stop(queue, reader).await;
+    }
+
+    fn test_tokens(count: i64) -> Arc<crate::matching_forward::RequestTokens> {
+        Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(move || count)))
+    }
+
+    #[tokio::test]
+    async fn matching_reader_without_forward_token_waits_for_local_poller() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let forwarded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = forwarded.clone();
+        reader.set_backlog_forwarder(BacklogForward {
+            tokens: test_tokens(0),
+            forward: Arc::new(move |_task| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData { schedule_id: 21, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        assert_eq!(delivered.data.schedule_id, 21);
+        assert_eq!(forwarded.load(Ordering::SeqCst), 0);
+        stop(queue, reader).await;
+    }
+
+    #[tokio::test]
+    async fn matching_reader_forward_failure_keeps_durable_row_until_local_match() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let attempted = Arc::new(Notify::new());
+        let attempted_forward = attempted.clone();
+        reader.set_backlog_forwarder(BacklogForward {
+            tokens: test_tokens(1),
+            forward: Arc::new(move |_task| {
+                attempted_forward.notify_one();
+                Box::pin(async { Err(crate::matching_forward::ForwardError::Remote(tonic::Status::unavailable("parent down"))) })
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData { schedule_id: 22, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
+        assert_eq!(queue.levels().1, 0, "failed forward must not ack the durable row");
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        assert_eq!(delivered.data.schedule_id, 22);
         stop(queue, reader).await;
     }
     async fn wait_read(queue: &DurableTaskQueue, expected: i64) {

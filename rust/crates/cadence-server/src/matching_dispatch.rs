@@ -257,6 +257,11 @@ impl ForwardState {
         }
     }
 
+    /// Go `fwdrAddReqTokenC`: outstanding forwarded-add tokens.
+    pub(crate) fn add_tokens(&self) -> Arc<crate::matching_forward::RequestTokens> {
+        self.add_permits.clone()
+    }
+
     pub(crate) async fn forward_backlog_task(
         &self,
         task: AllocatedTask,
@@ -264,11 +269,12 @@ impl ForwardState {
         task_type: i32,
         kind: i16,
     ) -> Result<(), crate::matching_forward::ForwardError> {
-        let _permit = self.add_permits.acquire().await.ok_or(crate::matching_forward::ForwardError::NoParent)?;
+        // Go `ForwardTask`: the parent name is resolved before the rate limit
+        // is charged; the outstanding-add token is taken by the caller.
+        let (parent, parent_name) = (self.resolve)().await.ok_or(crate::matching_forward::ForwardError::NoParent)?;
         if !self.add_rate.allow(now()) {
             return Err(crate::matching_forward::ForwardError::SlowDown);
         }
-        let (parent, parent_name) = (self.resolve)().await.ok_or(crate::matching_forward::ForwardError::NoParent)?;
         let run_id = task.data.run_id.as_deref()
             .and_then(|id| uuid::Uuid::from_slice(id).ok())
             .map(|id| id.to_string()).unwrap_or_default();
@@ -282,19 +288,19 @@ impl ForwardState {
             Parent::Remote(channel) => {
                 let mut client = m::matching_api_client::MatchingApiClient::new(channel);
                 if task_type == 0 {
-                    let mut request = Request::new(m::AddDecisionTaskRequest {
+                    let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
                         domain_id: domain_id.to_owned(), workflow_execution: execution,
-                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) }),
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind), ..Default::default() }),
                         schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
                         source: 2, forwarded_from, partition_config,
                     });
                     request.set_timeout(Duration::from_secs(2));
                     client.add_decision_task(request).await.map(|_| ())
                 } else {
-                    let mut request = Request::new(m::AddActivityTaskRequest {
+                    let mut request = tonic::Request::new(m::AddActivityTaskRequest {
                         domain_id: domain_id.to_owned(), source_domain_id: domain_id.to_owned(),
                         workflow_execution: execution,
-                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) }),
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind), ..Default::default() }),
                         schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
                         source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
                     });
@@ -305,19 +311,19 @@ impl ForwardState {
             Parent::Service(service) => {
                 use m::matching_api_server::MatchingApi;
                 if task_type == 0 {
-                    let mut request = Request::new(m::AddDecisionTaskRequest {
+                    let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
                         domain_id: domain_id.to_owned(), workflow_execution: execution,
-                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) }),
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind), ..Default::default() }),
                         schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
                         source: 2, forwarded_from, partition_config,
                     });
                     request.set_timeout(Duration::from_secs(2));
                     service.add_decision_task(request).await.map(|_| ())
                 } else {
-                    let mut request = Request::new(m::AddActivityTaskRequest {
+                    let mut request = tonic::Request::new(m::AddActivityTaskRequest {
                         domain_id: domain_id.to_owned(), source_domain_id: domain_id.to_owned(),
                         workflow_execution: execution,
-                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) }),
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind), ..Default::default() }),
                         schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
                         source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
                     });
@@ -380,8 +386,8 @@ impl TaskDispatcher {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         let group = task.data.partition_config.as_ref()
             .and_then(|config| config.get("isolation-group"))
-            .map(String::as_str).unwrap_or_default();
-        if matcher.offer(task.data, group, &source_domain.to_string(), true, local_wait, deadline).await {
+            .map(String::as_str).unwrap_or_default().to_owned();
+        if matcher.offer(task.data, &group, &source_domain.to_string(), true, local_wait, deadline).await {
             Ok(())
         } else {
             Err(Status::unavailable("remote sync match failed"))

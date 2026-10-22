@@ -1338,6 +1338,7 @@ impl QueueRegistry {
                         let local_wait_name = lookup.1.clone();
                         let local_wait_type = lookup.2;
                         reader.set_backlog_forwarder(crate::matching_reader::BacklogForward {
+                            tokens: forward_state.add_tokens(),
                             forward: Arc::new(move |task| {
                                 let forward_state = forward_state.clone();
                                 let domain = forward_domain.clone();
