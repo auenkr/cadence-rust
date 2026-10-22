@@ -273,8 +273,24 @@ enum WaitResult {
     Released,
     Woken,
 }
+/// Go maps SQL throttling to ServiceBusyError (`convertCommonErrors`); every
+/// other persistence or shutdown error reaches handleErr's default: Internal.
 fn queue_status(error: QueueError) -> Status {
-    Status::unavailable(error.to_string())
+    if matches!(
+        error,
+        QueueError::Storage(cadence_persistence::matching_sqlite::StorageError::Backend {
+            kind: cadence_persistence::matching_task_store::BackendErrorKind::Throttled,
+            ..
+        })
+    ) {
+        return crate::grpc::detailed_status(
+            tonic::Code::ResourceExhausted,
+            error.to_string(),
+            "ServiceBusyError",
+            cadence_proto::api::ServiceBusyError { reason: String::new() },
+        );
+    }
+    Status::internal(error.to_string())
 }
 impl TaskDispatcher {
     pub(crate) fn reader_should_reload(&self) -> bool {
@@ -1068,6 +1084,30 @@ mod tests {
         matching_blob::{BlobEncoding, TaskData},
         matching_sqlite::{SqliteTaskStore, TaskListKey},
     };
+
+    #[test]
+    fn queue_status_maps_throttling_to_service_busy_and_other_errors_to_internal() {
+        use cadence_persistence::{
+            matching_sqlite::StorageError,
+            matching_task_store::{BackendErrorKind, MatchingTaskStoreError},
+        };
+        // Go convertCommonErrors: throttling becomes ServiceBusyError (ResourceExhausted).
+        let throttled = QueueError::Storage(StorageError::Backend {
+            kind: BackendErrorKind::Throttled,
+            message: "too many connections".into(),
+        });
+        assert_eq!(queue_status(throttled).code(), tonic::Code::ResourceExhausted);
+        // Timeouts, persistence failures, condition failures and shutdown reach
+        // handleErr's default branch: InternalServiceError.
+        let timeout = QueueError::Storage(StorageError::Backend {
+            kind: BackendErrorKind::Timeout,
+            message: "timed out".into(),
+        });
+        assert_eq!(queue_status(timeout).code(), tonic::Code::Internal);
+        let condition = QueueError::Storage(MatchingTaskStoreError::ConditionFailed("fenced".into()));
+        assert_eq!(queue_status(condition).code(), tonic::Code::Internal);
+        assert_eq!(queue_status(QueueError::Stopped).code(), tonic::Code::Internal);
+    }
     use prost::Message;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
