@@ -1278,6 +1278,20 @@ impl QueueRegistry {
                                             .unwrap_or(1)
                                     })
                             };
+                            let max_outstanding_adds: crate::matching_forward::Count = {
+                                let provider = registry.forward_tasks.clone();
+                                let domain = domain.clone();
+                                let name = lookup.1.clone();
+                                let task_type = lookup.2;
+                                Arc::new(move || provider.as_ref().map(|p| p(&domain, &name, task_type)).unwrap_or(1))
+                            };
+                            let add_rate: crate::matching_forward::Count = {
+                                let provider = registry.forward_rate.clone();
+                                let domain = domain.clone();
+                                let name = lookup.1.clone();
+                                let task_type = lookup.2;
+                                Arc::new(move || provider.as_ref().map(|p| p(&domain, &name, task_type)).unwrap_or(10))
+                            };
                             let parent_key = TaskListKey {
                                 domain_id: key.domain_id,
                                 name: lookup.1.clone(),
@@ -1341,6 +1355,8 @@ impl QueueRegistry {
                                         >
                                 },
                                 max_outstanding,
+                                max_outstanding_adds,
+                                add_rate,
                                 lookup.1.clone(),
                                 {
                                     let provider = registry.local_poll_wait.clone();
@@ -1357,6 +1373,27 @@ impl QueueRegistry {
                             ))
                         }
                     };
+                    if let Some(forward_state) = forward.clone() {
+                        let forward_domain = domain.clone();
+                        let forward_task_type = lookup.2;
+                        let forward_kind = kind;
+                        let local_wait_provider = registry.local_poll_wait.clone();
+                        let local_wait_domain = domain.clone();
+                        let local_wait_name = lookup.1.clone();
+                        let local_wait_type = lookup.2;
+                        reader.set_backlog_forwarder(crate::matching_reader::BacklogForward {
+                            forward: Arc::new(move |task| {
+                                let forward_state = forward_state.clone();
+                                let domain = forward_domain.clone();
+                                Box::pin(async move {
+                                    forward_state.forward_backlog_task(task, &domain, forward_task_type, forward_kind).await
+                                })
+                            }),
+                            local_wait: Arc::new(move || std::time::Duration::from_nanos(
+                                local_wait_provider.as_ref().map(|p| p(&local_wait_domain, &local_wait_name, local_wait_type)).unwrap_or(10_000_000).max(0) as u64
+                            )),
+                        });
+                    }
                     let wake = registry.changed.clone();
                     let stopped = writer.stop_signal();
                     queue.set_stop_waker(Arc::new(move || {
