@@ -1045,8 +1045,8 @@ mod tests {
         assert_eq!(events[0].tags["operation"], "HistoryClientGetMutableState");
     }
 
-    #[test]
-    fn history_metrics_do_not_count_an_unpolled_future() {
+    #[tokio::test]
+    async fn history_metrics_do_not_count_an_unpolled_future() {
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
         let client = client().with_metrics(sink.clone());
         drop(client.instrument_history(

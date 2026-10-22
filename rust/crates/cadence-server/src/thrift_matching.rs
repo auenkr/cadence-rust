@@ -858,6 +858,13 @@ async fn http_handler_with_procedures(
     http_handler(axum::extract::State(matching), headers, body).await
 }
 
+/// Persistence drivers enable rustls' aws-lc-rs backend next to the ring
+/// backend selected here, so rustls cannot pick a process default itself.
+pub fn install_tls_crypto_provider() {
+    // Err means a provider is already installed, which is fine.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1036,6 +1043,7 @@ mod tests {
 
     #[tokio::test]
     async fn dedicated_http_listener_enforces_tls_handshake() {
+        install_tls_crypto_provider();
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let generated = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
         let cert_path = tempfile::NamedTempFile::new().unwrap();

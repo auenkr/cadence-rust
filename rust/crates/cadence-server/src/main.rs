@@ -458,6 +458,7 @@ mod matching_http_listener_tests {
     async fn tls_handshake_timeout_is_injectable() {
         use tokio::io::AsyncWriteExt;
 
+        cadence_server::thrift_matching::install_tls_crypto_provider();
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_cert_resolver(std::sync::Arc::new(NoServerCertificate));
@@ -630,6 +631,7 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    cadence_server::thrift_matching::install_tls_crypto_provider();
     let cli = Cli::parse();
     match cli.command {
         Command::Start {

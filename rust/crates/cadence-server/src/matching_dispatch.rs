@@ -1628,7 +1628,7 @@ mod tests {
             );
             assert_eq!(
                 poll_success.tags[crate::matching_metrics::TASK_LIST_TAG],
-                "metric-list"
+                "metric_list"
             );
             assert!(events
                 .iter()

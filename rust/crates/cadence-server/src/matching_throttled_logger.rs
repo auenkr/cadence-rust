@@ -182,11 +182,12 @@ mod tests {
         // has elapsed and an error log still cannot be emitted.
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         // Refresh samples rate=1 at 5s, but the limiter's last recorded time
-        // is 1ns before that. It accumulates one token at 5.999999999s.
-        now.store(REFRESH_NANOS + 999_999_998, Ordering::SeqCst);
+        // is 1ns before that. Go truncates the sub-nanosecond wait of 0.999999999
+        // tokens to zero, so the first allowed call is at 5.999999998s.
+        now.store(REFRESH_NANOS + 999_999_997, Ordering::SeqCst);
         logger.error("PollForDecisionTask", "missing deadline");
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-        now.store(REFRESH_NANOS + 999_999_999, Ordering::SeqCst);
+        now.store(REFRESH_NANOS + 999_999_998, Ordering::SeqCst);
         logger.error("PollForDecisionTask", "missing deadline");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }

@@ -1732,9 +1732,18 @@ impl QueueRegistry {
                     let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                     request.set_timeout(remaining);
                 }
-                cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel)
-                    .refresh_task_list_partition_config(request)
-                    .await
+                let mut client = cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel);
+                let call = client.refresh_task_list_partition_config(request);
+                // The gRPC timeout header does not bound a peer that never
+                // completes the transport handshake, so enforce the caller's
+                // context deadline locally as Go's context cancellation does.
+                let result = match caller_deadline {
+                    Some(deadline) => tokio::time::timeout_at(deadline, call)
+                        .await
+                        .unwrap_or_else(|_| Err(Status::deadline_exceeded("context deadline exceeded"))),
+                    None => call.await,
+                };
+                result
                     .map(|_| ())
                     .map_err(|error| (task_list_name, owner_identity, error))
             });
@@ -2171,7 +2180,11 @@ mod tests {
         let first = registry.get(key.clone(), 0, 1).await.unwrap();
         let reused = registry.get(key.clone(), 0, 2).await.unwrap();
         assert!(Arc::ptr_eq(&first.queue, &reused.queue));
-        assert_eq!(sink.events().len(), 1, "lookup reuse does not register another manager");
+        assert_eq!(
+            sink.events().iter().filter(|event| event.name == TASKLIST_MANAGERS).count(),
+            1,
+            "lookup reuse does not register another manager"
+        );
 
         first.queue.stop();
         let replacement = registry.get(key.clone(), 0, 3).await.unwrap();

@@ -1024,7 +1024,10 @@ mod tests {
             while !sink
                 .events()
                 .iter()
-                .any(|event| event.name == crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST)
+                .any(|event| {
+                    event.name == crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST
+                        && event.value == crate::matching_metrics::MetricValue::Number(1.0)
+                })
             {
                 tokio::task::yield_now().await;
             }
