@@ -243,4 +243,80 @@ mod tests {
             }
         }
     }
+    // Go: TestUpdateTaskListPartitionConfig (task_list_manager_test.go:1498), over a SQLite store.
+    #[test]
+    fn update_partition_config_cases_match_go_task_list_manager_test() {
+        let parts = |count: i32| -> std::collections::HashMap<i32, Vec<String>> {
+            (0..count).map(|id| (id, Vec::new())).collect()
+        };
+        let request = |read: i32, write: i32| StoredPartitionConfig {
+            version: 0,
+            read_partitions: parts(read),
+            write_partitions: parts(write),
+        };
+        let fixture = || {
+            let directory = tempfile::tempdir().unwrap();
+            let store = std::sync::Arc::new(
+                SqliteTaskStore::create(directory.path().join("queue.db"), BlobEncoding::ThriftRW)
+                    .unwrap(),
+            );
+            let key = TaskListKey { domain_id: uuid::Uuid::from_u128(1), name: "tl".into(), task_type: 0 };
+            let queue = DurableTaskQueue::open(
+                store.clone(),
+                key.clone(),
+                0,
+                std::num::NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap();
+            let cache = PartitionCache::load(store.as_ref(), &queue, &key, 0).unwrap();
+            (directory, store, key, queue, cache)
+        };
+        let persisted = |store: &SqliteTaskStore, key: &TaskListKey| {
+            store.get_task_list(key).unwrap().data.adaptive_partition_config.map(from_storage)
+        };
+
+        // "success - nil original config, request of one partition": no-op, nothing persisted.
+        let (_d, store, key, queue, cache) = fixture();
+        assert!(cache.update(&queue, request(1, 1), 2).unwrap().is_none());
+        assert!(cache.get().is_none());
+        assert!(persisted(&store, &key).is_none());
+
+        // "success - update" then "success - no op" (same partitions) at version 1 -> 2.
+        let (_d, store, key, queue, cache) = fixture();
+        assert!(cache.update(&queue, request(3, 3), 2).unwrap().is_some());
+        assert_eq!(cache.get().unwrap().version, 1);
+        assert!(cache.update(&queue, request(3, 3), 3).unwrap().is_none());
+        assert_eq!(cache.get().unwrap().version, 1);
+        let (old, new) = cache.update(&queue, request(3, 1), 4).unwrap().unwrap();
+        assert_eq!(old.unwrap().version, 1);
+        assert_eq!((new.version, new.read_partitions.len(), new.write_partitions.len()), (2, 3, 1));
+        assert_eq!(
+            serde_json::to_value(persisted(&store, &key)).unwrap(),
+            serde_json::to_value(cache.get()).unwrap()
+        );
+
+        // Invalid config (read < write): rejected before any write, cache unchanged.
+        let error = cache.update(&queue, request(1, 3), 5).unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(cache.get().unwrap().version, 2);
+
+        // "failed to update": persistence error is returned, cache keeps the old config and the
+        // queue is stopped (Go asserts tlm.stopped == 1).
+        let (_d, store, key, queue, cache) = fixture();
+        cache.update(&queue, request(3, 3), 2).unwrap();
+        // A newer lease owner fences this stale queue's config update.
+        let _owner = DurableTaskQueue::open(
+            store.clone(),
+            key.clone(),
+            0,
+            std::num::NonZeroU32::new(100).unwrap(),
+            3,
+        )
+        .unwrap();
+        assert!(cache.update(&queue, request(3, 1), 4).is_err());
+        assert_eq!(cache.get().unwrap().version, 1);
+        assert_eq!(cache.get().unwrap().write_partitions.len(), 3);
+        assert!(queue.is_stopped());
+    }
 }
