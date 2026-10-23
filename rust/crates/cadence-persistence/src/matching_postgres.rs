@@ -458,6 +458,28 @@ impl PostgresTaskStore {
 }
 
 impl MatchingTaskStore for PostgresTaskStore {
+    fn fetch_latest_config(
+        &self,
+        row_type: i32,
+    ) -> std::result::Result<Option<crate::config_store::ConfigStoreRow>, String> {
+        // Go sqlplugin/postgres SelectLatestConfig on the default shard.
+        let mut lease = self.pools[0].checkout().map_err(|e| e.to_string())?;
+        let row = lease
+            .query_opt(
+                "SELECT version, data, data_encoding FROM cluster_config WHERE row_type = $1 ORDER BY version LIMIT 1;",
+                &[&row_type],
+            )
+            .map_err(|e| e.to_string())?;
+        match row {
+            None => Ok(None),
+            Some(row) => Ok(Some(crate::config_store::ConfigStoreRow {
+                version: -row.try_get::<_, i64>(0).map_err(|e| e.to_string())?,
+                data: row.try_get(1).map_err(|e| e.to_string())?,
+                encoding: row.try_get(2).map_err(|e| e.to_string())?,
+            })),
+        }
+    }
+
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
         let mut client = self.pool(key).checkout()?;
         self.read_task_list_row(&mut client, key)?

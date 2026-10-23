@@ -389,6 +389,31 @@ fn task_not_expired(data: &TaskData, now_nanos: i64) -> bool {
 
 
 impl MatchingTaskStore for CassandraMatchingTaskStore {
+    fn fetch_latest_config(
+        &self,
+        row_type: i32,
+    ) -> std::result::Result<Option<crate::config_store::ConfigStoreRow>, String> {
+        // Go cassandra templateSelectLatestConfig: `version` is a DESC
+        // clustering key, so LIMIT 1 is the latest and is stored positive.
+        let session = self.session();
+        let result = self
+            .driver
+            .run(session.query_unpaged(
+                "SELECT version, values, encoding FROM cluster_config WHERE row_type = ? LIMIT 1",
+                (row_type,),
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows = result.into_rows_result().map_err(|e| e.to_string())?;
+        let row = rows
+            .maybe_first_row::<(i64, Option<Vec<u8>>, Option<String>)>()
+            .map_err(|e| e.to_string())?;
+        Ok(row.map(|(version, data, encoding)| crate::config_store::ConfigStoreRow {
+            version,
+            data: data.unwrap_or_default(),
+            encoding: encoding.unwrap_or_default(),
+        }))
+    }
+
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
         let session = self.session();
         let result = self

@@ -537,6 +537,9 @@ pub async fn run(
                 }
                 _ => std::time::Duration::from_secs(5),
             };
+            let mut config_store_client: Option<
+                std::sync::Arc<cadence_persistence::config_store::ConfigStoreClient>,
+            > = None;
             let dynamic_config_path = match dynamic_config_provider {
                 config::DynamicConfigProvider::FileBased(provider) => {
                     if provider.filepath.is_empty() {
@@ -558,13 +561,55 @@ pub async fn run(
                     eprintln!("initialising NOP dynamic config client");
                     None
                 }
-                config::DynamicConfigProvider::ConfigStore(store) => anyhow::bail!(
-                    "dynamicconfig.client \"configstore\" (pollInterval {}ns, updateRetryAttempts {}, FetchTimeout {}ns, UpdateTimeout {}ns) is not supported by Rust Matching: Go (dynamicconfigfx/fx.go:91-99, configstore/config_store_client.go:92-122) polls the default datastore's dynamic-config rows and falls back to a no-op client only when creating the client fails; Rust has no config-store client, so refusing to start avoids silently running on defaults",
-                    store.poll_interval_nanos,
-                    store.update_retry_attempts,
-                    store.fetch_timeout_nanos,
-                    store.update_timeout_nanos,
-                ),
+                config::DynamicConfigProvider::ConfigStore(store) => {
+                    // Go dynamicconfigfx: a client that cannot be created
+                    // (store unreachable, first fetch fails) means NOP.
+                    eprintln!("initialising ConfigStore dynamic config client");
+                    let client_config = cadence_persistence::config_store::ClientConfig {
+                        poll_interval: std::time::Duration::from_nanos(
+                            store.poll_interval_nanos as u64,
+                        ),
+                        update_retry_attempts: store.update_retry_attempts,
+                        fetch_timeout: std::time::Duration::from_nanos(
+                            store.fetch_timeout_nanos as u64,
+                        ),
+                        update_timeout: std::time::Duration::from_nanos(
+                            store.update_timeout_nanos as u64,
+                        ),
+                    };
+                    let persistence = cfg.persistence.clone();
+                    let cluster_name = String::new();
+                    let created = tokio::task::spawn_blocking(move || {
+                        let stores = crate::matching_task_store::open_configured_default_store(
+                            &persistence,
+                            &cluster_name,
+                            std::sync::Arc::new(|| false),
+                            std::sync::Arc::new(|| "thriftrw".to_string()),
+                        )
+                        .map_err(|e| e.to_string())?;
+                        let task_store = stores.task_store;
+                        let fetch: cadence_persistence::config_store::ConfigRowFetcher =
+                            std::sync::Arc::new(move |row_type| {
+                                cadence_persistence::matching_task_store::MatchingTaskStore::fetch_latest_config(
+                                    &*task_store,
+                                    row_type,
+                                )
+                            });
+                        cadence_persistence::config_store::ConfigStoreClient::new(
+                            &client_config,
+                            fetch,
+                        )
+                    })
+                    .await
+                    .map_err(|error| anyhow::anyhow!("joining config store startup: {error}"))?;
+                    match created {
+                        Ok(client) => config_store_client = Some(std::sync::Arc::new(client)),
+                        Err(error) => eprintln!(
+                            "warning: creating ConfigStore dynamic config client: {error}; using no-op configuration"
+                        ),
+                    }
+                    None
+                }
                 config::DynamicConfigProvider::OpenFeature(feature) => anyhow::bail!(
                     "dynamicconfig.client \"openfeature\" (providerName {:?}) is not supported by Rust Matching: Go (dynamicconfigfx/fx.go:103-119) registers the named OpenFeature provider plugin (e.g. unleash) on start; no provider plugin is ported",
                     feature.provider_name
@@ -618,6 +663,16 @@ pub async fn run(
                 ..Default::default()
             };
             let mut dynamic_config_loaded_at = None;
+            if let Some(client) = config_store_client.as_ref() {
+                if let Some(snapshot) = client.snapshot() {
+                    *state
+                        .admin
+                        .dynamic_config
+                        .lock()
+                        .expect("dynamic config lock") =
+                        crate::admin::DynamicConfigOverlay::from_config_store(&snapshot);
+                }
+            }
             let dynamic_config_loaded = if let Some(path) = dynamic_config_path.as_ref() {
                 match crate::admin::DynamicConfigOverlay::from_file(path) {
                     Ok(snapshot) => {
@@ -1247,6 +1302,11 @@ pub async fn run(
                                 .expect("successful initial dynamic-config load has timestamp"),
                         ),
                     );
+                }
+            }
+            if let Some(client) = config_store_client.clone() {
+                if let Some(runtime) = matching_runtime.take() {
+                    matching_runtime = Some(runtime.with_dynamic_config_store(client));
                 }
             }
             if let Some(membership) = matching_membership.clone() {

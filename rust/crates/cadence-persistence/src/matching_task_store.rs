@@ -108,6 +108,15 @@ pub struct AllocatedTask {
 /// `create_tasks_with_domains` retains Go's cross-domain task row key behavior:
 /// rows use each task's source domain while the lease fence applies to `key`.
 pub trait MatchingTaskStore: Send + Sync {
+    /// Go `ConfigStore.FetchConfig` on this store's datastore (dynamic-config
+    /// client `configstore`). `Ok(None)` is Go's not-found.
+    fn fetch_latest_config(
+        &self,
+        _row_type: i32,
+    ) -> std::result::Result<Option<crate::config_store::ConfigStoreRow>, String> {
+        Err("this task store has no config store".into())
+    }
+
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord>;
 
     fn lease(

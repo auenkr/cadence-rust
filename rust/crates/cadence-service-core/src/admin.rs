@@ -56,6 +56,16 @@ fn filters_match(value: &DynamicConfigValue, filters: &[DynamicConfigFilter]) ->
 }
 
 impl DynamicConfigOverlay {
+    /// Build the property snapshot from a config-store snapshot; entry and
+    /// value order is the stored order, as Go's `getValueWithFilters` walks it.
+    pub fn from_config_store(snapshot: &cadence_persistence::config_store::Snapshot) -> Self {
+        let mut overlay = Self::default();
+        for entry in snapshot.entries.iter().flatten() {
+            overlay.normal.insert(entry.name.clone(), entry.values.clone());
+        }
+        overlay
+    }
+
     /// Parse the Go file-based client's YAML format (`key: [{value,
     /// constraints}]`) into the ordered property snapshot consumed by Matching.
     pub fn from_file(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
@@ -1083,6 +1093,31 @@ pub async fn update_domain_async_workflow_configuration(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn config_store_snapshot_keeps_entry_value_order() {
+        use cadence_persistence::config_store::Snapshot;
+        let value = |n: &str| DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob::new(
+                cadence_api::enums::EncodingType::JSON,
+                n.as_bytes().to_vec(),
+            )),
+            filters: vec![],
+        };
+        let snapshot = Snapshot {
+            version: 2,
+            schema_version: 0,
+            entries: Some(vec![cadence_api::admin::DynamicConfigEntry {
+                name: "k".into(),
+                values: vec![value("1"), value("2")],
+            }]),
+        };
+        let overlay = DynamicConfigOverlay::from_config_store(&snapshot);
+        assert_eq!(overlay.property_values("k").len(), 2);
+        assert!(DynamicConfigOverlay::from_config_store(&Snapshot::default())
+            .property_values("k")
+            .is_empty());
+    }
+
     use super::*;
 
     #[test]

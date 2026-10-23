@@ -728,6 +728,25 @@ fn mysql_database_index(logical_shard: usize, endpoint_count: usize) -> usize {
 }
 
 impl MatchingTaskStore for MySqlTaskStore {
+    fn fetch_latest_config(
+        &self,
+        row_type: i32,
+    ) -> std::result::Result<Option<crate::config_store::ConfigStoreRow>, String> {
+        // Go sqlplugin/mysql SelectLatestConfig on the default shard.
+        let mut lease = self.pools[0].checkout().map_err(|e| e.to_string())?;
+        let row: Option<(i64, Vec<u8>, String)> = lease
+            .exec_first(
+                "SELECT version, data, data_encoding FROM cluster_config WHERE row_type = ? ORDER BY version LIMIT 1;",
+                (row_type,),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(row.map(|(version, data, encoding)| crate::config_store::ConfigStoreRow {
+            version: -version,
+            data,
+            encoding,
+        }))
+    }
+
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
         let mut connection = self.pool(key).checkout()?;
         self.read_task_list(&mut connection, key)?
