@@ -2934,6 +2934,11 @@ impl m::matching_api_server::MatchingApi for Matching {
                         self.semaphores.get_or_create_with_idle_ttl(identifier, idle_ttl)
                             .await.map_err(semaphore_status)?
                     };
+                    // Go's grant checks the caller's context before its first write, so an
+                    // expired caller returns without claiming a slot.
+                    if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
+                        return Err(Status::internal("context deadline exceeded"));
+                    }
                     let result = manager.acquire(&r.owner_id, deadline).await.map_err(semaphore_status)?;
                     let outcome = match result.outcome {
                         SemaphoreAcquireOutcome::Acquired => 1,
