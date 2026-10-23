@@ -111,7 +111,7 @@ pub fn checker(
                 let result: Result<Option<bool>, Status> = async {
                     if domains
                         .is_active_in(&domain, &cluster)
-                        .map_err(|error| Status::not_found(error.message))?
+                        .map_err(|error| crate::grpc::domain_not_found(error.message))?
                     {
                         return Ok(Some(false));
                     }
@@ -120,7 +120,7 @@ pub fn checker(
                             uuid: Some(domain.clone()),
                             ..Default::default()
                         })
-                        .map_err(|error| Status::not_found(error.message))?;
+                        .map_err(|error| crate::grpc::domain_not_found(error.message))?;
                     let active_active = description
                         .replication_configuration
                         .as_ref()
