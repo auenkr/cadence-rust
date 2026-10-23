@@ -1,0 +1,2 @@
+env 
+/usr/bin/python3 tests/run-go-service-baseline.py --rust-services matching --matching-restart --postgres --history-transport grpc --rust-production-binary /mnt/storage/service/cargo-target-shared/debug/cadence-matching --binary /mnt/storage/service/gate-runs/matching-build/cadence-server --artifacts-dir /mnt/storage/service/gate-runs/pg1 --evidence-dir memory/evidence/matching-gate-run-20261023/pg1

@@ -1,0 +1,37 @@
+{
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goMatchingStarted": false,
+  "rustServices": [
+    "matching"
+  ],
+  "goServices": [
+    "frontend",
+    "history",
+    "worker"
+  ],
+  "rustProductionBinary": "/mnt/storage/service/cargo-target-shared/debug/cadence-matching",
+  "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+  "historyTransport": "grpc",
+  "rustDynamicConfigFile": "/mnt/storage/service/gate-runs/pg1/rust-dynamic-config.yaml",
+  "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+  "acceptanceEligible": false,
+  "serverCommand": [
+    "/mnt/storage/service/gate-runs/matching-build/cadence-server",
+    "--config",
+    "/mnt/storage/service/gate-runs/pg1/config",
+    "--zone",
+    "postgres",
+    "start",
+    "--auto-setup",
+    "--services",
+    "frontend,history,worker"
+  ],
+  "artifactsDirectory": "/mnt/storage/service/gate-runs/pg1",
+  "probeExitCode": 0,
+  "goServicesPid": 867824,
+  "goServicesAliveAfterProbe": true,
+  "matchingExporter": null,
+  "matchingExporterAddress": null,
+  "runExitCode": 0,
+  "failure": null
+}
