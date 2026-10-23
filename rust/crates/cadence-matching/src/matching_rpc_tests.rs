@@ -1247,7 +1247,7 @@ async fn matching_rpc_semaphore_domain_not_found_matches_go() {
 // caller gets Internal "context deadline exceeded" and must not leave a slot claimed.
 #[tokio::test]
 async fn matching_rpc_semaphore_expired_deadline_claims_no_slot() {
-    let (_dir, _store, mut matching, _key) = fixture();
+    let (_dir, _store, matching, _key) = fixture();
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
         "system.enableDistributedSemaphore", vec![bool_config(true, Some("domain"))]);
     let domain = Uuid::from_u128(1).to_string();
