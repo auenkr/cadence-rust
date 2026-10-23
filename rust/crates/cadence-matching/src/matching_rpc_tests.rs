@@ -2603,7 +2603,11 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
             }],
         );
     // Go `matching.qpsTrackerInterval` (default 10s; shortened here) is read
-    // when the task list manager is created, so it is updated first.
+    // when the task list manager is created, so it is updated first. The tracker
+    // is wall-clock and its first window opens when the first add creates the
+    // queue. The window is long enough that the adds below always land in it,
+    // and the test then waits for the windows to close instead of sleeping.
+    let window = Duration::from_secs(2);
     matching
         .frontend
         .state
@@ -2617,7 +2621,7 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
             vec![cadence_api::admin::DynamicConfigValue {
                 value: Some(cadence_api::types::DataBlob::new(
                     cadence_api::enums::EncodingType::JSON,
-                    b"\"50ms\"".to_vec(),
+                    b"\"2s\"".to_vec(),
                 )),
                 filters: vec![
                     cadence_api::admin::DynamicConfigFilter {
@@ -2635,6 +2639,7 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
                 ],
             }],
         );
+    let opened = std::time::Instant::now();
     let add = |schedule_id: i64, partition_config: HashMap<String, String>| {
         let matching = matching.clone();
         let domain = key.domain_id.to_string();
@@ -2667,17 +2672,31 @@ async fn matching_rpc_reports_arrival_qps_by_isolation_group() {
         .await
         .unwrap();
     // Go's tracker only reports when a window closes, so the open window's
-    // arrivals are still invisible.
-    assert_eq!(queue.qps.qps(), 0.0);
-    assert_eq!(queue.qps.group_qps("z"), 0.0);
+    // arrivals are still invisible. The first window starts no earlier than
+    // `opened`, so reads made before `opened + window` see only the open window.
+    // The guard is checked after the reads for that reason.
+    let open_qps = queue.qps.qps();
+    let open_group_qps = queue.qps.group_qps("z");
+    assert!(
+        opened.elapsed() < window,
+        "adds ran past the QPS window; the open-window check is not meaningful"
+    );
+    assert_eq!(open_qps, 0.0);
+    assert_eq!(open_group_qps, 0.0);
     let activity = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 1).await.unwrap();
     activity.qps.report_counter(1);
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    // Windows close on the wall clock, so wait for the root and the group to
+    // report instead of sleeping for a fixed time. Three root arrivals and two
+    // isolation-group arrivals were reported, and the group counts toward the
+    // root as well.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while queue.qps.qps() <= 0.0 || queue.qps.group_qps("z") <= 0.0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("closed windows should report the arrivals");
     assert_eq!(activity.qps.qps(), 0.0, "activity tracker retains the default 10s window");
-    // Three root arrivals and two isolation-group arrivals were reported, and
-    // the group counts toward the root as well.
-    assert!(queue.qps.qps() > 0.0);
-    assert!(queue.qps.group_qps("z") > 0.0);
     let status = matching
         .describe_task_list(Request::new(m::DescribeTaskListRequest {
             domain_id: key.domain_id.to_string(),
