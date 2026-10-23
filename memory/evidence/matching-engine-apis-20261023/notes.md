@@ -123,6 +123,18 @@ new mixed-cluster evidence or a claim of complete Matching service parity.
 Cargo uses the shared target directory as explicitly requested for this task;
 cargo-safe serializes through /tmp/cargo.lock and applies the capped work slice.
 
-Checkpoint: implementation and Go-derived tests complete; focused Cargo run is
-queued on the shared lock. Validation results are pending and will be appended
-before this branch is handed back.
+## Validation results
+
+Source commit: 87860c557 (the later evidence commits change only memory files).
+Run from /mnt/storage/service/github/wt/engineapis/rust in tmux cadence-rust:
+
+```sh
+CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe test -p cadence-matching --lib engine_apis > /tmp/ea.log 2>&1; echo $? > /tmp/ea.exit
+```
+
+Exit **0**: 5 passed, 0 failed, 444 filtered out. See focused.log and focused.exit.
+Compilation log names this worktree for every workspace dependency, confirming
+cargo-safe rebuilt its sources after the shared cache changed workspaces.
+Clippy and full crate tests remain queued; their results will be appended before
+handoff. The lock wait included other worktrees' builds and a mixed-cluster gate;
+this task never bypassed that lock or ran Cargo alongside the gate.
