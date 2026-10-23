@@ -13,3 +13,7 @@ Base: origin/matching-candidate-20261023 at 4f5fb6722. Worktree: /mnt/storage/se
 ## Validation
 
 Validation results and real command exit codes are recorded separately in gate.md after jobs complete. Source review and unit tests do not establish mixed-cluster service completion. No mixed-cluster gate is claimed by this branch.
+
+## Updated build policy
+
+The user replaced the two-slot build rules during this task: one Cargo job host-wide, `/tmp/cargo.lock`, `-j3`, no separate workspace check (clippy covers it), clippy then tests sequentially, no Cargo during any mixed gate, wait when load exceeds 6 or available RAM is below 2GB, polling intervals at least 60 seconds. This branch's old queued pipelines were stopped before they executed any Cargo command; no check exit code exists. Final validation will follow the new rule. Other worktrees' results are not validation of this branch.
