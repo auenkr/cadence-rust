@@ -3135,6 +3135,23 @@ mod tests {
         registry.sweep_idle(base + 2 * TTL, false).await.unwrap();
         assert!(adding.queue.is_stopped());
     }
+    // Go: TestTaskListManagerImpl_HasPollerAfter (task_list_manager_test.go:1343). An outstanding
+    // poller counts, and so does one that finished after the query time; Go's zero time.Time{}
+    // is before every poll, which i64::MIN mirrors here.
+    #[tokio::test]
+    async fn has_poller_after_reports_outstanding_or_finished_pollers() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key, 0, 1).await.unwrap();
+        let info = || cadence_common::poller::Info {
+            identity: "foo".into(),
+            rate_per_second: 0.0,
+            isolation_group: String::new(),
+        };
+        handle.pollers.lock().unwrap().start("poller1", info(), 1);
+        assert!(handle.has_poller_after(i64::MIN), "outstanding poller");
+        handle.pollers.lock().unwrap().end("poller1", 2);
+        assert!(handle.has_poller_after(i64::MIN), "poller finished after the query time");
+    }
     // Go: TestQueriesPerSecond (task_list_manager_test.go:457), case "returns zero QPS". Go reads
     // the manager's qpsTracker; Rust sums the tracker of loaded, unstopped owners with the name.
     // The non-zero tracker case needs an injected clock and is not ported here (see inventory).

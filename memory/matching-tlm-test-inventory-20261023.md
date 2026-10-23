@@ -28,15 +28,15 @@ Status legend:
 | 7 | TestQueriesPerSecond (457) | `matching_registry.rs::loaded_owner_reports_zero_qps_before_arrivals` | PARTIAL: zero-QPS case only. "returns QPS from tracker" (42.5) needs a deterministic EMA clock; the Rust tracker is `cadence_common::qps::EmaQpsTracker` with a system clock. |
 | 8 | TestCheckIdleTaskList (497) | `matching_registry.rs::idle_check_unloads_only_after_full_ttl_without_activity` | PORTED (idle, poller, add-task subtests) |
 | 9 | TestAddTaskStandby (590) | `matching_registry.rs::append_after_writer_stop_fails_without_persisting` | PARTIAL: stopped-writer error and no persistence. The standby-domain forwarded branch is not ported. |
-| 10 | TestRateLimitErrorsFromTasklistDispatch (646) | - | PENDING (group 3) |
-| 11 | TestMisconfiguredZoneDoesNotBlock (671) | - | PENDING (group 3) |
-| 12 | TestGetIsolationGroupForTask (709) | - | PENDING (group 3) |
-| 13 | TestTaskWriterShutdown (943) | - | PENDING (group 3) |
+| 10 | TestRateLimitErrorsFromTasklistDispatch (646) | `matching_dispatch.rs::queue_status_maps_throttling_to_service_busy_and_other_errors_to_internal` (indirect) | NOT-PORTED: Go injects a `dispatchTask` hook returning `ErrTasklistThrottled` and asserts the retry loop. Rust has no dispatch hook; the throttle mapping is covered only by the status-mapping test. Follow-up. |
+| 11 | TestMisconfiguredZoneDoesNotBlock (671) | `matching_sync.rs::sync_match_invalid_isolation_group_poll_falls_back_to_default_group` (poll side) | PARTIAL: poll-side fallback to the default group is covered. The dispatch-side fallback (`dispatchSingleTaskFromBuffer` redirect, `dispatched[""]` count) is not ported. |
+| 12 | TestGetIsolationGroupForTask (709) | - | NOT-PORTED: the selection logic is an inline closure in `grpc_matching.rs` (about lines 800-830) over live domain and dynamic-config overlay state, not a pure function. The 13-case table needs that fixture. Follow-up. |
+| 13 | TestTaskWriterShutdown (943) | `matching_registry.rs::append_after_writer_stop_fails_without_persisting` (queue stop, not writer stop) | PARTIAL: stopped-task-list append error is covered. The explicit `taskWriter.Stop()` path and the `stopped` race sub-case are not ported. |
 | 14 | TestTaskListManagerGetTaskBatch (974) | `matching_reader.rs::matching_reader_prefetch_backpressure_and_stop_preserve_unacked_rows` (indirect) | PARTIAL: Go calls `taskReader.getTaskBatch(readLevel, maxReadLevel)` directly. Rust has no batch function with that signature; the batch read is fused into the queue pump. The 1200-task sub-assertions (range/batch sizing) are not ported. |
 | 15 | TestTaskListReaderPumpAdvancesAckLevelAfterEmptyReads (1104) | - | NOT-PORTED: ack advancement over 15 empty leased ranges (`renewLeaseWithRetry`) and the post-advance write offset. Needs a lease-renewal-without-write harness; follow-up. |
 | 16 | TestTaskListManagerGetTaskBatch_ReadBatchDone (1196) | - | NOT-PORTED: depends on `getTaskBatch` `isReadBatchDone` return value, which has no Rust analogue (see row 14). |
-| 17 | TestTaskExpiryAndCompletion (1241) | - | PENDING (group 3) |
-| 18 | TestTaskListManagerImpl_HasPollerAfter (1343) | - | PENDING (group 3) |
+| 17 | TestTaskExpiryAndCompletion (1241) | `matching_reader.rs::matching_reader_dispatch_expiry_distinguishes_active_and_passive_heads` (indirect) | NOT-PORTED: the Go test asserts task-GC row counts under two thresholds (`MaxTaskDeleteBatchSize=2`, `MaxTimeBetweenTaskDeletes=1ns`) after polls. The Rust GC batch and time knobs are not wired to this assertion. Follow-up. |
+| 18 | TestTaskListManagerImpl_HasPollerAfter (1343) | `matching_registry.rs::has_poller_after_reports_outstanding_or_finished_pollers` | PORTED (outstanding and finished-poller sub-cases in one sequenced test) |
 | 19 | TestRefreshTaskListPartitionConfig (1380) | - | PENDING (group 4) |
 | 20 | TestUpdateTaskListPartitionConfig (1498) | - | PENDING (group 4) |
 | 21 | TestRefreshTaskListPartitionConfigConcurrency (1703) | - | PENDING (group 4) |
@@ -53,4 +53,5 @@ Status legend:
 Each group is pushed to `matching-tlm-tests-20261023` and run with `rust-ci.yml`, `package=cadence-matching`.
 
 - Group 1 (Go 2, 5, 6, 7, 8, 9): commit `be8d3127f`, run https://github.com/auenkr/cadence-rust/actions/runs/40010474303, conclusion success. The five new tests in `matching_registry.rs` ran and passed: `unload_notifies_registry_once_and_second_unload_is_noop`, `idle_check_unloads_only_after_full_ttl_without_activity`, `loaded_owner_reports_zero_qps_before_arrivals`, `describe_by_domain_lists_loaded_root_without_config_or_pollers`, `append_after_writer_stop_fails_without_persisting`. Crate result: 495 passed, 0 failed, 9 ignored.
-- Group 2 (Go 1, 3, 4, 14, 15, 16): pending
+- Group 2 (Go 1, 3, 4, 14, 15, 16): commit `cde29f739`, run https://github.com/auenkr/cadence-rust/actions/runs/40011223704, conclusion success. New reader tests `stop_joins_pump_blocked_on_buffered_task_without_poller` and `matching_reader_read_level_advances_past_expired_rows_without_ack` passed. Go 14, 15, 16 are not fully ported (see rows).
+- Group 3 (Go 10, 11, 12, 13, 17, 18): only Go 18 is a new port (`has_poller_after_reports_outstanding_or_finished_pollers`). Go 10, 12 and 17 are NOT-PORTED with reasons; Go 11 and 13 are PARTIAL. CI: pending
