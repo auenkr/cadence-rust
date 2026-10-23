@@ -443,6 +443,39 @@ mod tests {
     use crate::config::{DatastoreConfig, SqlConfig};
     use std::collections::HashMap;
 
+    fn nosql_from_yaml(body: &str) -> crate::config::NosqlConfig {
+        let yaml = format!("persistence:\n  datastores:\n    c:\n      nosql:\n        pluginName: cassandra\n        hosts: \"h1,h2\"\n        keyspace: cadence\n{body}");
+        crate::config::Config::from_yaml(&yaml).unwrap().persistence.datastores["c"]
+            .nosql
+            .clone()
+            .unwrap()
+    }
+
+    #[test]
+    fn cassandra_config_maps_go_options() {
+        let nosql = nosql_from_yaml("        user: u\n        password: p\n        port: 9142\n        datacenter: dc1\n        consistency: quorum\n        serialConsistency: serial\n        maxConns: 5\n        timeout: 3s\n        connectTimeout: 1s\n        tls:\n          enabled: true\n          caFile: /ca.pem\n          caFiles: [/a.pem]\n          certFile: /c.pem\n          keyFile: /k.pem\n          enableHostVerification: true\n          serverName: cass.internal\n");
+        let cfg = cassandra_config(&nosql).unwrap();
+        assert_eq!(cfg.hosts, vec!["h1", "h2"]);
+        assert_eq!(cfg.port, 9142);
+        assert_eq!(cfg.datacenter, "dc1");
+        assert_eq!(cfg.max_connections_per_host.unwrap().get(), 5);
+        assert_eq!(cfg.request_timeout, std::time::Duration::from_secs(3));
+        assert_eq!(cfg.connect_timeout, std::time::Duration::from_secs(1));
+        let tls = cfg.tls.unwrap();
+        assert_eq!(tls.ca_files.len(), 2);
+        assert!(tls.verify_hostname);
+        assert_eq!(tls.server_name.as_deref(), Some("cass.internal"));
+    }
+
+    #[test]
+    fn cassandra_config_ignores_disabled_tls_and_rejects_unsupported_proto() {
+        let nosql = nosql_from_yaml("        tls:\n          enabled: false\n          caFile: /ca.pem\n");
+        assert!(cassandra_config(&nosql).unwrap().tls.is_none());
+        let nosql = nosql_from_yaml("        protoVersion: 3\n");
+        let error = cassandra_config(&nosql).unwrap_err().to_string();
+        assert!(error.contains("protoVersion 3"), "{error}");
+    }
+
     fn persistence(sql: Option<SqlConfig>) -> crate::config::PersistenceConfig {
         crate::config::PersistenceConfig {
             default_store: "primary".into(),
