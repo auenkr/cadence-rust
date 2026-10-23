@@ -59,15 +59,25 @@ A slot's free token row is never created. A fresh semaphore therefore has an emp
 
 The caveat: the upstream cause is a **Go defect** (or at least a Go gap). The comment at `semaphore_manager.go:403` promises seeding that nothing implements, so a production Go capacity-N semaphore can never make its first grant. The harness is "wrong" only because it assumes Go works here.
 
-## Proposed fix (decision needed, not applied)
+## Applied fix (branch `matching-cassandra-probe-fix-20261024`, harness only)
 
-This is not a tiny obvious fix, so nothing was changed in code.
+Decision: Rust stays Go-faithful. Harness changed, no Rust or Go program logic changed.
 
-1. **Recommended.** Keep Rust Go-faithful. In `tests/matching-service-compat.cjs` before the race:
-   - (i) Assert a fresh capacity-1 semaphore returns NO_SLOT for the first acquire (records the Go gap as evidence).
-   - (ii) Seed one free token row through a gocql fixture in `go/tests/matching-cassandra-interop/main.go`: `INSERT INTO semaphore_tokens (domain_id, semaphore_name, bucket, type, token_id, owner_id, holder, held_token, updated_time)` for token 1, `holder` = free sentinel, `owner_id` = none sentinel. This is the row shape Go's comment says exists.
-   - (iii) Run the two-owner race and the restart/recovery steps unchanged.
-   Record the Go gap as an explicit parity gap in the matching parity notes. The durable-hold section then still runs.
+- `go/tests/matching-cassandra-interop/main.go`: new `seed-semaphore {domain-id} {semaphore-name}` subcommand. It inserts token row 1 (`type`=token, `owner_id`=none sentinel, `holder`=free sentinel) with `IF NOT EXISTS`.
+- `tests/matching-service-compat.cjs`, Cassandra block: a separate fresh semaphore `durable-gap-${id}` asserts its first acquire returns NO_SLOT. Then `durable-${id}` is seeded through `seed-semaphore` before its first acquire. The two-owner race and recovery steps are unchanged and expect one ACQUIRED. Evidence is recorded as `freshSemaphoreFirstAcquire`.
+- MySQL/PG probe paths unchanged.
+
+**Why the order differs from the original proposal:** seeding after the first acquire cannot work. Go's `Start` loads the free set once (`semaphore_manager.go:160-170`, `load` at `:198`), and `reserve` reads only that in-memory `freeList` (`:494`). Rust loads once too (`matching_semaphore.rs:177-186`). A row seeded after a bucket's first acquire is never seen by that bucket, so the race would still get two NO_SLOT. The NO_SLOT assertion therefore needs its own semaphore, and the race semaphore is seeded before its first acquire.
+
+**Not verified:** no cargo, no gate, no Go test run (per task scope). `node --check` and `gofmt -e` passed. The cassandra lane still needs one run to confirm.
+
+**Parity gap (Go-side):** `go/service/matching/semaphore/semaphore_manager.go:403` says "Token rows are seeded once and never deleted", but nothing in `go/` seeds token rows. `CreateSemaphore` writes metadata only, and `semaphore_tokens_cql.go:27-28` says rows are not seeded. A production Go capacity-N semaphore therefore never makes its first grant. Go-side fix needs an upstream decision and is out of scope for a no-logic-change port.
+
+## Options considered (historical)
+
+1. **Chosen.** Keep Rust Go-faithful and fix the harness, as above.
+2. **Not recommended:** fix Go to seed token rows in `CreateSemaphore`. That changes Go program logic (out of scope for a no-logic-change port) and needs an upstream decision.
+3. **Rejected:** restore metadata seeding in Rust. Reintroduces the deviation `3076d7837` removed and hides the Go gap.
 2. **Not recommended:** fix Go to seed token rows in `CreateSemaphore`. That changes Go program logic (out of scope for a no-logic-change port) and needs an upstream decision.
 3. **Rejected:** restore metadata seeding in Rust. Reintroduces the deviation `3076d7837` removed and hides the Go gap.
 
