@@ -57,6 +57,8 @@ Like gpt 6 luna, haiku 5.5, or opencode free model(Medium thinking mode). Normal
 ## NOTE
 This machine has 4 CPUs (i5-7300HQ), 7.7GB RAM and ~117GB free on /mnt/storage, so clean up the things which are not needed or saved already.
 
+CI builds (user decision 2026-10-23, replaces the earlier "no CI builds" rule): the repo is public, so GitHub Actions is free. Run cargo clippy/test on GitHub instead of the dev host whenever possible: `gh workflow run rust-ci.yml --ref <branch> [-f package=cadence-matching]`, then `gh run watch <id> --exit-status` / `gh run view <id> --log` (needs `gh auth switch -u auenkr`). Record the run URL, head SHA and conclusion under memory/evidence/ (CI conclusion = the exit code). Local cargo is only for quick `-p <crate>` iteration. Mixed Go/Rust gates (docker + Go build) still run locally unless a gate workflow exists.
+
 Build rules (RAM is the limit, a cadence-server rustc can use 2-3GB):
 - Use the shared target dir: `export CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared`.
 - At most ONE cargo job host-wide (observed: 2-3 concurrent workspace builds drove load to 12 on 4 cores and filled swap). Every cargo/rustc invocation must be wrapped in the single lock: `flock /tmp/cargo.lock cargo <cmd> -j2` (RAM-bound: -j3 caused swap thrash, load 16). Never start cargo without the lock; never use another lock file.

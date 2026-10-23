@@ -1,0 +1,57 @@
+name: rust-ci
+
+# Cargo build/test/clippy for the Rust port run here (free for public repos) instead of on the dev host.
+# Trigger manually for any branch: gh workflow run rust-ci.yml --ref <branch> [-f package=cadence-matching]
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Crate to test (empty = whole workspace)"
+        required: false
+        default: ""
+  push:
+    branches: ["master", "matching-*"]
+    paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
+
+concurrency:
+  group: rust-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clippy-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: never
+      PKG: ${{ github.event.inputs.package }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init IDL submodule
+        run: git submodule update --init go/idls
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Clippy
+        working-directory: rust
+        run: |
+          set -o pipefail
+          if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--workspace"; fi
+          cargo clippy $SEL --all-targets -- -D warnings 2>&1 | tee clippy.log
+          echo "clippy exit ${PIPESTATUS[0]}"
+      - name: Test
+        working-directory: rust
+        run: |
+          set -o pipefail
+          if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--workspace"; fi
+          cargo test $SEL 2>&1 | tee test.log
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-ci-logs
+          path: |
+            rust/clippy.log
+            rust/test.log
