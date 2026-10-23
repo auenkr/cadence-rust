@@ -184,7 +184,7 @@ impl Manager {
     }
 
     async fn load(&self) -> Result<(), ManagerError> {
-        let metadata = self.store.get_semaphore_metadata(
+        self.store.get_semaphore_metadata(
             &self.id.domain_id,
             &self.id.semaphore_name,
         ).await?;
@@ -193,8 +193,9 @@ impl Manager {
             &self.id.semaphore_name,
             self.id.bucket,
         ).await?;
-        let budget = cadence_persistence::semaphores::bucket_budget(metadata.bucket_size);
-        let mut free: HashMap<i32, ()> = (1..=budget).map(|token_id| (token_id, ())).collect();
+        // Go builds the free set only from rows returned by the scan. Metadata
+        // does not prove that an absent token row exists or is unheld.
+        let mut free: HashMap<i32, ()> = HashMap::new();
         let mut held: HashMap<String, i32> = HashMap::new();
         for row in rows {
             match row {
@@ -296,13 +297,23 @@ impl Manager {
             let Some(token_id) = self.reserve() else {
                 break;
             };
-            match self.store.grant_semaphore_token(
+            let outcome = self.store.grant_semaphore_token(
                 &self.id.domain_id,
                 &self.id.semaphore_name,
                 self.id.bucket,
                 token_id,
                 owner_id,
-            ).await? {
+            ).await;
+            let outcome = match outcome {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    // Like Go, an ambiguous failed write must not drain the
+                    // cache. The next conditional write resolves ownership.
+                    self.unreserve(token_id);
+                    return Err(error.into());
+                }
+            };
+            match outcome {
                 GrantOutcome::Applied => {
                     self.record_hold(owner_id, token_id);
                     return Ok(AcquireResult {
@@ -653,6 +664,33 @@ mod tests {
         assert_eq!(manager.acquire("1:w:r1:1").await, Err(ManagerError::NotReady));
     }
 
+    // Go: TestAcquireRejectsAnEmptyOwnerID (semaphore/semaphore_manager_test.go:307). A rejected
+    // request must not touch the free set.
+    #[tokio::test]
+    async fn matching_semaphore_rejects_empty_owner_without_touching_free_set() {
+        let registry = Registry::new(Arc::new(store()));
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
+        assert_eq!(
+            manager.acquire("").await,
+            Err(ManagerError::BadRequest("ownerID is required".into()))
+        );
+        assert_eq!(manager.free_count(), 2);
+    }
+
+    // Go: TestUnreserveIsIdempotent (semaphore/semaphore_manager_test.go:829). A double unreserve
+    // must not list the same slot twice, or two acquires could draw it.
+    #[tokio::test]
+    async fn matching_semaphore_unreserve_is_idempotent() {
+        let registry = Registry::new(Arc::new(store()));
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
+        let token_id = manager.reserve().unwrap();
+        assert_eq!(manager.free_count(), 1);
+        manager.unreserve(token_id);
+        assert_eq!(manager.free_count(), 2);
+        manager.unreserve(token_id);
+        assert_eq!(manager.free_count(), 2);
+    }
+
     // Go: TestRingKey. Buckets of one semaphore must hash to different ring keys.
     #[test]
     fn matching_semaphore_ring_key_separates_buckets() {
@@ -735,3 +773,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "matching_semaphore_parity_tests.rs"]
+mod parity_tests;
