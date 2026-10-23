@@ -60,6 +60,10 @@ parser.add_argument('--etcd-image', default=os.environ.get('CADENCE_ETCD_IMAGE',
 parser.add_argument('--matching-failure-recovery', action='store_true', help='run a two-instance production Matching failure/recovery probe')
 parser.add_argument('--matching-idle-check-seconds', type=int, help='override the Matching idle-task-list check interval in seconds')
 parser.add_argument('--matching-backlog-forward', action='store_true', help='probe backlog forward-to-parent on a two-partition native config: a child backlog task reaches a root-only poller, and a root backlog task reaches a child-only poller (requires --rust-services matching)')
+parser.add_argument('--probe-pg-gc-domain', action='store_true', help='probe scenario: PostgreSQL task GC convergence and domain metadata checks (requires --postgres)')
+parser.add_argument('--probe-query-standby', action='store_true', help='probe scenario: QueryWorkflow answered by a poller that only polls the parent partition (requires --rust-services matching)')
+parser.add_argument('--probe-list-partitions', action='store_true', help='probe scenario: ListTaskListPartitions/DescribeTaskList compared with Go semantics on every Rust node and through the Go Frontend; sets matching.numTasklistWritePartitions=3 (requires --rust-services matching)')
+parser.add_argument('--probe-durable-restart', action='store_true', help='probe scenario: stop Rust Matching with multi-partition backlog rows, restart, drain every partition (requires --rust-services matching)')
 parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
@@ -329,6 +333,10 @@ if args.build_only and args.dry_run:
     parser.error('--build-only and --dry-run are exclusive')
 if args.matching_failure_recovery and not production_matching:
     parser.error('--matching-failure-recovery requires --rust-services matching')
+if args.probe_pg_gc_domain and not args.postgres:
+    parser.error('--probe-pg-gc-domain requires --postgres')
+if (args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart) and not production_matching:
+    parser.error('--probe-query-standby, --probe-list-partitions and --probe-durable-restart require --rust-services matching')
 if args.matching_backlog_forward and not production_matching:
     parser.error('--matching-backlog-forward requires --rust-services matching')
 if args.matching_idle_check_seconds is not None and (args.matching_idle_check_seconds < 1 or not production_matching):
@@ -481,6 +489,9 @@ if args.matching_idle_check_seconds is not None:
         '\nmatching.idleTasklistCheckInterval:\n'
         f'  - value: {args.matching_idle_check_seconds}s\n'
     )
+if args.probe_list_partitions:
+    # Go engine.go getAllPartitions reads this key to build the ListTaskListPartitions answer.
+    dynamic_text += '\nmatching.numTasklistWritePartitions:\n  - value: 3\nmatching.numTasklistReadPartitions:\n  - value: 3\n'
 go_dynamic_text = dynamic_text
 if args.matching_transport == 'thrift':
     # Go's direct outbounds for History and Matching become TChannel/Thrift
@@ -998,6 +1009,10 @@ try:
                     probe_environment['CADENCE_MATCHING_TRANSPORT'] = args.matching_transport
                     if args.matching_backlog_forward:
                         probe_environment['CADENCE_MATCHING_BACKLOG_FORWARD'] = '1'
+                    for flag, name in ((args.probe_pg_gc_domain, 'CADENCE_PROBE_PG_GC_DOMAIN'), (args.probe_query_standby, 'CADENCE_PROBE_QUERY_STANDBY'),
+                                       (args.probe_list_partitions, 'CADENCE_PROBE_LIST_PARTITIONS'), (args.probe_durable_restart, 'CADENCE_PROBE_DURABLE_RESTART')):
+                        if flag:
+                            probe_environment[name] = '1'
                     if args.cassandra:
                         probe_environment.update({
                             'CADENCE_MATCHING_CASSANDRA_GATE': '1',
@@ -1019,7 +1034,7 @@ try:
                             'CADENCE_MATCHING_FAILURE_RECOVERY': '1',
                         })
                 result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart or args.matching_backlog_forward or args.matching_failure_recovery else (600 if args.matching_delivery or args.rust_matching else 120)))
+                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart or args.matching_backlog_forward or args.matching_failure_recovery or args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_pg_gc_domain else (600 if args.matching_delivery or args.rust_matching else 120)))
                 if udp_capture:
                     udp_stop.set()
                     udp_thread.join(timeout=2)
