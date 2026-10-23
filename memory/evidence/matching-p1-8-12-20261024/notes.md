@@ -32,3 +32,8 @@ Change: added `matching_backlog_offer_prefers_local_poller_before_forwarding` (`
 - The divergence is only the internal error type, so no production change was made.
 
 Other PARTIAL rows in the remote family (`matcher_test` 11 PARTIAL in the test map) are not ported here. Next block to port: `TestQueryRemoteSyncMatch` / `TestQueryRemoteSyncMatchError` (`go/service/matching/tasklist/matcher_test.go:317`, `:368`).
+
+## Verification
+
+- rust-ci `workflow_dispatch`, branch `matching-p1-8-12-20261024`, package `cadence-matching`, commit `94c275c53`: run `40031896578` (https://github.com/auenkr/cadence-rust/actions/runs/40031896578), conclusion success.
+- Job `clippy-test`: clippy and `cargo test` passed. `matching_dispatch::tests::matching_backlog_offer_prefers_local_poller_before_forwarding ... ok`. Result line: 566 passed, 0 failed, 10 ignored (cadence-matching crate).
