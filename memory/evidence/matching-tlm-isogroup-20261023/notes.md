@@ -11,3 +11,5 @@
 - Ported as `matching_reader_retries_throttled_dispatch_without_acking` using a zero-rate, zero-burst limiter: asserts the throttle metric and that the task is not acked.
 
 ## CI
+- Commit e278c5655, run https://github.com/auenkr/cadence-rust/actions/runs/40014990614 (workflow_dispatch, package=cadence-matching), conclusion success. Push run 40014980241 may have been cancelled by the concurrency group.
+- Caveat: whether the cadence-common test was in the run's scope was not checked (package=cadence-matching only).
