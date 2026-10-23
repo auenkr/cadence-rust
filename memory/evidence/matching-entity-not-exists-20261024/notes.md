@@ -49,4 +49,8 @@ NotFound (execution or task), `mutable_state_view` and `describe_admin` (executi
 
 ## CI evidence
 
-Pending. Run URL and result are recorded below once the workflow is complete.
+| Run | Commit | Result |
+|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/40032279886 | `89727371a` | **Success** (`clippy-test`). `cadence-matching` lib tests: **572 passed, 0 failed, 12 ignored**. `domain_not_found_status_carries_entity_not_exists_detail` and `matching_rpc_semaphore_domain_not_found_matches_go` are `ok`. Baseline before this change was 571 (`matching-semaphore-rpc2-20261024`), so the only addition is the helper test |
+
+Re-run: `gh workflow run rust-ci.yml --ref matching-entity-not-exists-detail-20261024 -f package=cadence-matching`.
