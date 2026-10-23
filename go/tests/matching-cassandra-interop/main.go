@@ -22,6 +22,8 @@ const (
 	tasksTaskRowType         = 0
 	tasksTaskListRowType     = 1
 	decisionTaskListType     = 1
+	// Go persistence.TaskListTypeDecision (iota 0); the seed/verify fixture above uses its own value.
+	liveDecisionTaskListType = 0
 	semaphoreOwnerRowType     = 2
 	semaphoreTokenRowType     = 1
 	semaphoreOwnerTokenIDNone = -1
@@ -111,11 +113,11 @@ func observeTask(command, domainID, name, timeoutText string) {
 	deadline := time.Now().Add(timeout)
 	for {
 		var rangeID int64
-		err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=-12345", domainUUID, name, decisionTaskListType, tasksTaskListRowType).Scan(&rangeID)
+		err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=-12345", domainUUID, name, liveDecisionTaskListType, tasksTaskListRowType).Scan(&rangeID)
 		if err != nil && err != gocql.ErrNotFound {
 			log.Fatal(err)
 		}
-		iter := session.Query("SELECT task_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=?", domainUUID, name, decisionTaskListType, tasksTaskRowType).Iter()
+		iter := session.Query("SELECT task_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=?", domainUUID, name, liveDecisionTaskListType, tasksTaskRowType).Iter()
 		count := 0
 		var taskID int64
 		for iter.Scan(&taskID) { count++ }
