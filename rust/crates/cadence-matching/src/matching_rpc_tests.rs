@@ -1219,6 +1219,60 @@ async fn matching_rpc_semaphore_disabled_message_matches_go() {
     assert_eq!(error.message(), "distributed semaphore is not enabled for this domain");
 }
 
+// Go handler.go AcquireSemaphore: the host limiter runs before the engine, so a denied
+// request answers ServiceBusyError and never reaches the semaphore code.
+#[tokio::test]
+async fn go_handler_acquire_semaphore_rate_limited_returns_service_busy() {
+    let domain_id = Uuid::from_u128(9102);
+    let matching = Matching::new(denied_after_first_state(domain_id));
+    let req = || semaphore_request(&domain_id.to_string(), "sem", 0, "1:w:r:1");
+    let _ = matching.acquire_semaphore(req()).await;
+    assert_host_busy(matching.acquire_semaphore(req()).await.unwrap_err());
+}
+
+// Go engine.go getOrCreateSemaphoreManager: a cache miss resolves the domain by ID before the
+// enabled flag, and the store's "Domain <id> does not exist." comes back as NotFound.
+#[tokio::test]
+async fn matching_rpc_semaphore_domain_not_found_matches_go() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(77).to_string();
+    let error = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, "1:w:r:1"))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::NotFound);
+    assert_eq!(error.message(), format!("Domain {domain} does not exist."));
+}
+
+// Go semaphore_manager.go grant checks the caller's context before its first write. An expired
+// caller gets Internal "context deadline exceeded" and must not leave a slot claimed.
+#[tokio::test]
+async fn matching_rpc_semaphore_expired_deadline_claims_no_slot() {
+    let (_dir, _store, mut matching, _key) = fixture();
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
+        "system.enableDistributedSemaphore", vec![bool_config(true, Some("domain"))]);
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    matching.frontend.state.executions.create_semaphore("domain", "sem", 2, 2).unwrap();
+    let mut expired = semaphore_request(&domain, "sem", 0, "1:w:r0:1");
+    expired.metadata_mut().insert("grpc-timeout", "0n".parse().unwrap());
+    let error = MatchingApi::acquire_semaphore(&matching, expired).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert_eq!(error.message(), "context deadline exceeded");
+    // Both slots are still free: two live owners are granted and a third is refused.
+    for owner in ["1:w:r1:1", "1:w:r2:1"] {
+        let granted = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, owner))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(granted.outcome, 1);
+    }
+    let refused = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, "1:w:r3:1"))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(refused.outcome, 2);
+}
+
 // Go `errIfSemaphoreOwnershipLost` answers "not known" as the owner once the engine is shutting down.
 #[ignore = "parity gap: Rust ownership check has no shutdown branch; Go rejects with SemaphoreNotOwnedByHostError owned-by \"not known\" while shutting down. go/service/matching/handler/engine.go:1675"]
 #[tokio::test]
