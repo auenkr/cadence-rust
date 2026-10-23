@@ -1,0 +1,25 @@
+ 00:32:07 up 14 days, 13:59,  1 user,  load average: 4.37, 4.16, 3.48
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       3.7Gi       930Mi       114Mi       3.5Gi       4.0Gi
+Swap:           11Gi       2.4Gi       9.2Gi
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Go baseline artifacts: /mnt/storage/service/gate-runs/backlog-mysql-two-control/run
+Traceback (most recent call last):
+  File "/mnt/storage/service/github/wt/backlogev/tests/run-go-service-baseline.py", line 1021, in <module>
+    result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
+        env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart or args.matching_backlog_forward else (600 if args.matching_delivery or args.rust_matching else 120)))
+  File "/usr/lib/python3.14/subprocess.py", line 557, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1221, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2179, in _communicate
+    self.wait(timeout=self._remaining_time(endtime))
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1279, in wait
+    return self._wait(timeout=timeout)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2076, in _wait
+    raise TimeoutExpired(self.args, timeout)
+subprocess.TimeoutExpired: Command '['node', '/mnt/storage/service/github/wt/backlogev/tests/matching-service-compat.cjs', '127.0.0.1:33435', '127.0.0.1:44277', '127.0.0.1:36803', '/mnt/storage/service/gate-runs/backlog-mysql-two-control/run/rust-matching', '127.0.0.1:51939', '', '1343344', 'production']' timed out after 120 seconds

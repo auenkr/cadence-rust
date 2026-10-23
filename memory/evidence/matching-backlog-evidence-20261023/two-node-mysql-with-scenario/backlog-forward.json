@@ -1,0 +1,18 @@
+{
+  "rootPartition": "backlog-forward-b21616e5-4064-45db-b86d-72553ed9e34e",
+  "childPartition": "/__cadence_sys/backlog-forward-b21616e5-4064-45db-b86d-72553ed9e34e/1",
+  "numReadPartitions": 2,
+  "numWritePartitions": 2,
+  "childToRoot": {
+    "workflowId": "fwd-child-b21616e5-4064-45db-b86d-72553ed9e34e",
+    "activityId": "forwarded-from-child",
+    "childBacklogRowsBeforeRootPoll": 1,
+    "rootPollOnly": true
+  },
+  "parentToChild": {
+    "workflowId": "fwd-parent-b21616e5-4064-45db-b86d-72553ed9e34e",
+    "activityId": "forwarded-from-parent",
+    "rootBacklogRowsBeforeChildPoll": 1,
+    "childPollOnly": true
+  }
+}
