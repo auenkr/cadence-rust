@@ -107,4 +107,7 @@ program logic change was needed. A unit test pins the request fields.
 Run from `/mnt/storage/service/github/wt/syncfwd/rust`, `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared`, via `cargo-safe`.
 
 - Baseline (before test edit), `/tmp/sf-base.log`, exit 0: `442 passed; 0 failed; 2 ignored`.
-- Final: see the results section below.
+- Final test, `/tmp/sf.log`, exit 0 (`/tmp/sf.exit` = 0): `443 passed; 0 failed; 2 ignored`. The
+  new test `grpc_matching::durable_tests::matching_rpc_sync_offer_forward_sends_go_forwarder_fields_to_parent ... ok`.
+- Final clippy, `cargo-safe clippy -p cadence-matching --all-targets -- -D warnings`, `/tmp/sf-clippy.exit` = 0.
+- Branch `matching-sync-offer-forward-20261023` pushed to origin (commit `500abca43`).
