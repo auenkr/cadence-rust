@@ -95,6 +95,32 @@ pub struct CassandraDomainUdt {
     pub owner_email: Option<String>,
 }
 
+/// `domain` UDT as stored in rows that may carry NULL fields (Go's seeded
+/// `cadence-domain-metadata` record has an all-NULL UDT; gocql reads NULL as zero).
+#[derive(Debug, Clone, DeserializeValue)]
+pub struct CassandraNullableDomainUdt {
+    pub id: Option<Uuid>,
+    pub name: Option<String>,
+    pub status: Option<i32>,
+    pub description: Option<String>,
+    pub data: Option<HashMap<String, String>>,
+    pub owner_email: Option<String>,
+}
+
+impl CassandraNullableDomainUdt {
+    /// `None` when the record has no id (the metadata record).
+    pub fn into_domain(self) -> Option<CassandraDomainUdt> {
+        Some(CassandraDomainUdt {
+            id: self.id?,
+            name: self.name.unwrap_or_default(),
+            status: self.status.unwrap_or_default(),
+            description: self.description,
+            data: self.data,
+            owner_email: self.owner_email,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, DeserializeValue)]
 pub struct CassandraDomainConfigUdt {
     pub retention: i32,

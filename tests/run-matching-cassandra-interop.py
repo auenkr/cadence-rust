@@ -44,10 +44,10 @@ def run(label, command, cwd):
     if result.returncode:
         sys.exit(result.returncode)
 
-run("go-seed", ["go", "run", "./tests/matching-cassandra-interop", "seed"], ROOT)
+run("go-seed", ["go", "run", "./tests/matching-cassandra-interop", "seed"], ROOT / "go")
 run("rust-restart-probe", [
     "cargo", "test", "--manifest-path", "rust/Cargo.toml", "-p", "cadence-persistence",
     "matching_cassandra::tests::go_seed_rust_write_restart_go_verify", "--", "--ignored", "--exact", "--nocapture",
 ], ROOT)
-run("go-verify", ["go", "run", "./tests/matching-cassandra-interop", "verify"], ROOT)
+run("go-verify", ["go", "run", "./tests/matching-cassandra-interop", "verify"], ROOT / "go")
 print(f"Cassandra interop passed; evidence: {ARTIFACTS}")
