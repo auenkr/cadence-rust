@@ -1,0 +1,36 @@
+starting matching (api v1-thrift)
+cadence-server running on 0.0.0.0:0: matching
+Cadence internal matching gRPC listening on 127.0.0.1:47873
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:54331
+dynamic config integer read failed (value was missing or had the wrong type); using default
+dynamic config integer read failed (value was missing or had the wrong type); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was not found); using default
+Matching task list lost ownership during shutdown: Task list range ID was 19 when it was should have been 18
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was not found); using default
+Matching task list lost ownership during shutdown: Task list range ID was 18 when it was should have been 17
+dynamic config integer read failed (value was missing or had the wrong type); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was missing or had the wrong type); using default
+dynamic config boolean read failed (value was missing or had the wrong type); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config boolean read failed (value was missing or had the wrong type); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config boolean read failed (value was missing or had the wrong type); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config integer read failed (value was not found); using default
+Matching task list lost ownership during shutdown: Task list range ID was 40 when it was should have been 39
+dynamic config integer read failed (value was not found); using default
+flushing Matching metrics failed: Connection refused (os error 111)
+shutting down

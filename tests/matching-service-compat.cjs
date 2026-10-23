@@ -44,7 +44,9 @@ function sqliteTaskState(domainId, taskList, label) {
     const durable = durableTaskCount(domainId, taskList, 0, undefined);
     fs.writeFileSync(path.join(path.resolve(process.argv[5]), label + '.log'), (durable.stdout || '') + '\n' + (durable.stderr || ''));
     if (durable.status !== 0) throw new Error('durable task observation failed (' + (durable.error || durable.status) + '); see ' + path.resolve(process.argv[5], label + '.log'));
-    return { queued_rows: Number(durable.stdout.trim()), range_id: null };
+    const range = durableTaskCount(domainId, taskList, 0, undefined, true);
+    if (range.status !== 0) throw new Error('task-list range observation failed (' + (range.error || range.status) + '): ' + (range.stderr || ''));
+    return { queued_rows: Number(durable.stdout.trim()), range_id: Number(range.stdout.trim()) };
   }
   const database = productionMode ? process.env.CADENCE_MATCHING_SQLITE_DB : path.join(path.resolve(process.argv[5]), 'matching.db');
   if (!database) throw new Error('SQLite production probe requires CADENCE_MATCHING_SQLITE_DB');
@@ -255,9 +257,9 @@ function mysqlRows(sql) {
 }
 // Every task query is constrained by the canonical domain UUID, the task list
 // and the task type, exactly like Go's task table keys.
-function durableTaskCount(domainId, taskList, taskType, fallbackDatabase) {
+function durableTaskCount(domainId, taskList, taskType, fallbackDatabase, rangeId = false) {
   if (process.env.CADENCE_MATCHING_MYSQL) {
-    const query = `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList)}' AND task_type=${taskType}`;
+    const query = rangeId ? `SELECT COALESCE(MAX(range_id),0) FROM task_lists WHERE domain_id=UNHEX('${domainHex(domainId)}') AND name='${sqlText(taskList)}' AND task_type=${taskType}` : `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList)}' AND task_type=${taskType}`;
     const result = mysqlQuery(query);
     if (result.status === 0) result.stdout = result.stdout.trim();
     return result;
@@ -274,7 +276,7 @@ function durableTaskCount(domainId, taskList, taskType, fallbackDatabase) {
     }
     const result = spawnSync('psql', ['-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1', '-v', `task_list=${taskList}`,
       '-v', `domain_id=${domainId}`, '-f', '-'], {
-      input: `SELECT count(*) FROM tasks WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND task_list_name = :'task_list' AND task_type = ${Number(taskType)};\n`,
+      input: rangeId ? `SELECT COALESCE(MAX(range_id),0) FROM task_lists WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND name = :'task_list' AND task_type = ${Number(taskType)};\n` : `SELECT count(*) FROM tasks WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND task_list_name = :'task_list' AND task_type = ${Number(taskType)};\n`,
       encoding: 'utf8', env: pgEnv,
     });
     if (result.status === 0) result.stdout = result.stdout.trim();
@@ -1079,6 +1081,16 @@ async function run() {
   // control its isolation metadata without changing Go History configuration.
   clients.Matching = new schema.matching.v1.MatchingAPI(process.argv[4], grpc.credentials.createInsecure());
   const isolatedList = { name: `isolated-${id}` };
+  if (failureRecoveryMode) {
+    // Two Rust instances share the ring: like Go's Matching, the non-owner answers
+    // the typed ABORTED status, so aim the direct client at whichever host owns the list.
+    try {
+      await call('Matching', 'DescribeTaskList', { domainId, request: { taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY' } });
+    } catch (error) {
+      if (error.code !== grpc.status.ABORTED) throw error;
+      clients.Matching = directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
+    }
+  }
   const isoStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
     ...startRequest, workflowId: `isolated-${id}`, taskList: isolatedList, requestId: randomUUID(),
   });

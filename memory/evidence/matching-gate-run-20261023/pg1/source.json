@@ -1,0 +1,11 @@
+{
+  "repository": "/mnt/storage/service/github/wt/gate4",
+  "head": "105ff1378d97bee144a288de4cc37fae33030126",
+  "branch": "matching-gate-run-20261023",
+  "status": [
+    "M tests/__pycache__/matching_evidence.cpython-314.pyc",
+    "?? memory/evidence/matching-gate-run-20261023/command-pg1.txt",
+    "?? memory/evidence/matching-gate-run-20261023/pg1.log",
+    "?? memory/evidence/matching-gate-run-20261023/pg1/"
+  ]
+}

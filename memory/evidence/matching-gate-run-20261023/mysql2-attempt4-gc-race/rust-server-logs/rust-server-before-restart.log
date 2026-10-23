@@ -1,0 +1,10 @@
+starting matching (api v1-thrift)
+cadence-server running on 0.0.0.0:0: matching
+Cadence internal matching gRPC listening on 127.0.0.1:58941
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:51709
+dynamic config integer read failed (value was missing or had the wrong type); using default
+dynamic config integer read failed (value was not found); using default
+Matching task list lost ownership during shutdown: Task list range ID was 2 when it was should have been 1
+dynamic config integer read failed (value was missing or had the wrong type); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config integer read failed (value was not found); using default

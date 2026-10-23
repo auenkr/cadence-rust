@@ -1,0 +1,2 @@
+env CADENCE_MYSQL_DOCKER_CONTAINER=cadence-mysql-gate
+/usr/bin/python3 tests/run-go-service-baseline.py --rust-services matching --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3 --mysql --history-transport grpc --rust-production-binary /mnt/storage/service/cargo-target-shared/debug/cadence-matching --binary /mnt/storage/service/gate-runs/matching-build/cadence-server --artifacts-dir /mnt/storage/service/gate-runs/mysql2 --evidence-dir memory/evidence/matching-gate-run-20261023/mysql2

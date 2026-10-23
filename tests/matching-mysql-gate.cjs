@@ -112,10 +112,17 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
   for (;;) {
     const state = {};
     for (const expectation of taskLists) {
-      const rows = readTaskListRows(query, domainHex, expectation.name)
-        .filter(row => row.taskType === expectation.taskType);
-      const taskRows = countTaskRows(query, domainHex, expectation.name, expectation.taskType);
-      const live = await liveBlockProvider(expectation.name, expectation.taskType);
+      // A short idle-check interval can evict and re-lease a list between the
+      // row read and the Describe, so re-read one list until both agree on the
+      // range. Go's idle eviction reloads on the next Describe the same way.
+      let rows, taskRows, live;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        rows = readTaskListRows(query, domainHex, expectation.name)
+          .filter(row => row.taskType === expectation.taskType);
+        taskRows = countTaskRows(query, domainHex, expectation.name, expectation.taskType);
+        live = await liveBlockProvider(expectation.name, expectation.taskType);
+        if (rows[0] && Math.floor((live.startId - 1) / rangeSize) + 1 === rows[0].rangeId) break;
+      }
       state[expectation.label] = { rows, taskRows, live };
     }
     const pendingTasks = countTaskRows(query, domainHex, pendingListName);

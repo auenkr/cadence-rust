@@ -1,0 +1,7 @@
+Existing Go SDK resumed and completed the pre-restart workflow/activity
+
+{"level":"info","ts":"2026-10-23T14:04:41.935+0530","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-10-23T14:04:41.935+0530","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-10-23T14:04:41.984+0530","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"service-compat-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf","TaskList":"graceful-drain-tasks-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf","WorkerID":"828432@appointy@graceful-drain-tasks-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf@5179ba04-9d29-4600-a1ae-bac0241bfe74"}
+{"level":"info","ts":"2026-10-23T14:04:41.990+0530","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"service-compat-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf","TaskList":"graceful-drain-tasks-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf","WorkerID":"828432@appointy@graceful-drain-tasks-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf@5179ba04-9d29-4600-a1ae-bac0241bfe74"}
+{"level":"info","ts":"2026-10-23T14:04:42.236+0530","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"service-compat-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf","TaskList":"graceful-drain-tasks-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf","WorkerID":"828432@appointy@graceful-drain-tasks-e2e6bf74-79cb-46b1-a9d8-d99303c98fdf@5179ba04-9d29-4600-a1ae-bac0241bfe74"}
