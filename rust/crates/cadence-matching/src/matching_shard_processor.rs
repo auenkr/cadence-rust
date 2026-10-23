@@ -230,4 +230,43 @@ mod tests {
         assert!(!reassigned.queue.is_stopped());
         assert_eq!(registry.loaded_owner_count(), 3);
     }
+
+    // Go: TestNewShardProcessorFailsWithEmptyParams. An empty shard key is refused.
+    #[tokio::test]
+    async fn shard_processor_factory_rejects_empty_shard_key() {
+        let (_dir, _store, registry) = fixture();
+        let factory = QueueRegistryShardProcessorFactory::new(registry, 0);
+        let error = match factory.create(String::new()).await {
+            Ok(_) => panic!("an empty shard key must not create a processor"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "ShardID must be specified");
+    }
+
+    // Go: TestGetShardReport. A new processor reports READY with zero load.
+    #[tokio::test]
+    async fn shard_processor_initial_report_is_ready_with_zero_load() {
+        let (_dir, _store, registry) = fixture();
+        let processor = QueueRegistryShardProcessorFactory::new(registry, 1_000_000_000)
+            .create("queue".into())
+            .await
+            .unwrap();
+        let report = processor.report();
+        assert_eq!(report.load, 0.0);
+        assert_eq!(report.status, sd::ShardStatus::Ready);
+    }
+
+    // Go: TestSetShardStatus. Setting the status is reflected by the next report.
+    #[tokio::test]
+    async fn shard_processor_set_status_is_reflected_in_report() {
+        let (_dir, _store, registry) = fixture();
+        let processor = QueueRegistryShardProcessorFactory::new(registry, 1_000_000_000)
+            .create("queue".into())
+            .await
+            .unwrap();
+        processor.set_status(sd::ShardStatus::Ready);
+        let report = processor.report();
+        assert_eq!(report.load, 0.0);
+        assert_eq!(report.status, sd::ShardStatus::Ready);
+    }
 }
