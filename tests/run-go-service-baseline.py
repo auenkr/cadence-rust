@@ -8,6 +8,9 @@ binaries; the rest stay on the original Go server (see tests/gates/README.md).
 --rust-matching replaces Go Matching with Rust using test-only Fx discovery.
 --history-transport selects Rust Matching's outbound History transport in the
 production Ringpop lane (grpc or tchannel).
+--matching-transport thrift makes the original Go Frontend/History/Worker call
+Rust Matching over TChannel/Thrift (system.enableGRPCOutbound=false in the Go
+dynamic config); the default grpc keeps today's gRPC path.
 """
 import argparse
 import base64
@@ -40,6 +43,8 @@ parser.add_argument('--build-only', action='store_true', help='build the selecte
 parser.add_argument('--dry-run', action='store_true', help='write the planned config and commands into the artifacts directory, then exit without building or starting any service')
 parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
     help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
+parser.add_argument('--matching-transport', choices=('grpc', 'thrift'), default='grpc',
+    help='transport the original Go services use for Matching calls: grpc (default) or thrift (TChannel/Thrift via system.enableGRPCOutbound=false in the Go dynamic config; also moves Go-to-Go History calls to TChannel)')
 parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'),
     help='configure and capture one Rust Matching exporter in the production Ringpop lane')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
@@ -331,6 +336,8 @@ if production_matching and args.go_mixed_server_bin:
     parser.error('Rust matching cannot use the Go test-binary discovery overlay (--go-mixed-server-bin)')
 if args.history_transport != 'grpc' and not production_matching:
     parser.error('--history-transport applies only with --rust-services matching')
+if args.matching_transport != 'grpc' and not production_matching:
+    parser.error('--matching-transport thrift requires --rust-services matching')
 if args.mysql and not production_matching:
     parser.error('--mysql requires --rust-services matching')
 if args.postgres and not production_matching:
@@ -469,7 +476,14 @@ if args.matching_idle_check_seconds is not None:
         '\nmatching.idleTasklistCheckInterval:\n'
         f'  - value: {args.matching_idle_check_seconds}s\n'
     )
-dynamic_config.write_text(dynamic_text)
+go_dynamic_text = dynamic_text
+if args.matching_transport == 'thrift':
+    # Go's direct outbounds for History and Matching become TChannel/Thrift
+    # (common/rpc/params.go EnableGRPCOutbound -> NewDirectOutboundBuilder). The
+    # Rust Matching dynamic config below is derived from dynamic_text and keeps
+    # its own system.enableGRPCOutbound from --history-transport.
+    go_dynamic_text += '\nsystem.enableGRPCOutbound:\n  - value: false\n'
+dynamic_config.write_text(go_dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
         'FRONTEND_PORT_GRPC', 'MATCHING_PORT_GRPC', 'HISTORY_PORT_GRPC',
         'FRONTEND_PORT_PPROF', 'MATCHING_PORT_PPROF', 'HISTORY_PORT_PPROF', 'WORKER_PORT_PPROF']
@@ -722,6 +736,7 @@ results = {
     'rustProductionBinary': str(rust_matching_binary) if production_matching else None,
     'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
     'historyTransport': args.history_transport if production_matching else None,
+    'matchingTransport': args.matching_transport,
     'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
     'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
     'acceptanceEligible': bool(args.cassandra) and not args.shard_distributor,
@@ -766,7 +781,7 @@ if args.dry_run:
         'goBinary': str(binary), 'rustMatchingBinary': str(rust_matching_binary) if production_matching else None,
         'rustMatchingBinaryIsPlanned': production_matching and not args.rust_production_binary,
         'serverCommand': command, 'rustCommandRecord': str(work / 'rust-matching-command.json') if production_matching else None,
-        'cassandra': args.cassandra, 'shardDistributor': args.shard_distributor,
+        'matchingTransport': args.matching_transport, 'cassandra': args.cassandra, 'shardDistributor': args.shard_distributor,
         'probe': 'tests/matching-service-compat.cjs' if production_matching or args.rust_matching or args.matching_restart
                  else ('tests/matching-history-compat.cjs' if args.matching_delivery else 'tests/service-workflow-compat.cjs')}, indent=2) + '\n')
     print(f'Dry run planned without building or starting services: {work / "dry-run.json"}', flush=True)

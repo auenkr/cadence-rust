@@ -617,11 +617,14 @@ fn application_error(
         },
         text(status.message()),
     )];
-    if name == "DomainNotActiveError" {
-        if let Some(v) = details
-            .as_ref()
-            .and_then(|v| p::DomainNotActiveError::decode(v.value.as_slice()).ok())
-        {
+    // Go's thrift mapper (common/types/mapper/thrift/shared.go) always fills
+    // these fields, and thriftrw rejects a reply that omits a required one.
+    match name {
+        "DomainNotActiveError" => {
+            let v = details
+                .as_ref()
+                .and_then(|v| p::DomainNotActiveError::decode(v.value.as_slice()).ok())
+                .unwrap_or_default();
             fields.extend([
                 (2, text(v.domain)),
                 (3, text(v.current_cluster)),
@@ -632,6 +635,28 @@ fn application_error(
                 ),
             ]);
         }
+        "EntityNotExistsError" => {
+            let v = details
+                .as_ref()
+                .and_then(|v| p::EntityNotExistsError::decode(v.value.as_slice()).ok())
+                .unwrap_or_default();
+            fields.extend([
+                (2, text(v.current_cluster)),
+                (3, text(v.active_cluster)),
+                (
+                    4,
+                    Value::List(v.active_clusters.into_iter().map(text).collect()),
+                ),
+            ]);
+        }
+        "ServiceBusyError" => {
+            let v = details
+                .as_ref()
+                .and_then(|v| p::ServiceBusyError::decode(v.value.as_slice()).ok())
+                .unwrap_or_default();
+            fields.push((2, text(v.reason)));
+        }
+        _ => {}
     }
     if name == "TaskListNotOwnedByHostError" {
         if let Some(v) = details.as_ref().and_then(|v| {
@@ -973,6 +998,36 @@ mod tests {
             event.opt_i32(30).unwrap(),
             Some(cadence_api::enums::EventType::DecisionTaskScheduled as i32)
         );
+    }
+    #[test]
+    fn matching_thrift_exceptions_fill_required_fields_like_go_mapper() {
+        let method = cadence_thrift::find_method("MatchingService::QueryWorkflow").unwrap();
+        // Untyped NotFound: thriftrw requires EntityNotExistsError.activeClusters (4).
+        let (wire, error) = application_error(method, Status::not_found("gone"));
+        assert_eq!(error.unwrap().0, "EntityNotExistsError");
+        let Value::Struct(details) = wire.get(3).unwrap() else { panic!("wrong field") };
+        assert_eq!(details.opt_string(1).unwrap().as_deref(), Some("gone"));
+        assert_eq!(details.opt_string(2).unwrap().as_deref(), Some(""));
+        assert_eq!(details.opt_string(3).unwrap().as_deref(), Some(""));
+        assert!(matches!(details.get(4), Some(Value::List(v)) if v.is_empty()));
+        // Untyped ResourceExhausted: Go always sends ServiceBusyError.reason (2).
+        let (wire, error) = application_error(method, Status::resource_exhausted("busy"));
+        assert_eq!(error.unwrap().0, "ServiceBusyError");
+        let Value::Struct(details) = wire.get(6).unwrap() else { panic!("wrong field") };
+        assert_eq!(details.opt_string(2).unwrap().as_deref(), Some(""));
+        // DomainNotActiveError without decodable details still carries 2-5.
+        let add = cadence_thrift::find_method("MatchingService::AddDecisionTask").unwrap();
+        let status = crate::grpc::detailed_status(
+            tonic::Code::FailedPrecondition,
+            "inactive",
+            "DomainNotActiveError",
+            p::DomainNotActiveError::default(),
+        );
+        let (wire, error) = application_error(add, status);
+        assert_eq!(error.unwrap().0, "DomainNotActiveError");
+        let Value::Struct(details) = wire.get(5).unwrap() else { panic!("wrong field") };
+        assert!(matches!(details.get(5), Some(Value::List(v)) if v.is_empty()));
+        assert!(details.get(2).is_some() && details.get(3).is_some() && details.get(4).is_some());
     }
     #[test]
     fn matching_thrift_uses_each_methods_exception_field_ids() {
