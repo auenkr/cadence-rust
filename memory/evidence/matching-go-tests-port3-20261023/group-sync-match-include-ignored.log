@@ -1,0 +1,64 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/gotests3/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/gotests3/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/gotests3/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/gotests3/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/gotests3/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/gotests3/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/gotests3/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 41s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 31 tests
+test matching_config::tests::activity_sync_match_wait_defaults_to_go_50ms ... ok
+test matching_dispatch::tests::matching_isolation_remote_sync_match_blocking_waits_for_root_poller ... ok
+test matching_dispatch::tests::matching_isolation_remote_sync_match_forwards_to_root_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_child_add_sync_matches_parent_without_duplicate_persistence ... ok
+test matching_dispatch::tests::matching_remote_sync_match_forwards_to_root_poller ... ok
+test matching_dispatch::tests::matching_sync_match_failure_reports_busy_without_matching ... ok
+test matching_dispatch::tests::matching_remote_sync_match_blocking_waits_for_root_poller ... ok
+test matching_query::tests::sync_match_query_hands_off_to_parked_poller ... ok
+test matching_query::tests::sync_match_queued_query_is_returned_to_next ... ok
+test matching_sync::tests::sync_match_cancellation_and_history_failure_allow_persistence_fallback ... ok
+test matching_sync::tests::sync_match_child_context_preserves_parent_tailroom ... ok
+test matching_query::tests::sync_match_non_blocking_query_poll_returns_queued_query_once ... ok
+test matching_sync::tests::sync_match_does_not_deliver_to_other_or_unknown_groups ... ok
+test matching_sync::tests::sync_match_isolation_group_hands_off_within_its_group ... ok
+test matching_sync::tests::sync_match_isolation_group_mismatch_does_not_match ... ok
+test matching_sync::tests::sync_match_isolation_queued_offer_is_returned_to_its_group ... ok
+test matching_sync::tests::sync_match_local_match_hands_off_to_waiting_poller ... ok
+test matching_sync::tests::sync_match_local_timeout_reports_no_match_when_poller_finishes_late ... ok
+test matching_sync::tests::sync_match_non_blocking_isolated_poll_returns_queued_offer_without_waiting ... ok
+test matching_sync::tests::sync_match_non_blocking_poll_returns_queued_offer_without_waiting ... ok
+test matching_sync::tests::sync_match_invalid_isolation_group_poll_gets_no_task ... FAILED
+test matching_sync::tests::sync_match_offer_deadline_before_poll_withdraws_offer ... ok
+test matching_sync::tests::sync_match_offer_without_waiting_poller_is_not_queued ... ok
+test matching_sync::tests::sync_match_poll_after_stop_returns_no_task ... ok
+test matching_sync::tests::sync_match_preserves_only_the_transient_forwarded_request_signal ... ok
+test matching_sync::tests::sync_match_queued_offer_is_returned_to_poll ... ok
+test matching_sync::tests::sync_match_stop_while_parked_releases_poller_without_task ... ok
+test matching_sync::tests::sync_match_waits_for_history_completion_and_preserves_original_metadata ... ok
+test matching_sync::tests::sync_match_zero_local_wait_hands_off_to_waiting_poller ... ok
+test matching_sync::tests::sync_match_zero_wait_claims_registered_poller_and_timeouts_withdraw_offers ... ok
+test matching_sync::tests::sync_match_non_blocking_poll_with_no_tasks_returns_immediately ... FAILED
+
+failures:
+
+---- matching_sync::tests::sync_match_invalid_isolation_group_poll_gets_no_task stdout ----
+
+thread 'matching_sync::tests::sync_match_invalid_isolation_group_poll_gets_no_task' (1202635) panicked at crates/cadence-matching/src/matching_sync.rs:812:9:
+unknown group poll returns no task without waiting
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- matching_sync::tests::sync_match_non_blocking_poll_with_no_tasks_returns_immediately stdout ----
+
+thread 'matching_sync::tests::sync_match_non_blocking_poll_with_no_tasks_returns_immediately' (1202643) panicked at crates/cadence-matching/src/matching_sync.rs:804:9:
+poll with no tasks returns None without waiting
+
+
+failures:
+    matching_sync::tests::sync_match_invalid_isolation_group_poll_gets_no_task
+    matching_sync::tests::sync_match_non_blocking_poll_with_no_tasks_returns_immediately
+
+test result: FAILED. 29 passed; 2 failed; 0 ignored; 0 measured; 421 filtered out; finished in 0.20s
+
+error: test failed, to rerun pass `-p cadence-matching --lib`
