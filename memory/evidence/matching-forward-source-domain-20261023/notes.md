@@ -32,8 +32,14 @@
   Go task blob or divergence from SQL reads).
 
 ## Open (not fixed here)
-- Go sync-offer forward (`matcher.go:219-222`) for freshly added tasks is not wired
-  in Rust, so the in-memory source-domain case is still not reachable from RPC.
+- CORRECTED 2026-10-23 (see `memory/matching-sync-forward-trace-20261023.md`): the Go
+  sync-offer forward (`matcher.go:219-222`) IS wired in Rust. `sync_match_chain`
+  (`grpc_matching.rs:1358`) is called from `add_decision_task` (`:2200`) and
+  `add_activity_task` (`:2415`), and its remote branch sets the Go fields
+  (`source` = the task's own domain; `SourceDomainUUID` is reachable from RPC). A test pins
+  those fields.
+- Remaining metric-only gap: a parent ServiceBusy on sync forward does not increment
+  `SyncMatchForwardTaskThrottleErrorPerTasklist` (Go `matcher.go:230-231`).
 
 ## Evidence (worktree /mnt/storage/service/github/wt/fwdsrc/rust, CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared)
 - Prerequisite: `git submodule update --init go/idls` (IDL missing in fresh worktree;
