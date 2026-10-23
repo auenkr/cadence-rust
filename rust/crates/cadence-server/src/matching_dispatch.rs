@@ -675,6 +675,50 @@ impl TaskDispatcher {
         )
         .await
     }
+    /// Go standby `getTask` -> `matcher.PollForQuery`: after the local wait
+    /// (served by the caller's query channel) the poll is forwarded to the
+    /// parent partition so its query channel is served too. Never claims
+    /// backlog tasks. A forward error or missing parent waits out the poll.
+    pub async fn forward_query_poll(
+        &self,
+        poll: p::PollForDecisionTaskRequest,
+        expiration: Duration,
+        lifecycle: PollLifecycle,
+    ) -> Result<m::PollForDecisionTaskResponse, Status> {
+        let deadline = tokio::time::Instant::now() + expiration;
+        if let Some(forward) = self.forward.as_ref() {
+            let wait = Duration::from_nanos((forward.local_wait)().max(0) as u64);
+            tokio::time::sleep(wait.min(expiration)).await;
+            let permit = tokio::select! {
+                permit = forward.permits.acquire() => permit,
+                _ = tokio::time::sleep_until(deadline) => None,
+            };
+            if let (Some(_permit), Some((parent, parent_name))) =
+                (permit, (forward.resolve)().await)
+            {
+                if !matches!(parent, Parent::Dispatcher(_)) {
+                    let target = ForwardPoll {
+                        target: parent,
+                        domain_id: self.domain_id.clone(),
+                        parent_name,
+                        forwarded_from: forward.source.clone(),
+                        poller_id: lifecycle.id.clone(),
+                        isolation_group: lifecycle.info.isolation_group.clone(),
+                        deadline,
+                    };
+                    let result = tokio::select! {
+                        result = poll.forward(target) => Some(result),
+                        _ = tokio::time::sleep_until(deadline) => None,
+                    };
+                    if let Some(Ok(response)) = result {
+                        return Ok(response);
+                    }
+                }
+            }
+        }
+        tokio::time::sleep_until(deadline).await;
+        Ok(m::PollForDecisionTaskResponse::default())
+    }
     pub async fn poll_activity(
         &self,
         poll: p::PollForActivityTaskRequest,
@@ -797,7 +841,8 @@ impl TaskDispatcher {
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         if let (Some(reader), Some(lifecycle)) = (self.reader.as_ref(), lifecycle.as_ref()) {
-            if !lifecycle.info.isolation_group.is_empty()
+            if reader.isolation_enabled()
+                && !lifecycle.info.isolation_group.is_empty()
                 && !reader.has_isolation_group(&lifecycle.info.isolation_group)
             {
                 if let Some(context) = lifecycle.metric_context.as_ref() {
@@ -1053,22 +1098,6 @@ impl TaskDispatcher {
                         }
                     }
                     StartErrorKind::Retry => {
-                        if !matches!(error.code(), tonic::Code::Cancelled | tonic::Code::DeadlineExceeded) {
-                            if let Some((metrics, context)) = lifecycle
-                                .as_ref()
-                                .and_then(|lifecycle| {
-                                    lifecycle
-                                        .metric_context
-                                        .as_ref()
-                                        .map(|context| (lifecycle.metrics.clone(), context.clone()))
-                                })
-                            {
-                                metrics.task_list_counter_event(
-                                    crate::matching_metrics::BUFFER_UNKNOWN_DISPATCH_ERROR,
-                                    &context,
-                                );
-                            }
-                        }
                         self.finish_delivery(task, Err(error)).await;
                     }
                 },

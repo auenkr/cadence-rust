@@ -299,9 +299,30 @@ pub fn query_outcome(
     }))
 }
 
+/// Go `forwarder.handleErr`: a parent `ServiceBusyError` becomes
+/// `ErrForwarderSlowDown`, so `OfferQuery` keeps waiting for a local poller.
+pub fn query_forward_slow_down(status: &Status) -> bool {
+    status.code() == tonic::Code::ResourceExhausted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn matching_query_forward_slow_down_only_for_service_busy() {
+        let busy = crate::grpc::detailed_status(
+            tonic::Code::ResourceExhausted,
+            "busy",
+            "ServiceBusyError",
+            p::ServiceBusyError {
+                reason: String::new(),
+            },
+        );
+        assert!(query_forward_slow_down(&busy));
+        assert!(!query_forward_slow_down(&Status::internal("boom")));
+        assert!(!query_forward_slow_down(&Status::deadline_exceeded("late")));
+    }
 
     #[test]
     fn matching_query_registration_drop_withdraws_cancelled_offer() {
