@@ -116,7 +116,7 @@ fn fixture() -> (
 ) {
     fixture_with_history("http://127.0.0.1:1")
 }
-fn fixture_with_history(
+pub(super) fn fixture_with_history(
     history_peer: &str,
 ) -> (
     tempfile::TempDir,
@@ -163,7 +163,7 @@ fn fixture_with_history(
         },
     )
 }
-fn execution() -> Option<p::WorkflowExecution> {
+pub(super) fn execution() -> Option<p::WorkflowExecution> {
     Some(p::WorkflowExecution {
         workflow_id: "remote-workflow".into(),
         run_id: Uuid::from_u128(2).to_string(),
@@ -285,7 +285,7 @@ async fn matching_remote_adds_and_query_reach_go_yarpc_through_production_handle
         .unwrap();
 }
 
-fn membership_with_parent_remote(
+pub(super) fn membership_with_parent_remote(
     child: &str,
     parent: &str,
     remote_address: &str,
@@ -1205,7 +1205,7 @@ impl h::history_api_server::HistoryApi for FakeHistory {
         Ok(tonic::Response::new(self.state.clone()))
     }
 }
-async fn start_fake_history(state: h::GetMutableStateResponse) -> String {
+pub(super) async fn start_fake_history(state: h::GetMutableStateResponse) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -1940,7 +1940,7 @@ async fn matching_rpc_forwarding_disabled_keeps_parent_backlog_untouched() {
 /// Matches Go matching's query task metadata: the frontend loads history with
 /// `next_event_id`, and a sticky task list plus a supported client decides
 /// `sticky_execution_enabled`.
-fn mutable_state() -> h::GetMutableStateResponse {
+pub(super) fn mutable_state() -> h::GetMutableStateResponse {
     h::GetMutableStateResponse {
         workflow_execution: execution(),
         workflow_type: Some(p::WorkflowType {
