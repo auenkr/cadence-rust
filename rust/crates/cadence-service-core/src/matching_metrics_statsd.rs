@@ -326,6 +326,12 @@ impl MetricSink for StatsdMetricSink {
                     Some(HistogramSpec::GoDefault1ms100s) => go_default_exponential_bounds(),
                     Some(HistogramSpec::GoLow1ms100s) => go_low_1ms100s_bounds_nanos(),
                     Some(HistogramSpec::GoMid1To16k) => go_low_1ms100s_bounds_nanos(),
+                    Some(HistogramSpec::GoPersistenceLatency) => {
+                        crate::matching_metrics::go_persistence_latency_bounds_nanos()
+                    }
+                    Some(HistogramSpec::GoResponseRowSize | HistogramSpec::GoResponsePayloadSize) => {
+                        return;
+                    }
                     None => go_default_duration_bounds_nanos(),
                 };
                 let (lower, upper) = duration_bucket_bounds(duration, &bounds);
@@ -337,9 +343,15 @@ impl MetricSink for StatsdMetricSink {
                 self.aggregate(bucket_name, "c", Aggregate::Counter(1));
             }
             (MetricKind::Histogram, MetricValue::Count(value))
-                if event.histogram == Some(HistogramSpec::GoMid1To16k) =>
+                if event.histogram.is_some_and(|spec| {
+                    spec == HistogramSpec::GoMid1To16k
+                        || crate::matching_metrics::go_value_histogram_bounds(spec).is_some()
+                }) =>
             {
-                let bounds = go_mid_1_to_16k_bounds();
+                let bounds = match event.histogram.and_then(crate::matching_metrics::go_value_histogram_bounds) {
+                    Some(bounds) => bounds,
+                    None => go_mid_1_to_16k_bounds(),
+                };
                 let index = bounds
                     .iter()
                     .position(|bound| value <= *bound)

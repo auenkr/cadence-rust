@@ -41,6 +41,30 @@ pub fn limit_semaphore_store(
     Arc::new(RateLimitedSemaphoreStore { store, limiter })
 }
 
+/// Go `GetTasksResponse.ByteSize` (amd64): slice header plus, per `TaskInfo`,
+/// `Sizeof` (128) and the string/map payload lengths.
+fn get_tasks_byte_size(tasks: &[cadence_persistence::matching_task_store::AllocatedTask]) -> u64 {
+    const RESPONSE_SIZE: u64 = 24;
+    const TASK_INFO_SIZE: u64 = 128;
+    // DomainID is not part of the Rust row; the Go value is a 36-byte UUID string.
+    const DOMAIN_ID_LEN: u64 = 36;
+    RESPONSE_SIZE
+        + tasks
+            .iter()
+            .map(|task| {
+                let run_id = if task.data.run_id.is_some() { 36 } else { 0 };
+                let partition = task.data.partition_config.as_ref().map_or(0, |map| {
+                    map.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum()
+                });
+                TASK_INFO_SIZE
+                    + DOMAIN_ID_LEN
+                    + task.data.workflow_id.len() as u64
+                    + run_id
+                    + partition
+            })
+            .sum::<u64>()
+}
+
 struct RateLimitedTaskStore {
     store: Arc<dyn MatchingTaskStore>,
     limiter: Arc<MatchingPersistenceLimiter>,
@@ -139,8 +163,12 @@ impl MatchingTaskStore for RateLimitedTaskStore {
             .get_tasks(key, read_level, max_read_level, batch_size);
         self.limiter
             .record_task_call("GetTasks", Some(key.domain_id), started.elapsed(), &result);
-        if matches!(&result, Ok(tasks) if tasks.is_empty()) {
-            self.limiter.record_empty_response("GetTasks");
+        if let Ok(tasks) = &result {
+            self.limiter.record_list_response(
+                "GetTasks",
+                tasks.len() as u64,
+                get_tasks_byte_size(tasks),
+            );
         }
         result
     }
@@ -222,13 +250,35 @@ impl RateLimitedDomainSource {
     }
 }
 
+impl RateLimitedDomainSource {
+    fn record<T>(
+        &self,
+        operation: &'static str,
+        elapsed: std::time::Duration,
+        result: &Result<T, DomainMetadataSourceError>,
+    ) {
+        use crate::matching_domain_cache::DomainErrorClass;
+        use crate::matching_persistence_limiter::PersistenceErrorClass;
+        let class = result.as_ref().err().map(|error| match error.class {
+            DomainErrorClass::NotFound => PersistenceErrorClass::NotFound,
+            DomainErrorClass::BadRequest => PersistenceErrorClass::BadRequest,
+            DomainErrorClass::DbUnavailable => PersistenceErrorClass::DbUnavailable,
+            DomainErrorClass::Internal => PersistenceErrorClass::Internal,
+        });
+        self.limiter.record_domain_call(operation, elapsed, class);
+    }
+}
+
 impl DomainMetadataSource for RateLimitedDomainSource {
     fn metadata_version(
         &self,
         timeout: std::time::Duration,
     ) -> Result<i64, DomainMetadataSourceError> {
         self.permit("GetMetadata", None)?;
-        self.source.metadata_version(timeout)
+        let started = std::time::Instant::now();
+        let result = self.source.metadata_version(timeout);
+        self.record("GetMetadata", started.elapsed(), &result);
+        result
     }
     fn list_domains(
         &self,
@@ -237,8 +287,31 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         timeout: std::time::Duration,
     ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
         self.permit("ListDomain", None)?;
-        self.source
-            .list_domains(page_size, next_page_token, timeout)
+        let started = std::time::Instant::now();
+        let result = self
+            .source
+            .list_domains(page_size, next_page_token, timeout);
+        self.record("ListDomain", started.elapsed(), &result);
+        if let Ok(page) = &result {
+            // Go `ListDomainsResponse.ByteSize`: Sizeof (32) + token + domains.
+            let payload = 32
+                + page.next_page_token.as_ref().map_or(0, |t| t.len() as u64)
+                + page
+                    .domains
+                    .iter()
+                    .map(|d| {
+                        // Config and replication sizes are not modeled; the
+                        // info part follows `DomainInfo.ByteSize`.
+                        128 + 36
+                            + (d.info.name.len() + d.info.description.len() + d.info.owner_email.len())
+                                as u64
+                            + d.info.data.iter().flat_map(|m| m.iter()).map(|(k, v)| (k.len() + v.len()) as u64).sum::<u64>()
+                    })
+                    .sum::<u64>();
+            self.limiter
+                .record_list_response("ListDomain", page.domains.len() as u64, payload);
+        }
+        result
     }
     fn get_domain(
         &self,
@@ -250,7 +323,10 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         DomainMetadataSourceError,
     > {
         self.permit("GetDomain", name)?;
-        self.source.get_domain(name, id, timeout)
+        let started = std::time::Instant::now();
+        let result = self.source.get_domain(name, id, timeout);
+        self.record("GetDomain", started.elapsed(), &result);
+        result
     }
 }
 

@@ -95,9 +95,15 @@ impl CassandraMatchingTaskStore {
     fn session(&self) -> Arc<Session> {
         self.driver.session()
     }
-    fn internal(error: impl std::fmt::Display) -> MatchingTaskStoreError {
+    fn internal(error: impl std::fmt::Display + 'static) -> MatchingTaskStoreError {
+        // Go nosql `convertCommonErrors`: gocql unavailability becomes
+        // `DBUnavailableError`, everything else unclassified is internal.
+        let kind = match (&error as &dyn std::any::Any).downcast_ref::<ExecutionError>() {
+            Some(error) if is_unavailable(error) => BackendErrorKind::DbUnavailable,
+            _ => BackendErrorKind::Internal,
+        };
         MatchingTaskStoreError::Backend {
-            kind: BackendErrorKind::Internal,
+            kind,
             message: error.to_string(),
         }
     }
