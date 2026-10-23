@@ -4225,3 +4225,52 @@ async fn go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_no
         assert_eq!(err.message(), "Only normal tasklist's partition config can be updated.");
     }
 }
+
+// engine_integration_test.go AddTasksTest (non-forwarded): 111 adds all persist.
+#[tokio::test]
+async fn go_engine_add_decision_and_activity_tasks_persist_every_task() {
+    let (_dir, store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    for i in 0..111i64 {
+        matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(), workflow_execution: execution(), task_list: list(),
+            schedule_id: i * 3, ..Default::default()
+        })).await.unwrap();
+        matching.add_activity_task(Request::new(m::AddActivityTaskRequest {
+            domain_id: domain.clone(), source_domain_id: domain.clone(), workflow_execution: execution(),
+            task_list: list(), schedule_id: i * 3, ..Default::default()
+        })).await.unwrap();
+    }
+    assert_eq!(store.task_list_size(&key, 0).unwrap(), 111);
+    assert_eq!(store.task_list_size(&key, 1).unwrap(), 111);
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+// engine_integration_test.go AddAndPollTasks (decision, no isolation): add 6, poll all, FIFO, store drained.
+#[tokio::test]
+async fn go_engine_add_then_poll_decision_tasks_delivers_each_task_and_drains_store() {
+    let address = start_starting_history().await;
+    let (_dir, store, matching, key) = fixture_with_history(&address);
+    let domain = key.domain_id.to_string();
+    for i in 0..6i64 {
+        matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(), workflow_execution: execution(), task_list: list(),
+            schedule_id: i * 3, ..Default::default()
+        })).await.unwrap();
+    }
+    assert_eq!(store.task_list_size(&key, 0).unwrap(), 6);
+    let mut seen = Vec::new();
+    for _ in 0..6 {
+        let response = matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain.clone(), poller_id: "add-poll".into(),
+            request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+        }))).await.unwrap().into_inner();
+        assert!(!response.task_token.is_empty());
+        seen.push(response.scheduled_event_id);
+    }
+    assert_eq!(seen, vec![0, 3, 6, 9, 12, 15]);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while store.task_list_size(&key, 0).unwrap() != 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
+    }).await.expect("acked tasks are deleted");
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
