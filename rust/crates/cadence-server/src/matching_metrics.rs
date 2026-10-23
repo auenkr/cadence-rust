@@ -264,7 +264,10 @@ pub(crate) fn record_persistence_qps_rejection(
         let per_domain = domain.is_some();
         let mut go_tags = BTreeMap::new();
         go_tags.insert(OPERATION_TAG.to_owned(), go_operation.to_owned());
-        go_tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".to_owned());
+        go_tags.insert(IS_RETRY_TAG.to_owned(), "false".to_owned());
+        if domain.is_none() {
+            go_tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".to_owned());
+        }
         if let Some(domain) = domain {
             go_tags.insert(DOMAIN_TAG.to_owned(), go_sanitize_metric_value(domain));
         }
@@ -352,6 +355,7 @@ pub struct InboundMetricContext {
 
 tokio::task_local! {
     static INBOUND_METRIC_CONTEXT: InboundMetricContext;
+    static REQUEST_METRIC_TAGS: BTreeMap<String, String>;
 }
 
 fn go_sanitize_metric_value(value: &str) -> String {
@@ -1197,6 +1201,36 @@ impl MatchingMetrics {
         name: &str,
         context: &PollMetricContext,
     ) -> BTreeMap<String, String> {
+        if matches!(
+            name,
+            FORWARDED_PER_TASK_LIST
+                | LOCAL_TO_LOCAL_MATCH
+                | LOCAL_TO_REMOTE_MATCH
+                | REMOTE_TO_LOCAL_MATCH
+                | REMOTE_TO_REMOTE_MATCH
+                | ISOLATION_TASK_MATCH
+                | ISOLATION_SUCCESS
+                | POLL_DECISION_ALREADY_STARTED
+                | POLL_ACTIVITY_ALREADY_STARTED
+                | RESPOND_QUERY_TASK_FAILED
+        ) {
+            if let Ok(tags) = REQUEST_METRIC_TAGS.try_with(Clone::clone) {
+                return tags;
+            }
+            let method = if name == RESPOND_QUERY_TASK_FAILED {
+                "RespondQueryTaskCompleted"
+            } else if context.task_type == "activity_task" {
+                "PollForActivityTask"
+            } else {
+                "PollForDecisionTask"
+            };
+            return Self::request_tags(
+                method,
+                Some(&context.domain),
+                Some((&context.task_list, Some(context.task_list_kind))),
+                None,
+            );
+        }
         let mut tags = self.task_list_tags(context);
         if matches!(
             name,
@@ -1417,7 +1451,7 @@ impl MatchingMetrics {
             start: std::time::Instant::now(),
             finished: false,
         };
-        let result = future.await;
+        let result = REQUEST_METRIC_TAGS.scope(timer.tags.clone(), future).await;
         if let Err(ref error) = result {
             let metric = error.matching_error_metric();
             if metric != CADENCE_FAILURES_PER_TASK_LIST {

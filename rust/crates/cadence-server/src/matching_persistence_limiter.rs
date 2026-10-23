@@ -14,6 +14,8 @@ const HOST_QPS_DEFAULT: i64 = 3000;
 const GLOBAL_QPS_DEFAULT: i64 = 0;
 const REFRESH_NANOS: i64 = 5_000_000_000;
 
+type DomainNameResolver = Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>;
+
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,6 +42,7 @@ pub struct MatchingPersistenceLimiter {
     enabled: bool,
     rejected: AtomicU64,
     metric_sink: RwLock<Arc<dyn crate::matching_metrics::MetricSink>>,
+    domain_name: RwLock<DomainNameResolver>,
 }
 
 impl std::fmt::Debug for MatchingPersistenceLimiter {
@@ -81,6 +84,7 @@ impl MatchingPersistenceLimiter {
             enabled,
             rejected: AtomicU64::new(0),
             metric_sink: RwLock::new(Arc::new(crate::matching_metrics::NoopMetricSink)),
+            domain_name: RwLock::new(Arc::new(|_| None)),
         })
     }
 
@@ -107,20 +111,63 @@ impl MatchingPersistenceLimiter {
         );
     }
 
+    pub fn with_domain_cache(
+        &self,
+        cache: &Arc<crate::matching_domain_cache::MatchingDomainCache>,
+    ) {
+        let cache = Arc::downgrade(cache);
+        *self
+            .domain_name
+            .write()
+            .expect("Matching metric domain resolver lock") = Arc::new(move |id| {
+            cache
+                .upgrade()
+                .and_then(|cache| cache.cached_domain_name(&id.to_string()))
+        });
+    }
+
+    pub(crate) fn record_task_rejection(
+        &self,
+        operation: &'static str,
+        domain_id: Option<uuid::Uuid>,
+    ) {
+        let domain = domain_id.map(|id| {
+            (self
+                .domain_name
+                .read()
+                .expect("Matching metric domain resolver lock"))(id)
+            .unwrap_or_else(|| "_unknown_".into())
+        });
+        self.record_rejection(operation, domain.as_deref(), Some(operation));
+    }
+
     pub(crate) fn record_task_call<T>(
         &self,
         operation: &'static str,
+        domain_id: Option<uuid::Uuid>,
         elapsed: std::time::Duration,
         result: &cadence_persistence::matching_task_store::Result<T>,
     ) {
         use crate::matching_metrics::*;
         use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
         let sink = self.metric_sink.read().expect("Matching metrics sink lock");
-        let tags = std::collections::BTreeMap::from([
+        let mut tags = std::collections::BTreeMap::from([
             (OPERATION_TAG.to_owned(), operation.to_owned()),
-            (TASK_CATEGORY_TAG.to_owned(), "none".to_owned()),
             (IS_RETRY_TAG.to_owned(), "false".to_owned()),
         ]);
+        if let Some(id) = domain_id {
+            let domain = (self
+                .domain_name
+                .read()
+                .expect("Matching metric domain resolver lock"))(id);
+            tags.insert(
+                DOMAIN_TAG.to_owned(),
+                domain.unwrap_or_else(|| "_unknown_".into()),
+            );
+        } else {
+            tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".into());
+        }
+        let per_domain = domain_id.is_some();
         let record = |name, kind, value, histogram| {
             sink.record(MetricEvent {
                 name,
@@ -131,13 +178,21 @@ impl MatchingPersistenceLimiter {
             })
         };
         record(
-            PERSISTENCE_REQUESTS,
+            if per_domain {
+                PERSISTENCE_REQUESTS_PER_DOMAIN
+            } else {
+                PERSISTENCE_REQUESTS
+            },
             MetricKind::Counter,
             MetricValue::Count(1),
             None,
         );
         record(
-            "persistence_latency",
+            if per_domain {
+                "persistence_latency_per_domain"
+            } else {
+                "persistence_latency"
+            },
             MetricKind::Timer,
             MetricValue::Duration(elapsed),
             None,
@@ -151,7 +206,11 @@ impl MatchingPersistenceLimiter {
             histogram_tags.insert(key.to_owned(), value.to_owned());
         }
         sink.record(MetricEvent {
-            name: "persistence_latency_ns",
+            name: if per_domain {
+                "persistence_latency_per_domain_ns"
+            } else {
+                "persistence_latency_ns"
+            },
             kind: MetricKind::Histogram,
             value: MetricValue::Duration(elapsed),
             tags: histogram_tags,
@@ -159,24 +218,61 @@ impl MatchingPersistenceLimiter {
         });
         if let Err(error) = result {
             let (name, failure) = match error {
-                MatchingTaskStoreError::ConditionFailed(_) => {
-                    ("persistence_errors_condition_failed", false)
-                }
-                MatchingTaskStoreError::NotFound => ("persistence_errors_entity_not_exists", false),
+                MatchingTaskStoreError::ConditionFailed(_) => (
+                    if per_domain {
+                        "persistence_errors_condition_failed_per_domain"
+                    } else {
+                        "persistence_errors_condition_failed"
+                    },
+                    false,
+                ),
+                MatchingTaskStoreError::NotFound => (
+                    if per_domain {
+                        "persistence_errors_entity_not_exists_per_domain"
+                    } else {
+                        "persistence_errors_entity_not_exists"
+                    },
+                    false,
+                ),
                 MatchingTaskStoreError::Backend {
                     kind: BackendErrorKind::Timeout,
                     ..
-                } => ("persistence_errors_timeout", true),
+                } => (
+                    if per_domain {
+                        "persistence_errors_timeout_per_domain"
+                    } else {
+                        "persistence_errors_timeout"
+                    },
+                    true,
+                ),
                 MatchingTaskStoreError::Backend {
                     kind: BackendErrorKind::Throttled,
                     ..
-                } => (PERSISTENCE_ERRORS_BUSY, true),
-                _ => (PERSISTENCE_FAILURES, false),
+                } => (
+                    if per_domain {
+                        PERSISTENCE_ERRORS_BUSY_PER_DOMAIN
+                    } else {
+                        PERSISTENCE_ERRORS_BUSY
+                    },
+                    true,
+                ),
+                _ => (
+                    if per_domain {
+                        PERSISTENCE_FAILURES_PER_DOMAIN
+                    } else {
+                        PERSISTENCE_FAILURES
+                    },
+                    false,
+                ),
             };
             record(name, MetricKind::Counter, MetricValue::Count(1), None);
             if failure {
                 record(
-                    PERSISTENCE_FAILURES,
+                    if per_domain {
+                        PERSISTENCE_FAILURES_PER_DOMAIN
+                    } else {
+                        PERSISTENCE_FAILURES
+                    },
                     MetricKind::Counter,
                     MetricValue::Count(1),
                     None,
@@ -372,11 +468,13 @@ mod metered_task_tests {
         limiter.with_metric_sink(sink.clone());
         limiter.record_task_call(
             "GetTasks",
+            None,
             std::time::Duration::from_millis(3),
             &Ok::<_, MatchingTaskStoreError>(()),
         );
         limiter.record_task_call(
             "UpdateTaskList",
+            None,
             std::time::Duration::from_millis(1),
             &Err::<(), _>(MatchingTaskStoreError::ConditionFailed("lease".into())),
         );

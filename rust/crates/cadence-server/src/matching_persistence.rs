@@ -47,12 +47,11 @@ struct RateLimitedTaskStore {
 }
 
 impl RateLimitedTaskStore {
-    fn permit(&self, operation: &'static str) -> TaskResult<()> {
+    fn permit(&self, operation: &'static str, domain_id: Option<Uuid>) -> TaskResult<()> {
         if self.limiter.allow() {
             Ok(())
         } else {
-            self.limiter
-                .record_rejection(operation, None, Some(operation));
+            self.limiter.record_task_rejection(operation, domain_id);
             Err(MatchingTaskStoreError::Backend {
                 kind: cadence_persistence::matching_task_store::BackendErrorKind::Throttled,
                 message: REJECTED.into(),
@@ -63,11 +62,11 @@ impl RateLimitedTaskStore {
 
 impl MatchingTaskStore for RateLimitedTaskStore {
     fn get_task_list(&self, key: &TaskListKey) -> TaskResult<TaskListRecord> {
-        self.permit("GetTaskList")?;
+        self.permit("GetTaskList", None)?;
         let started = std::time::Instant::now();
         let result = self.store.get_task_list(key);
         self.limiter
-            .record_task_call("GetTaskList", started.elapsed(), &result);
+            .record_task_call("GetTaskList", None, started.elapsed(), &result);
         result
     }
     fn lease(
@@ -77,11 +76,15 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         previous_range: i64,
         now_nanos: i64,
     ) -> TaskResult<TaskListRecord> {
-        self.permit("LeaseTaskList")?;
+        self.permit("LeaseTaskList", Some(key.domain_id))?;
         let started = std::time::Instant::now();
         let result = self.store.lease(key, kind, previous_range, now_nanos);
-        self.limiter
-            .record_task_call("LeaseTaskList", started.elapsed(), &result);
+        self.limiter.record_task_call(
+            "LeaseTaskList",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
         result
     }
     fn update_task_list(
@@ -91,11 +94,15 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         data: TaskListData,
         now_nanos: i64,
     ) -> TaskResult<()> {
-        self.permit("UpdateTaskList")?;
+        self.permit("UpdateTaskList", Some(key.domain_id))?;
         let started = std::time::Instant::now();
         let result = self.store.update_task_list(key, range, data, now_nanos);
-        self.limiter
-            .record_task_call("UpdateTaskList", started.elapsed(), &result);
+        self.limiter.record_task_call(
+            "UpdateTaskList",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
         result
     }
     fn create_tasks_with_domains(
@@ -105,13 +112,17 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> TaskResult<()> {
-        self.permit("CreateTask")?;
+        self.permit("CreateTask", Some(key.domain_id))?;
         let started = std::time::Instant::now();
         let result = self
             .store
             .create_tasks_with_domains(key, range, now_nanos, tasks);
-        self.limiter
-            .record_task_call("CreateTask", started.elapsed(), &result);
+        self.limiter.record_task_call(
+            "CreateTask",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
         result
     }
     fn get_tasks(
@@ -121,29 +132,37 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         max_read_level: i64,
         batch_size: i64,
     ) -> TaskResult<Vec<AllocatedTask>> {
-        self.permit("GetTasks")?;
+        self.permit("GetTasks", Some(key.domain_id))?;
         let started = std::time::Instant::now();
         let result = self
             .store
             .get_tasks(key, read_level, max_read_level, batch_size);
         self.limiter
-            .record_task_call("GetTasks", started.elapsed(), &result);
+            .record_task_call("GetTasks", Some(key.domain_id), started.elapsed(), &result);
         result
     }
     fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> TaskResult<i64> {
-        self.permit("GetTaskListSize")?;
+        self.permit("GetTaskListSize", Some(key.domain_id))?;
         let started = std::time::Instant::now();
         let result = self.store.task_list_size(key, ack_level);
-        self.limiter
-            .record_task_call("GetTaskListSize", started.elapsed(), &result);
+        self.limiter.record_task_call(
+            "GetTaskListSize",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
         result
     }
     fn complete_task(&self, key: &TaskListKey, task_id: i64) -> TaskResult<()> {
-        self.permit("CompleteTask")?;
+        self.permit("CompleteTask", Some(key.domain_id))?;
         let started = std::time::Instant::now();
         let result = self.store.complete_task(key, task_id);
-        self.limiter
-            .record_task_call("CompleteTask", started.elapsed(), &result);
+        self.limiter.record_task_call(
+            "CompleteTask",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
         result
     }
     fn complete_tasks_less_than(
@@ -152,21 +171,29 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         inclusive_task_id: i64,
         limit: i64,
     ) -> TaskResult<usize> {
-        self.permit("CompleteTasksLessThan")?;
+        self.permit("CompleteTasksLessThan", Some(key.domain_id))?;
         let started = std::time::Instant::now();
         let result = self
             .store
             .complete_tasks_less_than(key, inclusive_task_id, limit);
-        self.limiter
-            .record_task_call("CompleteTasksLessThan", started.elapsed(), &result);
+        self.limiter.record_task_call(
+            "CompleteTasksLessThan",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
         result
     }
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> TaskResult<()> {
-        self.permit("DeleteTaskList")?;
+        self.permit("DeleteTaskList", Some(key.domain_id))?;
         let started = std::time::Instant::now();
         let result = self.store.delete_task_list(key, range);
-        self.limiter
-            .record_task_call("DeleteTaskList", started.elapsed(), &result);
+        self.limiter.record_task_call(
+            "DeleteTaskList",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
         result
     }
 }

@@ -1213,6 +1213,9 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
+            if let (Some(limiter), Some(cache)) = (matching_persistence_limiter.as_ref(), matching_domain_cache.as_ref()) {
+                limiter.with_domain_cache(cache);
+            }
             // Explicit production config starts the shared metadata cache and
             // opens Matching queues on the configured defaultStore. The
             // private data-dir database is only an embedded-development path.
