@@ -1,0 +1,7 @@
+ 02:13:56 up 14 days, 15:41,  1 user,  load average: 0.58, 3.50, 3.86
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       4.3Gi       288Mi       399Mi       3.8Gi       3.4Gi
+Swap:           11Gi       2.4Gi       9.2Gi
+Go baseline artifacts: /tmp/gatefinal2/l6
+Selected evidence copied to /mnt/storage/service/github/wt/gatefinal2/memory/evidence/matching-gate-final2-20261023/6-sd-fixture/evidence: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'go-sdk.log', 'graceful-drain-sdk.log', 'restart-sdk.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-after-restart.log', 'rust-server-logs/rust-server-before-restart.log', 'rust-server-logs/rust-server-secondary.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_sqlite.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Preliminary production process probe completed; it is not Matching acceptance evidence: /tmp/gatefinal2/l6/results.json

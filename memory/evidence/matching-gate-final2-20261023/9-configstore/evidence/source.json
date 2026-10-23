@@ -1,0 +1,11 @@
+{
+  "repository": "/mnt/storage/service/github/wt/gatefinal2",
+  "head": "f40aae7524c6134c1eb6ea68b7dc68ec0ba35292",
+  "branch": "matching-gate-final2-20261023",
+  "status": [
+    "M tests/matching-service-compat.cjs",
+    " M tests/run-go-service-baseline.py",
+    "?? go/tests/configstore-seed/",
+    "?? memory/evidence/matching-gate-final2-20261023/9-configstore/"
+  ]
+}

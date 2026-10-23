@@ -1,0 +1,12 @@
+ 02:19:00 up 14 days, 15:46,  1 user,  load average: 0.13, 1.37, 2.81
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       3.8Gi       808Mi       428Mi       3.8Gi       3.9Gi
+Swap:           11Gi       2.3Gi       9.3Gi
+ 02:19:00 up 14 days, 15:46,  1 user,  load average: 0.13, 1.37, 2.81
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       3.8Gi       808Mi       428Mi       3.8Gi       3.9Gi
+Swap:           11Gi       2.3Gi       9.3Gi
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Go baseline artifacts: /tmp/gatefinal2/l8/run
+Selected evidence copied to /mnt/storage/service/github/wt/gatefinal2/memory/evidence/matching-gate-final2-20261023/8-backlog-two-node/evidence: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'db-observations.json', 'gc-backlog-sdk.log', 'go-sdk.log', 'graceful-drain-sdk.log', 'restart-sdk.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-after-failure-recovery.log', 'rust-server-logs/rust-server-after-graceful-drain.log', 'rust-server-logs/rust-server-after-restart.log', 'rust-server-logs/rust-server-before-restart.log', 'rust-server-logs/rust-server-secondary.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_mysql.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Preliminary production process probe completed; it is not Matching acceptance evidence: /tmp/gatefinal2/l8/run/results.json

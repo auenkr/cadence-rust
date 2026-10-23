@@ -1,0 +1,10 @@
+{
+  "repository": "/mnt/storage/service/github/wt/gatefinal2",
+  "head": "da02cd2646a58855d05175a84b8d7759257970ca",
+  "branch": "matching-gate-final2-20261023",
+  "status": [
+    "?? memory/evidence/matching-gate-final2-20261023/6-sd-fixture-attempt1-failed/",
+    "?? memory/evidence/matching-gate-final2-20261023/6-sd-fixture-attempt1-run/",
+    "?? memory/evidence/matching-gate-final2-20261023/6-sd-fixture/"
+  ]
+}

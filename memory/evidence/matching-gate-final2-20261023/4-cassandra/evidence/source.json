@@ -1,0 +1,11 @@
+{
+  "repository": "/mnt/storage/service/github/wt/gatefinal2",
+  "head": "990815bf8aa5104c884938a599bb4a4da4ae1a44",
+  "branch": "matching-gate-final2-20261023",
+  "status": [
+    "M tests/matching-service-compat.cjs",
+    "?? memory/evidence/matching-gate-final2-20261023/4-cassandra-attempt1-failed/",
+    "?? memory/evidence/matching-gate-final2-20261023/4-cassandra-attempt1-run/",
+    "?? memory/evidence/matching-gate-final2-20261023/4-cassandra/"
+  ]
+}

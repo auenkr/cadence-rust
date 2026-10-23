@@ -1,0 +1,269 @@
+{
+  "decoderFixtureCases": 4,
+  "taskGarbageCollection": {
+    "pendingTaskRows": 1,
+    "statements": [
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a16a6f6e8b7e19a44e7f858365e327') AND name='gc-backlog-e501d5a5-8b7e-4316-9a1d-72d64cb7d009' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a16a6f6e8b7e19a44e7f858365e327') AND name='gc-backlog-e501d5a5-8b7e-4316-9a1d-72d64cb7d009' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a16a6f6e8b7e19a44e7f858365e327') AND name='tasks-e501d5a5-8b7e-4316-9a1d-72d64cb7d009' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a16a6f6e8b7e19a44e7f858365e327') AND name='tasks-e501d5a5-8b7e-4316-9a1d-72d64cb7d009' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a16a6f6e8b7e19a44e7f858365e327') AND name='restart-tasks-e501d5a5-8b7e-4316-9a1d-72d64cb7d009' ORDER BY task_type",
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a16a6f6e8b7e19a44e7f858365e327') AND name='restart-tasks-e501d5a5-8b7e-4316-9a1d-72d64cb7d009' ORDER BY task_type",
+      "SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('01a16a6f6e8b7e19a44e7f858365e327') AND task_list_name='gc-pending-e501d5a5-8b7e-4316-9a1d-72d64cb7d009'"
+    ],
+    "snapshots": [
+      {
+        "at": "2026-10-23T20:25:11.894Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-23T20:25:13.513Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 2,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      },
+      {
+        "at": "2026-10-23T20:25:16.170Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": true,
+        "queues": {
+          "backlogDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "backlogActivity": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 2,
+            "liveRange": 2
+          },
+          "mainDecision": {
+            "taskRows": 0,
+            "ackLevel": 100000,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "mainActivity": {
+            "taskRows": 0,
+            "ackLevel": 100000,
+            "persistedRange": 3,
+            "liveRange": 3
+          },
+          "restartDecision": {
+            "taskRows": 0,
+            "ackLevel": 200000,
+            "persistedRange": 4,
+            "liveRange": 4
+          },
+          "restartActivity": {
+            "taskRows": 0,
+            "ackLevel": 100000,
+            "persistedRange": 3,
+            "liveRange": 3
+          }
+        }
+      }
+    ],
+    "queues": {
+      "backlogDecision": {
+        "taskList": "gc-backlog-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "backlogActivity": {
+        "taskList": "gc-backlog-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 0,
+        "observedMaxTaskId": null,
+        "minAck": 0,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw",
+        "durableGcEvidence": false,
+        "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+      },
+      "mainDecision": {
+        "taskList": "tasks-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 100000,
+        "observedMaxTaskId": 2,
+        "minAck": null,
+        "persistedRange": 3,
+        "liveBlock": {
+          "startId": 200001,
+          "endId": 300000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "mainActivity": {
+        "taskList": "tasks-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 100000,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 3,
+        "liveBlock": {
+          "startId": 200001,
+          "endId": 300000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "restartDecision": {
+        "taskList": "restart-tasks-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 200000,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 4,
+        "liveBlock": {
+          "startId": 300001,
+          "endId": 400000
+        },
+        "dataEncoding": "thriftrw"
+      },
+      "restartActivity": {
+        "taskList": "restart-tasks-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+        "taskType": 1,
+        "remainingTaskRows": 0,
+        "ackLevel": 100000,
+        "observedMaxTaskId": null,
+        "minAck": 0,
+        "persistedRange": 3,
+        "liveBlock": {
+          "startId": 200001,
+          "endId": 300000
+        },
+        "dataEncoding": "thriftrw",
+        "durableGcEvidence": false,
+        "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+      }
+    },
+    "rangeSize": 100000
+  },
+  "domainMetadata": {
+    "domain": "service-compat-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+    "domainId": "01a16a6f6e8b7e19a44e7f858365e327",
+    "isGlobal": 0,
+    "dataEncoding": "thriftrw",
+    "dataLength": 425,
+    "notificationVersions": [
+      5
+    ]
+  },
+  "backlog": {
+    "taskList": "gc-backlog-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+    "workflowId": "gc-backlog-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+    "watermark": {
+      "taskType": 0,
+      "rows": 1,
+      "maxTaskId": 1
+    },
+    "completionEvents": 1
+  },
+  "pendingControl": {
+    "taskList": "gc-pending-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+    "workflowId": "gc-pending-e501d5a5-8b7e-4316-9a1d-72d64cb7d009",
+    "watermark": {
+      "taskType": 0,
+      "rows": 1,
+      "maxTaskId": 1
+    }
+  }
+}

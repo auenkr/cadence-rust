@@ -1,0 +1,1 @@
+Attempt 1 failed with 'Rust Matching did not report assigned shard restart-tasks-... READY' (cjs:128, 15s READY wait, restart scenario); identical rerun, no code change, exit 0. Intermittent; root cause (Rust vs fixture timing) NOT determined. Attempt 1 logs: ../6-sd-fixture-attempt1-failed

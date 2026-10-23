@@ -1,0 +1,15 @@
+ 01:47:07 up 14 days, 15:14,  1 user,  load average: 4.04, 5.99, 6.13
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       5.8Gi       250Mi       412Mi       2.4Gi       1.9Gi
+Swap:           11Gi       3.2Gi       8.3Gi
+ 01:47:07 up 14 days, 15:14,  1 user,  load average: 4.04, 5.99, 6.13
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       5.8Gi       250Mi       412Mi       2.4Gi       1.9Gi
+Swap:           11Gi       3.2Gi       8.3Gi
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Go baseline artifacts: /tmp/gatefinal2/l1/run
+Selected evidence copied to /mnt/storage/service/github/wt/gatefinal2/memory/evidence/matching-gate-final2-20261023/1-mysql-single/evidence: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'graceful-drain-sdk.log', 'restart-sdk.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-after-graceful-drain.log', 'rust-server-logs/rust-server-after-restart.log', 'rust-server-logs/rust-server-before-restart.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_mysql.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Traceback (most recent call last):
+  File "/mnt/storage/service/github/wt/gatefinal2/tests/run-go-service-baseline.py", line 1060, in <module>
+    raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+RuntimeError: Go baseline probe failed; see /tmp/gatefinal2/l1/run/probe.log

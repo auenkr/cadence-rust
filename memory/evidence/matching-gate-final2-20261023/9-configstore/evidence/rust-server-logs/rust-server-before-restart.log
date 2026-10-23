@@ -1,0 +1,11 @@
+initialising ConfigStore dynamic config client
+warning: creating ConfigStore dynamic config client: failed to fetch dynamic config snapshot DeserializeBatchEvents encoding: "thriftrw", error: invalid thrift data: unknown ttype 89; using no-op configuration
+starting matching (api v1-thrift)
+dynamic config float read failed (value was missing or invalid); using default
+cadence-server running on 0.0.0.0:0: matching
+Cadence internal matching gRPC listening on 127.0.0.1:54045
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:38261
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+Matching membership cleanup failed: status: Internal, message: "Not enough hosts to serve the request", details: [], metadata: MetadataMap { headers: {} }
+flushing Matching metrics failed: Connection refused (os error 111)
+shutting down

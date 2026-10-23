@@ -1,0 +1,26 @@
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: Cassandra semaphore capacity one must grant exactly one concurrent owner; grants=[{"outcome":"SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT","tokenId":0},{"outcome":"SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT","tokenId":0}]
+
+0 !== 1
+
+    at run (/mnt/storage/service/github/wt/gatefinal2/tests/matching-service-compat.cjs:542:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 0,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: Cassandra semaphore capacity one must grant exactly one concurrent owner; grants=[{"outcome":"SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT","tokenId":0},{"outcome":"SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT","tokenId":0}]
+
+0 !== 1
+
+    at run (/mnt/storage/service/github/wt/gatefinal2/tests/matching-service-compat.cjs:542:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 0,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
