@@ -266,31 +266,32 @@ impl CassandraDomainMetadataStore {
         let row = rows
             .maybe_first_row::<(
                 CassandraDomainUdt,
-                CassandraDomainConfigUdt,
-                CassandraDomainReplicationConfigUdt,
-                bool,
-                i64,
-                i64,
-                i64,
-                i64,
-                i64,
-                i64,
-                i64,
+                Option<CassandraDomainConfigUdt>,
+                Option<CassandraDomainReplicationConfigUdt>,
+                Option<bool>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
             )>()
             .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
             .ok_or_else(|| MatchingDomainMetadataError::NotFound(name.to_string()))?;
+        // gocql reads NULL columns as zero values; the seeded cadence-system row has several.
         decode_go_cassandra_domain_metadata(
             row.0,
-            row.1,
-            row.2,
-            row.3,
-            row.4,
-            row.5,
-            row.6,
-            row.7,
-            row.8,
-            row.9,
-            row.10,
+            row.1.unwrap_or_default(),
+            row.2.unwrap_or_default(),
+            row.3.unwrap_or_default(),
+            row.4.unwrap_or_default(),
+            row.5.unwrap_or_default(),
+            row.6.unwrap_or_default(),
+            row.7.unwrap_or_default(),
+            row.8.unwrap_or_default(),
+            row.9.unwrap_or_default(),
+            row.10.unwrap_or_default(),
             &self.current_cluster,
         )
     }
@@ -373,17 +374,17 @@ impl CassandraDomainMetadataStore {
         for row in rows
             .rows::<(
                 String,
-                CassandraDomainUdt,
-                CassandraDomainConfigUdt,
-                CassandraDomainReplicationConfigUdt,
-                bool,
-                i64,
-                i64,
-                i64,
-                i64,
-                i64,
-                i64,
-                i64,
+                Option<CassandraDomainUdt>,
+                Option<CassandraDomainConfigUdt>,
+                Option<CassandraDomainReplicationConfigUdt>,
+                Option<bool>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
             )>()
             .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
         {
@@ -401,21 +402,22 @@ impl CassandraDomainMetadataStore {
                 updated,
                 notify,
             ) = row.map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
-            if name == "cadence-domain-metadata" {
+            // The metadata record has a NULL domain UDT; Go skips it before decoding.
+            let Some(domain) = domain.filter(|_| name != "cadence-domain-metadata") else {
                 continue;
-            }
+            };
             domains.push(decode_go_cassandra_domain_metadata(
                 domain,
-                config,
-                replication,
-                global,
-                config_v,
-                failover_v,
-                failover_notify_v,
-                previous_v,
-                end,
-                updated,
-                notify,
+                config.unwrap_or_default(),
+                replication.unwrap_or_default(),
+                global.unwrap_or_default(),
+                config_v.unwrap_or_default(),
+                failover_v.unwrap_or_default(),
+                failover_notify_v.unwrap_or_default(),
+                previous_v.unwrap_or_default(),
+                end.unwrap_or_default(),
+                updated.unwrap_or_default(),
+                notify.unwrap_or_default(),
                 &self.current_cluster,
             )?);
         }

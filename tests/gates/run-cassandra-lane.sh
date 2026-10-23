@@ -39,8 +39,8 @@ done
 for ks in "$KEYSPACE" "$VISIBILITY_KEYSPACE"; do
   echo "CREATE KEYSPACE IF NOT EXISTS $ks WITH replication = {'class':'SimpleStrategy','replication_factor':1};" | docker exec -i "$CONTAINER" cqlsh || exit 5
 done
-docker exec -i "$CONTAINER" cqlsh -k "$KEYSPACE" < "$ROOT/go/schema/cassandra/cadence/schema.cql" > "$ARTIFACTS/apply-go-schema.log" 2>&1 || exit 5
-docker exec -i "$CONTAINER" cqlsh -k "$VISIBILITY_KEYSPACE" < "$ROOT/go/schema/cassandra/visibility/schema.cql" > "$ARTIFACTS/apply-go-visibility-schema.log" 2>&1 || exit 5
+# Tables are created by Go --auto-setup in the harness (it applies schema.cql itself and
+# records schema_version; pre-applying here made it fail with "type shard already exists").
 python3 "$ROOT/tests/run-go-service-baseline.py" --rust-services matching --cassandra \
   --cassandra-port "$PORT" --cassandra-keyspace "$KEYSPACE" --cassandra-visibility-keyspace "$VISIBILITY_KEYSPACE" \
   --rust-production-binary "$BINARY" --artifacts-dir "$ARTIFACTS/run" "$@"
