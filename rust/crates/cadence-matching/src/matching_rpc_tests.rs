@@ -33,6 +33,20 @@ async fn matching_long_polls_reject_missing_transport_deadlines_with_bad_request
 }
 
 #[tokio::test]
+async fn matching_long_polls_with_nearly_expired_deadline_return_internal_like_go() {
+    let matching = Matching::new(crate::handlers::AppState::default());
+    let mut decision = Request::new(m::PollForDecisionTaskRequest::default());
+    decision.metadata_mut().insert("grpc-timeout", "5m".parse().unwrap());
+    let error = matching.poll_for_decision_task(decision).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::InvalidArgument); // missing request precedes, as before
+    assert!(crate::grpc_matching::check_poll_context(Some(std::time::Instant::now())).is_err());
+    let status = crate::grpc_matching::check_poll_context(Some(std::time::Instant::now())).unwrap_err();
+    assert_eq!(status.code(), tonic::Code::Internal);
+    assert_eq!(status.message(), "context deadline exceeded");
+    assert!(crate::grpc_matching::check_poll_context(Some(std::time::Instant::now() + std::time::Duration::from_secs(1))).is_ok());
+}
+
+#[tokio::test]
 async fn matching_rpc_quotas_classify_shared_protocol_handlers_and_preserve_count_only_calls() {
     let state = crate::handlers::AppState::default();
     let domain_id = Uuid::from_u128(9001);

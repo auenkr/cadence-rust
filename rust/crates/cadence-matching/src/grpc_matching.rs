@@ -112,6 +112,17 @@ pub(crate) fn report_arrival(
 /// Go `isolationgroup.GroupKey`: the task partition-config key carrying the
 /// task's isolation group.
 const ISOLATION_GROUP_KEY: &str = "isolation-group";
+/// Go `common.IsValidContext` (contextExpireThreshold = 10ms): a poll whose
+/// remaining deadline is below the threshold fails with the raw
+/// `context.DeadlineExceeded`, which `handleErr` turns into InternalServiceError.
+pub(crate) fn check_poll_context(deadline: Option<std::time::Instant>) -> Result<(), Status> {
+    match deadline {
+        Some(deadline) if deadline.saturating_duration_since(std::time::Instant::now()) < std::time::Duration::from_millis(10) => {
+            Err(Status::internal("context deadline exceeded"))
+        }
+        _ => Ok(()),
+    }
+}
 fn task_list_name(name: &str) -> Result<TaskListName, Status> {
     TaskListName::parse(name).map_err(Status::invalid_argument)
 }
@@ -1654,6 +1665,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
+        check_poll_context(incoming_deadline)?;
         if !r.forwarded_from.is_empty() {
             self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
                 domain: payload.domain.clone(),
@@ -1887,6 +1899,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
+        check_poll_context(incoming_deadline)?;
         if !r.forwarded_from.is_empty() {
             self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
                 domain: payload.domain.clone(),
