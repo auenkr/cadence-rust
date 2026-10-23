@@ -143,4 +143,56 @@ mod tests {
         let exhausted = tonic::Status::resource_exhausted("other exhausted error");
         assert!(matches!(ForwardError::classify(exhausted), ForwardError::Remote(_)));
     }
+    #[tokio::test(start_paused = true)]
+    async fn matching_forward_max_outstanding_concurrency() {
+        // Go TestMaxOutstandingConcurrency: 50 callers each take an add and a
+        // poll token. Released tokens admit every caller; leaked tokens admit one.
+        for (leak, expected) in [(false, 50), (true, 1)] {
+            let (_, add_provider) = count(1);
+            let (_, poll_provider) = count(1);
+            let adds = Arc::new(RequestTokens::new(add_provider));
+            let polls = Arc::new(RequestTokens::new(poll_provider));
+            let mut callers = Vec::new();
+            for _ in 0..50 {
+                let (adds, polls) = (adds.clone(), polls.clone());
+                callers.push(tokio::spawn(async move {
+                    let mut took = (0, 0);
+                    if let Ok(Some(token)) =
+                        tokio::time::timeout(std::time::Duration::from_millis(100), adds.acquire()).await
+                    {
+                        if leak { std::mem::forget(token) } else { drop(token) }
+                        took.0 = 1;
+                    }
+                    if let Ok(Some(token)) =
+                        tokio::time::timeout(std::time::Duration::from_millis(100), polls.acquire()).await
+                    {
+                        if leak { std::mem::forget(token) } else { drop(token) }
+                        took.1 = 1;
+                    }
+                    took
+                }));
+            }
+            let mut totals = (0, 0);
+            for caller in callers {
+                let (add, poll) = caller.await.unwrap();
+                totals.0 += add;
+                totals.1 += poll;
+            }
+            assert_eq!(totals, (expected, expected));
+        }
+    }
+    #[tokio::test]
+    async fn matching_forward_config_update_resizes_generation() {
+        // Go TestMaxOutstandingConfigUpdate: capacity follows the dynamic config
+        // after an update, and an in-flight token never inflates the new count.
+        let (value, provider) = count(1);
+        let tokens = RequestTokens::new(provider);
+        let inflight = tokens.try_acquire().unwrap();
+        assert!(tokens.try_acquire().is_none());
+        value.store(10, Ordering::SeqCst);
+        let fresh: Vec<_> = (0..10).map(|_| tokens.try_acquire().unwrap()).collect();
+        assert!(tokens.try_acquire().is_none());
+        drop(inflight);
+        drop(fresh);
+    }
 }

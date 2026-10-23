@@ -1,0 +1,19 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 37s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 5 tests
+test matching_shard_processor::tests::shard_processor_factory_rejects_empty_shard_key ... ok
+test matching_shard_processor::tests::shard_processor_initial_report_is_ready_with_zero_load ... ok
+test matching_shard_processor::tests::shard_processor_set_status_is_reflected_in_report ... ok
+test matching_shard_processor::tests::report_has_strict_ttl_and_recomputes_qps_after_original_deadline ... ok
+test matching_shard_processor::tests::start_is_noop_and_stop_is_exact_name_across_domain_and_type ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 413 filtered out; finished in 0.01s
+

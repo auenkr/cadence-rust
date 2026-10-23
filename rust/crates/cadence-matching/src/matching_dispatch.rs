@@ -1386,6 +1386,7 @@ mod tests {
         Mutex,
     };
     use uuid::Uuid;
+    use crate::matching_forward::ForwardError;
     #[test]
     fn matching_forwarded_poll_rebuilds_parent_request() {
         let activity = p::PollForActivityTaskRequest {
@@ -2109,6 +2110,52 @@ mod tests {
         invalid.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 1), now()));
         assert!(matches!(invalid.forward_backlog_task(task, &domain, 2, 0).await, Err(ForwardError::InvalidTaskListType)));
         server.abort();
+    }
+    fn forward_state(source: &str, rate: i64) -> ForwardState {
+        // Parent resolution always fails, so a forward that passes the limiter
+        // reports Remote without touching the network.
+        ForwardState::new(
+            || Box::pin(async { None::<(Parent, String)> }),
+            Arc::new(|| 1),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(move || rate), now())),
+            source.into(),
+            Arc::new(|| 0),
+        )
+    }
+    fn unallocated_task() -> AllocatedTask {
+        AllocatedTask { task_id: 0, data: TaskData::default() }
+    }
+    #[tokio::test]
+    async fn matching_forward_task_error_is_no_parent_or_task_list_kind() {
+        // Go TestForwardTaskError: a root list has no parent, and a sticky
+        // list cannot forward.
+        let root = forward_state("queue", 10);
+        assert!(matches!(
+            root.forward_backlog_task(unallocated_task(), "domain", 0, 0).await,
+            Err(ForwardError::NoParent)
+        ));
+        let partition = forward_state("/__cadence_sys/queue/1", 10);
+        assert!(matches!(
+            partition.forward_backlog_task(unallocated_task(), "domain", 1, 1).await,
+            Err(ForwardError::TaskListKind)
+        ));
+    }
+    #[tokio::test]
+    async fn matching_forward_task_rate_exceeded_after_two_forwards() {
+        // Go TestForwardTaskRateExceeded: two forwards pass the rate limit, the
+        // third returns ErrForwarderSlowDown before the parent is resolved.
+        let forward = forward_state("/__cadence_sys/queue/1", 2);
+        for _ in 0..2 {
+            assert!(matches!(
+                forward.forward_backlog_task(unallocated_task(), "domain", 1, 0).await,
+                Err(ForwardError::Remote(_))
+            ));
+        }
+        assert!(matches!(
+            forward.forward_backlog_task(unallocated_task(), "domain", 1, 0).await,
+            Err(ForwardError::SlowDown)
+        ));
     }
 
 }

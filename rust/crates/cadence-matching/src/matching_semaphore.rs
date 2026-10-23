@@ -652,4 +652,86 @@ mod tests {
         // A stopped manager refuses further acquires until rebuilt.
         assert_eq!(manager.acquire("1:w:r1:1").await, Err(ManagerError::NotReady));
     }
+
+    // Go: TestRingKey. Buckets of one semaphore must hash to different ring keys.
+    #[test]
+    fn matching_semaphore_ring_key_separates_buckets() {
+        assert_eq!(identifier(0).ring_key(), "uuid-d_sem_0");
+        assert_ne!(identifier(0).ring_key(), identifier(1).ring_key());
+    }
+
+    // Go: TestIdentifierIsUsableAsAMapKey. Buckets are looked up by value.
+    #[test]
+    fn matching_semaphore_identifier_is_usable_as_a_map_key() {
+        let mut buckets = HashMap::new();
+        buckets.insert(identifier(0), "first");
+        buckets.insert(identifier(1), "second");
+        assert_eq!(buckets.get(&identifier(0)), Some(&"first"));
+        assert_eq!(buckets.len(), 2);
+    }
+
+    // Go: TestSemaphoreRegistry_RegisterLookupAndUnregister.
+    #[tokio::test]
+    async fn matching_semaphore_registry_register_lookup_and_unregister() {
+        let registry = Registry::new(Arc::new(store()));
+        assert!(registry.by_identifier(&identifier(0)).is_none(), "an empty registry holds nothing");
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
+        let held = registry.by_identifier(&identifier(0)).expect("a registered manager is found");
+        assert!(Arc::ptr_eq(&manager, &held));
+        assert!(registry.unregister(&manager), "unregistering the held manager reports true");
+        assert!(registry.by_identifier(&identifier(0)).is_none());
+        assert!(!registry.unregister(&manager), "unregistering twice reports false");
+    }
+
+    // Go: TestSemaphoreRegistry_UnregisterIgnoresAStaleManager. A stale manager tearing down
+    // must not evict the manager that now serves the same bucket.
+    #[tokio::test]
+    async fn matching_semaphore_unregister_ignores_a_stale_manager() {
+        let registry = Registry::new(Arc::new(store()));
+        let stopping = registry.get_or_create(identifier(0)).await.unwrap();
+        assert!(registry.unregister(&stopping));
+        let current = registry.get_or_create(identifier(0)).await.unwrap();
+        assert!(!registry.unregister(&stopping), "the registry no longer holds this manager");
+        let held = registry
+            .by_identifier(&identifier(0))
+            .expect("the manager now serving the bucket must survive");
+        assert!(Arc::ptr_eq(&current, &held));
+    }
+
+    // Go: TestSemaphoreRegistry_AllManagersIsASnapshot.
+    #[tokio::test]
+    async fn matching_semaphore_all_managers_is_a_snapshot() {
+        let registry = Registry::new(Arc::new(store()));
+        registry.get_or_create(identifier(0)).await.unwrap();
+        registry.get_or_create(identifier(1)).await.unwrap();
+        let snapshot = registry.all_managers();
+        assert_eq!(snapshot.len(), 2);
+        for manager in &snapshot {
+            assert!(registry.unregister(manager));
+        }
+        assert_eq!(snapshot.len(), 2, "emptying the registry must not change a snapshot already taken");
+        assert!(registry.all_managers().is_empty());
+    }
+
+    // Go: TestSemaphoreRegistry_GetOrCreateBuildsOnceUnderConcurrentCallers. Every caller of a
+    // cold bucket must get the one manager that was registered.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn matching_semaphore_concurrent_callers_share_one_manager() {
+        let registry = Registry::new(Arc::new(store()));
+        let tasks: Vec<_> = (0..32)
+            .map(|_| {
+                let registry = registry.clone();
+                tokio::spawn(async move { registry.get_or_create(identifier(0)).await.unwrap() })
+            })
+            .collect();
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await.unwrap());
+        }
+        let held = registry.by_identifier(&identifier(0)).expect("the bucket is registered");
+        assert_eq!(registry.all_managers().len(), 1);
+        for got in &results {
+            assert!(Arc::ptr_eq(&held, got), "every caller must get the one registered manager");
+        }
+    }
 }
