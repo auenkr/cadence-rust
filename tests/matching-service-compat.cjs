@@ -121,6 +121,71 @@ async function registerShardWithGoManager(shardName, force = false) {
   shardAssignmentLock = next.catch(() => {});
   return next;
 }
+
+// Shard-distributor lane (--shard-distributor): scenarios against the pinned Go
+// shard-manager handlers. Stats shape (field names/status values) is read
+// defensively because it has not been observed from a live run yet.
+const shardDistributorRestartDir = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_RESTART_DIR;
+const shardDistributorEvidence = [];
+const sdHeartbeatMs = executor => Date.parse(executor?.LastHeartbeat || executor?.lastHeartbeat || '') || 0;
+async function sdFreshExecutors(maxAgeMs = 10000) {
+  const stats = (await shardManagerCommand({ op: 'stats' })) || {};
+  return Object.entries(stats).filter(([, executor]) => Date.now() - sdHeartbeatMs(executor) < maxAgeMs);
+}
+async function sdAssertHeartbeat(label, { excludeIds = [], minimum = 1 } = {}) {
+  if (!shardManagerControl) return null;
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    const fresh = (await sdFreshExecutors()).filter(([executorId]) => !excludeIds.includes(executorId));
+    if (fresh.length >= minimum) {
+      const record = { label, executors: fresh.map(([executorId]) => executorId), observedAt: new Date().toISOString() };
+      shardDistributorEvidence.push({ check: 'executor-heartbeat', ...record });
+      return record;
+    }
+    if (Date.now() > deadline) throw new Error(`shard-distributor ${label}: no fresh Rust Matching executor heartbeat within 30s`);
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+}
+async function sdAssertExecutorStopped(label, previousIds) {
+  if (!shardManagerControl) return;
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    const stats = (await shardManagerCommand({ op: 'stats' })) || {};
+    const fresh = (await sdFreshExecutors(3000)).map(([executorId]) => executorId);
+    const stopped = previousIds.filter(executorId => !fresh.includes(executorId));
+    if (stopped.length > 0) {
+      shardDistributorEvidence.push({ check: 'executor-stopped', label, stopped,
+        status: Object.fromEntries(stopped.map(executorId => [executorId, stats[executorId]?.Status ?? stats[executorId]?.status ?? 'removed'])) });
+      return stopped;
+    }
+    if (Date.now() > deadline) throw new Error(`shard-distributor ${label}: executor kept heartbeating after Rust Matching stopped`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
+async function sdReassign(label, taskListName) {
+  if (!shardManagerControl) return;
+  await registerShardWithGoManager(taskListName, true);
+  shardDistributorEvidence.push({ check: 'ownership-reassigned', label, taskList: taskListName });
+}
+async function sdRestartScenario(label, domain, id) {
+  if (!shardManagerControl || !shardDistributorRestartDir) return;
+  const request = path.join(shardDistributorRestartDir, 'restart.request');
+  const done = path.join(shardDistributorRestartDir, 'restart.done');
+  if (fs.existsSync(done)) fs.unlinkSync(done);
+  fs.writeFileSync(request, label);
+  const deadline = Date.now() + 90000;
+  while (!fs.existsSync(done)) {
+    if (Date.now() > deadline) throw new Error('harness did not restart the shard-distributor fixture within 90s');
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  // The restarted shard-distributor starts with empty state: Rust Matching must
+  // re-register through its executor heartbeat and be given ownership again.
+  await sdAssertHeartbeat(`${label}-after-restart`);
+  const taskList = { name: `sd-restart-${id}` };
+  const info = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+  assert(info.taskListStatus, 'DescribeTaskList through restarted shard-distributor returned no status');
+  shardDistributorEvidence.push({ check: 'shard-distributor-restart', label, taskList: taskList.name });
+}
 function call(service, method, request) {
   const taskListName = request.taskList?.name || request.request?.taskList?.name;
   if (taskListName) return registerShardWithGoManager(taskListName).then(() => callRpc(service, method, request));
@@ -751,18 +816,24 @@ async function run() {
     // The persisted watermark is read while the row is stored and undelivered.
     restartState.watermark = await awaitPersistedTask(restartTaskList, 0);
     const beforePid = rust.pid;
+    const sdBeforeKill = await sdAssertHeartbeat('before-sigkill');
     rust.kill('SIGKILL');
     const beforeExit = await exited;
     assert.equal(beforeExit.signal, 'SIGKILL', 'first Rust Matching process did not terminate');
     if (goServicesPid) process.kill(goServicesPid, 0);
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
+    if (sdBeforeKill) {
+      await sdAssertHeartbeat('after-sigkill-restart', { excludeIds: [] });
+      await sdReassign('after-sigkill-restart', restartTaskList);
+    }
     const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
     fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
     if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
     const finalHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: restartID, runId: restartStarted.runId } });
     const completions = finalHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(completions, 1, 'restart workflow must have exactly one visible completion');
+    if (sdBeforeKill) await sdRestartScenario('restart-flow', domain, restartID);
     restartEvidence = { workflowId: restartID, runId: restartStarted.runId, taskList: restartTaskList, durableTaskRowsBeforeKill: persisted.queued_rows, taskRangeBeforeKill: persisted.range_id, durableWatermarkBeforeKill: restartState.watermark, firstRustPid: beforePid, secondRustPid: rust.pid, completionEvents: completions, goServicesPid };
     // Reuse the second live process for the existing compatibility coverage below.
   }
@@ -835,10 +906,12 @@ async function run() {
     const drainingProcess = drainingPrimary ? rust : secondaryRust;
     const drainExit = drainingPrimary ? exited : new Promise(resolve => drainingProcess.once('exit', (code, signal) => resolve({ code, signal })));
     const drainingPid = drainingProcess.pid;
+    const sdBeforeDrain = shardManagerControl ? (await sdAssertHeartbeat('before-sigterm')).executors : null;
     drainingProcess.kill('SIGTERM');
     const drained = await Promise.race([drainExit, new Promise(resolve => setTimeout(() => resolve(null), 60000))]);
     assert(drained, `Rust Matching did not finish SIGTERM drain; see ${work}/rust-server-before-graceful-restart.log`);
     assert.equal(drained.code, 0, `Rust Matching graceful shutdown failed: ${JSON.stringify(drained)}`);
+    if (sdBeforeDrain) await sdAssertExecutorStopped('after-sigterm-drain', sdBeforeDrain);
     if (goServicesPid) process.kill(goServicesPid, 0);
     if (drainingPrimary) {
       rust = startRust('after-graceful-drain');
@@ -868,6 +941,10 @@ async function run() {
       }
       assert(membershipRestored, 'gracefully restarted Rust Matching member did not rejoin the shared Ringpop ownership map');
     }
+    if (sdBeforeDrain) {
+      await sdAssertHeartbeat('after-sigterm-restart');
+      await sdReassign('after-sigterm-restart', drainTaskList);
+    }
     const drainSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
       ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
       CADENCE_MIXED_RESTART_WORKFLOW_ID: drainID, CADENCE_MIXED_RESTART_TASK_LIST: drainTaskList,
@@ -878,6 +955,7 @@ async function run() {
     const drainCompletions = drainHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(drainCompletions, 1, 'gracefully drained workflow must have exactly one visible completion');
     const drainedRows = await taskObserver.waitEmpty(domainId, drainTaskList, 30, 'task-after-graceful-drain');
+    if (sdBeforeDrain) await sdRestartScenario('drain-flow', domain, drainID);
     gracefulDrainEvidence = { workflowId: drainID, runId: drainStarted.runId, taskList: drainTaskList, taskListOwner: drainOwner, queuedRowsBeforeSignal: queued.queued_rows, rangeBeforeSignal: queued.range_id, queuedRowsAfterRecovery: drainedRows.queued_rows, drainingPid, recoveredByRustPid: drainingPrimary ? rust.pid : secondaryRust.pid, completionEvents: drainCompletions, goServicesPid };
   } else {
   async function expireIdleOwners() {
@@ -1130,7 +1208,7 @@ async function run() {
         taskList: goMatchingTaskList, taskRowsBeforeGoConsume: Number(pendingRows.stdout) },
     }, null, 2) + '\n');
   }
-  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', shardDistributor: shardManagerControl ? shardDistributorEvidence : 'not requested', peer, domain, execution, attributes }));
   } catch (error) {
     // Keep the probe-body failure visible; the shutdown checks in finally may throw their own error.
     console.error('PROBE BODY FAILED:', error);
