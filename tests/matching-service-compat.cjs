@@ -264,7 +264,7 @@ function callRpc(service, method, request) {
   metadata.set('rpc-service', service === 'Matching' ? 'cadence-matching' : 'cadence-frontend');
   metadata.set('rpc-encoding', 'proto');
   metadata.set('rpc-caller', 'cadence-service-compat');
-  return new Promise((resolve, reject) => clientsForTaskList(taskListName)[service][method](request, metadata,
+  return new Promise((resolve, reject) => (service === 'Matching' ? clientsForTaskList(taskListName) : clients)[service][method](request, metadata,
     { deadline: Date.now() + 20000 }, (error, response) => {
       if (error) {
         error.message = `${service}.${method} failed${taskListName ? ` for task list ${taskListName}` : ''}: ${error.message}`;
@@ -477,17 +477,19 @@ async function run() {
       throw new Error('two-instance failure recovery requires secondary Matching ports');
     }
     secondaryRust = startSecondaryRust();
+    let lastConvergenceError = '';
     const convergenceDeadline = Date.now() + 30000;
     while (Date.now() < convergenceDeadline) {
       if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) throw new Error(`secondary Rust Matching exited; see ${work}/rust-server-secondary.log`);
       try {
         await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-ready-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
         break;
-      } catch (_) {
+      } catch (error) {
+        lastConvergenceError = error.message;
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
-    if (Date.now() >= convergenceDeadline) throw new Error('second Rust Matching instance did not join the original Ringpop cluster');
+    if (Date.now() >= convergenceDeadline) throw new Error(`second Rust Matching instance did not join the original Ringpop cluster; last error: ${lastConvergenceError}`);
     if (cassandraGate) {
       const semaphoreName = `durable-${id}`;
       const createdSemaphore = await call('SemaphoreAPI', 'CreateSemaphore', {
