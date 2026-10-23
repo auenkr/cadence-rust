@@ -1472,7 +1472,13 @@ mod tests {
         let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
         assert_eq!(delivered.data.schedule_id, 11);
         assert!(sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_FORWARD_TASK_THROTTLE_ERRORS));
-        assert!(sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED));
+        // Go records the metric after the send to the poller completes
+        // (matcher.go:396-403), so it lands after poll() returns.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED) {
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
         stop(queue, reader).await;
     }
 

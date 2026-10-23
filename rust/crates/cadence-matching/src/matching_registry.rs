@@ -3010,12 +3010,11 @@ mod tests {
         let added = new.append(vec![TaskData::default()], 2).await.unwrap();
         assert_eq!(added[0].task_id, 101);
         let finishing = owner.clone();
-        assert!(
-            owner_work(move |readers| finishing.finish(3, readers))
-                .await
-                .is_err(),
-            "old final ack must be fenced"
-        );
+        // Go's taskReader.Stop logs and ignores a failed final ack update
+        // (task_reader.go:172-176); the fence is asserted on the store below.
+        owner_work(move |readers| finishing.finish(3, readers))
+            .await
+            .expect("old final ack failure is logged, not returned");
         assert!(!registry.detach(&lookup, &owner));
         assert!(Arc::ptr_eq(
             &new.queue,
