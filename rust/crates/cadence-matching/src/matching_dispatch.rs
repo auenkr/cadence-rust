@@ -710,7 +710,15 @@ impl TaskDispatcher {
             {
                 return false;
             }
-            let Some((parent, parent_name)) = (forward.resolve)().await else {
+            let resolved = tokio::select! {
+                resolved = (forward.resolve)() => resolved,
+                _ = async {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.closed().await;
+                    }
+                } => return true,
+            };
+            let Some((parent, parent_name)) = resolved else {
                 return false;
             };
             let parent = match parent {
@@ -1029,10 +1037,17 @@ impl TaskDispatcher {
         F: FnMut(AllocatedTask, Q, Option<String>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
+        // Register before starting the worker. Closing its response receiver
+        // cancels upstream forwarding while leaving claimed-task recovery with
+        // the worker (including an in-process parent delivery loop).
+        let released = self.blocked_pollers.notified();
+        tokio::pin!(released);
+        released.as_mut().enable();
         let (sender, receiver) = oneshot::channel();
         let timeout_metrics = lifecycle
             .as_ref()
             .and_then(|l| Some((l.metrics.clone(), l.metric_context.clone()?)));
+        let blocked_poller = lifecycle.as_ref().map(|poll| (poll.manager.clone(), poll.id.clone()));
         let worker = self.clone();
         let deadline = tokio::time::Instant::now() + expiration;
         let poll_started = tokio::time::Instant::now();
@@ -1041,7 +1056,23 @@ impl TaskDispatcher {
                 .delivery_worker(poll, sender, deliver, lifecycle, deadline, poll_started)
                 .await;
         });
-        match tokio::time::timeout(expiration, receiver).await {
+        let response = tokio::time::timeout(expiration, receiver);
+        tokio::pin!(response);
+        let response = tokio::select! {
+            biased;
+            response = &mut response => response,
+            _ = &mut released => {
+                // EndPoll precedes local History start. Failover disconnects
+                // blocked matcher polls, not delivery already in progress.
+                if blocked_poller.as_ref().is_some_and(|(manager, id)| {
+                    manager.lock().expect("poller history lock").contains_poll(id)
+                }) {
+                    return Ok(R::default());
+                }
+                response.await
+            },
+        };
+        match response {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(Status::unavailable("Matching delivery worker stopped.")),
             Err(_) => {
@@ -2348,6 +2379,77 @@ mod tests {
         assert_eq!(request.request.unwrap().task_list.unwrap().name, "tl0");
         assert_eq!(dispatcher.queue.levels(), before);
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn matching_failover_keeps_local_history_delivery_after_end_poll() {
+        let (_directory, _store, _key, dispatcher) = fixture(1);
+        let entered = Arc::new(Notify::new());
+        let finish = Arc::new(Notify::new());
+        let worker = dispatcher.clone();
+        let started = entered.clone();
+        let complete = finish.clone();
+        let mut poll = tokio::spawn(async move {
+            worker.poll_with_lifecycle(
+                (), Duration::from_secs(60),
+                move |_, _, _| {
+                    let started = started.clone();
+                    let complete = complete.clone();
+                    async move {
+                        started.notify_one();
+                        complete.notified().await;
+                        Ok(m::PollForDecisionTaskResponse { task_token: vec![9], ..Default::default() })
+                    }
+                }, Some(query_lifecycle()),
+            ).await
+        });
+        tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+        dispatcher.release_blocked_pollers();
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut poll).await.is_err());
+        finish.notify_one();
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1), poll).await.unwrap().unwrap().unwrap().task_token, vec![9]);
+        assert_eq!(dispatcher.queue.levels().1, 1);
+    }
+
+    #[tokio::test]
+    async fn matching_failover_releases_active_forward_resolver_and_poller_registration() {
+        let (_directory, _store, _key, dispatcher) = fixture(0);
+        let entered = Arc::new(Notify::new());
+        let copy = entered.clone();
+        let forward = ForwardState::new(
+            move || {
+                copy.notify_one();
+                Box::pin(std::future::pending())
+            },
+            Arc::new(|| 1),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            "/__cadence_sys/tl0/1".into(), Arc::new(|| 0),
+        );
+        let reader = crate::matching_reader::TaskReader::new(
+            dispatcher.queue.clone(), dispatcher.task_notification(),
+            crate::matching_reader::ReaderConfig::default(),
+        );
+        let dispatcher = dispatcher.with_forward(forward).with_reader(reader.clone());
+        let lifecycle = query_lifecycle();
+        let manager = lifecycle.manager.clone();
+        let worker = dispatcher.clone();
+        let poll = tokio::spawn(async move {
+            worker.poll_decision_with_poller(
+                p::PollForDecisionTaskRequest::default(), Duration::from_secs(60), lifecycle,
+            ).await
+        });
+        tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+        dispatcher.release_blocked_pollers();
+        assert!(tokio::time::timeout(Duration::from_secs(1), poll).await.unwrap().unwrap().unwrap().task_token.is_empty());
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while manager.lock().unwrap().contains_poll("query-poller") {
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        assert!(!dispatcher.queue.is_stopped());
+        reader.stop();
+        reader.wait_stopped().await;
     }
 
     #[tokio::test]
