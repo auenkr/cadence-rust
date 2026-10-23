@@ -84,6 +84,7 @@ async function shardManagerCommand(command) {
 async function registerShardWithGoManager(shardName, force = false) {
   if (!shardManagerControl) return;
   const next = shardAssignmentLock.then(async () => {
+    if (realShardDistributor) return registerShardWithRealManager(shardName);
     const wasManaged = managedShardNames.has(shardName);
     managedShardNames.add(shardName);
     const deadline = Date.now() + 30000;
@@ -212,6 +213,46 @@ async function sdRestartScenario(label, domain, id) {
   assert(info.taskListStatus, 'DescribeTaskList through restarted shard-distributor returned no status');
   shardDistributorEvidence.push({ check: 'shard-distributor-restart', label, taskList: taskList.name });
 }
+// Real shard-distributor: the leader loop picks the owner, so the probe asks GetShardOwner (through the
+// launcher's read-only "assign" op), waits until that executor reports the shard READY and then sends
+// the task list's RPCs to that executor's gRPC port.
+const realShardOwnerPorts = new Map();
+const realOwnerClients = new Map();
+async function registerShardWithRealManager(shardName) {
+  managedShardNames.add(shardName);
+  const deadline = Date.now() + 45000;
+  let lastProblem = 'no executor heartbeat';
+  while (Date.now() < deadline) {
+    try {
+      const owners = await shardManagerCommand({ op: 'assign', shards: [shardName] });
+      const ownerId = owners?.[shardName];
+      const stats = (await shardManagerCommand({ op: 'stats' })) || {};
+      const current = ownerId && stats[ownerId];
+      if (current) {
+        const reports = current.ReportedShards || current.reportedShards || {};
+        const status = reports[shardName]?.Status ?? reports[shardName]?.status;
+        const port = String((current.Metadata || current.metadata || {}).grpc || '');
+        if (port && (status === 1 || status === 'READY' || status === 'ready' || status === 'ShardStatusREADY')) {
+          realShardOwnerPorts.set(shardName, port);
+          return;
+        }
+        lastProblem = `owner ${ownerId} status ${status}`;
+      } else lastProblem = `owner ${ownerId} not in executor stats`;
+    } catch (error) { lastProblem = error.message; }
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  throw new Error(`real shard-distributor did not give ${shardName} a READY owner (${lastProblem})`);
+}
+function clientsForTaskList(taskListName) {
+  const port = realShardDistributor && taskListName ? realShardOwnerPorts.get(taskListName) : undefined;
+  if (!port) return clients;
+  if (!realOwnerClients.has(port)) {
+    const owned = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](`127.0.0.1:${port}`, grpc.credentials.createInsecure())]));
+    owned.Matching = new schema.matching.v1.MatchingAPI(`127.0.0.1:${port}`, grpc.credentials.createInsecure());
+    realOwnerClients.set(port, owned);
+  }
+  return realOwnerClients.get(port);
+}
 function call(service, method, request) {
   const taskListName = request.taskList?.name || request.request?.taskList?.name;
   if (taskListName) return registerShardWithGoManager(taskListName).then(() => callRpc(service, method, request));
@@ -223,7 +264,7 @@ function callRpc(service, method, request) {
   metadata.set('rpc-service', service === 'Matching' ? 'cadence-matching' : 'cadence-frontend');
   metadata.set('rpc-encoding', 'proto');
   metadata.set('rpc-caller', 'cadence-service-compat');
-  return new Promise((resolve, reject) => clients[service][method](request, metadata,
+  return new Promise((resolve, reject) => clientsForTaskList(taskListName)[service][method](request, metadata,
     { deadline: Date.now() + 20000 }, (error, response) => {
       if (error) {
         error.message = `${service}.${method} failed${taskListName ? ` for task list ${taskListName}` : ''}: ${error.message}`;
