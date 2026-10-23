@@ -851,6 +851,40 @@ mod tests {
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert_eq!(later.len(), 1);
     }
+    // Go: TestTaskExpiryAndCompletion (task_list_manager_test.go:1241) GC cases. Row counts left in
+    // the store after acking, under the size threshold (batch 2) and the time threshold (1ns).
+    #[test]
+    fn matching_queue_gc_thresholds_drive_stored_row_counts() {
+        let rows = |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 1000).unwrap().len();
+        let finish = |queue: &DurableTaskQueue, count: usize, now: i64| {
+            queue.append(&vec![data(); count], now).unwrap();
+            let batch = queue.read_batch(100, n(100), now + 1).unwrap();
+            for task in batch.tasks {
+                queue.complete(task.task_id).unwrap();
+            }
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("gc-thresholds.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 1).unwrap();
+        // Size threshold: backlog 4 >= batch 2, deletes despite a one minute interval.
+        finish(&queue, 4, 2);
+        assert_eq!(rows(&store), 4);
+        let minute = std::time::Duration::from_secs(60);
+        assert_eq!(queue.run_garbage_collection_with(false, n(2), minute).unwrap(), 4);
+        assert_eq!(rows(&store), 0);
+        // Below both thresholds (backlog 1 < batch 100, interval not elapsed): nothing deleted.
+        finish(&queue, 1, 10);
+        assert_eq!(queue.run_garbage_collection_with(false, n(100), minute).unwrap(), 0);
+        assert_eq!(rows(&store), 1);
+        // Time threshold: 1ns interval has elapsed, so a small backlog is deleted.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let nano = std::time::Duration::from_nanos(1);
+        assert_eq!(queue.run_garbage_collection_with(false, n(100), nano).unwrap(), 1);
+        assert_eq!(rows(&store), 0);
+    }
     #[test]
     fn matching_queue_reports_condition_failed_for_writer_and_ack_not_partition_update() {
         use crate::matching_blob::PartitionConfig;
