@@ -17,6 +17,16 @@ pub struct SqliteTaskStore {
 }
 
 impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
+    fn fetch_latest_config(
+        &self,
+        row_type: i32,
+    ) -> std::result::Result<Option<crate::config_store::ConfigStoreRow>, String> {
+        crate::config_store::sqlite_fetch_latest(
+            &self.connection.lock().expect("matching SQL lock"),
+            row_type,
+        )
+    }
+
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
         SqliteTaskStore::get_task_list(self, key)
     }

@@ -8,6 +8,7 @@ pub mod domain_replication;
 pub mod domain_update;
 pub mod domains;
 pub mod dynamic_config;
+pub mod config_store;
 pub mod executions;
 pub mod history_branch;
 pub mod raw_history;

@@ -392,6 +392,46 @@ impl MatchingRuntime {
         self
     }
 
+    /// Own Go config-store polling (`startUpdate`): refresh the cached
+    /// snapshot every `pollInterval`; a failed update keeps the old snapshot.
+    pub fn with_dynamic_config_store(
+        mut self,
+        client: std::sync::Arc<cadence_persistence::config_store::ConfigStoreClient>,
+    ) -> Self {
+        let overlay = self.matching.frontend.state.admin.dynamic_config.clone();
+        let (stop, mut stopped) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let poll_interval = client.poll_interval();
+            let mut interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + poll_interval,
+                poll_interval,
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = &mut stopped => break,
+                    _ = interval.tick() => {
+                        let worker = client.clone();
+                        let updated = tokio::task::spawn_blocking(move || {
+                            worker.update().map(|()| worker.snapshot())
+                        })
+                        .await;
+                        match updated {
+                            Ok(Ok(Some(snapshot))) => if let Ok(mut current) = overlay.lock() {
+                                *current = crate::admin::DynamicConfigOverlay::from_config_store(&snapshot);
+                            },
+                            Ok(Ok(None)) => {}
+                            Ok(Err(error)) => eprintln!("error: Failed to update dynamic config: {error}"),
+                            Err(error) => eprintln!("error: dynamic config update task: {error}"),
+                        }
+                    }
+                }
+            }
+        });
+        self.dynamic_config_watch = Some((stop, task));
+        self
+    }
+
     /// Attach the service membership ring before this runtime is exposed to
     /// RPC listeners. Both the handler and durable queue registry use this
     /// same snapshot for ownership and forwarding.
