@@ -1755,6 +1755,54 @@ mod tests {
         );
         stop(queue, reader).await;
     }
+    // Go: TestDeliverBufferTasks (task_list_manager_test.go:127, cancel case) and
+    // TestDeliverBufferTasks_NoPollers (task_list_manager_test.go:164). A buffered task with no
+    // poller blocks the dispatch loop; stopping the reader must join the pump and leave the row
+    // unacknowledged for recovery. The Go rate-limiter branch is not ported (see inventory).
+    #[tokio::test]
+    async fn stop_joins_pump_blocked_on_buffered_task_without_poller() {
+        let (_directory, queue, reader, _) = fixture(1, 1);
+        wait_read(&queue, 1).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(queue.levels().1, 0);
+        stop(queue.clone(), reader).await;
+        assert_eq!(queue.levels().1, 0);
+        assert!(queue.retry_data(1).is_ok());
+    }
+    // Go: TestReadLevelForAllExpiredTasksInBatch (task_list_manager_test.go:181). Rows that are
+    // already expired advance the read level without advancing the ack level, and a later mixed
+    // batch moves the read level past both expired and live rows.
+    #[tokio::test]
+    async fn matching_reader_read_level_advances_past_expired_rows_without_ack() {
+        let (_directory, queue, reader, wake) = fixture(0, 3);
+        let expired = || TaskData {
+            expiry_nanos: now() - 60_000_000_000,
+            ..TaskData::default()
+        };
+        queue.append(&[expired(), expired()], now()).unwrap();
+        wake.notify_waiters();
+        wait_read(&queue, 2).await;
+        assert_eq!(queue.levels().0, 2);
+        assert_eq!(queue.levels().1, 0);
+
+        queue
+            .append(
+                &[
+                    expired(),
+                    TaskData {
+                        expiry_nanos: now() + 3_600_000_000_000,
+                        ..TaskData::default()
+                    },
+                ],
+                now(),
+            )
+            .unwrap();
+        wake.notify_waiters();
+        wait_read(&queue, 4).await;
+        assert_eq!(queue.levels().0, 4);
+        assert_eq!(queue.levels().1, 0);
+        stop(queue, reader).await;
+    }
     #[tokio::test]
     async fn matching_reader_prefetch_backpressure_and_stop_preserve_unacked_rows() {
         for batch in [1, 3] {
