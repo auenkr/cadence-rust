@@ -3088,9 +3088,16 @@ mod tests {
             registry.with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| 500_000_000));
         let handle = registry.get(key.clone(), 0, 1).await.unwrap();
         handle.liveness.mark_alive(0);
+        // Go: shutdown fires only once the TTL has elapsed; one nanosecond earlier the owner is alive.
+        registry.sweep_idle(500_000_000 - 1, false).await.unwrap();
+        assert!(!handle.queue.is_stopped(), "owner shut down before its TTL elapsed");
+        assert!(registry.state.lock().unwrap().owners.contains_key(&(key.domain_id, key.name.clone(), key.task_type)));
         registry.sweep_idle(500_000_000, false).await.unwrap();
         assert!(handle.queue.is_stopped());
         assert!(registry.state.lock().unwrap().owners.is_empty());
+        // Go's shutdown callback runs once (CAS on shutdownFlag); a later sweep is a no-op.
+        registry.sweep_idle(1_000_000_000, false).await.unwrap();
+        assert!(handle.queue.is_stopped());
     }
     // Go: liveness ticks at TTL/2 and calls shutdown once the owner has been inactive for a full TTL
     // (liveness/liveness.go). Unlike the sweep tests above, this drives the production `maintain_until`
@@ -3266,6 +3273,10 @@ mod tests {
         assert!(handle.has_poller_after(i64::MIN), "outstanding poller");
         handle.pollers.lock().unwrap().end("poller1", 2);
         assert!(handle.has_poller_after(i64::MIN), "poller finished after the query time");
+        assert!(handle.has_poller_after(1), "poller finished at 2 is after the query time 1");
+        // Go's "finished before the query time" branch: a poller that ended at the query time or earlier does not count.
+        assert!(!handle.has_poller_after(2), "poller finished at the query time is not after it");
+        assert!(!handle.has_poller_after(3), "poller finished before the query time");
     }
     // Go: TestQueriesPerSecond (task_list_manager_test.go:457), case "returns zero QPS". Go reads
     // the manager's qpsTracker; Rust sums the tracker of loaded, unstopped owners with the name.
