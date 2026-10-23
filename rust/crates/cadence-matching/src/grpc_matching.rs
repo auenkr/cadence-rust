@@ -2633,7 +2633,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                                 Response::new(m::QueryWorkflowResponse {
                                                     partition_config: partitions
                                                         .get()
-                                                        .map(partition_config_to_internal),
+                                                        .map(partition_config_to_proto),
                                                     ..response
                                                 })
                                             })
@@ -2728,7 +2728,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                         return result.map(|mut response| {
                                             response.get_mut().partition_config = partitions
                                                 .get()
-                                                .map(partition_config_to_internal);
+                                                .map(partition_config_to_proto);
                                             response
                                         });
                                     }
