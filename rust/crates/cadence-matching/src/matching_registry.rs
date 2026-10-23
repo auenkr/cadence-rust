@@ -3365,6 +3365,128 @@ mod tests {
         assert!(described.pollers.is_empty());
         assert!(described.partition_config.is_none());
     }
+    // Go: TestTaskListRegistry_Filters (task_list_registry_test.go:102). The three Go filters are
+    // all managers, managers by domain, and managers by exact task-list name across domains.
+    // Rust reports the domain snapshot through describe_by_domain and the exact-name filter
+    // through stop_task_list_name, which is the set Go's ManagersByTaskListName feeds.
+    #[tokio::test]
+    async fn registry_filters_by_domain_and_exact_name_like_go() {
+        let (_dir, _store, registry, _key) = fixture();
+        let owner = |domain: u128, name: &str| TaskListKey {
+            domain_id: Uuid::from_u128(domain),
+            name: name.into(),
+            task_type: 0,
+        };
+        let domain_a1 = registry.get(owner(1, "shared-name"), 0, 1).await.unwrap();
+        let domain_a2 = registry.get(owner(1, "other-name"), 0, 1).await.unwrap();
+        let domain_b1 = registry.get(owner(2, "shared-name"), 0, 1).await.unwrap();
+        assert_eq!(registry.loaded_owner_count(), 3, "all managers");
+        let names_in = |domain: u128| {
+            let response = registry.describe_by_domain(Uuid::from_u128(domain), true, registry_now());
+            let mut names: Vec<String> = response.decision_task_list_map.keys().cloned().collect();
+            names.sort();
+            names
+        };
+        assert_eq!(names_in(1), vec!["other-name", "shared-name"], "managers by domain A");
+        assert_eq!(names_in(2), vec!["shared-name"], "managers by domain B");
+        assert!(names_in(3).is_empty(), "missing domain has no managers");
+        registry.stop_task_list_name("shared-name").await.unwrap();
+        assert!(domain_a1.queue.is_stopped(), "exact name filter stops domain A");
+        assert!(domain_b1.queue.is_stopped(), "exact name filter spans domains");
+        assert!(!domain_a2.queue.is_stopped(), "a different name stays loaded");
+        assert_eq!(registry.loaded_owner_count(), 1);
+    }
+    // Go: TestDescribeTaskList (task_list_manager_test.go:304), case "no status, with config".
+    // The Rust description carries the owner's cached partition config. Status cases stay
+    // on the RPC path (matching_rpc_durable_describe_tracks_activity_poller_and_queue_status).
+    #[tokio::test]
+    async fn describe_by_domain_reports_partition_config_like_go() {
+        use cadence_persistence::StoredPartitionConfig;
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        let config = StoredPartitionConfig {
+            version: 1,
+            read_partitions: (0..3).map(|id| (id, Vec::new())).collect(),
+            write_partitions: (0..2).map(|id| (id, Vec::new())).collect(),
+        };
+        registry
+            .refresh_partition_config(key.clone(), handle.clone(), Some(config))
+            .await
+            .unwrap();
+        let response = registry.describe_by_domain(key.domain_id, false, registry_now());
+        let described = &response.decision_task_list_map["queue"];
+        let partition = described.partition_config.as_ref().unwrap();
+        assert_eq!(
+            (
+                partition.version,
+                partition.read_partitions.len(),
+                partition.write_partitions.len()
+            ),
+            (1, 3, 2)
+        );
+        assert!(described.pollers.is_empty());
+    }
+    // Go: TestDescribeTaskList (task_list_manager_test.go:304), case "no status, with pollers".
+    // A recent poller is listed with its identity, rate, and the time Go records as the last
+    // access (the start time).
+    #[tokio::test]
+    async fn describe_by_domain_reports_recent_pollers_like_go() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        let now = registry_now();
+        handle.pollers.lock().unwrap().start(
+            "pollerID",
+            cadence_common::poller::Info {
+                identity: "pollerIdentity".into(),
+                rate_per_second: 1.0,
+                isolation_group: "a".into(),
+            },
+            now,
+        );
+        let response = registry.describe_by_domain(key.domain_id, false, now);
+        let pollers = &response.decision_task_list_map["queue"].pollers;
+        assert_eq!(pollers.len(), 1);
+        assert_eq!(pollers[0].identity, "pollerIdentity");
+        assert_eq!(pollers[0].rate_per_second, 1.0);
+        assert_eq!(
+            pollers[0].last_access_time,
+            Some(prost_types::Timestamp {
+                seconds: now.div_euclid(1_000_000_000),
+                nanos: now.rem_euclid(1_000_000_000) as i32,
+            })
+        );
+    }
+    // Go: TestQueriesPerSecond (task_list_manager_test.go:457), case "returns QPS from tracker"
+    // (mocked 42.5). Rust's owner tracker is a wall-clock EMA with no per-owner injection seam,
+    // so the exact non-zero value cannot be asserted deterministically.
+    #[ignore = "parity gap: Go mocks the owner QPS tracker to return exactly 42.5; Rust's owner tracker is a wall-clock EMA with no injection seam"]
+    #[tokio::test]
+    async fn loaded_owner_reports_mocked_tracker_qps_after_arrivals() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        crate::grpc_matching::report_arrival(&handle, &TaskData::default());
+        assert_eq!(handle.qps.qps(), 42.5);
+    }
+    // Go: TestAddTaskStandby (task_list_manager_test.go:590) and TestTaskWriterShutdown
+    // (task_list_manager_test.go:943). Once the writer is stopped, every append is refused with the
+    // same stopped status and nothing persists, including a later retry. Go's stopped-flag reset
+    // race has no Rust equivalent (the stop is held on the queue), so it is not reproduced.
+    #[tokio::test]
+    async fn append_after_writer_stop_reports_stopped_and_stays_refused() {
+        let (_dir, store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        handle.queue.stop();
+        let Err(first) = handle.append(vec![TaskData::default()], 2).await else {
+            panic!("append after writer stop must be refused");
+        };
+        assert_eq!(first.code(), tonic::Code::Unavailable);
+        assert_eq!(first.message(), "matching task-list owner stopped");
+        let Err(second) = handle.append(vec![TaskData::default()], 3).await else {
+            panic!("a retry after writer stop must be refused");
+        };
+        assert_eq!(second.message(), first.message());
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
+    }
     // Go: TestAddTaskStandby (task_list_manager_test.go:590). Go stops the task writer so an
     // AddTask cannot persist and returns errShutdown. The standby-domain branch is not ported.
     #[tokio::test]
