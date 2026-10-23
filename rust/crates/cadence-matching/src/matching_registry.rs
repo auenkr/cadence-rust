@@ -3310,7 +3310,11 @@ mod tests {
         let described = &response.decision_task_list_map["queue"];
         let partition = described.partition_config.as_ref().unwrap();
         assert_eq!(
-            (partition.version, partition.num_read_partitions, partition.num_write_partitions),
+            (
+                partition.version,
+                partition.read_partitions.len(),
+                partition.write_partitions.len()
+            ),
             (1, 3, 2)
         );
         assert!(described.pollers.is_empty());
