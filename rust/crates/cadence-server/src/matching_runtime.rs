@@ -716,6 +716,22 @@ mod tests {
     use cadence_persistence::matching_sqlite::SqliteTaskStore;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[test]
+    fn failover_callback_selection_matches_go_and_advances_baseline() {
+        let (version, notified) = notified_failover_domains(10, [
+            ("global".into(), true, false, 11),
+            ("local".into(), false, false, 20),
+            ("active-active".into(), true, true, 30),
+            ("old".into(), true, false, 10),
+        ].into_iter());
+        assert_eq!(version, 30);
+        assert_eq!(notified, vec!["global"]);
+        let (same, notified) = notified_failover_domains(version,
+            [("global".into(), true, false, 11)].into_iter());
+        assert_eq!(same, 30);
+        assert!(notified.is_empty());
+    }
+
     fn empty_membership() -> crate::matching_membership::Membership {
         crate::matching_membership::Membership::new("local", Vec::new())
     }

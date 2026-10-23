@@ -695,7 +695,10 @@ async fn dispatch_inner(
     let method = cadence_thrift::service::find_method(procedure)
         .ok_or_else(|| format!("Unknown Matching procedure {procedure}"))?;
     if method.service == "Meta" {
-        return crate::yarpc::dispatch(&matching.frontend.state, "health", args, deadline).await;
+        matching.wait_started().await;
+        return Ok((Struct { fields: vec![(0, Value::Struct(Struct {
+            fields: vec![(1, Value::Bool(true)), (2, Value::Bytes(b"matching good".to_vec()))],
+        }))] }, None));
     }
     if method.service != "MatchingService" {
         return Err("Unknown Matching service".into());

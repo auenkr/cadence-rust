@@ -298,6 +298,7 @@ impl Drop for PollGuard {
 pub struct Matching {
     pub frontend: Frontend,
     polls: Polls,
+    started: tokio::sync::watch::Sender<bool>,
     queues: Option<crate::matching_registry::QueueRegistry>,
     /// Go `cfg.NumTasklistWritePartitions`, shared with the registry limiter.
     partition_count: Option<crate::matching_registry::PartitionCountProvider>,
@@ -336,6 +337,7 @@ impl Matching {
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
+            started: tokio::sync::watch::channel(true).0,
             queues: None,
             partition_count: None,
             scaler_config: None,
@@ -899,6 +901,19 @@ impl Matching {
         matching.scaler_config = Some(scaler_config);
         matching.poll_expiration = poll_expiration;
         matching.bind_local_poll_service()
+    }
+    /// Production publishes the handler before membership bootstrap so Ringpop
+    /// can join; Meta health must wait until engine startup completes.
+    pub fn with_start_pending(mut self) -> Self {
+        self.started = tokio::sync::watch::channel(false).0;
+        self
+    }
+    pub fn mark_started(&self) {
+        self.started.send_replace(true);
+    }
+    pub(crate) async fn wait_started(&self) {
+        let mut started = self.started.subscribe();
+        started.wait_for(|ready| *ready).await.expect("Matching startup sender lives with handler");
     }
     pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
         self.queues = self
@@ -1687,6 +1702,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             let lifecycle = crate::matching_dispatch::PollLifecycle {
                 manager: queue.pollers.clone(),
                 id: guard.key.poller.clone(),
+                cancel: Some(guard.cancel.clone()),
                 info: cadence_common::poller::Info {
                     identity: payload.identity.clone(),
                     rate_per_second: rate,
@@ -1927,6 +1943,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             let lifecycle = crate::matching_dispatch::PollLifecycle {
                 manager: queue.pollers.clone(),
                 id: guard.key.poller.clone(),
+                cancel: Some(guard.cancel.clone()),
                 info: cadence_common::poller::Info {
                     identity: payload.identity.clone(),
                     rate_per_second: rate,
@@ -2907,40 +2924,36 @@ impl m::matching_api_server::MatchingApi for Matching {
                     // Owner parsing mirrors Go's `ParseRequestOwner`.
                     cadence_common::semaphore::parse_owner(&r.owner_id)
                         .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
-                    // The domain must exist, like Go's domain-cache lookup.
-                    let domain_name = self.domain_name(&r.domain_id)?;
-                    if !self.frontend.state.semaphore_enabled {
-                        return Err(Status::invalid_argument(
-                            "distributed semaphore is not enabled for this domain",
-                        ));
-                    }
-                    // Go `EnableDistributedSemaphore` is a per-domain flag; the standalone
-                    // host reads one global toggle, matching the rest of the server.
                     let identifier = Identifier::new(&r.domain_id, &r.semaphore_name, r.bucket)
                         .map_err(semaphore_status)?;
-                    if let Some(membership) = &self.membership {
-                        membership.check_semaphore(&identifier)?;
-                    }
-                    // Idle buckets unload like Go's liveness callback.
-                    self.semaphores.sweep_idle(semaphore_now());
-                    let idle_ttl = {
-                        let overlay = self
-                            .frontend
-                            .state
-                            .admin
-                            .dynamic_config
-                            .lock()
-                            .expect("admin lock");
-                        crate::matching_config::semaphore_idle_time(
-                            overlay.property_values("matching.semaphoreIdleTime"),
-                            &domain_name,
-                        )
+                    // Go's cached-manager fast path skips both domain admission
+                    // and Ring ownership; Start is still called on every request.
+                    let manager = if let Some(manager) = self.semaphores.by_identifier(&identifier) {
+                        manager.start().await.map_err(semaphore_status)?;
+                        manager
+                    } else {
+                        let domain_name = self.domain_name(&r.domain_id)?;
+                        let (enabled, idle_ttl) = {
+                            let overlay = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+                            (
+                                cadence_persistence::dynamic_config::boolean(
+                                    overlay.property_values("system.enableDistributedSemaphore"),
+                                    Some(&domain_name), false,
+                                ),
+                                crate::matching_config::semaphore_idle_time(
+                                    overlay.property_values("matching.semaphoreIdleTime"), &domain_name,
+                                ),
+                            )
+                        };
+                        if !enabled {
+                            return Err(Status::invalid_argument("distributed semaphore is not enabled for this domain"));
+                        }
+                        if let Some(membership) = &self.membership {
+                            membership.check_semaphore(&identifier)?;
+                        }
+                        self.semaphores.get_or_create_with_idle_ttl(identifier, idle_ttl)
+                            .await.map_err(semaphore_status)?
                     };
-                    let manager = self
-                        .semaphores
-                        .get_or_create_with_idle_ttl(identifier, idle_ttl)
-                        .await
-                        .map_err(semaphore_status)?;
                     let result = manager.acquire(&r.owner_id).await.map_err(semaphore_status)?;
                     let outcome = match result.outcome {
                         SemaphoreAcquireOutcome::Acquired => 1,
@@ -3228,7 +3241,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                     // Go getOrCreateTaskListManager: a non-owner gets an error and
                     // an unloaded list is loaded before the cancel.
                     if self.queues.is_some() {
-                        self.durable_queue(&r.domain_id, &list, crate::matching_config::persistence_task_list_type(r.task_list_type)).await?;
+                        let queue = self.durable_queue(&r.domain_id, &list, crate::matching_config::persistence_task_list_type(r.task_list_type)).await?;
+                        queue.pollers.lock().expect("poller history lock").cancel(&r.poller_id);
+                        return Ok(Response::new(m::CancelOutstandingPollResponse {}));
                     }
                     let key = PollKey {
                         domain: r.domain_id,
@@ -3513,6 +3528,14 @@ pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyho
     serve_with_tls(addr, matching, None).await
 }
 
+#[tonic::async_trait]
+impl p::meta_api_server::MetaApi for Matching {
+    async fn health(&self, _: Request<p::HealthRequest>) -> Result<Response<p::HealthResponse>, Status> {
+        self.wait_started().await;
+        Ok(Response::new(p::HealthResponse { ok: true, message: "matching good".into() }))
+    }
+}
+
 /// Serve Matching on `addr` with the Go `rpc.tls` listener config, if any.
 pub async fn serve_with_tls(
     addr: std::net::SocketAddr,
@@ -3554,9 +3577,11 @@ pub async fn serve_with_listener_tls(
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(cadence_proto::FILE_DESCRIPTOR_SET)
         .with_service_name("uber.cadence.matching.v1.MatchingAPI")
+        .with_service_name("uber.cadence.api.v1.MetaAPI")
         .build_v1()?;
     crate::grpc_tls::server_builder(tls)?
         .add_service(reflection)
+        .add_service(p::meta_api_server::MetaApiServer::new(matching.clone()).max_decoding_message_size(limit))
         .add_service(
             m::matching_api_server::MatchingApiServer::new(matching)
                 .max_decoding_message_size(limit),

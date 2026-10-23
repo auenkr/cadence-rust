@@ -22,6 +22,7 @@ use tonic::Status;
 pub struct PollLifecycle {
     pub manager: Arc<std::sync::Mutex<cadence_common::poller::Manager>>,
     pub id: String,
+    pub cancel: Option<Arc<Notify>>,
     pub info: cadence_common::poller::Info,
     pub forwarded: bool,
     pub metric_context: Option<crate::matching_metrics::PollMetricContext>,
@@ -34,6 +35,10 @@ impl PollLifecycle {
             let mut manager = self.manager.lock().expect("poller history lock");
             let timestamp = now();
             manager.start(&self.id, self.info.clone(), timestamp);
+            if let Some(cancel) = &self.cancel {
+                let cancel = cancel.clone();
+                manager.set_cancel(&self.id, Arc::new(move || cancel.notify_one()));
+            }
             manager.count_at(timestamp)
         };
         if !self.info.identity.is_empty() {
@@ -1615,6 +1620,7 @@ mod tests {
                 Some(PollLifecycle {
                     manager: manager.clone(),
                     id: "expired".into(),
+                    cancel: None,
                     info: cadence_common::poller::Info {
                         identity: "worker".into(),
                         rate_per_second: 1.0,
@@ -1673,6 +1679,7 @@ mod tests {
                 Some(PollLifecycle {
                     manager: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                     id: "timeout".into(),
+                    cancel: None,
                     info: cadence_common::poller::Info {
                         identity: "worker".into(),
                         rate_per_second: 1.0,
@@ -1706,6 +1713,7 @@ mod tests {
         let lifecycle = PollLifecycle {
             manager: manager.clone(),
             id: "poll".into(),
+                    cancel: None,
             info: cadence_common::poller::Info {
                 identity: "worker".into(),
                 rate_per_second: 42.0,
@@ -1825,6 +1833,7 @@ mod tests {
             let lifecycle = PollLifecycle {
                 manager: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                 id: format!("metric-poller-{case}"),
+                    cancel: None,
                 info: cadence_common::poller::Info {
                     identity: "worker".into(),
                     rate_per_second: 1.0,

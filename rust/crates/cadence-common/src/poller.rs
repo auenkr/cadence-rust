@@ -1,5 +1,5 @@
 //! State semantics of Go service/matching/poller/manager.go.
-//! Callers own poll cancellation and synchronization; timestamps are Unix nanos.
+//! Callers supply poll cancellation callbacks and synchronization; timestamps are Unix nanos.
 use std::collections::{HashMap, VecDeque};
 const TTL: i64 = 300_000_000_000;
 const CAPACITY: usize = 5000;
@@ -25,6 +25,7 @@ pub struct Manager {
     history: HashMap<String, Entry>,
     order: VecDeque<String>,
     outstanding: HashMap<String, Info>,
+    cancellations: HashMap<String, std::sync::Arc<dyn Fn() + Send + Sync>>,
     group_count: HashMap<String, usize>,
     last_end: Option<i64>,
     group_end: HashMap<String, i64>,
@@ -62,7 +63,14 @@ impl Manager {
             self.outstanding.insert(id.into(), info);
         }
     }
+    pub fn set_cancel(&mut self, id: &str, cancel: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        if !id.is_empty() { self.cancellations.insert(id.into(), cancel); }
+    }
+    pub fn cancel(&self, id: &str) {
+        if let Some(cancel) = self.cancellations.get(id) { cancel(); }
+    }
     pub fn end(&mut self, id: &str, now: i64) {
+        self.cancellations.remove(id);
         self.last_end = Some(now);
         if let Some(info) = self.outstanding.remove(id) {
             if !info.isolation_group.is_empty() {
