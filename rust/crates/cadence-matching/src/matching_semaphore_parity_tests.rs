@@ -190,6 +190,8 @@ async fn matching_semaphore_start_builds_free_and_held_indexes() {
     );
     let manager = started(&store).await;
     assert_eq!(manager.free_count(), 2);
+    // Go: only the unheld slots are free, so the free set is exactly {1, 3}, not just its size.
+    assert_eq!(manager.index.lock().unwrap().free_list, vec![1, 3]);
     assert_eq!(
         manager.index.lock().unwrap().held,
         HashMap::from([("x".into(), 2), ("y".into(), 4)])
