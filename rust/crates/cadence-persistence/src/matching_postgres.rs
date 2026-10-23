@@ -281,7 +281,7 @@ pub struct PostgresTaskStore {
 
 // Statements mirror go/common/persistence/sql/sqlplugin/postgres/task.go
 // (consts at lines 32-104); `matching_postgres_sql_matches_go_task_go` pins them.
-const SELECT_TASK_LIST: &str = "SELECT range_id, data, data_encoding FROM task_lists WHERE shard_id = $1 AND domain_id = $2 AND name = $3 AND task_type = $4";
+const SELECT_TASK_LIST: &str = "SELECT domain_id, range_id, name, task_type, data, data_encoding FROM task_lists WHERE shard_id = $1 AND domain_id = $2 AND name = $3 AND task_type = $4";
 const LOCK_TASK_LIST: &str = "SELECT range_id FROM task_lists WHERE shard_id = $1 AND domain_id = $2 AND name = $3 AND task_type = $4 FOR UPDATE";
 const INSERT_TASK_LIST: &str = "INSERT INTO task_lists(shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES ($1, $2, $3, $4, $5, $6, $7)";
 const UPDATE_TASK_LIST: &str = "UPDATE task_lists SET range_id = $1, data = $2, data_encoding = $3 WHERE shard_id = $4 AND domain_id = $5 AND name = $6 AND task_type = $7";
@@ -391,10 +391,11 @@ impl PostgresTaskStore {
         ) {
             Ok(row) => row
                 .map(|row| {
+                    // Columns: domain_id, range_id, name, task_type, data, data_encoding.
                     Ok((
-                        row.try_get(0).map_err(normalize_postgres_error)?,
                         row.try_get(1).map_err(normalize_postgres_error)?,
-                        row.try_get(2).map_err(normalize_postgres_error)?,
+                        row.try_get(4).map_err(normalize_postgres_error)?,
+                        row.try_get(5).map_err(normalize_postgres_error)?,
                     ))
                 })
                 .transpose(),

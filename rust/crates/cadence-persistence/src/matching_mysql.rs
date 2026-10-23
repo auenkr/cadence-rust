@@ -450,7 +450,7 @@ impl Drop for ConnectionLease {
 
 // Statements below mirror go/common/persistence/sql/sqlplugin/mysql/task.go
 // (consts at lines 32-104); `matching_mysql_sql_matches_go_task_go` pins them.
-const SELECT_TASK_LIST: &str = "SELECT range_id, data, data_encoding FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?";
+const SELECT_TASK_LIST: &str = "SELECT domain_id, range_id, name, task_type, data, data_encoding FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?";
 const LOCK_TASK_LIST: &str = "SELECT range_id FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ? FOR UPDATE";
 const INSERT_TASK_LIST: &str = "INSERT INTO task_lists(shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES (?, ?, ?, ?, ?, ?, ?)";
 const UPDATE_TASK_LIST: &str = "UPDATE task_lists SET range_id = ?, data = ?, data_encoding = ? WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?";
@@ -653,12 +653,16 @@ impl MySqlTaskStore {
     ) -> Result<Option<(i64, Vec<u8>, String)>> {
         let shard_id = self.database_shard(key);
         let discard = connection.discard.clone();
-        connection
+        // Columns: domain_id, range_id, name, task_type, data, data_encoding.
+        type Row = (Vec<u8>, i64, String, i32, Vec<u8>, String);
+        let row: Option<Row> = connection
             .exec_first(
                 SELECT_TASK_LIST,
                 (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
-            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))
+            .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
+        // Columns: domain_id, range_id, name, task_type, data, data_encoding.
+        Ok(row.map(|(_, range_id, _, _, data, encoding)| (range_id, data, encoding)))
     }
 
     fn decode_task_list_row(row: (i64, Vec<u8>, String)) -> Result<TaskListRecord> {

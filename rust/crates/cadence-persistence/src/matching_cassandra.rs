@@ -737,6 +737,21 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
 #[cfg(test)]
 mod tests {
     const GO_UDT: &str = "{domain_id: ?, name: ?, type: ?, ack_level: ?, kind: ?, last_updated: ?, adaptive_partition_config: ? }";
+    const GO_TASK_UDT: &str = "{domain_id: ?, workflow_id: ?, run_id: ?, schedule_id: ?, created_time: ?, partition_config: ? }";
+
+    /// Go builds several statements by concatenating the named UDT templates
+    /// `templateTaskListType` and `templateTaskType`, so the statement text is
+    /// not contiguous in tasks_cql.go. Each template's literal must exist in Go
+    /// and is substituted back in, giving the statement Go actually sends.
+    fn go_composed(go: &str) -> String {
+        use crate::matching_task_store::go_sql_pin::{assert_in_go_ci, strip};
+        assert_in_go_ci(go, GO_UDT);
+        assert_in_go_ci(go, GO_TASK_UDT);
+        strip(go)
+            .to_ascii_lowercase()
+            .replace("templatetasklisttype", &strip(GO_UDT).to_ascii_lowercase())
+            .replace("templatetasktype", &strip(GO_TASK_UDT).to_ascii_lowercase())
+    }
 
     /// Statements bound with a single UDT parameter must equal Go's CQL with
     /// the inline UDT template (tasks_cql.go:25-33) replaced by `?`.
@@ -764,7 +779,7 @@ mod tests {
         );
         // templateInsertTaskListQuery / templateUpdateTaskListQuery with the
         // UDT literal replaced by one bound UDT parameter.
-        let go_stripped = strip(go).to_ascii_lowercase();
+        let go_stripped = go_composed(go);
         let udt = strip(GO_UDT).to_ascii_lowercase();
         for statement in [INSERT_TASK_LIST, UPDATE_LIST] {
             let wanted = strip(statement).to_ascii_lowercase();
@@ -813,7 +828,7 @@ mod tests {
             "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES (11112222-3333-4444-5555-666677778888, 'tl''x', 1, 0, 42, {domain_id: 11112222-3333-4444-5555-666677778888, workflow_id: 'wf', run_id: 00000000-0000-0000-0000-000000000007, schedule_id: 9, created_time: 1700000000123, partition_config: {'k': 'v'}}, 1700000000123)"
         );
         // Column list and UDT field order are Go's templateTaskType.
-        assert_in_go_ci(go, "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES(?, ?, ?, ?, ?, {domain_id: ?, workflow_id: ?, run_id: ?, schedule_id: ?, created_time: ?, partition_config: ? }, ?)");
+        assert_in_go_ci(&go_composed(go), "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES(?, ?, ?, ?, ?, {domain_id: ?, workflow_id: ?, run_id: ?, schedule_id: ?, created_time: ?, partition_config: ? }, ?)");
         // Positive timeout appends Go's TTL clause.
         let with_ttl = TaskData {
             expiry_nanos: plain.created_nanos + 30_000_000_000,
