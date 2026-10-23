@@ -139,6 +139,8 @@ pub struct Manager {
     store: Arc<dyn SemaphorePersistence>,
     liveness: Liveness,
     index: Mutex<Index>,
+    /// Go `startupDoneCh`: set once the startup load ended (or the manager stopped).
+    startup_done: tokio::sync::watch::Sender<bool>,
 }
 
 impl Manager {
@@ -152,6 +154,7 @@ impl Manager {
             store,
             liveness: Liveness::new(now_nanos(), idle_ttl_nanos.max(1)),
             index: Mutex::new(Index::default()),
+            startup_done: tokio::sync::watch::channel(false).0,
         }
     }
 
@@ -171,11 +174,13 @@ impl Manager {
                 State::Stopped => return Err(ManagerError::NotReady),
             }
         }
-        if let Err(error) = self.load().await {
+        let loaded = self.load().await;
+        if loaded.is_err() {
             self.stop();
-            return Err(error);
         }
-        Ok(())
+        // Go defers markStartupDone: waiters are released however load returns.
+        self.startup_done.send_replace(true);
+        loaded
     }
 
     async fn load(&self) -> Result<(), ManagerError> {
@@ -237,6 +242,7 @@ impl Manager {
     /// Go `Manager.Stop`: later acquires get `NotReady`.
     pub fn stop(&self) {
         self.index.lock().expect("semaphore manager lock").state = State::Stopped;
+        self.startup_done.send_replace(true);
     }
 
     fn is_running(&self) -> bool {
@@ -255,6 +261,13 @@ impl Manager {
         // Marked before the startup wait so a bucket whose first request
         // arrives during a slow scan is not counted idle once it finishes.
         self.liveness.mark_alive(now_nanos());
+        // Go `awaitStartup`: callers that find the load in flight wait for it
+        // (bounded by the RPC deadline) instead of failing.
+        let starting = self.index.lock().expect("semaphore manager lock").state == State::Starting;
+        if starting {
+            let mut done = self.startup_done.subscribe();
+            let _ = done.wait_for(|finished| *finished).await;
+        }
         if !self.is_running() {
             return Err(ManagerError::NotReady);
         }

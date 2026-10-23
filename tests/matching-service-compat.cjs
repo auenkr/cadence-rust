@@ -31,7 +31,7 @@ clients.Matching = new schema.matching.v1.MatchingAPI(peer, grpc.credentials.cre
 const cassandraGate = process.env.CADENCE_MATCHING_CASSANDRA_GATE === '1';
 function cassandraCommand(args, label) {
   const result = spawnSync('go', ['run', './tests/matching-cassandra-interop', ...args], {
-    cwd: path.resolve(__dirname, '..'), encoding: 'utf8', timeout: 120000, env: process.env,
+    cwd: path.resolve(__dirname, '..', 'go'), encoding: 'utf8', timeout: 600000, env: process.env,
   });
   fs.writeFileSync(path.join(path.resolve(process.argv[5]), `${label}.log`), `${result.stdout || ''}\n${result.stderr || ''}`);
   if (result.status !== 0) throw new Error(`Cassandra ${label} failed (${result.error || result.status}); see ${path.resolve(process.argv[5], `${label}.log`)}`);
@@ -448,7 +448,7 @@ async function run() {
       });
       assert.equal(createdSemaphore.semaphore.capacity, 1);
       assert.equal(createdSemaphore.semaphore.bucketCapacity, 1);
-      const semaphoreClients = [clients.Matching, directMatchingClient(process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT)];
+      const semaphoreClients = [directMatchingClient(`127.0.0.1:${rustGrpcPort}`), directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`)];
       semaphoreAcquire = (owner, clientIndex = 0) => acquireSemaphore(semaphoreClients[clientIndex], {
         domainId, semaphoreName, bucket: 0, ownerId: owner,
       }).catch(error => {
@@ -750,6 +750,24 @@ async function run() {
       const recoveredOwnerProcess = recoveredOwnerIndex === 0 ? rust : secondaryRust;
       const remainingOwnerIndex = semaphoreEvidence.bucketOwnerIndex;
       const remainingPeer = directMatchingClient(`127.0.0.1:${remainingOwnerIndex === 0 ? rustGrpcPort : process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
+      // The originally crashed bucket owner is still dead here; bring it back so a
+      // second host exists to own the released bucket once the recovered one is killed.
+      if (remainingOwnerIndex === 0) {
+        rust = startRust('after-semaphore-owner-crash');
+        await waitForRustReady('after-semaphore-owner-crash');
+      } else {
+        secondaryRust = startSecondaryRust();
+        const rejoinDeadline = Date.now() + 30000;
+        let rejoined = false;
+        while (Date.now() < rejoinDeadline) {
+          try {
+            await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-semaphore-owner-restarted-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+            rejoined = true;
+            break;
+          } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
+        }
+        assert(rejoined, 'restarted semaphore bucket owner did not rejoin Go discovery');
+      }
       const recoveredOwnerExitPromise = new Promise(resolve => recoveredOwnerProcess.once('exit', (code, signal) => resolve({ code, signal })));
       recoveredOwnerProcess.kill('SIGKILL');
       const recoveredOwnerExit = await recoveredOwnerExitPromise;
