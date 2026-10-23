@@ -2245,7 +2245,7 @@ mod tests {
         assert_eq!(request.schedule_id, 91);
         // Rust TaskData has no schedule-to-start field, and persisted Go rows read
         // zero, so the Go random TaskInfo value has no input here; 0 is asserted.
-        assert_eq!(request.schedule_to_start_timeout.clone().unwrap().seconds, 0);
+        assert_eq!(request.schedule_to_start_timeout.unwrap().seconds, 0);
         assert_eq!(request.forwarded_from, "/__cadence_sys/tl0/1");
         assert_eq!(request.source, 2);
         server.abort();
@@ -2282,7 +2282,7 @@ mod tests {
         assert_eq!(execution.workflow_id, workflow.to_string());
         assert_eq!(execution.run_id, run.to_string());
         assert_eq!(request.schedule_id, 91);
-        assert_eq!(request.schedule_to_start_timeout.clone().unwrap().seconds, 0);
+        assert_eq!(request.schedule_to_start_timeout.unwrap().seconds, 0);
         assert_eq!(request.forwarded_from, "/__cadence_sys/tl0/1");
         server.abort();
     }
