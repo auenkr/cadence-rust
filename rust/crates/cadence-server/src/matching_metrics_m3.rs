@@ -798,6 +798,7 @@ fn decimal_units(integer: u64, fraction: u64, precision: usize) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
