@@ -402,13 +402,8 @@ mod tests {
         now.load(Ordering::SeqCst) + after.as_nanos() as i64
     }
     fn assert_elapsed(expected: Duration, actual: Duration) {
-        let delta = if actual > expected {
-            actual - expected
-        } else {
-            expected - actual
-        };
         assert!(
-            delta <= PRECISION,
+            actual.abs_diff(expected) <= PRECISION,
             "duration should be within {PRECISION:?} of {expected:?}, was {actual:?}"
         );
     }
