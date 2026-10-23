@@ -1,0 +1,4 @@
+    Blocking waiting for file lock on build directory
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/metrics/rust/crates/cadence-proto)
+    Checking cadence-server v0.1.0 (/mnt/storage/service/github/wt/metrics/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.26s
