@@ -17,3 +17,5 @@ No Rust/Go mismatch found. Tests not run locally (CI only).
 
 ## CI
 (filled below)
+- sha 7b449805de6449ea5f7e0df5c907bd4115219263, package=cadence-matching: https://github.com/auenkr/cadence-rust/actions/runs/40015006344 success (553 passed; dispatch test ok).
+- same sha, package=cadence-persistence: https://github.com/auenkr/cadence-rust/actions/runs/40015344818 success (4 new matching_queue tests ok).
