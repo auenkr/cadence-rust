@@ -2833,6 +2833,70 @@ mod tests {
         let recovered = take(&registry, &new).await;
         assert_eq!(recovered.task_id, 1);
     }
+    // Go: TestTaskListRegistry_RegisterLookupAndUnregister (task_list_registry_test.go:30). Lookup
+    // returns the registered owner, a stale unregister leaves the replacement in place, and
+    // unregistering the current owner empties the lookup. Go's gauge transitions are asserted by
+    // task_list_manager_gauge_tracks_registry_lifecycle_not_get_calls.
+    #[tokio::test]
+    async fn registry_register_lookup_and_unregister_matches_go() {
+        let (_dir, _store, registry, key) = fixture();
+        let lookup = (key.domain_id, key.name.clone(), key.task_type);
+        let initial = registry.get(key.clone(), 0, 1).await.unwrap();
+        let same = registry.get(key.clone(), 0, 2).await.unwrap();
+        assert!(Arc::ptr_eq(&initial.queue, &same.queue));
+        assert!(registry.unload(key.clone(), initial.clone(), 3).await.unwrap());
+        assert!(!registry.state.lock().unwrap().owners.contains_key(&lookup));
+        let updated = registry.get(key.clone(), 0, 4).await.unwrap();
+        assert!(!Arc::ptr_eq(&initial.queue, &updated.queue));
+        assert!(!registry.unload(key.clone(), initial, 5).await.unwrap());
+        let registered = registry
+            .state
+            .lock()
+            .unwrap()
+            .owners
+            .get(&lookup)
+            .map(|owner| owner.queue.clone())
+            .unwrap();
+        assert!(Arc::ptr_eq(&registered, &updated.queue));
+        assert!(registry.unload(key.clone(), updated, 6).await.unwrap());
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+    // Go: TestGetTasksPumpConditionFailedUnloadsTaskList (task_reader_test.go:443). A lost lease
+    // makes the periodic ack persist fail with ConditionFailed. The owner fences itself and the
+    // registry unloads it on its own, without a stop signal and without waiting for another ack tick.
+    #[tokio::test]
+    async fn ack_condition_failure_unloads_owner_without_stop_signal() {
+        let (_dir, store, mut registry, key) = fixture();
+        registry.update_ack_interval = Some(Arc::new(|_, _, _| 10_000_000));
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        // Another owner takes the lease, so the stored range moves past this owner's range.
+        store.lease(&key, 0, 0, 2).unwrap();
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
+        let worker = registry.clone();
+        let pump = tokio::spawn(async move {
+            worker
+                .maintain_until(Duration::from_secs(3600), async {
+                    let _ = shutdown.await;
+                })
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !handle.queue.is_stopped() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !registry.state.lock().unwrap().owners.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.send(()).unwrap();
+        pump.await.unwrap().unwrap();
+    }
     #[tokio::test]
     async fn maintenance_persists_live_ack_and_shutdown_stops_handles() {
         let (_dir, store, mut registry, key) = fixture();
