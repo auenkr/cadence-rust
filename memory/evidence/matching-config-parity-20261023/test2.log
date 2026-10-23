@@ -1,0 +1,106 @@
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-matching)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-service-core)
+error[E0433]: cannot find `DynamicConfigProvider` in `config`
+   --> crates/cadence-matching/src/launcher.rs:531:25
+    |
+531 |                 config::DynamicConfigProvider::FileBased(provider)
+    |                         ^^^^^^^^^^^^^^^^^^^^^ could not find `DynamicConfigProvider` in `config`
+    |
+help: a struct with a similar name exists
+    |
+531 -                 config::DynamicConfigProvider::FileBased(provider)
+531 +                 config::DynamicConfigConfig::FileBased(provider)
+    |
+
+error[E0433]: cannot find `DynamicConfigProvider` in `config`
+   --> crates/cadence-matching/src/launcher.rs:541:25
+    |
+541 |                 config::DynamicConfigProvider::FileBased(provider) => {
+    |                         ^^^^^^^^^^^^^^^^^^^^^ could not find `DynamicConfigProvider` in `config`
+    |
+help: a struct with a similar name exists
+    |
+541 -                 config::DynamicConfigProvider::FileBased(provider) => {
+541 +                 config::DynamicConfigConfig::FileBased(provider) => {
+    |
+
+error[E0433]: cannot find `DynamicConfigProvider` in `config`
+   --> crates/cadence-matching/src/launcher.rs:557:25
+    |
+557 |                 config::DynamicConfigProvider::Nop => {
+    |                         ^^^^^^^^^^^^^^^^^^^^^ could not find `DynamicConfigProvider` in `config`
+    |
+help: a struct with a similar name exists
+    |
+557 -                 config::DynamicConfigProvider::Nop => {
+557 +                 config::DynamicConfigConfig::Nop => {
+    |
+
+error[E0433]: cannot find `DynamicConfigProvider` in `config`
+   --> crates/cadence-matching/src/launcher.rs:561:25
+    |
+561 |                 config::DynamicConfigProvider::ConfigStore(store) => anyhow::bail!(
+    |                         ^^^^^^^^^^^^^^^^^^^^^ could not find `DynamicConfigProvider` in `config`
+    |
+help: a struct with a similar name exists
+    |
+561 -                 config::DynamicConfigProvider::ConfigStore(store) => anyhow::bail!(
+561 +                 config::DynamicConfigConfig::ConfigStore(store) => anyhow::bail!(
+    |
+
+error[E0433]: cannot find `DynamicConfigProvider` in `config`
+   --> crates/cadence-matching/src/launcher.rs:568:25
+    |
+568 |                 config::DynamicConfigProvider::OpenFeature(feature) => anyhow::bail!(
+    |                         ^^^^^^^^^^^^^^^^^^^^^ could not find `DynamicConfigProvider` in `config`
+    |
+help: a struct with a similar name exists
+    |
+568 -                 config::DynamicConfigProvider::OpenFeature(feature) => anyhow::bail!(
+568 +                 config::DynamicConfigConfig::OpenFeature(feature) => anyhow::bail!(
+    |
+
+error[E0425]: cannot find function `float` in module `cadence_persistence::dynamic_config`
+   --> crates/cadence-matching/src/launcher.rs:648:58
+    |
+648 |                     cadence_persistence::dynamic_config::float(overlay.property_values(key), 0.0)
+    |                     -------------------------------------^^^^^
+    |                     |                                    |
+    |                     |                                    not found in `cadence_persistence::dynamic_config`
+    |                     help: perhaps you intended to use this type: `f32`
+
+error[E0425]: cannot find function `boolean_domain_id` in module `cadence_persistence::dynamic_config`
+  --> crates/cadence-matching/src/matching_task_info_log.rs:36:46
+   |
+36 |         cadence_persistence::dynamic_config::boolean_domain_id(
+   |                                              ^^^^^^^^^^^^^^^^^ not found in `cadence_persistence::dynamic_config`
+
+error[E0026]: variant `cadence_service_core::cli::Command::Start` does not have fields named `env`, `zone`
+   --> crates/cadence-matching/src/launcher.rs:488:13
+    |
+488 |             env,
+    |             ^^^
+489 |             zone,
+    |             ^^^^ variant `cadence_service_core::cli::Command::Start` does not have these fields
+
+error[E0599]: no associated function or constant named `from_layers` found for struct `cadence_service_core::config::Config` in the current scope
+   --> crates/cadence-matching/src/launcher.rs:519:37
+    |
+519 |                     config::Config::from_layers(&path, &env, &zone)?
+    |                                     ^^^^^^^^^^^ associated function or constant not found in `cadence_service_core::config::Config`
+    |
+note: if you're trying to build a new `cadence_service_core::config::Config` consider using one of the following associated functions:
+      cadence_service_core::config::Config::development
+      cadence_service_core::config::Config::from_file
+      cadence_service_core::config::Config::from_yaml
+   --> crates/cadence-service-core/src/config.rs:656:4
+
+error[E0599]: no method named `validate_go` found for struct `PersistenceConfig` in the current scope
+    --> crates/cadence-matching/src/launcher.rs:1604:29
+     |
+1604 |             cfg.persistence.validate_go().map_err(anyhow::Error::msg)?;
+     |                             ^^^^^^^^^^^ method not found in `PersistenceConfig`
+
+Some errors have detailed explanations: E0026, E0425, E0433, E0599.
+For more information about an error, try `rustc --explain E0026`.
+error: could not compile `cadence-matching` (lib test) due to 10 previous errors

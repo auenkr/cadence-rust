@@ -1,0 +1,23 @@
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-proto)
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-matching)
+error[E0425]: cannot find function `float` in module `cadence_persistence::dynamic_config`
+   --> crates/cadence-matching/src/launcher.rs:648:58
+    |
+648 |                     cadence_persistence::dynamic_config::float(overlay.property_values(key), 0.0)
+    |                     -------------------------------------^^^^^
+    |                     |                                    |
+    |                     |                                    not found in `cadence_persistence::dynamic_config`
+    |                     help: perhaps you intended to use this type: `f32`
+
+error[E0425]: cannot find function `boolean_domain_id` in module `cadence_persistence::dynamic_config`
+  --> crates/cadence-matching/src/matching_task_info_log.rs:36:46
+   |
+36 |         cadence_persistence::dynamic_config::boolean_domain_id(
+   |                                              ^^^^^^^^^^^^^^^^^ not found in `cadence_persistence::dynamic_config`
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `cadence-matching` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `cadence-matching` (lib test) due to 2 previous errors

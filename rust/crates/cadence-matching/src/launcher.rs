@@ -485,6 +485,8 @@ pub async fn run(
     match cli.command {
         Command::Start {
             config,
+            env,
+            zone,
             root,
             services,
             port,
@@ -501,44 +503,72 @@ pub async fn run(
             // supported persistence backend.
             let embedded_development = config.is_none();
             let cfg = match config {
+                Some(path) if std::path::Path::new(&path).is_dir() => {
+                    // Go `--config <dir> --env --zone` layered loader.
+                    let var = |names: &[&str]| {
+                        names.iter().find_map(|name| std::env::var(name).ok())
+                    };
+                    let env = env
+                        .or_else(|| var(&["CADENCE_ENVIRONMENT"]))
+                        .unwrap_or_default();
+                    let zone = zone
+                        .or_else(|| {
+                            var(&["CADENCE_AVAILABILITY_ZONE", "CADENCE_AVAILABILTY_ZONE"])
+                        })
+                        .unwrap_or_default();
+                    config::Config::from_layers(&path, &env, &zone)?
+                }
                 Some(path) => config::Config::from_file(path)?,
                 None => config::Config::development()?,
             };
             cfg.validate()?;
+            cfg.persistence.validate_go().map_err(anyhow::Error::msg)?;
             let process_root = root
                 .map(std::path::PathBuf::from)
                 .unwrap_or(std::env::current_dir()?);
-            let dynamic_config_provider = cfg.selected_dynamic_config_client();
-            let dynamic_config_poll = match dynamic_config_provider {
-                Some((_, provider)) if !provider.poll_interval.is_empty() => {
+            let dynamic_config_provider = cfg.dynamic_config_provider();
+            let dynamic_config_poll = match &dynamic_config_provider {
+                config::DynamicConfigProvider::FileBased(provider)
+                    if !provider.poll_interval.is_empty() =>
+                {
                     let nanos = crate::config::parse_go_duration(&provider.poll_interval)
                         .map_err(anyhow::Error::msg)?;
                     std::time::Duration::from_nanos(nanos.max(5_000_000_000) as u64)
                 }
                 _ => std::time::Duration::from_secs(5),
             };
-            let dynamic_config_path = if let Some((client, provider)) = dynamic_config_provider {
-                if !client.eq_ignore_ascii_case("filebased") {
-                    anyhow::bail!(
-                        "dynamic config client {client:?} is not supported by Rust Matching; only filebased is currently ported"
-                    );
-                }
-                if provider.filepath.is_empty() {
-                    eprintln!(
-                        "warning: filebased dynamic config has no filepath; using no-op configuration"
-                    );
-                    None
-                } else {
-                    let path = std::path::PathBuf::from(&provider.filepath);
-                    let path = if path.is_absolute() {
-                        path
+            let dynamic_config_path = match dynamic_config_provider {
+                config::DynamicConfigProvider::FileBased(provider) => {
+                    if provider.filepath.is_empty() {
+                        eprintln!(
+                            "warning: filebased dynamic config has no filepath; using no-op configuration"
+                        );
+                        None
                     } else {
-                        process_root.join(path)
-                    };
-                    Some(path)
+                        let path = std::path::PathBuf::from(&provider.filepath);
+                        let path = if path.is_absolute() {
+                            path
+                        } else {
+                            process_root.join(path)
+                        };
+                        Some(path)
+                    }
                 }
-            } else {
-                None
+                config::DynamicConfigProvider::Nop => {
+                    eprintln!("initialising NOP dynamic config client");
+                    None
+                }
+                config::DynamicConfigProvider::ConfigStore(store) => anyhow::bail!(
+                    "dynamicconfig.client \"configstore\" (pollInterval {}ns, updateRetryAttempts {}, FetchTimeout {}ns, UpdateTimeout {}ns) is not supported by Rust Matching: Go (dynamicconfigfx/fx.go:91-99, configstore/config_store_client.go:92-122) polls the default datastore's dynamic-config rows and falls back to a no-op client only when creating the client fails; Rust has no config-store client, so refusing to start avoids silently running on defaults",
+                    store.poll_interval_nanos,
+                    store.update_retry_attempts,
+                    store.fetch_timeout_nanos,
+                    store.update_timeout_nanos,
+                ),
+                config::DynamicConfigProvider::OpenFeature(feature) => anyhow::bail!(
+                    "dynamicconfig.client \"openfeature\" (providerName {:?}) is not supported by Rust Matching: Go (dynamicconfigfx/fx.go:103-119) registers the named OpenFeature provider plugin (e.g. unleash) on start; no provider plugin is ported",
+                    feature.provider_name
+                ),
             };
             let wanted: Vec<service::ServiceName> = if services.is_empty() {
                 only.map_or_else(|| service::ServiceName::all().to_vec(), <[_]>::to_vec)
@@ -609,6 +639,30 @@ pub async fn run(
             } else {
                 false
             };
+            // Go reads these once while constructing the clients
+            // (persistence/client/factory.go:195-199, client/clientfactory.go:183-185,
+            // handler/engine.go:1593 for EnableDebugMode at config build).
+            let (persistence_error_rate, debug_mode) = {
+                let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+                let rate = |key: &str| {
+                    cadence_persistence::dynamic_config::float(overlay.property_values(key), 0.0)
+                };
+                crate::matching_fault_injection::install_client_error_rate(rate(
+                    "matching.errorInjectionRate",
+                ));
+                (
+                    rate("system.persistenceErrorInjectionRate"),
+                    cadence_persistence::dynamic_config::boolean(
+                        overlay.property_values("system.enableDebugMode"),
+                        None,
+                        false,
+                    ),
+                )
+            };
+            crate::matching_task_info_log::install(crate::matching_task_info_log::TaskInfoLog::new(
+                state.admin.dynamic_config.clone(),
+                debug_mode,
+            ));
             let matching_member_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let matching_persistence_limiter = if wanted.contains(&service::ServiceName::Matching)
                 && !embedded_development
@@ -1043,6 +1097,12 @@ pub async fn run(
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!("joining Matching store startup: {error}"))??;
+                // Go wraps the raw TaskManager with the error injector before
+                // the rate limiter (persistence/client/factory.go:195-203).
+                stores.task_store = crate::matching_fault_injection::inject_task_store_errors(
+                    stores.task_store,
+                    persistence_error_rate,
+                );
                 if let Some(limiter) = matching_persistence_limiter.as_ref() {
                     stores.task_store = crate::matching_persistence::limit_task_store(
                         stores.task_store,
@@ -1541,6 +1601,7 @@ pub async fn run(
         Command::CheckConfig { config } => {
             let cfg = config::Config::from_file(&config)?;
             cfg.validate()?;
+            cfg.persistence.validate_go().map_err(anyhow::Error::msg)?;
             println!("config OK: {}", config);
         }
     }

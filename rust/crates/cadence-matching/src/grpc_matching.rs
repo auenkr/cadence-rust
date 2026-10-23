@@ -2080,6 +2080,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let add_started = tokio::time::Instant::now();
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
+                    log_received_add_task("Received AddDecisionTask", &r.domain_id, r.task_list.as_ref(), r.workflow_execution.as_ref(), 0, r.schedule_id);
                     task_list_name(
                         r.task_list
                             .as_ref()
@@ -2120,6 +2121,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                         "decision_task",
                         matching_host_name(),
                     );
+                    if r.task_list.as_ref().map_or(0, |t| t.kind) <= 1 && r.forwarded_from.is_empty() {
+                        log_tasklist_counter("Emitting tasklist counter on decision task", &r.domain_id, r.task_list.as_ref());
+                    }
                     if self.queues.is_some() {
                         let list = r
                             .task_list
@@ -2295,6 +2299,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let add_started = tokio::time::Instant::now();
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
+                    log_received_add_task("Received AddActivityTask", &r.domain_id, r.task_list.as_ref(), r.workflow_execution.as_ref(), 1, r.schedule_id);
                     task_list_name(
                         r.task_list
                             .as_ref()
@@ -2335,6 +2340,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                         "activity_task",
                         matching_host_name(),
                     );
+                    if r.task_list.as_ref().map_or(0, |t| t.kind) <= 1 && r.forwarded_from.is_empty() {
+                        log_tasklist_counter("Emitting tasklist counter on activity task", &r.domain_id, r.task_list.as_ref());
+                    }
                     if self.queues.is_some() {
                         let list = r
                             .task_list
@@ -2922,8 +2930,18 @@ impl m::matching_api_server::MatchingApi for Matching {
                     use cadence_api::enums::SemaphoreAcquireOutcome;
                     let r = request.get_ref().clone();
                     // Owner parsing mirrors Go's `ParseRequestOwner`.
-                    cadence_common::semaphore::parse_owner(&r.owner_id)
+                    let owner = cadence_common::semaphore::parse_owner(&r.owner_id)
                         .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
+                    crate::matching_task_info_log::emit(
+                        &r.domain_id,
+                        "Received AcquireSemaphore",
+                        &[
+                            ("wf-id", owner.workflow_id),
+                            ("wf-run-id", owner.run_id),
+                            ("wf-domain-id", r.domain_id.clone()),
+                            ("wf-schedule-id", owner.hold_id.to_string()),
+                        ],
+                    );
                     let identifier = Identifier::new(&r.domain_id, &r.semaphore_name, r.bucket)
                         .map_err(semaphore_status)?;
                     // Go's cached-manager fast path skips both domain admission
@@ -3589,6 +3607,53 @@ pub async fn serve_with_listener_tls(
         .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
         .await?;
     Ok(())
+}
+
+/// Go `tag.WorkflowTaskListKind` is the Go enum (Normal=0); proto kinds are +1.
+fn go_task_list_kind(proto_kind: i32) -> i32 {
+    (proto_kind - 1).max(0)
+}
+
+/// Go `engine.go` AddDecisionTask/AddActivityTask "Received ..." event.
+fn log_received_add_task(
+    message: &str,
+    domain_id: &str,
+    task_list: Option<&p::TaskList>,
+    execution: Option<&p::WorkflowExecution>,
+    task_type: i32,
+    schedule_id: i64,
+) {
+    let execution = execution.cloned().unwrap_or_default();
+    crate::matching_task_info_log::emit(
+        domain_id,
+        message,
+        &[
+            ("wf-task-list-name", task_list.map(|t| t.name.clone()).unwrap_or_default()),
+            ("wf-id", execution.workflow_id),
+            ("wf-run-id", execution.run_id),
+            ("wf-domain-id", domain_id.to_owned()),
+            ("wf-task-list-type", task_type.to_string()),
+            ("wf-schedule-id", schedule_id.to_string()),
+            ("wf-task-list-kind", go_task_list_kind(task_list.map_or(0, |t| t.kind)).to_string()),
+        ],
+    );
+}
+
+/// Go `engine.go` "Emitting tasklist counter on ..." event.
+fn log_tasklist_counter(
+    message: &str,
+    domain_id: &str,
+    task_list: Option<&p::TaskList>,
+) {
+    let name = task_list.map(|t| t.name.clone()).unwrap_or_default();
+    let root = cadence_common::task_list::TaskListName::parse(&name)
+        .map(|n| n.root().to_owned())
+        .unwrap_or_default();
+    crate::matching_task_info_log::emit(
+        domain_id,
+        message,
+        &[("wf-task-list-name", name), ("taskListBaseName", root)],
+    );
 }
 
 #[cfg(test)]

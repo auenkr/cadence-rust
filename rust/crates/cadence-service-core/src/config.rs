@@ -181,16 +181,87 @@ impl ShardDistributorMatchingConfig {
 pub struct DynamicConfigConfig {
     #[serde(default)]
     pub client: String,
+    #[serde(default, rename = "configstore")]
+    pub config_store: ConfigStoreClientConfig,
     #[serde(default, rename = "filebased")]
     pub file_based: DynamicConfigClientConfig,
+    #[serde(default, rename = "openfeature")]
+    pub open_feature: OpenFeatureClientConfig,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DynamicConfigClientConfig {
     #[serde(default)]
     pub filepath: String,
-    #[serde(default, rename = "pollInterval")]
+    #[serde(default, rename = "pollInterval", deserialize_with = "de_duration_string")]
     pub poll_interval: String,
+}
+
+/// Go `configstore/config.ClientConfig` (`common/dynamicconfig/configstore/config`).
+/// Durations are nanoseconds, as Go's `time.Duration`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigStoreClientConfig {
+    #[serde(default, rename = "pollInterval", deserialize_with = "de_go_duration")]
+    pub poll_interval_nanos: i64,
+    #[serde(default, rename = "updateRetryAttempts")]
+    pub update_retry_attempts: i32,
+    #[serde(default, rename = "FetchTimeout", deserialize_with = "de_go_duration")]
+    pub fetch_timeout_nanos: i64,
+    #[serde(default, rename = "UpdateTimeout", deserialize_with = "de_go_duration")]
+    pub update_timeout_nanos: i64,
+}
+
+/// Go `openfeatureclient/config.Config`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenFeatureClientConfig {
+    #[serde(default, rename = "providerName")]
+    pub provider_name: String,
+    #[serde(default)]
+    pub provider: Option<serde_yaml::Value>,
+}
+
+/// Go `configstore.configStoreMinPollInterval`.
+const CONFIG_STORE_MIN_POLL_INTERVAL_NANOS: i64 = 2_000_000_000;
+
+impl ConfigStoreClientConfig {
+    /// Go `defaultConfigValues` (`configstore/config_store_client.go:66-71`).
+    pub fn go_defaults() -> Self {
+        Self {
+            poll_interval_nanos: 10_000_000_000,
+            update_retry_attempts: 1,
+            fetch_timeout_nanos: 2,
+            update_timeout_nanos: 2,
+        }
+    }
+
+    /// Go `validateClientConfig` (`config_store_client.go:604-621`).
+    pub fn validate(&self) -> Result<(), String> {
+        if self.poll_interval_nanos < CONFIG_STORE_MIN_POLL_INTERVAL_NANOS {
+            return Err("poll interval should be at least 2s".into());
+        }
+        if self.update_retry_attempts < 0 {
+            return Err("UpdateRetryAttempts must be non-negative".into());
+        }
+        if self.fetch_timeout_nanos <= 0 {
+            return Err("FetchTimeout must be positive".into());
+        }
+        if self.update_timeout_nanos <= 0 {
+            return Err("UpdateTimeout must be positive".into());
+        }
+        Ok(())
+    }
+}
+
+/// Provider chosen by Go `dynamicconfigfx.New` (`dynamicconfigfx/fx.go:69-130`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DynamicConfigProvider<'a> {
+    FileBased(&'a DynamicConfigClientConfig),
+    /// Config as Go uses it: invalid values are replaced by `go_defaults()`.
+    ConfigStore(ConfigStoreClientConfig),
+    OpenFeature(&'a OpenFeatureClientConfig),
+    /// Go `dynamicconfig.NewNopClient()`: unset, unknown (client names are
+    /// case-sensitive) or legacy-less configuration.
+    Nop,
 }
 
 impl Config {
@@ -204,6 +275,43 @@ impl Config {
                 .as_ref()
                 .map(|config| ("filebased", config))
         }
+    }
+
+    /// Go `dynamicconfigfx.New` switch: `configstore`, `filebased` and
+    /// `openfeature` are matched exactly; anything else gets the no-op client.
+    /// An empty client uses the legacy file-based stanza (a missing stanza
+    /// fails to load in Go and also ends in the no-op client).
+    pub fn dynamic_config_provider(&self) -> DynamicConfigProvider<'_> {
+        let modern = &self.dynamic_config;
+        match modern.client.as_str() {
+            "" => self
+                .legacy_dynamic_config_client
+                .as_ref()
+                .map_or(DynamicConfigProvider::Nop, DynamicConfigProvider::FileBased),
+            "filebased" => DynamicConfigProvider::FileBased(&modern.file_based),
+            "configstore" => DynamicConfigProvider::ConfigStore(
+                if modern.config_store.validate().is_ok() {
+                    modern.config_store.clone()
+                } else {
+                    ConfigStoreClientConfig::go_defaults()
+                },
+            ),
+            "openfeature" => DynamicConfigProvider::OpenFeature(&modern.open_feature),
+            _ => DynamicConfigProvider::Nop,
+        }
+    }
+}
+
+fn de_duration_string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    use serde::de::Error;
+    match serde_yaml::Value::deserialize(d)? {
+        serde_yaml::Value::Null => Ok(String::new()),
+        serde_yaml::Value::Number(n) => n
+            .as_i64()
+            .map(|nanos| format!("{nanos}ns"))
+            .ok_or_else(|| Error::custom(format!("invalid duration {n:?}"))),
+        serde_yaml::Value::String(s) => Ok(s),
+        other => Err(Error::custom(format!("invalid duration {other:?}"))),
     }
 }
 
@@ -409,6 +517,8 @@ pub struct PersistenceConfig {
     pub default_store: String,
     #[serde(default, rename = "visibilityStore")]
     pub visibility_store: String,
+    #[serde(default, rename = "advancedVisibilityStore")]
+    pub advanced_visibility_store: String,
     #[serde(default, rename = "numHistoryShards")]
     pub num_history_shards: i32,
     #[serde(default, rename = "datastores")]
@@ -420,10 +530,144 @@ pub struct PersistenceConfig {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatastoreConfig {
+    /// Deprecated Go spelling of `nosql`; `fill_defaults` copies it over.
+    #[serde(default)]
+    pub cassandra: Option<NosqlConfig>,
     #[serde(default)]
     pub nosql: Option<NosqlConfig>,
+    #[serde(default, rename = "shardedNosql")]
+    pub sharded_nosql: Option<ShardedNosqlConfig>,
     #[serde(default)]
     pub sql: Option<SqlConfig>,
+}
+
+/// Go `config.ShardedNoSQL`; only the fields validated at startup are typed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardedNosqlConfig {
+    #[serde(default, rename = "defaultShard")]
+    pub default_shard: String,
+    #[serde(default, rename = "shardingPolicy")]
+    pub sharding_policy: Option<serde_yaml::Value>,
+    #[serde(default)]
+    pub connections: HashMap<String, serde_yaml::Value>,
+}
+
+impl PersistenceConfig {
+    /// Go `Persistence.FillDefaults` (`common/config/persistence.go:46-72`)
+    /// for the fields this model carries.
+    pub fn fill_defaults(&mut self) {
+        for store in self.datastores.values_mut() {
+            if store.nosql.is_none() {
+                if let Some(mut legacy) = store.cassandra.clone() {
+                    // Go aliases one pointer, so both fields see the plugin name.
+                    legacy.plugin_name = "cassandra".into();
+                    store.cassandra = Some(legacy.clone());
+                    store.nosql = Some(legacy);
+                }
+            }
+            if let Some(sql) = store.sql.as_mut() {
+                if sql.n_shards == 0 {
+                    sql.n_shards = 1;
+                }
+            }
+        }
+    }
+
+    /// Go `Persistence.Validate` (`persistence.go:75-176`) plus the
+    /// `validate:"nonzero"` tags on `defaultStore` and `numHistoryShards`
+    /// (`config.go:172,188`). The sharded-NoSQL history/tasklist policy
+    /// checks are not ported.
+    pub fn validate_go(&self) -> Result<(), String> {
+        if self.default_store.is_empty() {
+            return Err("failed to validate config: Persistence.DefaultStore: zero value".into());
+        }
+        if self.num_history_shards == 0 {
+            return Err(
+                "failed to validate config: Persistence.NumHistoryShards: zero value".into(),
+            );
+        }
+        let mut keys = vec![self.default_store.as_str()];
+        let mut advanced_only = false;
+        if self.datastores.contains_key(&self.visibility_store) {
+            keys.push(self.visibility_store.as_str());
+        } else if !self.datastores.contains_key(&self.advanced_visibility_store) {
+            return Err("must provide one of VisibilityStore and AdvancedVisibilityStore".into());
+        } else {
+            advanced_only = true;
+        }
+        for key in keys {
+            let ds = self.datastores.get(key).ok_or_else(|| {
+                format!("persistence config: missing config for datastore {key}")
+            })?;
+            if ds.cassandra.is_some() && ds.nosql.is_some() && ds.cassandra != ds.nosql {
+                return Err(format!(
+                    "persistence config: datastore {key}: only one of Cassandra or NoSQL can be specified"
+                ));
+            }
+            let count = usize::from(ds.nosql.is_some())
+                + usize::from(ds.sharded_nosql.is_some())
+                + usize::from(ds.sql.is_some());
+            if count != 1 {
+                return Err(format!(
+                    "persistence config: datastore {key}: must provide exactly one type of config, but provided {count}"
+                ));
+            }
+            if let Some(sql) = &ds.sql {
+                validate_sql(sql, advanced_only)?;
+            }
+            if let Some(sharded) = &ds.sharded_nosql {
+                if sharded.default_shard.is_empty() {
+                    return Err("ShardedNosql config: defaultShard can not be empty".into());
+                }
+                if !sharded.connections.contains_key(&sharded.default_shard) {
+                    return Err(format!(
+                        "ShardedNosql config: defaultShard ({}) is not defined in connections list",
+                        sharded.default_shard
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_sql(sql: &SqlConfig, advanced_only: bool) -> Result<(), String> {
+    if sql.use_multiple_databases {
+        if !advanced_only {
+            return Err("sql persistence config: multipleSQLDatabases can only be used with advanced visibility only".into());
+        }
+        for (value, name) in [
+            (&sql.database_name, "databaseName"),
+            (&sql.connect_addr, "connectAddr"),
+            (&sql.user, "user"),
+            (&sql.password, "password"),
+        ] {
+            if !value.is_empty() {
+                return Err(format!(
+                    "sql persistence config: {name} can only be configured in multipleDatabasesConfig when UseMultipleDatabases is true"
+                ));
+            }
+        }
+        if sql.n_shards <= 1 || sql.multiple_databases_config.len() != sql.n_shards as usize {
+            return Err("sql persistence config: nShards must be greater than one and equal to the length of multipleDatabasesConfig".into());
+        }
+        for entry in &sql.multiple_databases_config {
+            if entry.database_name.is_empty() {
+                return Err("sql multipleDatabasesConfig persistence config: databaseName can not be empty".into());
+            }
+            if entry.connect_addr.is_empty() {
+                return Err("sql multipleDatabasesConfig persistence config: connectAddr can not be empty".into());
+            }
+        }
+    } else if sql.plugin_name != "sqlite" {
+        if sql.database_name.is_empty() {
+            return Err("sql persistence config: databaseName can not be empty".into());
+        }
+        if sql.connect_addr.is_empty() {
+            return Err("sql persistence config: connectAddr can not be empty".into());
+        }
+    }
+    Ok(())
 }
 
 /// Mirrors Go `config.NoSQL`: `hosts` is a CSV string, not a list.
@@ -663,16 +907,51 @@ impl Config {
     }
 
     pub fn from_yaml(text: &str) -> anyhow::Result<Self> {
-        let mut config: Self = serde_yaml::from_str(&expand_env(text))?;
-        if config.cluster_metadata.is_none() {
-            config
-                .cluster_metadata
-                .clone_from(&config.legacy_cluster_metadata);
+        let config: Self = serde_yaml::from_str(&expand_env(text).map_err(anyhow::Error::msg)?)?;
+        Ok(config.finish())
+    }
+
+    /// Go `config.Load` (`common/config/loader.go:67-131`): `base.yaml`, then
+    /// `<env>.yaml`, then `<env>_<zone>.yaml` from `dir`, each existing file
+    /// deep-merged over the previous (maps merge, everything else replaces).
+    /// `env` defaults to `development`, `dir` to `config`.
+    pub fn from_layers(dir: &str, env: &str, zone: &str) -> anyhow::Result<Self> {
+        let env = if env.is_empty() { "development" } else { env };
+        let dir = if dir.is_empty() { "config" } else { dir };
+        let mut candidates = vec![
+            Path::new(dir).join("base.yaml"),
+            Path::new(dir).join(format!("{env}.yaml")),
+        ];
+        if !zone.is_empty() {
+            candidates.push(Path::new(dir).join(format!("{env}_{zone}.yaml")));
         }
-        if let Some(metadata) = config.cluster_metadata.as_mut() {
+        let files: Vec<_> = candidates.into_iter().filter(|path| path.exists()).collect();
+        if files.is_empty() {
+            anyhow::bail!("unable to get config files: no config files found within {dir}");
+        }
+        let mut merged = serde_yaml::Value::Null;
+        for file in &files {
+            let text = std::fs::read_to_string(file)?;
+            let layer: serde_yaml::Value =
+                serde_yaml::from_str(&expand_env(&text).map_err(anyhow::Error::msg)?)?;
+            if !layer.is_null() {
+                merged = merge_yaml(merged, layer);
+            }
+        }
+        let config: Self = serde_yaml::from_value(merged)?;
+        Ok(config.finish())
+    }
+
+    fn finish(mut self) -> Self {
+        if self.cluster_metadata.is_none() {
+            self.cluster_metadata
+                .clone_from(&self.legacy_cluster_metadata);
+        }
+        if let Some(metadata) = self.cluster_metadata.as_mut() {
             metadata.fill_defaults();
         }
-        Ok(config)
+        self.persistence.fill_defaults();
+        self
     }
 
     /// Service names this binary knows how to run.
@@ -711,57 +990,302 @@ impl Config {
     }
 }
 
-/// Expand `${VAR:default}`, `${VAR}`, and `$VAR` from the environment,
-/// mirroring the Go config loader's envsubst behavior.
-fn expand_env(text: &str) -> String {
+/// Merge `over` onto `base` like go.uber.org/config: maps merge recursively,
+/// scalars and sequences from the later file replace.
+fn merge_yaml(base: serde_yaml::Value, over: serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    match (base, over) {
+        (Value::Mapping(mut base), Value::Mapping(over)) => {
+            for (key, value) in over {
+                let merged = match base.remove(&key) {
+                    Some(existing) => merge_yaml(existing, value),
+                    None => value,
+                };
+                base.insert(key, merged);
+            }
+            Value::Mapping(base)
+        }
+        (_, over) => over,
+    }
+}
+
+/// Expand environment references like go.uber.org/config v1.4 `Expand`
+/// (`expand.go`): `${VAR}`, `${VAR:default}` (everything after the first
+/// `:` is the default, `""` means empty), `$VAR` (`[A-Za-z_][A-Za-z0-9_]*`)
+/// and `$$` for a literal `$`. A variable that is unset and has no default is
+/// an error. Go expands after merging, which has stripped YAML comments, so
+/// text after a comment `#` is left untouched here.
+fn expand_env(text: &str) -> Result<String, String> {
+    expand_with(text, &|name| std::env::var(name).ok())
+}
+
+fn expand_with(text: &str, lookup: &dyn Fn(&str) -> Option<String>) -> Result<String, String> {
     let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '$' {
-            out.push(c);
+    for line in text.split_inclusive('\n') {
+        let split = comment_start(line).unwrap_or(line.len());
+        out.push_str(&expand_segment(&line[..split], lookup)?);
+        out.push_str(&line[split..]);
+    }
+    Ok(out)
+}
+
+/// Byte index of a YAML comment `#` (start of line or after whitespace,
+/// outside single/double quotes).
+fn comment_start(line: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    let mut previous_space = true;
+    let mut chars = line.char_indices().peekable();
+    while let Some((index, c)) = chars.next() {
+        match quote {
+            Some('"') if c == '\\' => {
+                chars.next();
+            }
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None => match c {
+                '#' if previous_space => return Some(index),
+                '"' | '\'' if previous_space => quote = Some(c),
+                _ => {}
+            },
+        }
+        previous_space = c.is_whitespace();
+    }
+    None
+}
+
+fn expand_segment(
+    segment: &str,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    let bytes = segment.as_bytes();
+    let mut out = String::with_capacity(segment.len());
+    let mut pos = 0;
+    while pos < bytes.len() {
+        let Some(offset) = segment[pos..].find('$') else {
+            out.push_str(&segment[pos..]);
+            break;
+        };
+        out.push_str(&segment[pos..pos + offset]);
+        pos += offset;
+        let Some(&next) = bytes.get(pos + 1) else {
+            out.push('$');
+            break;
+        };
+        if next == b'$' {
+            out.push('$');
+            pos += 2;
             continue;
         }
-        if chars.peek() == Some(&'{') {
-            chars.next();
-            let mut expr = String::new();
-            for ch in chars.by_ref() {
-                if ch == '}' {
+        let (token, end) = if next == b'{' {
+            match segment[pos + 2..].find('}') {
+                Some(close) => (&segment[pos + 2..pos + 2 + close], pos + 3 + close),
+                None => {
+                    out.push_str(&segment[pos..]);
                     break;
                 }
-                expr.push(ch);
             }
-            let (var, default) = match expr.split_once(":-") {
-                Some((v, d)) => (v, Some(d)),
-                None => match expr.split_once(':') {
-                    Some((v, d)) => (v, Some(d)),
-                    None => (expr.as_str(), None),
-                },
-            };
-            let value = std::env::var(var).unwrap_or_else(|_| default.unwrap_or("").to_string());
-            out.push_str(&value);
-            continue;
-        }
-        let mut var = String::new();
-        while let Some(&ch) = chars.peek() {
-            if ch.is_ascii_alphanumeric() || ch == '_' {
-                var.push(ch);
-                chars.next();
-            } else {
-                break;
-            }
-        }
-        if var.is_empty() {
-            out.push('$');
+        } else if next == b'_' || next.is_ascii_alphabetic() {
+            let len = bytes[pos + 1..]
+                .iter()
+                .take_while(|b| **b == b'_' || b.is_ascii_alphanumeric())
+                .count();
+            (&segment[pos + 1..pos + 1 + len], pos + 1 + len)
         } else {
-            out.push_str(&std::env::var(&var).unwrap_or_default());
+            out.push('$');
+            pos += 1;
+            continue;
+        };
+        let (key, default) = match token.split_once(':') {
+            Some((key, default)) => (key, default),
+            None => (token, ""),
+        };
+        match lookup(key) {
+            Some(value) => out.push_str(&value),
+            None if default.is_empty() => {
+                return Err(format!(
+                    "couldn't expand environment: default is empty for {key:?} (use \"\" for empty string)"
+                ));
+            }
+            None if default == "\"\"" => {}
+            None => out.push_str(default),
         }
+        pos = end;
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lookup(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_owned())
+        }
+    }
+
+    #[test]
+    fn env_expansion_follows_go_uber_config() {
+        let env = lookup(&[("A", "1"), ("EMPTY", "")]);
+        let expand = |text: &str| expand_with(text, &env);
+        assert_eq!(expand("p: ${A}").unwrap(), "p: 1");
+        assert_eq!(expand("p: $A").unwrap(), "p: 1");
+        // Set-but-empty counts as set.
+        assert_eq!(expand("p: ${EMPTY:7}").unwrap(), "p: ");
+        assert_eq!(expand("p: ${MISSING:7}").unwrap(), "p: 7");
+        // Everything after the first colon is the default, so `:-` keeps the dash.
+        assert_eq!(expand("p: ${MISSING:-7}").unwrap(), "p: -7");
+        assert_eq!(expand("p: ${MISSING:a:b}").unwrap(), "p: a:b");
+        assert_eq!(expand("p: ${MISSING:\"\"}").unwrap(), "p: ");
+        // Unset with no/empty default is an error, as in Go.
+        assert!(expand("p: ${MISSING}").unwrap_err().contains("default is empty"));
+        assert!(expand("p: ${MISSING:}").is_err());
+        assert!(expand("p: $MISSING").is_err());
+        // `$$` is a literal dollar; non-name characters after `$` are copied.
+        assert_eq!(expand("p: $$A").unwrap(), "p: $A");
+        assert_eq!(expand("p: $1 $ end $").unwrap(), "p: $1 $ end $");
+        // Unterminated braces are copied through.
+        assert_eq!(expand("p: ${A").unwrap(), "p: ${A");
+        // Names start with a letter or underscore only; `$A_b1` is one name.
+        assert_eq!(expand("p: $A,x").unwrap(), "p: 1,x");
+    }
+
+    #[test]
+    fn env_expansion_skips_yaml_comments_but_not_quoted_hashes() {
+        let env = lookup(&[("A", "1")]);
+        let expand = |text: &str| expand_with(text, &env);
+        assert_eq!(
+            expand("p: ${A} # ${MISSING}\n# ${MISSING}\nq: '${A} # ${A}' # tail\n").unwrap(),
+            "p: 1 # ${MISSING}\n# ${MISSING}\nq: '1 # 1' # tail\n"
+        );
+        assert_eq!(expand("p: a#${A}\n").unwrap(), "p: a#1\n");
+    }
+
+    #[test]
+    fn layered_config_merges_base_env_and_zone_like_go_loader() {
+        let dir = std::env::temp_dir().join(format!("cadence-layers-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("base.yaml"),
+            "persistence:\n  defaultStore: base\n  numHistoryShards: 4\ndynamicconfig:\n  client: filebased\n  filebased:\n    filepath: base.yaml\n    pollInterval: 10s\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("production.yaml"),
+            "persistence:\n  numHistoryShards: 8\ndynamicconfig:\n  filebased:\n    filepath: prod.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("production_az1.yaml"),
+            "dynamicconfig:\n  filebased:\n    pollInterval: 30s\n",
+        )
+        .unwrap();
+        let dir_str = dir.to_str().unwrap();
+        let cfg = Config::from_layers(dir_str, "production", "az1").unwrap();
+        assert_eq!(cfg.persistence.default_store, "base");
+        assert_eq!(cfg.persistence.num_history_shards, 8);
+        assert_eq!(cfg.dynamic_config.client, "filebased");
+        assert_eq!(cfg.dynamic_config.file_based.filepath, "prod.yaml");
+        assert_eq!(cfg.dynamic_config.file_based.poll_interval, "30s");
+        // No zone layer: only base + env.
+        let cfg = Config::from_layers(dir_str, "production", "").unwrap();
+        assert_eq!(cfg.dynamic_config.file_based.poll_interval, "10s");
+        // Unknown env: base only (development.yaml absent is fine).
+        let cfg = Config::from_layers(dir_str, "", "").unwrap();
+        assert_eq!(cfg.persistence.num_history_shards, 4);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let empty = std::env::temp_dir().join(format!("cadence-nolayers-{}", std::process::id()));
+        std::fs::create_dir_all(&empty).unwrap();
+        let error = Config::from_layers(empty.to_str().unwrap(), "x", "").unwrap_err();
+        assert!(error.to_string().contains("no config files found"));
+        std::fs::remove_dir_all(&empty).unwrap();
+    }
+
+    #[test]
+    fn dynamic_config_provider_selection_matches_dynamicconfigfx() {
+        let cfg = |yaml: &str| Config::from_yaml(yaml).unwrap();
+        assert_eq!(cfg("{}").dynamic_config_provider(), DynamicConfigProvider::Nop);
+        // Names are matched exactly; anything else is the no-op client.
+        assert_eq!(
+            cfg("dynamicconfig: {client: FileBased}").dynamic_config_provider(),
+            DynamicConfigProvider::Nop
+        );
+        assert_eq!(
+            cfg("dynamicconfig: {client: bogus}").dynamic_config_provider(),
+            DynamicConfigProvider::Nop
+        );
+        let legacy = cfg("dynamicConfigClient: {filepath: l.yaml}");
+        assert!(matches!(
+            legacy.dynamic_config_provider(),
+            DynamicConfigProvider::FileBased(p) if p.filepath == "l.yaml"
+        ));
+        // Numeric pollInterval is a Go time.Duration in nanoseconds.
+        let numeric = cfg("dynamicconfig: {client: filebased, filebased: {filepath: f, pollInterval: 7000000000}}");
+        assert!(matches!(
+            numeric.dynamic_config_provider(),
+            DynamicConfigProvider::FileBased(p) if p.poll_interval == "7000000000ns"
+        ));
+        let good = cfg("dynamicconfig: {client: configstore, configstore: {pollInterval: 5s, updateRetryAttempts: 3, FetchTimeout: 4s, UpdateTimeout: 6s}}");
+        assert!(matches!(
+            good.dynamic_config_provider(),
+            DynamicConfigProvider::ConfigStore(c) if c.poll_interval_nanos == 5_000_000_000
+                && c.update_retry_attempts == 3 && c.fetch_timeout_nanos == 4_000_000_000
+        ));
+        // Invalid values fall back to Go's defaults (10s, 1, 2ns, 2ns).
+        let bad = cfg("dynamicconfig: {client: configstore, configstore: {pollInterval: 1s, updateRetryAttempts: 1, FetchTimeout: 1s, UpdateTimeout: 1s}}");
+        assert_eq!(
+            bad.dynamic_config_provider(),
+            DynamicConfigProvider::ConfigStore(ConfigStoreClientConfig::go_defaults())
+        );
+        assert!(ConfigStoreClientConfig { update_retry_attempts: -1, ..ConfigStoreClientConfig::go_defaults() }.validate().is_err());
+        assert!(ConfigStoreClientConfig { fetch_timeout_nanos: 0, ..ConfigStoreClientConfig::go_defaults() }.validate().is_err());
+        let feature = cfg("dynamicconfig: {client: openfeature, openfeature: {providerName: unleash, provider: {url: u}}}");
+        assert!(matches!(
+            feature.dynamic_config_provider(),
+            DynamicConfigProvider::OpenFeature(f) if f.provider_name == "unleash" && f.provider.is_some()
+        ));
+    }
+
+    #[test]
+    fn persistence_validation_follows_go_validate() {
+        let ok = "persistence:\n  defaultStore: d\n  visibilityStore: v\n  numHistoryShards: 4\n  datastores:\n    d: {nosql: {pluginName: cassandra}}\n    v: {sql: {pluginName: mysql, databaseName: db, connectAddr: 'h:1'}}\n";
+        let cfg = Config::from_yaml(ok).unwrap();
+        cfg.persistence.validate_go().unwrap();
+        let check = |from: &str, to: &str| {
+            Config::from_yaml(&ok.replace(from, to))
+                .unwrap()
+                .persistence
+                .validate_go()
+                .unwrap_err()
+        };
+        assert!(check("numHistoryShards: 4", "numHistoryShards: 0").contains("NumHistoryShards"));
+        assert!(check("defaultStore: d", "defaultStore: ''").contains("DefaultStore"));
+        assert!(check("defaultStore: d", "defaultStore: zz").contains("missing config for datastore zz"));
+        assert!(check("visibilityStore: v", "visibilityStore: ''")
+            .contains("one of VisibilityStore and AdvancedVisibilityStore"));
+        assert!(check("databaseName: db, ", "").contains("databaseName can not be empty"));
+        assert!(check("connectAddr: 'h:1'", "connectAddr: ''").contains("connectAddr can not be empty"));
+        assert!(check("d: {nosql: {pluginName: cassandra}}", "d: {}").contains("provided 0"));
+        // sqlite needs neither database nor address.
+        Config::from_yaml(&ok.replace("{pluginName: mysql, databaseName: db, connectAddr: 'h:1'}", "{pluginName: sqlite}"))
+            .unwrap()
+            .persistence
+            .validate_go()
+            .unwrap();
+        // Advanced-visibility-only is accepted.
+        let advanced = ok.replace("visibilityStore: v", "advancedVisibilityStore: v");
+        Config::from_yaml(&advanced).unwrap().persistence.validate_go().unwrap();
+        // Deprecated `cassandra` key is promoted to NoSQL with plugin "cassandra".
+        let legacy = Config::from_yaml(&ok.replace("d: {nosql: {pluginName: cassandra}}", "d: {cassandra: {hosts: h}}")).unwrap();
+        let nosql = legacy.persistence.datastores["d"].nosql.as_ref().unwrap();
+        assert_eq!((nosql.plugin_name.as_str(), nosql.hosts.as_str()), ("cassandra", "h"));
+        legacy.persistence.validate_go().unwrap();
+        // SQL nShards defaults to 1.
+        assert_eq!(cfg.persistence.datastores["v"].sql.as_ref().unwrap().n_shards, 1);
+    }
 
     #[test]
     fn dynamic_config_modern_client_takes_precedence_and_legacy_is_supported() {
