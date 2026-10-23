@@ -1226,50 +1226,33 @@ impl QueueRegistry {
                             .map(|provider| Arc::new(provider(&domain, &lookup.1, lookup.2))),
                         ..crate::matching_reader::ReaderConfig::default()
                     };
-                    let reader = crate::matching_reader::TaskReader::with_dispatch_check_metrics(
-                        queue.clone(),
-                        dispatcher.task_notification(),
-                        reader_config,
-                        activity,
-                        limiter.clone(),
-                        isolation,
-                            registry.domain_metadata.as_ref().map(|(domains, cluster)| {
-                                crate::matching_standby::checker(
-                                    domains.clone(),
-                                    cluster.clone(),
-                                    registry.history.clone(),
-                                    key.clone(),
-                                    registry.standby_enabled.clone(),
-                                    registry.metrics.clone(),
-                                    crate::matching_metrics::PollMetricContext {
-                                        domain: domain.clone(),
-                                        task_list: lookup.1.clone(),
-                                        task_list_kind: i32::from(kind),
-                                        task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
-                                        poller_isolation_group: String::new(),
-                                    },
-                                )
-                            }),
-                        Some((
-                            registry.metrics.clone(),
-                            crate::matching_metrics::PollMetricContext {
-                                domain: domain.clone(),
-                                task_list: lookup.1.clone(),
-                                task_list_kind: i32::from(kind),
-                                task_type: if lookup.2 == 1 {
-                                    "activity_task"
-                                } else {
-                                    "decision_task"
+                    let forward_tasks = Arc::new(crate::matching_forward::RequestTokens::new({
+                            let provider = registry.forward_tasks.clone();
+                            let domain = domain.clone();
+                            let name = lookup.1.clone();
+                            let task_type = lookup.2;
+                                Arc::new(move || {
+                                    provider
+                                        .as_ref()
+                                        .map(|p| p(&domain, &name, task_type))
+                                        .unwrap_or(1)
+                                })
+                        }));
+                        let forward_rate = Arc::new(crate::matching_forward::ForwardRate::new(
+                                {
+                            let provider = registry.forward_rate.clone();
+                            let domain = domain.clone();
+                            let name = lookup.1.clone();
+                            let task_type = lookup.2;
+                                    Arc::new(move || {
+                                        provider
+                                            .as_ref()
+                                            .map(|p| p(&domain, &name, task_type))
+                                            .unwrap_or(10)
+                                    })
                                 },
-                                poller_isolation_group: String::new(),
-                            },
-                        )),
-                    );
-                    let read_stop = reader.stop_signal();
-                        let sync_matcher = Arc::new(crate::matching_sync::SyncMatcher::new(
-                            &sync_groups,
-                            read_stop.subscribe(),
-                        ));
+                                now,
+                            ));
                     let forward = {
                         // Go `forwarder` refuses sticky task lists; only a
                         // real child partition forwards polls to its parent.
@@ -1355,6 +1338,8 @@ impl QueueRegistry {
                                         >
                                 },
                                 max_outstanding,
+                                forward_tasks.clone(),
+                                forward_rate.clone(),
                                 lookup.1.clone(),
                                 {
                                     let provider = registry.local_poll_wait.clone();
@@ -1371,6 +1356,81 @@ impl QueueRegistry {
                             ))
                         }
                     };
+                    let forward = forward.map(|state| state.with_task_metrics(
+                        registry.metrics.clone(),
+                        crate::matching_metrics::PollMetricContext {
+                            domain: domain.clone(), task_list: lookup.1.clone(), task_list_kind: i32::from(kind),
+                            task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
+                            poller_isolation_group: String::new(),
+                        },
+                    ));
+                    let backlog_forward = forward.clone().map(|forward_state| {
+                        let forward_domain = domain.clone();
+                        let forward_task_type = lookup.2;
+                        let forward_kind = kind;
+                        let local_wait_provider = registry.local_poll_wait.clone();
+                        let local_wait_domain = domain.clone();
+                        let local_wait_name = lookup.1.clone();
+                        let local_wait_type = lookup.2;
+                        crate::matching_reader::BacklogForward {
+                            tokens: forward_state.add_tokens(),
+                            forward: Arc::new(move |task| {
+                                let forward_state = forward_state.clone();
+                                let domain = forward_domain.clone();
+                                Box::pin(async move {
+                                    forward_state.forward_backlog_task(task, &domain, forward_task_type, forward_kind).await
+                                })
+                            }),
+                            local_wait: Arc::new(move || std::time::Duration::from_nanos(
+                                local_wait_provider.as_ref().map(|p| p(&local_wait_domain, &local_wait_name, local_wait_type)).unwrap_or(10_000_000).max(0) as u64
+                            )),
+                        }
+                    });
+                    let reader = crate::matching_reader::TaskReader::with_dispatch_check_metrics_forwarding(
+                        queue.clone(),
+                        dispatcher.task_notification(),
+                        reader_config,
+                        activity,
+                        limiter.clone(),
+                        isolation,
+                            registry.domain_metadata.as_ref().map(|(domains, cluster)| {
+                                crate::matching_standby::checker(
+                                    domains.clone(),
+                                    cluster.clone(),
+                                    registry.history.clone(),
+                                    key.clone(),
+                                    registry.standby_enabled.clone(),
+                                    registry.metrics.clone(),
+                                    crate::matching_metrics::PollMetricContext {
+                                        domain: domain.clone(),
+                                        task_list: lookup.1.clone(),
+                                        task_list_kind: i32::from(kind),
+                                        task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
+                                        poller_isolation_group: String::new(),
+                                    },
+                                )
+                            }),
+                        Some((
+                            registry.metrics.clone(),
+                            crate::matching_metrics::PollMetricContext {
+                                domain: domain.clone(),
+                                task_list: lookup.1.clone(),
+                                task_list_kind: i32::from(kind),
+                                task_type: if lookup.2 == 1 {
+                                    "activity_task"
+                                } else {
+                                    "decision_task"
+                                },
+                                poller_isolation_group: String::new(),
+                            },
+                        )),
+                        backlog_forward,
+                    );
+                    let read_stop = reader.stop_signal();
+                        let sync_matcher = Arc::new(crate::matching_sync::SyncMatcher::new(
+                            &sync_groups,
+                            read_stop.subscribe(),
+                        ));
                     let wake = registry.changed.clone();
                     let stopped = writer.stop_signal();
                     queue.set_stop_waker(Arc::new(move || {
@@ -1387,33 +1447,8 @@ impl QueueRegistry {
                         dispatcher = dispatcher.with_forward(forward);
                     }
                     let owner = Arc::new(Owner {
-                        forward_tasks: Arc::new(crate::matching_forward::RequestTokens::new({
-                            let provider = registry.forward_tasks.clone();
-                            let domain = domain.clone();
-                            let name = lookup.1.clone();
-                            let task_type = lookup.2;
-                                Arc::new(move || {
-                                    provider
-                                        .as_ref()
-                                        .map(|p| p(&domain, &name, task_type))
-                                        .unwrap_or(1)
-                                })
-                        })),
-                            forward_rate: Arc::new(crate::matching_forward::ForwardRate::new(
-                                {
-                            let provider = registry.forward_rate.clone();
-                            let domain = domain.clone();
-                            let name = lookup.1.clone();
-                            let task_type = lookup.2;
-                                    Arc::new(move || {
-                                        provider
-                                            .as_ref()
-                                            .map(|p| p(&domain, &name, task_type))
-                                            .unwrap_or(10)
-                                    })
-                                },
-                                now,
-                            )),
+                        forward_tasks,
+                        forward_rate,
                         dispatcher,
                         writer,
                         reader,

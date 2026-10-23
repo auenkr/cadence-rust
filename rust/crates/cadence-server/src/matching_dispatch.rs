@@ -87,6 +87,9 @@ pub(crate) struct ForwardState {
     source: String,
     local_wait: crate::matching_forward::Count,
     permits: Arc<crate::matching_forward::RequestTokens>,
+    add_permits: Arc<crate::matching_forward::RequestTokens>,
+    add_rate: Arc<crate::matching_forward::ForwardRate>,
+    task_metrics: Option<(crate::matching_metrics::MatchingMetrics, crate::matching_metrics::PollMetricContext)>,
 }
 pub(crate) enum Parent {
     Dispatcher(Box<TaskDispatcher>),
@@ -235,10 +238,25 @@ impl<R: Send + 'static> ForwardPollRequest<R> for () {
         Box::pin(async { Err(Status::unimplemented("test poll")) })
     }
 }
+// Go's ForwardTask timer is deferred: remote busy responses and context
+// cancellation are timed too, while local limiter rejection is not.
+struct ForwardTaskTimer<'a> {
+    metrics: Option<&'a (crate::matching_metrics::MatchingMetrics, crate::matching_metrics::PollMetricContext)>,
+    started: std::time::Instant,
+}
+impl Drop for ForwardTaskTimer<'_> {
+    fn drop(&mut self) {
+        if let Some((metrics, context)) = self.metrics {
+            metrics.forward_task_latency(context, self.started.elapsed());
+        }
+    }
+}
 impl ForwardState {
     pub(crate) fn new(
         resolve: impl Fn() -> ParentFuture + Send + Sync + 'static,
         max_outstanding: crate::matching_forward::Count,
+        max_outstanding_adds: Arc<crate::matching_forward::RequestTokens>,
+        add_rate: Arc<crate::matching_forward::ForwardRate>,
         source: String,
         local_wait: crate::matching_forward::Count,
     ) -> Self {
@@ -247,7 +265,112 @@ impl ForwardState {
             source,
             local_wait,
             permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding)),
+            add_permits: max_outstanding_adds,
+            add_rate,
+            task_metrics: None,
         }
+    }
+
+    pub(crate) fn with_task_metrics(mut self, metrics: crate::matching_metrics::MatchingMetrics, context: crate::matching_metrics::PollMetricContext) -> Self {
+        self.task_metrics = Some((metrics, context));
+        self
+    }
+
+    /// Go `fwdrAddReqTokenC`: outstanding forwarded-add tokens.
+    pub(crate) fn add_tokens(&self) -> Arc<crate::matching_forward::RequestTokens> {
+        self.add_permits.clone()
+    }
+
+    pub(crate) async fn forward_backlog_task(
+        &self,
+        task: AllocatedTask,
+        domain_id: &str,
+        task_type: i32,
+        kind: i16,
+    ) -> Result<(), crate::matching_forward::ForwardError> {
+        if kind == 1 {
+            return Err(crate::matching_forward::ForwardError::TaskListKind);
+        }
+        // Go `ForwardTask`: the parent name is resolved before the rate limit
+        // is charged; the outstanding-add token is taken by the caller.
+        let name = cadence_common::task_list::TaskListName::parse(&self.source)
+            .map_err(|error| crate::matching_forward::ForwardError::Remote(Status::invalid_argument(error)))?;
+        if name.is_root() {
+            return Err(crate::matching_forward::ForwardError::NoParent);
+        }
+        if !self.add_rate.allow(now()) {
+            return Err(crate::matching_forward::ForwardError::SlowDown);
+        }
+        let _timer = ForwardTaskTimer { metrics: self.task_metrics.as_ref(), started: std::time::Instant::now() };
+        if !matches!(task_type, 0 | 1) {
+            return Err(crate::matching_forward::ForwardError::InvalidTaskListType);
+        }
+        let (parent, parent_name) = (self.resolve)().await.ok_or_else(||
+            crate::matching_forward::ForwardError::Remote(Status::unavailable("cannot resolve parent task list for forwarding")))?;
+        let run_id = task.data.run_id.as_deref()
+            .and_then(|id| uuid::Uuid::from_slice(id).ok())
+            .map(|id| id.to_string()).unwrap_or_default();
+        let execution = Some(p::WorkflowExecution { workflow_id: task.data.workflow_id.clone(), run_id });
+        let partition_config = task.data.partition_config.clone().unwrap_or_default().into_iter().collect();
+        // Go persistence GetTasks leaves ScheduleToStartTimeoutSeconds at
+        // zero (SQL and NoSQL). Expiry is for reader filtering, not a new
+        // timeout to reconstruct when forwarding an already-persisted task.
+        let timeout_seconds = 0i32;
+        let forwarded_from = self.source.clone();
+        let result = match parent {
+            Parent::Remote(channel) => {
+                let mut client = m::matching_api_client::MatchingApiClient::new(channel);
+                if task_type == 0 {
+                    let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
+                        domain_id: domain_id.to_owned(), workflow_execution: execution,
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
+                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
+                        source: 2, forwarded_from, partition_config,
+                    });
+                    request.set_timeout(Duration::from_secs(2));
+                    matching_yarpc_grpc_metadata(&mut request);
+                    client.add_decision_task(request).await.map(|_| ())
+                } else {
+                    let mut request = tonic::Request::new(m::AddActivityTaskRequest {
+                        domain_id: domain_id.to_owned(), source_domain_id: domain_id.to_owned(),
+                        workflow_execution: execution,
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
+                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
+                        source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
+                    });
+                    request.set_timeout(Duration::from_secs(2));
+                    matching_yarpc_grpc_metadata(&mut request);
+                    client.add_activity_task(request).await.map(|_| ())
+                }
+            }
+            Parent::Service(service) => {
+                use m::matching_api_server::MatchingApi;
+                if task_type == 0 {
+                    let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
+                        domain_id: domain_id.to_owned(), workflow_execution: execution,
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
+                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
+                        source: 2, forwarded_from, partition_config,
+                    });
+                    request.set_timeout(Duration::from_secs(2));
+                    service.add_decision_task(request).await.map(|_| ())
+                } else {
+                    let mut request = tonic::Request::new(m::AddActivityTaskRequest {
+                        domain_id: domain_id.to_owned(), source_domain_id: domain_id.to_owned(),
+                        workflow_execution: execution,
+                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
+                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
+                        source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
+                    });
+                    request.set_timeout(Duration::from_secs(2));
+                    service.add_activity_task(request).await.map(|_| ())
+                }
+            }
+            Parent::Dispatcher(dispatcher) => {
+                dispatcher.accept_forwarded_backlog(task, domain_id, &parent_name, task_type).await
+            }
+        };
+        result.map_err(crate::matching_forward::ForwardError::classify)
     }
 }
 pub(crate) fn now() -> i64 {
@@ -293,6 +416,47 @@ fn queue_status(error: QueueError) -> Status {
     Status::internal(error.to_string())
 }
 impl TaskDispatcher {
+    pub(crate) async fn accept_forwarded_backlog(
+        &self,
+        task: AllocatedTask,
+        source_domain: &str,
+        parent_name: &str,
+        task_type: i32,
+    ) -> Result<(), Status> {
+        let source_domain = uuid::Uuid::parse_str(source_domain)
+            .map_err(|_| Status::invalid_argument("DomainUUID is not valid."))?;
+        let matcher = self.sync_matcher.as_ref().ok_or_else(|| Status::unavailable("remote sync match failed"))?;
+        let root = cadence_common::task_list::TaskListName::parse(parent_name)
+            .map_err(|_| Status::invalid_argument("TaskList is not valid."))?
+            .is_root();
+        let local_wait = if root {
+            Duration::from_secs(2)
+        } else {
+            self.forward.as_ref().map(|forward| Duration::from_nanos((forward.local_wait)().max(0) as u64))
+                .unwrap_or(Duration::from_millis(10))
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let group = task.data.partition_config.as_ref()
+            .and_then(|config| config.get("isolation-group"))
+            .map(String::as_str).unwrap_or_default().to_owned();
+        if matcher.offer(task.data.clone(), &group, &source_domain.to_string(), true, local_wait, deadline).await {
+            return Ok(());
+        }
+        // Library users have no local Matching RPC factory. Preserve the
+        // forwarded Offer chain here too; root backlog waits above until the
+        // caller's two-second context expires, and failed offers never persist.
+        if !root {
+            if let Some(forward) = &self.forward {
+                if let Some(_permit) = forward.add_permits.try_acquire() {
+                    if Box::pin(forward.forward_backlog_task(task, &self.domain_id, task_type, 0)).await.is_ok() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(Status::unavailable("remote sync match failed"))
+    }
+
     pub(crate) fn reader_should_reload(&self) -> bool {
         self.reader
             .as_ref()
@@ -1802,4 +1966,66 @@ mod tests {
         assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
         assert_eq!(dispatcher.queue.levels(), (0, 0, 0));
     }
+    struct BacklogParent;
+    #[tonic::async_trait]
+    impl m::matching_api_server::MatchingApi for BacklogParent {
+        async fn add_decision_task(&self, request: tonic::Request<m::AddDecisionTaskRequest>) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
+            assert_eq!(request.metadata().get("rpc-service").unwrap(), "cadence-matching");
+            let task = request.into_inner();
+            assert_eq!(task.task_list.unwrap(), p::TaskList { name: "queue".into(), kind: 1, ..Default::default() });
+            assert_eq!(task.domain_id, uuid::Uuid::from_u128(1).to_string());
+            assert_eq!(task.forwarded_from, "/__cadence_sys/queue/1");
+            assert_eq!(task.source, 2);
+            assert_eq!(task.schedule_id, 91);
+            assert_eq!(task.schedule_to_start_timeout.unwrap().seconds, 0);
+            assert_eq!(task.partition_config.get("isolation-group").unwrap(), "zone-a");
+            Ok(tonic::Response::new(m::AddDecisionTaskResponse::default()))
+        }
+        async fn add_activity_task(&self, request: tonic::Request<m::AddActivityTaskRequest>) -> Result<tonic::Response<m::AddActivityTaskResponse>, Status> {
+            assert_eq!(request.metadata().get("rpc-caller").unwrap(), "cadence-matching");
+            let task = request.into_inner();
+            assert_eq!(task.task_list.unwrap().name, "queue");
+            assert_eq!(task.domain_id, task.source_domain_id);
+            assert_eq!(task.source, 2);
+            assert_eq!(task.forwarded_from, "/__cadence_sys/queue/1");
+            Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted, "parent busy", "ServiceBusyError", p::ServiceBusyError { reason: String::new() }))
+        }
+    }
+    #[tokio::test]
+    async fn matching_backlog_forward_remote_fields_busy_and_rate_limit() {
+        use crate::matching_forward::{ForwardError, ForwardRate, RequestTokens};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(m::matching_api_server::MatchingApiServer::new(BacklogParent))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+        });
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect().await.unwrap();
+        let state = ForwardState::new(move || {
+            let channel = channel.clone();
+            Box::pin(async move { Some((Parent::Remote(channel), "queue".into())) })
+        }, Arc::new(|| 1), Arc::new(RequestTokens::new(Arc::new(|| 1))), Arc::new(ForwardRate::new(Arc::new(|| 2), now())), "/__cadence_sys/queue/1".into(), Arc::new(|| 0));
+        let task = AllocatedTask { task_id: 1, data: cadence_persistence::matching_blob::TaskData {
+            schedule_id: 91, created_nanos: 1_000_000_000, expiry_nanos: 10_000_000_000,
+            partition_config: Some(std::collections::BTreeMap::from([("isolation-group".into(), "zone-a".into())])),
+            ..Default::default()
+        }};
+        let domain = uuid::Uuid::from_u128(1).to_string();
+        state.forward_backlog_task(task.clone(), &domain, 0, 0).await.unwrap();
+        assert!(matches!(state.forward_backlog_task(task.clone(), &domain, 1, 0).await, Err(ForwardError::SlowDown)));
+        let mut limited = state.clone();
+        limited.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 0), now()));
+        assert!(matches!(limited.forward_backlog_task(task.clone(), &domain, 0, 0).await, Err(ForwardError::SlowDown)), "zero forwarding rate rejects before issuing an RPC");
+        assert!(matches!(state.forward_backlog_task(task, &domain, 0, 1).await, Err(ForwardError::TaskListKind)));
+        let task = AllocatedTask { task_id: 2, data: Default::default() };
+        let mut root = state.clone();
+        root.source = "queue".into();
+        assert!(matches!(root.forward_backlog_task(task.clone(), &domain, 0, 0).await, Err(ForwardError::NoParent)));
+        let mut invalid = state.clone();
+        invalid.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 1), now()));
+        assert!(matches!(invalid.forward_backlog_task(task, &domain, 2, 0).await, Err(ForwardError::InvalidTaskListType)));
+        server.abort();
+    }
+
 }

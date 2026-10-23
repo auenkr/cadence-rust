@@ -107,7 +107,7 @@ fn history_service_retryable(error: &Status) -> bool {
     )
 }
 
-fn service_busy(error: &Status) -> bool {
+pub(crate) fn service_busy(error: &Status) -> bool {
     RpcStatus::decode(error.details())
         .ok()
         .and_then(|status| status.details.into_iter().next())

@@ -1302,6 +1302,35 @@ async fn matching_rpc_forwarded_root_backlog_waits_for_late_poller() {
     assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
+// Go MustOffer's forwarded success finishes the child durable task, while
+// the root's forwarded AddTask sync-matches without creating another row.
+#[tokio::test]
+async fn matching_rpc_two_partition_backlog_forward_finishes_child_without_parent_row() {
+    let address = start_starting_history().await;
+    let (_dir, store, matching, key) = fixture_with_history(&address);
+    let child_list = p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() };
+    let child = matching.durable_queue(&key.domain_id.to_string(), &child_list, 0).await.unwrap();
+    let row = child.enqueue(cadence_persistence::matching_blob::TaskData {
+        workflow_id: "backlog-workflow".into(), run_id: Some(Uuid::from_u128(2).as_bytes().to_vec()),
+        schedule_id: 81, ..Default::default()
+    }, key.domain_id, 0).await.unwrap();
+    // No child poller exists. A root poller arriving after persistence must
+    // receive this task through the reader's forwarding path.
+    assert_eq!(store.task_list_size(&TaskListKey { name: child_list.name.clone(), ..key.clone() }, 0).unwrap(), 1);
+    let poll = tokio::time::timeout(Duration::from_secs(5), matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(), poller_id: "root-backlog-worker".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }),
+        ..Default::default()
+    })))).await.unwrap().unwrap().into_inner();
+    assert_eq!(poll.started_event_id, 82);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while child.queue.levels().1 < row.task_id { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    assert_eq!(child.queue.levels().2, 0);
+    assert_eq!(store.task_list_size(&key, 0).unwrap(), 0, "forwarded adds never persist at the root");
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
 struct StartingHistory;
 
 #[tonic::async_trait]

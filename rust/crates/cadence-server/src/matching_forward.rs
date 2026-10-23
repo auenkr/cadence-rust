@@ -2,6 +2,31 @@
 use cadence_common::rate_limiter::RateLimiter;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tonic::{Code, Status};
+
+/// Go `forwarder.handleErr` classification for a parent add/poll failure.
+#[derive(Debug)]
+pub enum ForwardError {
+    SlowDown,
+    NoParent,
+    TaskListKind,
+    InvalidTaskListType,
+    Remote(Status),
+}
+
+impl ForwardError {
+    /// Cadence peers encode `ServiceBusyError` as a ResourceExhausted status
+    /// with the same typed detail used by Go's forwarder.
+    pub fn classify(status: Status) -> Self {
+        if status.code() == Code::ResourceExhausted
+            && crate::matching_history::service_busy(&status)
+        {
+            Self::SlowDown
+        } else {
+            Self::Remote(status)
+        }
+    }
+}
 
 pub type Count = Arc<dyn Fn() -> i64 + Send + Sync>;
 struct Generation {
@@ -101,5 +126,21 @@ mod tests {
         assert!(!rate.allow(9_999_999_999));
         assert!(!rate.allow(10_000_000_000));
         assert!(rate.allow(11_000_000_000));
+    }
+
+    #[test]
+    fn matching_forward_classifies_service_busy_only() {
+        let busy = crate::grpc::detailed_status(
+            tonic::Code::ResourceExhausted, "busy", "ServiceBusyError",
+            cadence_proto::api::ServiceBusyError { reason: String::new() },
+        );
+        assert!(matches!(ForwardError::classify(busy), ForwardError::SlowDown));
+        let malformed = tonic::Status::with_details(
+            tonic::Code::ResourceExhausted, "busy",
+            tonic::codegen::Bytes::from_static(b"uber.cadence.api.v1.ServiceBusyError"),
+        );
+        assert!(matches!(ForwardError::classify(malformed), ForwardError::Remote(_)));
+        let exhausted = tonic::Status::resource_exhausted("other exhausted error");
+        assert!(matches!(ForwardError::classify(exhausted), ForwardError::Remote(_)));
     }
 }
