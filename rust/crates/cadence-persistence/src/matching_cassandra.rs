@@ -1087,7 +1087,7 @@ mod recording_tests {
     }
 
     fn unavailable() -> ExecFailure {
-        ExecFailure::Execution(ExecutionError::LastAttemptError(
+        ExecFailure::Execution(Box::new(ExecutionError::LastAttemptError(
             RequestAttemptError::DbError(
                 DbError::Unavailable {
                     consistency: Consistency::All,
@@ -1096,7 +1096,7 @@ mod recording_tests {
                 },
                 "unavailable".into(),
             ),
-        ))
+        )))
     }
 
     impl CqlExecutor for Recorder {

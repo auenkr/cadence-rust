@@ -71,7 +71,7 @@ pub struct LwtOutcome {
 
 #[derive(Debug)]
 pub enum ExecFailure {
-    Execution(ExecutionError),
+    Execution(Box<ExecutionError>),
     Other(String),
 }
 
@@ -79,9 +79,13 @@ impl ExecFailure {
     pub fn is_unavailable(&self) -> bool {
         matches!(
             self,
-            ExecFailure::Execution(ExecutionError::LastAttemptError(
-                RequestAttemptError::DbError(DbError::Unavailable { .. }, _)
-            ))
+            ExecFailure::Execution(error) if matches!(
+                **error,
+                ExecutionError::LastAttemptError(RequestAttemptError::DbError(
+                    DbError::Unavailable { .. },
+                    _
+                ))
+            )
         )
     }
 }
@@ -89,7 +93,7 @@ impl ExecFailure {
 impl fmt::Display for ExecFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExecFailure::Execution(error) => fmt::Display::fmt(error, f),
+            ExecFailure::Execution(error) => fmt::Display::fmt(&**error, f),
             ExecFailure::Other(message) => f.write_str(message),
         }
     }
@@ -182,7 +186,7 @@ impl ScyllaExecutor {
         let session = self.driver.session();
         self.driver
             .run(session.query_unpaged(statement.to_statement(), values))
-            .map_err(ExecFailure::Execution)
+            .map_err(|error| ExecFailure::Execution(Box::new(error)))
     }
 }
 
@@ -208,7 +212,7 @@ impl CqlExecutor for ScyllaExecutor {
         let result = self
             .driver
             .run(session.batch(&batch, values))
-            .map_err(ExecFailure::Execution)?;
+            .map_err(|error| ExecFailure::Execution(Box::new(error)))?;
         lwt_outcome(result)
     }
 
