@@ -55,4 +55,10 @@ the test fail deterministically rather than fixing the flake.
 - Tokio dev-dependency already has `test-util` (`rust/crates/cadence-matching/Cargo.toml`:
   `tokio = { version = "1", features = ["full", "test-util"] }`), so no Cargo.toml change is needed
   for the paused-time option once the clock blocker is removed.
-- CI run: see the "Run" section, appended after the workflow completes.
+- CI run (baseline, unchanged test and code, head efabe9ce8):
+  https://github.com/auenkr/cadence-rust/actions/runs/40032742709 — conclusion `success`
+  (`rust-ci.yml`, `package=cadence-matching`, job `clippy-test`).
+  Log shows `matching_registry::tests::liveness_idle_pump_unloads_owner_between_ttl_and_one_and_a_half_ttl ... ok`
+  and `567 passed; 0 failed; 9 ignored` for the crate unit tests.
+  This only shows the real-time test passes on this runner today; it does not show it is
+  flake-free, which is the original concern.
