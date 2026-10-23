@@ -142,4 +142,12 @@ Total 41.
 
 ## CI
 
-(filled after the run)
+- Code commit: `aa8887a6cc64a0699b5ad2ee984605463161e43f` (branch `matching-membership-tests-20261023`).
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/40017392095 (`gh workflow run rust-ci.yml --ref ...`, full workspace).
+- Conclusion: **success** (job `clippy-test`: clippy `-D warnings` plus `cargo test --workspace`).
+- Tests: 38 suites `ok`, 0 `FAILED`, 1102 passed, 26 ignored (the ignored set includes the new G7 test).
+- New tests observed passing in the log: `go_diff_cases_report_change_only_for_address_set_differences`,
+  `go_member_count_tracks_replaced_ring_hosts`, `go_lookup_routes_key_on_two_member_ring`,
+  `go_subscribers_wake_only_when_placement_addresses_change`, `go_lookup_and_refresh_race_never_observes_missing_owner`.
+  `go_hashring_view_identifier_matches_go_emit_vectors` is ignored (G7).
+- Not run: no live multi-node gate (not needed for unit-level membership tests).
