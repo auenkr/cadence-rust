@@ -1,0 +1,26 @@
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-matching)
+error[E0425]: cannot find type `SyncMatcher` in this scope
+    --> crates/cadence-matching/src/matching_dispatch.rs:2361:64
+     |
+2361 |     fn forward_to_root(queue: Arc<DurableTaskQueue>, sync: Arc<SyncMatcher>, source: &str) -> ForwardState {
+     |                                                                ^^^^^^^^^^^ not found in this scope
+     |
+help: consider importing this struct
+     |
+1354 +     use crate::matching_sync::SyncMatcher;
+     |
+
+error[E0433]: cannot find type `SyncMatcher` in this scope
+    --> crates/cadence-matching/src/matching_dispatch.rs:2390:29
+     |
+2390 |         let sync = Arc::new(SyncMatcher::new(&["dca1".into(), "dca2".into()], stopped));
+     |                             ^^^^^^^^^^^ use of undeclared type `SyncMatcher`
+     |
+help: consider importing this struct
+     |
+1354 +     use crate::matching_sync::SyncMatcher;
+     |
+
+Some errors have detailed explanations: E0425, E0433.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `cadence-matching` (lib test) due to 2 previous errors

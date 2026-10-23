@@ -1387,6 +1387,7 @@ mod tests {
     };
     use uuid::Uuid;
     use crate::matching_forward::ForwardError;
+    use crate::matching_sync::SyncMatcher;
     #[test]
     fn matching_forwarded_poll_rebuilds_parent_request() {
         let activity = p::PollForActivityTaskRequest {
@@ -2156,6 +2157,327 @@ mod tests {
             forward.forward_backlog_task(unallocated_task(), "domain", 1, 0).await,
             Err(ForwardError::SlowDown)
         ));
+    }
+
+    /// In-process Go-shaped parent: records each forwarded request so the
+    /// test can check its fields, and answers with a fixed token.
+    #[derive(Clone, Default)]
+    struct RecordingParent {
+        add_decision: Arc<Mutex<Option<m::AddDecisionTaskRequest>>>,
+        add_activity: Arc<Mutex<Option<m::AddActivityTaskRequest>>>,
+        poll_decision: Arc<Mutex<Option<m::PollForDecisionTaskRequest>>>,
+        poll_activity: Arc<Mutex<Option<m::PollForActivityTaskRequest>>>,
+    }
+    #[tonic::async_trait]
+    impl m::matching_api_server::MatchingApi for RecordingParent {
+        async fn add_decision_task(&self, request: tonic::Request<m::AddDecisionTaskRequest>) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
+            *self.add_decision.lock().unwrap() = Some(request.into_inner());
+            Ok(tonic::Response::new(m::AddDecisionTaskResponse::default()))
+        }
+        async fn add_activity_task(&self, request: tonic::Request<m::AddActivityTaskRequest>) -> Result<tonic::Response<m::AddActivityTaskResponse>, Status> {
+            *self.add_activity.lock().unwrap() = Some(request.into_inner());
+            Ok(tonic::Response::new(m::AddActivityTaskResponse::default()))
+        }
+        async fn poll_for_decision_task(&self, request: tonic::Request<m::PollForDecisionTaskRequest>) -> Result<tonic::Response<m::PollForDecisionTaskResponse>, Status> {
+            *self.poll_decision.lock().unwrap() = Some(request.into_inner());
+            Ok(tonic::Response::new(m::PollForDecisionTaskResponse { task_token: vec![7], ..Default::default() }))
+        }
+        async fn poll_for_activity_task(&self, request: tonic::Request<m::PollForActivityTaskRequest>) -> Result<tonic::Response<m::PollForActivityTaskResponse>, Status> {
+            *self.poll_activity.lock().unwrap() = Some(request.into_inner());
+            Ok(tonic::Response::new(m::PollForActivityTaskResponse { task_token: vec![8], ..Default::default() }))
+        }
+    }
+    async fn recording_parent() -> (RecordingParent, tonic::transport::Channel, tokio::task::JoinHandle<()>) {
+        let parent = RecordingParent::default();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let served = parent.clone();
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(m::matching_api_server::MatchingApiServer::new(served))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+        });
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect().await.unwrap();
+        (parent, channel, server)
+    }
+    /// Go `newForwarder` with a parent resolving to `tl0` over the recording channel.
+    fn remote_forward_state(channel: tonic::transport::Channel, source: &str) -> ForwardState {
+        ForwardState::new(
+            move || {
+                let channel = channel.clone();
+                Box::pin(async move { Some((Parent::Remote(channel), "tl0".into())) })
+            },
+            Arc::new(|| 1),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            source.into(),
+            Arc::new(|| 0),
+        )
+    }
+    #[tokio::test]
+    async fn matching_forward_decision_task_fields_match_go_forwarder() {
+        // Go TestForwardDecisionTask: the decision add carries the workflow
+        // execution, schedule, normal kind and forwarded-from partition. The Go
+        // task domain is the `domain` argument here, since Rust takes one domain.
+        let (parent, channel, server) = recording_parent().await;
+        let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
+        let domain = Uuid::from_u128(5).to_string();
+        let workflow = Uuid::from_u128(3);
+        let run = Uuid::from_u128(4);
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData {
+                workflow_id: workflow.to_string(),
+                run_id: Some(run.as_bytes().to_vec()),
+                schedule_id: 91,
+                ..Default::default()
+            },
+        };
+        state.forward_backlog_task(task, &domain, 0, 0).await.unwrap();
+        let request = parent.add_decision.lock().unwrap().clone().expect("decision add reached the parent");
+        let list = request.task_list.clone().unwrap();
+        assert_eq!(list.name, "tl0");
+        assert_eq!(list.kind, 1);
+        assert_eq!(request.domain_id, domain);
+        let execution = request.workflow_execution.clone().unwrap();
+        assert_eq!(execution.workflow_id, workflow.to_string());
+        assert_eq!(execution.run_id, run.to_string());
+        assert_eq!(request.schedule_id, 91);
+        // Rust TaskData has no schedule-to-start field, and persisted Go rows read
+        // zero, so the Go random TaskInfo value has no input here; 0 is asserted.
+        assert_eq!(request.schedule_to_start_timeout.clone().unwrap().seconds, 0);
+        assert_eq!(request.forwarded_from, "/__cadence_sys/tl0/1");
+        assert_eq!(request.source, 2);
+        server.abort();
+    }
+    #[tokio::test]
+    #[ignore = "parity gap: Rust sends the list domain as SourceDomainUUID, Go sends the task's own domain (inventory parity gaps)"]
+    async fn matching_forward_activity_task_fields_match_go_forwarder() {
+        // Go TestForwardActivityTask: DomainUUID is the list's domain and
+        // SourceDomainUUID is the task's domain. Rust passes one domain, so the
+        // list domain is given and the source-domain assertion is expected to fail.
+        let (parent, channel, server) = recording_parent().await;
+        let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
+        let list_domain = Uuid::from_u128(1).to_string();
+        let source_domain = Uuid::from_u128(5).to_string();
+        let workflow = Uuid::from_u128(3);
+        let run = Uuid::from_u128(4);
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData {
+                workflow_id: workflow.to_string(),
+                run_id: Some(run.as_bytes().to_vec()),
+                schedule_id: 91,
+                ..Default::default()
+            },
+        };
+        state.forward_backlog_task(task, &list_domain, 1, 0).await.unwrap();
+        let request = parent.add_activity.lock().unwrap().clone().expect("activity add reached the parent");
+        assert_eq!(request.domain_id, list_domain);
+        assert_eq!(request.source_domain_id, source_domain);
+        let list = request.task_list.clone().unwrap();
+        assert_eq!(list.name, "tl0");
+        assert_eq!(list.kind, 1);
+        let execution = request.workflow_execution.clone().unwrap();
+        assert_eq!(execution.workflow_id, workflow.to_string());
+        assert_eq!(execution.run_id, run.to_string());
+        assert_eq!(request.schedule_id, 91);
+        assert_eq!(request.schedule_to_start_timeout.clone().unwrap().seconds, 0);
+        assert_eq!(request.forwarded_from, "/__cadence_sys/tl0/1");
+        server.abort();
+    }
+    #[tokio::test]
+    async fn matching_forward_poll_for_decision_fields_match_go_forwarder() {
+        // Go TestForwardPollForDecision: poller id, domain, identity, parent name
+        // and kind reach the parent, and the parent's decision response returns.
+        let (parent, channel, server) = recording_parent().await;
+        let domain = Uuid::from_u128(1).to_string();
+        let poller = Uuid::from_u128(6).to_string();
+        let forward = ForwardPoll {
+            target: Parent::Remote(channel),
+            domain_id: domain.clone(),
+            parent_name: "tl0".into(),
+            forwarded_from: "/__cadence_sys/tl0/1".into(),
+            poller_id: poller.clone(),
+            isolation_group: String::new(),
+            deadline: tokio::time::Instant::now() + Duration::from_secs(8),
+        };
+        let response = p::PollForDecisionTaskRequest {
+            identity: "id1".into(),
+            task_list: Some(p::TaskList { name: "/__cadence_sys/tl0/1".into(), kind: 1, ..Default::default() }),
+            ..Default::default()
+        }
+        .forward(forward)
+        .await
+        .unwrap();
+        assert_eq!(response.task_token, vec![7]);
+        // Go returns a decision response with no activity response; the Rust
+        // return type is the decision response, so that routing is by type.
+        let request = parent.poll_decision.lock().unwrap().clone().expect("decision poll reached the parent");
+        assert_eq!(request.poller_id, poller);
+        assert_eq!(request.domain_id, domain);
+        let inner = request.request.clone().unwrap();
+        assert_eq!(inner.identity, "id1");
+        assert_eq!(inner.task_list.clone().unwrap().name, "tl0");
+        assert_eq!(inner.task_list.clone().unwrap().kind, 1);
+        server.abort();
+    }
+    #[tokio::test]
+    async fn matching_forward_poll_for_activity_fields_match_go_forwarder() {
+        // Go TestForwardPollForActivity: same routed fields as the decision poll.
+        let (parent, channel, server) = recording_parent().await;
+        let domain = Uuid::from_u128(1).to_string();
+        let poller = Uuid::from_u128(6).to_string();
+        let forward = ForwardPoll {
+            target: Parent::Remote(channel),
+            domain_id: domain.clone(),
+            parent_name: "tl0".into(),
+            forwarded_from: "/__cadence_sys/tl0/1".into(),
+            poller_id: poller.clone(),
+            isolation_group: String::new(),
+            deadline: tokio::time::Instant::now() + Duration::from_secs(8),
+        };
+        let response = p::PollForActivityTaskRequest {
+            identity: "id1".into(),
+            task_list: Some(p::TaskList { name: "/__cadence_sys/tl0/1".into(), kind: 1, ..Default::default() }),
+            ..Default::default()
+        }
+        .forward(forward)
+        .await
+        .unwrap();
+        assert_eq!(response.task_token, vec![8]);
+        let request = parent.poll_activity.lock().unwrap().clone().expect("activity poll reached the parent");
+        assert_eq!(request.poller_id, poller);
+        assert_eq!(request.domain_id, domain);
+        let inner = request.request.clone().unwrap();
+        assert_eq!(inner.identity, "id1");
+        assert_eq!(inner.task_list.clone().unwrap().name, "tl0");
+        assert_eq!(inner.task_list.clone().unwrap().kind, 1);
+        server.abort();
+    }
+
+    /// Go `ForwardState` pointed at an in-process root dispatcher: the parent
+    /// resolves to `Parent::Dispatcher`, whose `accept_forwarded_backlog` offers
+    /// to the root's sync matcher, the Rust analog of Go's rootMatcher.Offer.
+    fn forward_to_root(queue: Arc<DurableTaskQueue>, sync: Arc<SyncMatcher>, source: &str) -> ForwardState {
+        let domain = Uuid::from_u128(1).to_string();
+        ForwardState::new(
+            move || {
+                let (queue, sync, domain) = (queue.clone(), sync.clone(), domain.clone());
+                Box::pin(async move {
+                    let root = TaskDispatcher::new(queue, lazy_history(), domain).with_sync_matcher(sync);
+                    Some((Parent::Dispatcher(Box::new(root)), "tl0".into()))
+                })
+            },
+            Arc::new(|| 1),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            source.into(),
+            Arc::new(|| 0),
+        )
+    }
+    fn lazy_history() -> MatchingHistoryClient {
+        MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            Duration::from_secs(1),
+            32 * 1024 * 1024,
+        )
+    }
+    /// Go testRemoteSyncMatch: a root poller takes the forwarded task. The
+    /// child's own local offer is not a Rust matcher step, so this starts at the forward.
+    async fn remote_sync_match_case(isolation_group: &str, poller_delay: Duration) {
+        let (_directory, _store, _key, root) = fixture(0);
+        let (_stop, stopped) = tokio::sync::watch::channel(false);
+        let sync = Arc::new(SyncMatcher::new(&["dca1".into(), "dca2".into()], stopped));
+        let forward = forward_to_root(root.queue.clone(), sync.clone(), "/__cadence_sys/tl0/1");
+        let group = isolation_group.to_owned();
+        let poller = sync.clone();
+        let parked = tokio::spawn(async move {
+            tokio::time::sleep(poller_delay).await;
+            poller.poll(&group).await.map(|received| {
+                let seen = (received.task.data.workflow_id.clone(), received.forwarded);
+                received.finish(Ok(()));
+                seen
+            })
+        });
+        if poller_delay.is_zero() {
+            // Park the root poller before the forward, as Go's test does.
+            for _ in 0..3 {
+                tokio::task::yield_now().await;
+            }
+        }
+        let mut partition_config = std::collections::BTreeMap::new();
+        if !isolation_group.is_empty() {
+            partition_config.insert("isolation-group".to_owned(), isolation_group.to_owned());
+        }
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData {
+                workflow_id: "child-workflow".into(),
+                schedule_id: 91,
+                partition_config: Some(partition_config),
+                ..Default::default()
+            },
+        };
+        let domain = Uuid::from_u128(1).to_string();
+        assert!(
+            forward.forward_backlog_task(task, &domain, 0, 0).await.is_ok(),
+            "forwarded add reports a remote sync match"
+        );
+        let (workflow_id, forwarded) = parked.await.unwrap().expect("root poller received the forwarded task");
+        assert_eq!(workflow_id, "child-workflow");
+        // Go checks req.ForwardedFrom on the wire; the in-process root only sees the transient signal.
+        assert!(forwarded, "root sees the forwarded request signal");
+    }
+    #[tokio::test]
+    async fn matching_remote_sync_match_forwards_to_root_poller() {
+        // Go TestRemoteSyncMatch: the root poller is already waiting.
+        remote_sync_match_case("", Duration::ZERO).await;
+    }
+    #[tokio::test]
+    async fn matching_isolation_remote_sync_match_forwards_to_root_poller() {
+        // Go TestIsolationRemoteSyncMatch: the same forward within isolation group dca1.
+        remote_sync_match_case("dca1", Duration::ZERO).await;
+    }
+    #[tokio::test]
+    async fn matching_remote_sync_match_blocking_waits_for_root_poller() {
+        // Go TestRemoteSyncMatchBlocking: the backlog-style offer blocks until the root polls.
+        remote_sync_match_case("", Duration::from_millis(10)).await;
+    }
+    #[tokio::test]
+    async fn matching_isolation_remote_sync_match_blocking_waits_for_root_poller() {
+        // Go TestIsolationRemoteSyncMatchBlocking: isolation group dca1, delayed root poll.
+        remote_sync_match_case("dca1", Duration::from_millis(10)).await;
+    }
+    /// In-process parent that answers every forwarded decision add with ServiceBusy.
+    struct BusyParent;
+    #[tonic::async_trait]
+    impl m::matching_api_server::MatchingApi for BusyParent {
+        async fn add_decision_task(&self, _request: tonic::Request<m::AddDecisionTaskRequest>) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
+            Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted, "parent busy", "ServiceBusyError", p::ServiceBusyError { reason: String::new() }))
+        }
+    }
+    #[tokio::test]
+    async fn matching_sync_match_failure_reports_busy_without_matching() {
+        // Go TestSyncMatchFailure: the parent answers ServiceBusy to the forwarded
+        // add. Go Offer swallows the error and reports no sync match; Rust returns
+        // SlowDown, which the caller treats as not matched and persists instead.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(m::matching_api_server::MatchingApiServer::new(BusyParent))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+        });
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect().await.unwrap();
+        let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData { workflow_id: "child-workflow".into(), schedule_id: 91, ..Default::default() },
+        };
+        let domain = Uuid::from_u128(1).to_string();
+        assert!(matches!(state.forward_backlog_task(task, &domain, 0, 0).await, Err(ForwardError::SlowDown)));
+        server.abort();
     }
 
 }

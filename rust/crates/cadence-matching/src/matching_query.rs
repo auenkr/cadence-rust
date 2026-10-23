@@ -564,4 +564,31 @@ mod tests {
         };
         assert!(query_outcome(QueryOutcome::Worker(answer), false).is_ok());
     }
+    #[tokio::test]
+    async fn sync_match_queued_query_is_returned_to_next() {
+        // Go Test_poll_QueryTask: a query already on the query channel is the poll result.
+        let channel = QueryChannel::new();
+        channel.offer(query("query-1"));
+        let received = tokio::time::timeout(std::time::Duration::from_millis(100), channel.next())
+            .await
+            .expect("queued query is returned without waiting");
+        assert_eq!(received.task_id, "query-1");
+    }
+    #[tokio::test]
+    async fn sync_match_query_hands_off_to_parked_poller() {
+        // Go TestQueryLocalSyncMatch: a parked decision poller takes the query, the
+        // answer reaches the waiting QueryWorkflow, and no forward is involved.
+        let channel = std::sync::Arc::new(QueryChannel::new());
+        let poller = channel.clone();
+        let poll = tokio::spawn(async move { poller.next().await });
+        tokio::task::yield_now().await;
+        let receiver = channel.register_waiter("query-1");
+        assert!(channel.try_offer(query("query-1")));
+        let received = poll.await.unwrap();
+        assert_eq!(received.task_id, "query-1");
+        assert!(channel
+            .complete("query-1", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .is_ok());
+        assert!(receiver.await.is_ok());
+    }
 }

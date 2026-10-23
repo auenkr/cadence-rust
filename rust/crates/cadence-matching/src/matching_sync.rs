@@ -580,4 +580,126 @@ mod tests {
         );
         poll.await.unwrap();
     }
+    #[tokio::test]
+    async fn sync_match_queued_offer_is_returned_to_poll() {
+        // Go Test_poll_Task: a task already queued on the offer channel is the
+        // poll's result. The offer completes only after the poll finishes it.
+        let (_stop, matcher) = fixture();
+        let offer = matcher.clone();
+        let queued = tokio::spawn(async move {
+            offer
+                .offer(
+                    task(),
+                    "",
+                    SOURCE,
+                    false,
+                    Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(1),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        let received = matcher.poll("").await.expect("queued offer is returned");
+        assert_eq!(received.task.data.workflow_id, "workflow");
+        received.finish(Ok(()));
+        assert!(queued.await.unwrap());
+    }
+    #[tokio::test]
+    async fn sync_match_isolation_queued_offer_is_returned_to_its_group() {
+        // Go Test_poll_IsolatedTask: a queued isolated task is returned to a
+        // poll for its own isolation group ("a" here).
+        let (_stop, matcher) = fixture();
+        let offer = matcher.clone();
+        let queued = tokio::spawn(async move {
+            offer
+                .offer(
+                    task(),
+                    "a",
+                    SOURCE,
+                    false,
+                    Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(1),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        let received = matcher.poll("a").await.expect("isolated offer is returned");
+        assert_eq!(received.task.data.workflow_id, "workflow");
+        received.finish(Ok(()));
+        assert!(queued.await.unwrap());
+    }
+    #[tokio::test]
+    async fn sync_match_non_blocking_poll_returns_queued_offer_without_waiting() {
+        // Go Test_pollNonBlocking_Task: with a task queued, poll returns at once.
+        let (_stop, matcher) = fixture();
+        let offer = matcher.clone();
+        let queued = tokio::spawn(async move {
+            offer
+                .offer(
+                    task(),
+                    "",
+                    SOURCE,
+                    false,
+                    Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(1),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        let received = tokio::time::timeout(Duration::from_millis(100), matcher.poll(""))
+            .await
+            .expect("queued offer is returned without waiting")
+            .expect("queued offer");
+        received.finish(Ok(()));
+        assert!(queued.await.unwrap());
+    }
+    #[tokio::test]
+    async fn sync_match_non_blocking_isolated_poll_returns_queued_offer_without_waiting() {
+        // Go Test_pollNonBlocking_IsolatedTask: queued isolated task, no wait.
+        let (_stop, matcher) = fixture();
+        let offer = matcher.clone();
+        let queued = tokio::spawn(async move {
+            offer
+                .offer(
+                    task(),
+                    "a",
+                    SOURCE,
+                    false,
+                    Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(1),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        let received = tokio::time::timeout(Duration::from_millis(100), matcher.poll("a"))
+            .await
+            .expect("queued isolated offer is returned without waiting")
+            .expect("queued isolated offer");
+        received.finish(Ok(()));
+        assert!(queued.await.unwrap());
+    }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_isolation_group_mismatch_does_not_match() {
+        // Go TestIsolationSyncMatchFailure: a poller in group "b" never takes a
+        // task offered for group "a", so the offer times out without a match.
+        let (_stop, matcher) = fixture();
+        let poller = matcher.clone();
+        let poll = tokio::spawn(async move {
+            poller.poll("b").await.map(|received| received.finish(Ok(())))
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !matcher
+                .offer(
+                    task(),
+                    "a",
+                    SOURCE,
+                    false,
+                    Duration::from_millis(100),
+                    Instant::now() + Duration::from_millis(100)
+                )
+                .await
+        );
+        poll.abort();
+    }
 }
