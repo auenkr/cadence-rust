@@ -2602,6 +2602,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                         let deadline = incoming_deadline
                             .unwrap_or_else(|| tokio::time::Instant::now() + self.poll_expiration);
                         let mut list = task_list.clone();
+                        // Go `resp.PartitionConfig = tlMgr.TaskListPartitionConfig()` on the
+                        // task list the caller asked for, not on the partition it forwards to.
+                        let partitions = queue.partitions.clone();
                         let mut handle = queue;
                         let mut permits = Vec::new();
                         let mut in_process_forward_metrics: Vec<(tokio::time::Instant, crate::matching_metrics::PollMetricContext)> = Vec::new();
@@ -2626,7 +2629,14 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 {
                                     Ok(Ok(result)) => {
                                         crate::matching_query::query_outcome(result, strong)
-                                            .map(Response::new)
+                                            .map(|response| {
+                                                Response::new(m::QueryWorkflowResponse {
+                                                    partition_config: partitions
+                                                        .get()
+                                                        .map(partition_config_to_internal),
+                                                    ..response
+                                                })
+                                            })
                                     }
                                     Ok(Err(_)) => {
                                         Err(Status::unavailable("Matching query channel closed."))
@@ -2714,7 +2724,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                                             list.name = forwarded_from_name;
                                             continue;
                                         }
-                                        return result;
+                                        // Go overwrites the forwarded response's config with the local one.
+                                        return result.map(|mut response| {
+                                            response.get_mut().partition_config = partitions
+                                                .get()
+                                                .map(partition_config_to_internal);
+                                            response
+                                        });
                                     }
                                     in_process_forward_metrics.push((
                                         tokio::time::Instant::now(),
