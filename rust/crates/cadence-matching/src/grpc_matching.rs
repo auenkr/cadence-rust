@@ -1554,6 +1554,12 @@ impl Matching {
                 };
                 self.metrics
                     .forward_task_latency(&forward_context, forward_started.elapsed());
+                // Go matcher.Offer counts a parent ServiceBusy (ErrForwarderSlowDown) on the child.
+                if let Err(status) = &result {
+                    if matches!(crate::matching_forward::ForwardError::classify(status.clone()), crate::matching_forward::ForwardError::SlowDown) {
+                        self.metrics.sync_forward_throttled(&forward_context);
+                    }
+                }
                 for (started, context) in in_process_forward_metrics.drain(..) {
                     self.metrics
                         .forward_task_latency(&context, started.elapsed());

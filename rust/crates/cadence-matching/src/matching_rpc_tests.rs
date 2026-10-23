@@ -4057,3 +4057,92 @@ async fn engine_apis_describe_identifier_errors_precede_domain_lookup_like_go() 
         .await
         .unwrap();
 }
+
+/// Parent partition owner that fails every forwarded Add with a ServiceBusy or an internal error.
+#[derive(Clone)]
+struct FailingAddParent {
+    busy: bool,
+}
+
+impl FailingAddParent {
+    fn failure(&self) -> Status {
+        if self.busy {
+            crate::grpc::detailed_status(
+                tonic::Code::ResourceExhausted,
+                "parent busy",
+                "ServiceBusyError",
+                cadence_proto::api::ServiceBusyError { reason: String::new() },
+            )
+        } else {
+            Status::internal("parent failed")
+        }
+    }
+}
+
+#[tonic::async_trait]
+impl MatchingApi for FailingAddParent {
+    async fn add_decision_task(&self, _: Request<m::AddDecisionTaskRequest>) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
+        Err(self.failure())
+    }
+    async fn add_activity_task(&self, _: Request<m::AddActivityTaskRequest>) -> Result<Response<m::AddActivityTaskResponse>, Status> {
+        Err(self.failure())
+    }
+    async fn poll_for_decision_task(&self, _: Request<m::PollForDecisionTaskRequest>) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
+        Err(Status::unimplemented("poll_for_decision_task"))
+    }
+    async fn poll_for_activity_task(&self, _: Request<m::PollForActivityTaskRequest>) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
+        Err(Status::unimplemented("poll_for_activity_task"))
+    }
+}
+
+/// Sends one child Add that must sync-forward to a failing parent; returns the child's metric sink.
+async fn sync_forward_to_failing_parent(busy: bool) -> Arc<crate::matching_metrics::RecordingMetricSink> {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+    let history = start_starting_history().await;
+    let (_dir, _store, child, key) = fixture_with_history(&history);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = listener.local_addr().unwrap().to_string();
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder().add_service(m::matching_api_server::MatchingApiServer::new(FailingAddParent { busy }))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+    });
+    let mut hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: String::new() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: String::new() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let root_id = ring.lookup("queue").unwrap().identity().to_owned();
+    let child_name = (1..=20).map(|id| format!("/__cadence_sys/queue/{id}")).find(|name| ring.lookup(name).unwrap().identity() != root_id).unwrap();
+    let child_id = ring.lookup(&child_name).unwrap().identity().to_owned();
+    for host in &mut hosts { host.grpc_address = endpoint.clone(); }
+    let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+    let child = child.with_membership(Membership::new(child_id, hosts)).with_metrics(sink.clone());
+    child.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(), workflow_execution: execution(),
+        task_list: Some(p::TaskList { name: child_name, kind: 1, ..Default::default() }),
+        schedule_id: 71, ..Default::default()
+    })).await.unwrap();
+    child.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    server.abort();
+    sink
+}
+
+#[tokio::test]
+async fn matching_rpc_sync_forward_parent_service_busy_counts_throttle_metric() {
+    use crate::matching_metrics::{MetricKind, MetricValue, SYNC_FORWARD_TASK_THROTTLE_ERRORS};
+    // Go matcher.go:230 increments SyncMatchForwardTaskThrottleErrorPerTasklist on ErrForwarderSlowDown.
+    let sink = sync_forward_to_failing_parent(true).await;
+    let throttled: Vec<_> = sink.events().into_iter().filter(|event| event.name == SYNC_FORWARD_TASK_THROTTLE_ERRORS).collect();
+    assert_eq!(throttled.len(), 1);
+    assert_eq!(throttled[0].kind, MetricKind::Counter);
+    assert_eq!(throttled[0].value, MetricValue::Count(1));
+}
+
+#[tokio::test]
+async fn matching_rpc_sync_forward_parent_other_error_does_not_count_throttle_metric() {
+    use crate::matching_metrics::SYNC_FORWARD_TASK_THROTTLE_ERRORS;
+    // Only ServiceBusy maps to ErrForwarderSlowDown; other parent failures leave the counter untouched.
+    let sink = sync_forward_to_failing_parent(false).await;
+    assert!(sink.events().iter().all(|event| event.name != SYNC_FORWARD_TASK_THROTTLE_ERRORS));
+}
