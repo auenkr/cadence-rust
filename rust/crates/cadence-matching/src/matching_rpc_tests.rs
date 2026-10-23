@@ -2872,6 +2872,105 @@ async fn matching_rpc_cross_host_poll_add_and_cancellation() {
     server.abort();
 }
 
+/// Parent partition owner for a sync-offer forward: records the forwarded Add RPCs.
+#[derive(Clone, Default)]
+struct RecordingAddParent {
+    add_decision: Arc<std::sync::Mutex<Option<m::AddDecisionTaskRequest>>>,
+    add_activity: Arc<std::sync::Mutex<Option<m::AddActivityTaskRequest>>>,
+}
+
+#[tonic::async_trait]
+impl MatchingApi for RecordingAddParent {
+    async fn add_decision_task(&self, request: Request<m::AddDecisionTaskRequest>) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
+        *self.add_decision.lock().unwrap() = Some(request.into_inner());
+        Ok(Response::new(m::AddDecisionTaskResponse::default()))
+    }
+    async fn add_activity_task(&self, request: Request<m::AddActivityTaskRequest>) -> Result<Response<m::AddActivityTaskResponse>, Status> {
+        *self.add_activity.lock().unwrap() = Some(request.into_inner());
+        Ok(Response::new(m::AddActivityTaskResponse::default()))
+    }
+    async fn poll_for_decision_task(&self, _: Request<m::PollForDecisionTaskRequest>) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
+        Err(Status::unimplemented("poll_for_decision_task"))
+    }
+    async fn poll_for_activity_task(&self, _: Request<m::PollForActivityTaskRequest>) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
+        Err(Status::unimplemented("poll_for_activity_task"))
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_sync_offer_forward_sends_go_forwarder_fields_to_parent() {
+    // Go matcher.Offer with no local poller -> forwarder.ForwardTask (forwarder.go:139-168):
+    // decision DomainUUID is the task domain; activity DomainUUID is the list domain and
+    // SourceDomainUUID is the task's own domain. The forwarded add is never persisted.
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+    let history = start_starting_history().await;
+    let (_dir, store, child, key) = fixture_with_history(&history);
+    let parent = RecordingAddParent::default();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = listener.local_addr().unwrap().to_string();
+    let served = parent.clone();
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder().add_service(m::matching_api_server::MatchingApiServer::new(served))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+    });
+    let mut hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: String::new() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: String::new() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let root_id = ring.lookup("queue").unwrap().identity().to_owned();
+    let child_name = (1..=20).map(|id| format!("/__cadence_sys/queue/{id}")).find(|name| ring.lookup(name).unwrap().identity() != root_id).unwrap();
+    let child_id = ring.lookup(&child_name).unwrap().identity().to_owned();
+    for host in &mut hosts { host.grpc_address = endpoint.clone(); }
+    let child = child.with_membership(Membership::new(child_id, hosts));
+    // The task's own domain differs from the list domain, so the activity mapping is observable.
+    let source = Uuid::from_u128(5);
+    child.frontend.state.domains.create(
+        cadence_api::types::DomainInfo { name: "source".into(), uuid: source.to_string(), ..Default::default() },
+        Default::default(),
+        Default::default(),
+        false,
+    ).unwrap();
+    let domain = key.domain_id.to_string();
+    let child_list = || Some(p::TaskList { name: child_name.clone(), kind: 1, ..Default::default() });
+    let schedule_to_start = || Some(prost_types::Duration { seconds: 7, nanos: 0 });
+
+    child.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: domain.clone(), workflow_execution: execution(), task_list: child_list(),
+        schedule_id: 61, schedule_to_start_timeout: schedule_to_start(), source: 1, ..Default::default()
+    })).await.unwrap();
+    let decision = parent.add_decision.lock().unwrap().clone().expect("decision add forwarded to parent");
+    assert_eq!(decision.domain_id, domain);
+    let list = decision.task_list.clone().unwrap();
+    assert_eq!((list.name.as_str(), list.kind), ("queue", 1));
+    assert_eq!(decision.workflow_execution, execution());
+    assert_eq!(decision.schedule_id, 61);
+    assert_eq!(decision.schedule_to_start_timeout.as_ref().map(|d| d.seconds), Some(7));
+    assert_eq!(decision.forwarded_from, child_name);
+    assert_eq!(decision.source, 1);
+
+    child.add_activity_task(Request::new(m::AddActivityTaskRequest {
+        domain_id: domain.clone(), source_domain_id: source.to_string(), workflow_execution: execution(),
+        task_list: child_list(), schedule_id: 62, schedule_to_start_timeout: schedule_to_start(), source: 1,
+        ..Default::default()
+    })).await.unwrap();
+    let activity = parent.add_activity.lock().unwrap().clone().expect("activity add forwarded to parent");
+    assert_eq!(activity.domain_id, domain);
+    assert_eq!(activity.source_domain_id, source.to_string());
+    let list = activity.task_list.clone().unwrap();
+    assert_eq!((list.name.as_str(), list.kind), ("queue", 1));
+    assert_eq!(activity.workflow_execution, execution());
+    assert_eq!(activity.schedule_id, 62);
+    assert_eq!(activity.schedule_to_start_timeout.as_ref().map(|d| d.seconds), Some(7));
+    assert_eq!(activity.forwarded_from, child_name);
+    assert_eq!(activity.source, 1);
+
+    assert_eq!(store.task_list_size(&TaskListKey { name: child_name.clone(), ..key.clone() }, 0).unwrap(), 0, "sync-forwarded adds never persist on the child");
+    child.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    server.abort();
+}
+
 #[tokio::test]
 async fn matching_rpc_local_poll_wait_delays_forwarding_and_reloads() {
     let (_directory, _store, matching, key) = fixture();
