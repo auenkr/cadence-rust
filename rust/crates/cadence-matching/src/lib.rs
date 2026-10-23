@@ -46,6 +46,8 @@ pub mod matching_standby;
 #[allow(clippy::result_large_err)]
 pub mod matching_dispatch;
 pub mod matching_forward;
+pub mod matching_fault_injection;
+pub mod matching_task_info_log;
 #[allow(clippy::result_large_err)]
 pub mod matching_partition;
 #[allow(clippy::result_large_err)]

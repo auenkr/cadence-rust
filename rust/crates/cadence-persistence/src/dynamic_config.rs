@@ -197,6 +197,52 @@ pub fn duration(values: &[DynamicConfigValue], domain: Option<&str>, default: i6
     }
 }
 
+/// Go `GetFloat64Property` without filters. Non-finite or non-numeric values
+/// fall back to the default.
+pub fn float(values: &[DynamicConfigValue], default: f64) -> f64 {
+    match selected(values, None)
+        .and_then(|value| value.as_f64())
+        .filter(|value| value.is_finite())
+    {
+        Some(value) => value,
+        None => {
+            report_read_error("float", "value was missing or invalid");
+            default
+        }
+    }
+}
+
+/// Go `GetBoolPropertyFilteredByDomainID` (filter `domainID`). Like the other
+/// readers, the first matching filtered entry wins and the last decodable
+/// unfiltered entry is the fallback.
+pub fn boolean_domain_id(
+    values: &[DynamicConfigValue],
+    domain_id: &str,
+    default: bool,
+) -> bool {
+    let mut fallback = None;
+    for value in values {
+        if value.filters.is_empty() {
+            if let Some(value) = decode(value.value.as_ref()) {
+                fallback = Some(value);
+            }
+        } else if value.filters.len() == 1
+            && value.filters[0].name == "domainID"
+            && decode(value.filters[0].value.as_ref()) == Some(Value::String(domain_id.into()))
+        {
+            fallback = decode(value.value.as_ref());
+            break;
+        }
+    }
+    match fallback.and_then(|value| value.as_bool()) {
+        Some(value) => value,
+        None => {
+            report_read_error("boolean", "value was missing or had the wrong type");
+            default
+        }
+    }
+}
+
 /// Go `MapAllIsolationGroupsResponse`: one non-string rejects the whole list.
 pub fn string_list(values: &[DynamicConfigValue]) -> Vec<String> {
     match selected(values, None)
@@ -244,6 +290,21 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn domain_id_filtered_boolean_and_plain_float_readers() {
+        let values = vec![
+            entry(json!(false), &[]),
+            entry(json!(true), &[("domainID", json!("d1"))]),
+            entry(json!(false), &[("domainName", json!("d2"))]),
+        ];
+        assert!(boolean_domain_id(&values, "d1", false));
+        assert!(!boolean_domain_id(&values, "d2", false));
+        assert!(boolean_domain_id(&[], "d1", true));
+        assert_eq!(float(&[entry(json!(0.25), &[])], 0.0), 0.25);
+        assert_eq!(float(&[entry(json!("x"), &[])], 0.5), 0.5);
+        assert_eq!(float(&[], 0.0), 0.0);
     }
 
     #[test]

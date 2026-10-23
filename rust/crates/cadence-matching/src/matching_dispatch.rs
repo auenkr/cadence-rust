@@ -148,6 +148,7 @@ impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTa
                     .deadline
                     .saturating_duration_since(tokio::time::Instant::now()),
             );
+            crate::matching_fault_injection::inject_client_call("matching-poll-for-decision-task", async move {
             match target.target {
                 Parent::Service(service) => {
                     m::matching_api_server::MatchingApi::poll_for_decision_task(&*service, request)
@@ -163,6 +164,8 @@ impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTa
                     unreachable!("library dispatcher handled by forwarding loop")
                 }
             }
+            })
+            .await
             .map(tonic::Response::into_inner)
         })
     }
@@ -198,6 +201,7 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
                     .deadline
                     .saturating_duration_since(tokio::time::Instant::now()),
             );
+            crate::matching_fault_injection::inject_client_call("matching-poll-for-activity-task", async move {
             match target.target {
                 Parent::Service(service) => {
                     m::matching_api_server::MatchingApi::poll_for_activity_task(&*service, request)
@@ -213,6 +217,8 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
                     unreachable!("library dispatcher handled by forwarding loop")
                 }
             }
+            })
+            .await
             .map(tonic::Response::into_inner)
         })
     }
@@ -236,6 +242,37 @@ pub(crate) fn matching_yarpc_grpc_metadata<T>(request: &mut tonic::Request<T>) {
         tonic::metadata::MetadataValue::from_static("proto"),
     );
 }
+/// Go `engine.go` poll-path `emitInfoOrDebugLog` events: the filter uses the
+/// task's own domain, the `wf-domain-id` tag the poll's domain.
+fn log_task_event(
+    message: &str,
+    task_domain_id: &str,
+    poll_domain_id: &str,
+    context: &crate::matching_metrics::PollMetricContext,
+    task: &AllocatedTask,
+    error: Option<&str>,
+) {
+    let run_id = task
+        .data
+        .run_id
+        .as_deref()
+        .and_then(|id| uuid::Uuid::from_slice(id).ok())
+        .map(|id| id.to_string())
+        .unwrap_or_default();
+    let mut fields = vec![
+        ("wf-domain-id", poll_domain_id.to_owned()),
+        ("wf-id", task.data.workflow_id.clone()),
+        ("wf-run-id", run_id),
+        ("wf-task-list-name", context.task_list.clone()),
+        ("wf-schedule-id", task.data.schedule_id.to_string()),
+        ("queue-task-id", task.task_id.to_string()),
+    ];
+    if let Some(error) = error {
+        fields.push(("error", error.to_owned()));
+    }
+    crate::matching_task_info_log::emit(task_domain_id, message, &fields);
+}
+
 #[cfg(test)]
 impl<R: Send + 'static> ForwardPollRequest<R> for () {
     fn for_parent(&self, _name: &str) -> Self {}
@@ -322,7 +359,8 @@ impl ForwardState {
         // timeout to reconstruct when forwarding an already-persisted task.
         let timeout_seconds = 0i32;
         let forwarded_from = self.source.clone();
-        let result = match parent {
+        let operation = if task_type == 0 { "matching-add-decision-task" } else { "matching-add-activity-task" };
+        let result = crate::matching_fault_injection::inject_client_call(operation, async { match parent {
             Parent::Remote(channel) => {
                 let mut client = m::matching_api_client::MatchingApiClient::new(channel);
                 if task_type == 0 {
@@ -374,7 +412,7 @@ impl ForwardState {
             Parent::Dispatcher(dispatcher) => {
                 dispatcher.accept_forwarded_backlog(task, domain_id, &parent_name, task_type).await
             }
-        };
+        } }).await;
         result.map_err(crate::matching_forward::ForwardError::classify)
     }
 }
@@ -1253,6 +1291,17 @@ impl TaskDispatcher {
                 }
                 Err(error) => match start_error_kind(&error) {
                     StartErrorKind::Discard => {
+                        if let Some(context) = lifecycle.as_ref().and_then(|l| l.metric_context.as_ref()) {
+                            let kind = if context.task_type == "decision_task" { "decision" } else { "activity" };
+                            log_task_event(
+                                &format!("Duplicated {kind} task"),
+                                task.sync.as_ref().map_or(self.domain_id.as_str(), |sync| sync.source_domain.as_str()),
+                                &self.domain_id,
+                                context,
+                                &task.task,
+                                Some(error.message()),
+                            );
+                        }
                         if let (Some(lifecycle), Some(context)) = (
                             lifecycle.as_ref(),
                             lifecycle.as_ref().and_then(|l| l.metric_context.as_ref()),
@@ -1262,6 +1311,17 @@ impl TaskDispatcher {
                         self.finish_delivery(task, Ok(())).await
                     }
                     StartErrorKind::InactiveDomain => {
+                        if let Some(context) = lifecycle.as_ref().and_then(|l| l.metric_context.as_ref()) {
+                            // Go logs this text for both decision and activity polls.
+                            log_task_event(
+                                "Decision task dropped because domain is not active",
+                                task.sync.as_ref().map_or(self.domain_id.as_str(), |sync| sync.source_domain.as_str()),
+                                &self.domain_id,
+                                context,
+                                &task.task,
+                                None,
+                            );
+                        }
                         if self
                             .history
                             .refresh_workflow_tasks_with_deadline(

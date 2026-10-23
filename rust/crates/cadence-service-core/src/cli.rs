@@ -19,6 +19,14 @@ pub enum Command {
         /// YAML config file with Cadence keys; defaults to embedded development settings.
         #[arg(long)]
         config: Option<String>,
+        /// Environment layer for a `--config` directory (`<env>.yaml`); defaults to
+        /// `$CADENCE_ENVIRONMENT`, then `development` (Go `--env`).
+        #[arg(long)]
+        env: Option<String>,
+        /// Zone layer for a `--config` directory (`<env>_<zone>.yaml`); defaults to
+        /// `$CADENCE_AVAILABILITY_ZONE` (Go `--zone`).
+        #[arg(long)]
+        zone: Option<String>,
         /// Process root used to resolve relative dynamic-config paths (Go --root semantics).
         #[arg(long)]
         root: Option<String>,
