@@ -130,3 +130,10 @@ clippy with warnings denied. Commands use the requested shared target and
 `cargo-safe` from this worktree's `rust/`, inside tmux session `cadence-rust`.
 Shared target validation is requested explicitly for this task; this is not a
 clean dedicated-target mixed-cluster gate or proof of full service completion.
+
+Checkpoint (2026-10-23 18:45 UTC / 2026-10-24 00:15 IST): implementation
+commit `3076d7837` is pushed. The targeted semaphore check waited approximately
+34 minutes on the shared lock and is now compiling this worktree's crates.
+All validation exits remain pending at this checkpoint; the tmux runners remain
+active. This checkpoint keeps the required 30-minute commit/push cadence while
+waiting for shared-host validation.
