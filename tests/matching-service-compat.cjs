@@ -906,6 +906,8 @@ async function run() {
     restartState.watermark = await awaitPersistedTask(restartTaskList, 0);
     const beforePid = rust.pid;
     const sdBeforeKill = await sdAssertHeartbeat('before-sigkill');
+    // Only the SIGKILLed primary's executor may expire; the secondary Rust node keeps heartbeating.
+    const sdKilledIds = (await sdFreshExecutors()).filter(([, e]) => String((e.Metadata || e.metadata || {}).grpc) === String(process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT)).map(([id]) => id);
     const sdKilledAt = Date.now();
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -914,7 +916,7 @@ async function run() {
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
     if (sdBeforeKill) {
-      await sdAssertExecutorExpired('after-sigkill', sdBeforeKill.executors, sdKilledAt);
+      await sdAssertExecutorExpired('after-sigkill', sdKilledIds.length ? sdKilledIds : sdBeforeKill.executors, sdKilledAt);
       await sdAssertHeartbeat('after-sigkill-restart', { excludeIds: [] });
       await sdReassign('after-sigkill-restart', restartTaskList);
     }
