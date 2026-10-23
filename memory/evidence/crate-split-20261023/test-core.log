@@ -1,0 +1,138 @@
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/split/rust/crates/cadence-service-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 00s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_service_core-bc02844712efb23e)
+
+running 91 tests
+test admin::tests::file_based_yaml_preserves_order_and_constraints ... ok
+test admin::tests::overlay_get_update_restore_list ... ok
+test admin::tests::file_based_yaml_matches_go_null_and_map_key_conversion ... ok
+test admin::tests::parses_the_go_filebased_client_fixture ... ok
+test config::tests::dynamic_config_modern_client_takes_precedence_and_legacy_is_supported ... ok
+test config::tests::canonical_and_legacy_cluster_keys_use_go_precedence ... ok
+test config::tests::metrics_configuration_preserves_single_reporter_selection ... ok
+test config::tests::parses_cassandra_csv_hosts ... ok
+test config::tests::parses_go_env_templated_ports ... ok
+test config::tests::parses_go_sql_pool_and_tls_config_for_matching ... ok
+test config::tests::parses_go_style_config ... ok
+test config::tests::embedded_defaults_match_go_development_config ... ok
+test config::tests::parses_real_go_development_config ... ok
+test config::tests::rejects_negative_shards ... ok
+test config::tests::ringpop_configuration_maps_defaults_validation_and_signed_values ... ok
+test config::tests::shard_distributor_config_matches_go_names_and_duration_semantics ... ok
+test config::tests::shard_distributor_matching_validation_handles_zero_one_and_multiple_namespaces ... ok
+test config::tests::shard_distributor_rejects_invalid_namespace_and_heartbeat_interval ... ok
+test grpc_shard::tests::metadata_limits_match_upstream ... ok
+test grpc_shard::tests::namespace_state_tracks_owners_and_executors ... ok
+test grpc_tls::tests::disabled_rpc_tls_stays_plaintext ... ok
+test config::tests::parses_real_go_base_config_subset ... ok
+test grpc_tls::tests::mutual_tls_admits_only_clients_signed_by_the_configured_ca ... ok
+test grpc_tls::tests::rpc_tls_parses_go_yaml_names ... ok
+test grpc_tls::tests::host_verification_checks_chain_and_server_name ... ok
+test matching_metrics::go_scope_parity_tests::engine_counter_inherits_rpc_scope_instead_of_manager_tags ... ok
+test matching_metrics::go_scope_parity_tests::manager_scaler_and_histogram_dimensions_match_go ... ok
+test matching_metrics::inbound_tests::add_task_counter_matches_go_dimensions_and_exclusions ... ok
+test matching_metrics::inbound_tests::inbound_cancelled_future_records_latency_without_failure ... ok
+test matching_metrics::inbound_tests::inbound_request_context_is_isolated_between_concurrent_calls ... ok
+test matching_metrics::inbound_tests::inbound_rpc_classifies_typed_query_failure ... ok
+test matching_metrics::inbound_tests::inbound_rpc_records_request_latency_and_failure_once ... ok
+test matching_metrics::inbound_tests::inbound_rpc_success_has_no_failure_event ... ok
+test matching_metrics::inbound_tests::inbound_task_list_scope_masks_sticky_name_and_unknown_domain ... ok
+test matching_metrics::matcher_metric_tests::async_local_handoff_emits_attempt_counter_and_go_integer_histogram ... ok
+test matching_metrics::matcher_metric_tests::async_match_latency_emits_timer_and_histogram ... ok
+test matching_metrics::matcher_metric_tests::condition_failed_and_async_forward_throttle_are_tasklist_counters ... ok
+test matching_metrics::matcher_metric_tests::handler_sync_match_latency_uses_request_scope_tags ... ok
+test matching_metrics::matcher_metric_tests::poll_match_latency_emits_go_timer_and_histogram_pairs ... ok
+test matching_metrics::matcher_metric_tests::poller_gauge_uses_go_task_list_dimensions ... ok
+test matching_metrics::matcher_metric_tests::respond_query_failed_uses_go_name ... ok
+test matching_metrics::matcher_metric_tests::semaphore_context_timeout_counts_on_request_scope ... ok
+test matching_metrics::persistence_qps_metric_tests::qps_rejection_exports_dedicated_counter_and_go_busy_scope_once ... ok
+test matching_metrics::persistence_qps_metric_tests::semaphore_qps_rejection_keeps_its_native_scope ... ok
+test matching_metrics_m3::tests::compact_batch_starts_with_go_v2_oneway_envelope ... ok
+test matching_metrics_m3::tests::low_histogram_ranges_use_tally_ids_and_duration_tags ... ok
+test matching_metrics_m3::tests::m3_capacity_one_queue_drains_without_losing_metrics_at_flush ... ok
+test matching_metrics_m3::tests::m3_scope_aggregates_counters_and_latest_gauges_but_keeps_timer_samples ... ok
+test matching_metrics_m3::tests::m3_udp_fans_out_to_hosts_and_drop_flushes_pending_metrics ... ok
+test matching_metrics_m3::tests::tally_internal_metrics_include_cached_tag_and_batch_counters ... ok
+test matching_metrics_prometheus::tests::custom_summary_objective_is_emitted ... ok
+test matching_metrics_prometheus::tests::explicit_histogram_timer_type_is_preserved ... ok
+test matching_metrics_prometheus::tests::go_low_buckets_match_source_boundaries_and_prometheus_units ... ok
+test matching_metrics_prometheus::tests::omitted_timer_type_uses_go_default_summary ... ok
+test matching_metrics_prometheus::tests::renders_cadence_labels_prefix_and_histograms_in_seconds ... ok
+test matching_metrics_runtime::tests::empty_statsd_host_uses_the_go_noop_scope ... ok
+test matching_metrics_runtime::tests::empty_statsd_scope_allows_prometheus_fallback ... ok
+test matching_metrics_runtime::tests::prometheus_listener_is_owned_and_stopped_by_runtime ... ok
+test matching_metrics_statsd::tests::config_accepts_go_statsd_duration_and_integer_packet_limit ... ok
+test grpc_tls::tests::server_tls_requires_a_matching_certificate_and_key ... ok
+test matching_metrics_statsd::tests::go_duration_strings_and_low_bucket_selection_match_tally ... ok
+test matching_metrics_statsd::tests::sends_sorted_tag_suffixes_with_both_prefixes_and_statsd_counter_type ... ok
+test matching_quota::tests::go_handler_method_classes_and_exemptions_are_preserved ... ok
+test matching_quota::tests::hard_rejection_emits_one_classified_metric_event_but_count_only_does_not ... ok
+test matching_quota::tests::host_and_domain_reservations_follow_go_order_and_return_domain_token_on_host_reject ... ok
+test matching_quota::tests::refreshing_rate_does_not_refill_at_the_configuration_refresh_instant ... ok
+test matching_quota::tests::user_and_worker_buckets_are_independent_and_refresh_live_values ... ok
+test matching_quota::tests::zero_domain_rate_falls_back_to_host_and_count_only_calls_are_admitted ... ok
+test ringpop_discovery::tests::dns_provider_matches_go_cache_errors_and_host_port_formatting ... ok
+test ringpop_discovery::tests::dns_provider_relooks_up_between_hosts_calls_and_propagates_bad_inputs ... ok
+test ringpop_discovery::tests::dns_srv_provider_caches_by_service_only_and_requeries_each_call ... ok
+test ringpop_discovery::tests::dns_srv_provider_preserves_targets_ipv6_and_trailing_dot_domain ... ok
+test ringpop_discovery::tests::file_matches_go_string_replacement_and_number_type_errors ... ok
+test ringpop_discovery::tests::file_reads_each_time_and_preserves_array_contents ... ok
+test ringpop_discovery::tests::malformed_utf8_outside_strings_remains_json_syntax_error ... ok
+test ringpop_discovery::tests::matches_actual_go_provider_oracle_fixture ... ok
+test ringpop_discovery::tests::missing_file_is_io_error_and_config_selects_supported_provider ... ok
+test ringpop_discovery::tests::split_and_join_host_port_match_go_ipv6_and_string_port_rules ... ok
+test ringpop_discovery::tests::static_hosts_preserve_order_duplicates_and_strings ... ok
+test ringpop_discovery::tests::system_dns_literal_fast_path_matches_go_without_normalizing ... ok
+test ringpop_discovery::tests::system_lookup_matches_go_system_oracle ... ok
+test ringpop_discovery::tests::system_resolver_can_be_initialized_and_dropped_inside_tokio ... ok
+test ringpop_discovery::tests::system_srv_ordering_keeps_priority_and_rfc2782_weight_groups ... ok
+test service::tests::health_json_matches_go_field_names ... ok
+test service::tests::registry_tracks_service_health ... ok
+test service::tests::service_name_parsing ... ok
+test tchannel_json_client::adversarial_tests::accumulated_crc32_and_crc32c_accept_multiple_tcp_fragments ... ok
+test tchannel_json_client::adversarial_tests::call_ttl_subtracts_connect_and_init_elapsed_time ... ok
+test tchannel_json_client::adversarial_tests::every_truncated_call_res_fixed_header_is_an_error ... ok
+test tchannel_json_client::adversarial_tests::malformed_ids_types_boundaries_and_checksums_are_rejected ... ok
+test matching_metrics_statsd::tests::counters_and_histogram_buckets_aggregate_while_gauges_keep_latest_value ... ok
+
+test result: ok. 91 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
+     Running tests/e2e.rs (/mnt/storage/service/cargo-target-shared/debug/deps/e2e-061d096096985781)
+
+running 27 tests
+test admin_and_visibility_routes ... ok
+test activity_heartbeat_cancel_and_paged_history ... ok
+test admin_cluster_config_and_workflow_maintenance ... ok
+test admin_isolation_and_async_config_flow ... ok
+test admin_reapply_replication_dlq_and_cross_cluster ... ok
+test archived_visibility_reports_unconfigured ... ok
+test admin_shard_queue_history_and_maintain_flow ... ok
+test async_start_is_consumed_into_a_run ... ok
+test child_workflow_runs_and_parent_closes ... ok
+test domain_crud_round_trip ... ok
+test describe_task_list_reports_pollers ... ok
+test empty_poll_returns_no_content ... ok
+test failover_moves_global_domain_and_lists_history ... ok
+test health_reports_ok ... ok
+test full_workflow_lifecycle ... ok
+test query_flow_answers_through_worker ... ok
+test query_task_completed_answers_direct_query ... ok
+test reset_workflow_forks_at_decision_boundary ... ok
+test restart_workflow_starts_new_run ... ok
+test schedule_crud_and_firing_flow ... ok
+test semaphore_create_and_gate_flow ... ok
+test signal_with_start_starts_or_signals ... ok
+test task_list_discovery_reports_queues ... ok
+test timer_decision_fires_without_worker ... ok
+test unknown_domain_is_404 ... ok
+test worker_simulation_drives_workflow_to_completion ... ok
+test refresh_tasks_and_diagnose_behave ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.15s
+
+   Doc-tests cadence_service_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

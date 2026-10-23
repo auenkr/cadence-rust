@@ -265,6 +265,11 @@ impl ServerCertVerifier for SkipChainVerification {
     }
 }
 
+pub fn install_tls_crypto_provider() {
+    // Err means a provider is already installed, which is fine.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 #[cfg(test)]
 mod tests {
     use std::{net::SocketAddr, path::Path, time::Duration};
@@ -478,9 +483,4 @@ mod tests {
             Ok(())
         );
     }
-}
-
-pub fn install_tls_crypto_provider() {
-    // Err means a provider is already installed, which is fine.
-    let _ = rustls::crypto::ring::default_provider().install_default();
 }

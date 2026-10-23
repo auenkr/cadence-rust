@@ -1,0 +1,4 @@
+    Checking cadence-history v0.1.0 (/mnt/storage/service/github/wt/split/rust/crates/cadence-history)
+    Checking cadence-frontend v0.1.0 (/mnt/storage/service/github/wt/split/rust/crates/cadence-frontend)
+    Checking cadence-worker v0.1.0 (/mnt/storage/service/github/wt/split/rust/crates/cadence-worker)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.31s

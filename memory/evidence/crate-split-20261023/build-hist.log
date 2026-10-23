@@ -1,0 +1,39 @@
+   Compiling tokio v1.53.3
+   Compiling bitflags v2.13.2
+   Compiling tempfile v3.27.0
+   Compiling prost-build v0.13.5
+   Compiling openssl v0.10.81
+   Compiling tokio-util v0.7.20
+   Compiling h2 v0.4.20
+   Compiling tokio-rustls v0.26.6
+   Compiling tower v0.5.3
+   Compiling axum v0.7.9
+   Compiling hyper v1.12.0
+   Compiling tokio-postgres v0.7.18
+   Compiling hyper-util v0.1.21
+   Compiling hyper-timeout v0.5.2
+   Compiling tower v0.4.13
+   Compiling tokio-stream v0.1.19
+   Compiling tonic-build v0.12.3
+   Compiling mysql_common v0.37.3
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/split/rust/crates/cadence-proto)
+   Compiling mysql_common v0.35.5
+   Compiling scylla-cql v2.0.0
+   Compiling tonic v0.12.3
+   Compiling tokio-openssl v0.6.5
+   Compiling rusqlite v0.32.1
+   Compiling mysql v26.0.1
+   Compiling hickory-proto v0.24.4
+   Compiling mysql_async v0.37.1 (/mnt/storage/service/github/wt/split/rust/vendor/mysql_async-0.37.1)
+   Compiling scylla v1.9.0 (/mnt/storage/service/github/wt/split/rust/vendor/scylla-1.9.0)
+   Compiling postgres-openssl v0.5.3
+   Compiling fs-err v3.3.2
+   Compiling postgres v0.19.14
+   Compiling axum v0.8.9
+   Compiling hickory-resolver v0.24.4
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/split/rust/crates/cadence-persistence)
+   Compiling axum-server v0.8.0
+   Compiling tonic-reflection v0.12.3
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/split/rust/crates/cadence-service-core)
+   Compiling cadence-history v0.1.0 (/mnt/storage/service/github/wt/split/rust/crates/cadence-history)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 08s

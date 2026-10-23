@@ -1,0 +1,31 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.73s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 2 tests
+test matching_reader::tests::matching_reader_local_poller_wins_after_forward_error ... FAILED
+test matching_registry::tests::replacement_can_load_before_old_cleanup_and_keeps_its_lease ... FAILED
+
+failures:
+
+---- matching_reader::tests::matching_reader_local_poller_wins_after_forward_error stdout ----
+
+thread 'matching_reader::tests::matching_reader_local_poller_wins_after_forward_error' (729801) panicked at crates/cadence-matching/src/matching_reader.rs:1475:9:
+assertion failed: sink.events().iter().any(|event|
+        event.name ==
+            crate::matching_metrics::ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- matching_registry::tests::replacement_can_load_before_old_cleanup_and_keeps_its_lease stdout ----
+Matching task list lost ownership during shutdown: Task list range ID was 2 when it was should have been 1
+
+thread 'matching_registry::tests::replacement_can_load_before_old_cleanup_and_keeps_its_lease' (729802) panicked at crates/cadence-matching/src/matching_registry.rs:3013:9:
+old final ack must be fenced
+
+
+failures:
+    matching_reader::tests::matching_reader_local_poller_wins_after_forward_error
+    matching_registry::tests::replacement_can_load_before_old_cleanup_and_keeps_its_lease
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 394 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p cadence-matching --lib`

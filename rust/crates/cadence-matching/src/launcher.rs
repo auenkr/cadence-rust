@@ -473,313 +473,6 @@ async fn serve_matching_http_permissive(
     Ok(())
 }
 
-#[cfg(test)]
-mod matching_http_listener_tests {
-    use super::*;
-    #[tokio::test]
-    async fn http_mutual_tls_and_permissive_round_trips() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let dir = tempfile::tempdir().unwrap();
-        let mut params = rcgen::CertificateParams::new(Vec::new()).unwrap();
-        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let ca_key = rcgen::KeyPair::generate().unwrap();
-        let ca = params.self_signed(&ca_key).unwrap();
-        let issue = || {
-            let key = rcgen::KeyPair::generate().unwrap();
-            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
-                .unwrap()
-                .signed_by(&key, &ca, &ca_key)
-                .unwrap();
-            (cert, key)
-        };
-        let (cert, key) = issue();
-        let write = |name: &str, data: String| {
-            let path = dir.path().join(name);
-            std::fs::write(&path, data).unwrap();
-            path.to_string_lossy().into_owned()
-        };
-        let mut http = config::HttpConfig {
-            tls_mode: Some("permissive".into()),
-            tls: Some(config::TlsConfig {
-                enabled: true,
-                cert_file: write("cert", cert.pem()),
-                key_file: write("key", key.serialize_pem()),
-                ca_files: vec![write("ca", ca.pem())],
-                require_client_auth: true,
-                enable_host_verification: true,
-                server_name: "ignored-on-server".into(),
-                ssl_mode: "ignored-for-rpc".into(),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        for mode in ["permissive", "enforced"] {
-            http.tls_mode = Some(mode.into());
-            let tls = matching_http_tls(&http).await.unwrap().unwrap();
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let addr = listener.local_addr().unwrap();
-            drop(listener);
-            let app = axum::Router::new().route("/", axum::routing::get(|| async { "ok" }));
-            let task = tokio::spawn(async move {
-                if mode == "permissive" {
-                    serve_matching_http_permissive(addr, app, tls).await
-                } else {
-                    axum_server::bind_rustls(addr, tls)
-                        .serve(app.into_make_service())
-                        .await
-                        .map_err(anyhow::Error::from)
-                }
-            });
-            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-            let tcp = loop {
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "HTTP listener did not start"
-                );
-                match tokio::net::TcpStream::connect(addr).await {
-                    Ok(tcp) => break tcp,
-                    Err(_) => tokio::task::yield_now().await,
-                }
-            };
-            async fn request<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
-                mut stream: S,
-            ) -> bool {
-                if stream
-                    .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                    .await
-                    .is_err()
-                {
-                    return false;
-                }
-                let mut response = Vec::new();
-                matches!(
-                    tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        stream.read_to_end(&mut response)
-                    )
-                    .await,
-                    Ok(Ok(_))
-                ) && response.starts_with(b"HTTP/1.1 200")
-            }
-            assert_eq!(request(tcp).await, mode == "permissive");
-            let mut roots = rustls::RootCertStore::empty();
-            roots.add(ca.der().clone()).unwrap();
-            for identity in ["trusted", "absent", "untrusted"] {
-                let builder = rustls::ClientConfig::builder().with_root_certificates(roots.clone());
-                let client = if identity != "absent" {
-                    let (cert, key) = if identity == "trusted" {
-                        issue()
-                    } else {
-                        let key = rcgen::KeyPair::generate().unwrap();
-                        let cert = rcgen::CertificateParams::new(vec!["rogue".into()])
-                            .unwrap()
-                            .self_signed(&key)
-                            .unwrap();
-                        (cert, key)
-                    };
-                    builder
-                        .with_client_auth_cert(
-                            vec![cert.der().clone()],
-                            rustls::pki_types::PrivatePkcs8KeyDer::from(key.serialize_der()).into(),
-                        )
-                        .unwrap()
-                } else {
-                    builder.with_no_client_auth()
-                };
-                let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
-                let connection = tokio_rustls::TlsConnector::from(std::sync::Arc::new(client))
-                    .connect("localhost".try_into().unwrap(), tcp)
-                    .await;
-                let success = match connection {
-                    Ok(stream) => request(stream).await,
-                    Err(_) => false,
-                };
-                assert_eq!(success, identity == "trusted", "{identity}");
-            }
-            task.abort();
-            let _ = task.await;
-        }
-        http.tls_mode = Some("disabled".into());
-        assert!(matching_http_tls(&http).await.unwrap().is_none());
-        http.tls.as_mut().unwrap().ca_files = vec![write("empty-ca", "not a certificate".into())];
-        assert!(matching_http_tls(&http).await.unwrap().is_none());
-        http.tls.as_mut().unwrap().ca_file = "/missing-http-ca".into();
-        assert!(matching_http_tls(&http)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("CA file"));
-    }
-
-    #[test]
-    fn history_outbound_selector_uses_last_unfiltered_global_value() {
-        use cadence_api::{
-            admin::{DynamicConfigFilter, DynamicConfigValue},
-            enums::EncodingType,
-            types::DataBlob,
-        };
-
-        let overlay = std::sync::Arc::new(std::sync::Mutex::new(
-            crate::admin::DynamicConfigOverlay::default(),
-        ));
-        let selected = || {
-            dynamic_bool_property(overlay.clone(), "system.enableGRPCOutbound", true)
-        };
-        assert!(selected(), "Go defaults outbound RPCs to gRPC");
-        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Grpc);
-
-        let json = |value: &[u8]| Some(DataBlob::new(EncodingType::JSON, value.to_vec()));
-        let constrained = |value: &[u8]| DynamicConfigValue {
-            value: json(value),
-            filters: vec![DynamicConfigFilter {
-                name: "domainName".into(),
-                value: json(b"\"filtered-domain\""),
-            }],
-        };
-        overlay.lock().unwrap().update(
-            false,
-            "system.enableGRPCOutbound",
-            vec![
-                DynamicConfigValue { value: json(b"false"), filters: vec![] },
-                constrained(b"true"),
-            ],
-        );
-        assert!(!selected(), "a domain-filtered value is not the startup selector");
-        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Tchannel);
-
-        overlay.lock().unwrap().update(
-            false,
-            "system.enableGRPCOutbound",
-            vec![
-                DynamicConfigValue { value: json(b"true"), filters: vec![] },
-                DynamicConfigValue { value: json(b"false"), filters: vec![] },
-                constrained(b"true"),
-            ],
-        );
-        assert!(!selected(), "the last unfiltered global value selects TChannel");
-        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Tchannel);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn tls_handshake_timeout_is_injectable() {
-        use tokio::io::AsyncWriteExt;
-
-        crate::grpc_tls::install_tls_crypto_provider();
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_cert_resolver(std::sync::Arc::new(NoServerCertificate));
-        let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let accepting = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            accept_matching_tls(acceptor, stream, std::time::Duration::from_millis(10))
-                .await
-                .unwrap_err()
-                .kind()
-        });
-        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
-        client
-            .write_all(&[0x16, 0x03, 0x03, 0x00, 0x01])
-            .await
-            .unwrap();
-        assert_eq!(accepting.await.unwrap(), std::io::ErrorKind::TimedOut);
-    }
-
-    #[test]
-    fn configured_listener_uses_bind_policy() {
-        let rpc: config::RpcConfig =
-            serde_yaml::from_str("bindOnLocalHost: true\nhttp: {port: 8801}").unwrap();
-        assert_eq!(
-            matching_http_addr(&rpc).unwrap().unwrap().to_string(),
-            "127.0.0.1:8801"
-        );
-    }
-    #[tokio::test]
-    async fn rejects_invalid_configuration_and_detects_enabled_tls() {
-        let rpc: config::RpcConfig = serde_yaml::from_str("http: {port: 0}").unwrap();
-        assert!(matching_http_addr(&rpc)
-            .unwrap_err()
-            .to_string()
-            .contains("HTTP port is not set"));
-        let tls: config::HttpConfig = serde_yaml::from_str("tls: {enabled: true}").unwrap();
-        assert!(matching_http_tls(&tls).await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn validates_tls_mode_and_certificate_configuration() {
-        let enforced_without_tls: config::HttpConfig =
-            serde_yaml::from_str("TLSMode: enforced").unwrap();
-        assert!(matching_http_tls(&enforced_without_tls)
-            .await
-            .unwrap()
-            .is_none());
-        let enforced_with_tls_disabled: config::HttpConfig =
-            serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: false}").unwrap();
-        assert!(matching_http_tls(&enforced_with_tls_disabled)
-            .await
-            .unwrap()
-            .is_none());
-        let permissive_without_tls: config::HttpConfig =
-            serde_yaml::from_str("TLSMode: permissive").unwrap();
-        assert!(matching_http_tls(&permissive_without_tls)
-            .await
-            .unwrap()
-            .is_none());
-
-        let uppercase: config::HttpConfig = serde_yaml::from_str(
-            "TLSMode: Enforced\ntls: {enabled: true, certFile: cert, keyFile: key}",
-        )
-        .unwrap();
-        assert!(matching_http_tls(&uppercase)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("unknown TLSMode"));
-        let empty: config::HttpConfig = serde_yaml::from_str("TLSMode: ''").unwrap();
-        assert!(matching_http_tls(&empty)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("unknown TLSMode"));
-
-        let permissive: config::HttpConfig = serde_yaml::from_str(
-            "TLSMode: permissive\ntls: {enabled: true, certFile: cert, keyFile: key}",
-        )
-        .unwrap();
-        assert!(matching_http_tls(&permissive)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("loading Matching HTTP TLS certificate/key"));
-
-        let missing_cert: config::HttpConfig =
-            serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: true, keyFile: key}").unwrap();
-        assert!(matching_http_tls(&missing_cert).await.unwrap().is_some());
-
-        let invalid_cert = tempfile::NamedTempFile::new().unwrap();
-        let invalid_key = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(invalid_cert.path(), b"not a certificate").unwrap();
-        std::fs::write(invalid_key.path(), b"not a key").unwrap();
-        let invalid_pair: config::HttpConfig = serde_yaml::from_str(&format!(
-            "TLSMode: enforced\ntls: {{enabled: true, certFile: {:?}, keyFile: {:?}}}",
-            invalid_cert.path().to_string_lossy(),
-            invalid_key.path().to_string_lossy(),
-        ))
-        .unwrap();
-        assert!(matching_http_tls(&invalid_pair)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("loading Matching HTTP TLS certificate/key"));
-    }
-}
-
 /// Shared launcher for every binary that hosts Rust-ported services.
 /// `only` restricts the services the binary may run (None = any); an empty
 /// `--services` list then means exactly that set.
@@ -1846,4 +1539,311 @@ pub async fn run(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod matching_http_listener_tests {
+    use super::*;
+    #[tokio::test]
+    async fn http_mutual_tls_and_permissive_round_trips() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = tempfile::tempdir().unwrap();
+        let mut params = rcgen::CertificateParams::new(Vec::new()).unwrap();
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let ca_key = rcgen::KeyPair::generate().unwrap();
+        let ca = params.self_signed(&ca_key).unwrap();
+        let issue = || {
+            let key = rcgen::KeyPair::generate().unwrap();
+            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
+                .unwrap()
+                .signed_by(&key, &ca, &ca_key)
+                .unwrap();
+            (cert, key)
+        };
+        let (cert, key) = issue();
+        let write = |name: &str, data: String| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, data).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let mut http = config::HttpConfig {
+            tls_mode: Some("permissive".into()),
+            tls: Some(config::TlsConfig {
+                enabled: true,
+                cert_file: write("cert", cert.pem()),
+                key_file: write("key", key.serialize_pem()),
+                ca_files: vec![write("ca", ca.pem())],
+                require_client_auth: true,
+                enable_host_verification: true,
+                server_name: "ignored-on-server".into(),
+                ssl_mode: "ignored-for-rpc".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for mode in ["permissive", "enforced"] {
+            http.tls_mode = Some(mode.into());
+            let tls = matching_http_tls(&http).await.unwrap().unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            drop(listener);
+            let app = axum::Router::new().route("/", axum::routing::get(|| async { "ok" }));
+            let task = tokio::spawn(async move {
+                if mode == "permissive" {
+                    serve_matching_http_permissive(addr, app, tls).await
+                } else {
+                    axum_server::bind_rustls(addr, tls)
+                        .serve(app.into_make_service())
+                        .await
+                        .map_err(anyhow::Error::from)
+                }
+            });
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+            let tcp = loop {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "HTTP listener did not start"
+                );
+                match tokio::net::TcpStream::connect(addr).await {
+                    Ok(tcp) => break tcp,
+                    Err(_) => tokio::task::yield_now().await,
+                }
+            };
+            async fn request<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+                mut stream: S,
+            ) -> bool {
+                if stream
+                    .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                    .await
+                    .is_err()
+                {
+                    return false;
+                }
+                let mut response = Vec::new();
+                matches!(
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        stream.read_to_end(&mut response)
+                    )
+                    .await,
+                    Ok(Ok(_))
+                ) && response.starts_with(b"HTTP/1.1 200")
+            }
+            assert_eq!(request(tcp).await, mode == "permissive");
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add(ca.der().clone()).unwrap();
+            for identity in ["trusted", "absent", "untrusted"] {
+                let builder = rustls::ClientConfig::builder().with_root_certificates(roots.clone());
+                let client = if identity != "absent" {
+                    let (cert, key) = if identity == "trusted" {
+                        issue()
+                    } else {
+                        let key = rcgen::KeyPair::generate().unwrap();
+                        let cert = rcgen::CertificateParams::new(vec!["rogue".into()])
+                            .unwrap()
+                            .self_signed(&key)
+                            .unwrap();
+                        (cert, key)
+                    };
+                    builder
+                        .with_client_auth_cert(
+                            vec![cert.der().clone()],
+                            rustls::pki_types::PrivatePkcs8KeyDer::from(key.serialize_der()).into(),
+                        )
+                        .unwrap()
+                } else {
+                    builder.with_no_client_auth()
+                };
+                let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+                let connection = tokio_rustls::TlsConnector::from(std::sync::Arc::new(client))
+                    .connect("localhost".try_into().unwrap(), tcp)
+                    .await;
+                let success = match connection {
+                    Ok(stream) => request(stream).await,
+                    Err(_) => false,
+                };
+                assert_eq!(success, identity == "trusted", "{identity}");
+            }
+            task.abort();
+            let _ = task.await;
+        }
+        http.tls_mode = Some("disabled".into());
+        assert!(matching_http_tls(&http).await.unwrap().is_none());
+        http.tls.as_mut().unwrap().ca_files = vec![write("empty-ca", "not a certificate".into())];
+        assert!(matching_http_tls(&http).await.unwrap().is_none());
+        http.tls.as_mut().unwrap().ca_file = "/missing-http-ca".into();
+        assert!(matching_http_tls(&http)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("CA file"));
+    }
+
+    #[test]
+    fn history_outbound_selector_uses_last_unfiltered_global_value() {
+        use cadence_api::{
+            admin::{DynamicConfigFilter, DynamicConfigValue},
+            enums::EncodingType,
+            types::DataBlob,
+        };
+
+        let overlay = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::admin::DynamicConfigOverlay::default(),
+        ));
+        let selected = || {
+            dynamic_bool_property(overlay.clone(), "system.enableGRPCOutbound", true)
+        };
+        assert!(selected(), "Go defaults outbound RPCs to gRPC");
+        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Grpc);
+
+        let json = |value: &[u8]| Some(DataBlob::new(EncodingType::JSON, value.to_vec()));
+        let constrained = |value: &[u8]| DynamicConfigValue {
+            value: json(value),
+            filters: vec![DynamicConfigFilter {
+                name: "domainName".into(),
+                value: json(b"\"filtered-domain\""),
+            }],
+        };
+        overlay.lock().unwrap().update(
+            false,
+            "system.enableGRPCOutbound",
+            vec![
+                DynamicConfigValue { value: json(b"false"), filters: vec![] },
+                constrained(b"true"),
+            ],
+        );
+        assert!(!selected(), "a domain-filtered value is not the startup selector");
+        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Tchannel);
+
+        overlay.lock().unwrap().update(
+            false,
+            "system.enableGRPCOutbound",
+            vec![
+                DynamicConfigValue { value: json(b"true"), filters: vec![] },
+                DynamicConfigValue { value: json(b"false"), filters: vec![] },
+                constrained(b"true"),
+            ],
+        );
+        assert!(!selected(), "the last unfiltered global value selects TChannel");
+        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Tchannel);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn tls_handshake_timeout_is_injectable() {
+        use tokio::io::AsyncWriteExt;
+
+        crate::grpc_tls::install_tls_crypto_provider();
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(std::sync::Arc::new(NoServerCertificate));
+        let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accepting = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            accept_matching_tls(acceptor, stream, std::time::Duration::from_millis(10))
+                .await
+                .unwrap_err()
+                .kind()
+        });
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client
+            .write_all(&[0x16, 0x03, 0x03, 0x00, 0x01])
+            .await
+            .unwrap();
+        assert_eq!(accepting.await.unwrap(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn configured_listener_uses_bind_policy() {
+        let rpc: config::RpcConfig =
+            serde_yaml::from_str("bindOnLocalHost: true\nhttp: {port: 8801}").unwrap();
+        assert_eq!(
+            matching_http_addr(&rpc).unwrap().unwrap().to_string(),
+            "127.0.0.1:8801"
+        );
+    }
+    #[tokio::test]
+    async fn rejects_invalid_configuration_and_detects_enabled_tls() {
+        let rpc: config::RpcConfig = serde_yaml::from_str("http: {port: 0}").unwrap();
+        assert!(matching_http_addr(&rpc)
+            .unwrap_err()
+            .to_string()
+            .contains("HTTP port is not set"));
+        let tls: config::HttpConfig = serde_yaml::from_str("tls: {enabled: true}").unwrap();
+        assert!(matching_http_tls(&tls).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn validates_tls_mode_and_certificate_configuration() {
+        let enforced_without_tls: config::HttpConfig =
+            serde_yaml::from_str("TLSMode: enforced").unwrap();
+        assert!(matching_http_tls(&enforced_without_tls)
+            .await
+            .unwrap()
+            .is_none());
+        let enforced_with_tls_disabled: config::HttpConfig =
+            serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: false}").unwrap();
+        assert!(matching_http_tls(&enforced_with_tls_disabled)
+            .await
+            .unwrap()
+            .is_none());
+        let permissive_without_tls: config::HttpConfig =
+            serde_yaml::from_str("TLSMode: permissive").unwrap();
+        assert!(matching_http_tls(&permissive_without_tls)
+            .await
+            .unwrap()
+            .is_none());
+
+        let uppercase: config::HttpConfig = serde_yaml::from_str(
+            "TLSMode: Enforced\ntls: {enabled: true, certFile: cert, keyFile: key}",
+        )
+        .unwrap();
+        assert!(matching_http_tls(&uppercase)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("unknown TLSMode"));
+        let empty: config::HttpConfig = serde_yaml::from_str("TLSMode: ''").unwrap();
+        assert!(matching_http_tls(&empty)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("unknown TLSMode"));
+
+        let permissive: config::HttpConfig = serde_yaml::from_str(
+            "TLSMode: permissive\ntls: {enabled: true, certFile: cert, keyFile: key}",
+        )
+        .unwrap();
+        assert!(matching_http_tls(&permissive)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("loading Matching HTTP TLS certificate/key"));
+
+        let missing_cert: config::HttpConfig =
+            serde_yaml::from_str("TLSMode: enforced\ntls: {enabled: true, keyFile: key}").unwrap();
+        assert!(matching_http_tls(&missing_cert).await.unwrap().is_some());
+
+        let invalid_cert = tempfile::NamedTempFile::new().unwrap();
+        let invalid_key = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(invalid_cert.path(), b"not a certificate").unwrap();
+        std::fs::write(invalid_key.path(), b"not a key").unwrap();
+        let invalid_pair: config::HttpConfig = serde_yaml::from_str(&format!(
+            "TLSMode: enforced\ntls: {{enabled: true, certFile: {:?}, keyFile: {:?}}}",
+            invalid_cert.path().to_string_lossy(),
+            invalid_key.path().to_string_lossy(),
+        ))
+        .unwrap();
+        assert!(matching_http_tls(&invalid_pair)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("loading Matching HTTP TLS certificate/key"));
+    }
 }
