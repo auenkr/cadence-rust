@@ -1063,11 +1063,9 @@ fn run_scaler_cycle(
 #[tokio::test]
 async fn matching_adaptive_scaler_lifecycle_start_stop_is_idempotent() {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    fn periodic(runs: std::sync::Arc<AtomicUsize>) -> impl std::future::Future<Output = ()> + Send + 'static {
-        async move {
-            runs.fetch_add(1, Ordering::SeqCst);
-            std::future::pending::<()>().await
-        }
+    async fn periodic(runs: std::sync::Arc<AtomicUsize>) {
+        runs.fetch_add(1, Ordering::SeqCst);
+        std::future::pending::<()>().await
     }
     let runs = std::sync::Arc::new(AtomicUsize::new(0));
     let daemon = ScalerDaemon::default();

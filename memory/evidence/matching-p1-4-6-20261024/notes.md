@@ -38,3 +38,7 @@ The `started` instant is taken before `get`, and the liveness clock starts at `r
 ## Verification
 
 - CI run: see below (filled after the run).
+
+## CI attempt log
+
+- Run `40031735890` on `aadd8f7e7` failed in clippy (`clippy::manual_async_fn` at `matching_scaler_go_tests.rs:1066`, the test helper `periodic`). Test job was skipped. Fixed by making the helper a plain `async fn`. No other diagnostics were reported.
