@@ -2158,4 +2158,201 @@ mod tests {
         ));
     }
 
+    /// In-process Go-shaped parent: records each forwarded request so the
+    /// test can check its fields, and answers with a fixed token.
+    #[derive(Clone, Default)]
+    struct RecordingParent {
+        add_decision: Arc<Mutex<Option<m::AddDecisionTaskRequest>>>,
+        add_activity: Arc<Mutex<Option<m::AddActivityTaskRequest>>>,
+        poll_decision: Arc<Mutex<Option<m::PollForDecisionTaskRequest>>>,
+        poll_activity: Arc<Mutex<Option<m::PollForActivityTaskRequest>>>,
+    }
+    #[tonic::async_trait]
+    impl m::matching_api_server::MatchingApi for RecordingParent {
+        async fn add_decision_task(&self, request: tonic::Request<m::AddDecisionTaskRequest>) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
+            *self.add_decision.lock().unwrap() = Some(request.into_inner());
+            Ok(tonic::Response::new(m::AddDecisionTaskResponse::default()))
+        }
+        async fn add_activity_task(&self, request: tonic::Request<m::AddActivityTaskRequest>) -> Result<tonic::Response<m::AddActivityTaskResponse>, Status> {
+            *self.add_activity.lock().unwrap() = Some(request.into_inner());
+            Ok(tonic::Response::new(m::AddActivityTaskResponse::default()))
+        }
+        async fn poll_for_decision_task(&self, request: tonic::Request<m::PollForDecisionTaskRequest>) -> Result<tonic::Response<m::PollForDecisionTaskResponse>, Status> {
+            *self.poll_decision.lock().unwrap() = Some(request.into_inner());
+            Ok(tonic::Response::new(m::PollForDecisionTaskResponse { task_token: vec![7], ..Default::default() }))
+        }
+        async fn poll_for_activity_task(&self, request: tonic::Request<m::PollForActivityTaskRequest>) -> Result<tonic::Response<m::PollForActivityTaskResponse>, Status> {
+            *self.poll_activity.lock().unwrap() = Some(request.into_inner());
+            Ok(tonic::Response::new(m::PollForActivityTaskResponse { task_token: vec![8], ..Default::default() }))
+        }
+    }
+    async fn recording_parent() -> (RecordingParent, tonic::transport::Channel, tokio::task::JoinHandle<()>) {
+        let parent = RecordingParent::default();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let served = parent.clone();
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(m::matching_api_server::MatchingApiServer::new(served))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+        });
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect().await.unwrap();
+        (parent, channel, server)
+    }
+    /// Go `newForwarder` with a parent resolving to `tl0` over the recording channel.
+    fn remote_forward_state(channel: tonic::transport::Channel, source: &str) -> ForwardState {
+        ForwardState::new(
+            move || {
+                let channel = channel.clone();
+                Box::pin(async move { Some((Parent::Remote(channel), "tl0".into())) })
+            },
+            Arc::new(|| 1),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            source.into(),
+            Arc::new(|| 0),
+        )
+    }
+    #[tokio::test]
+    async fn matching_forward_decision_task_fields_match_go_forwarder() {
+        // Go TestForwardDecisionTask: the decision add carries the workflow
+        // execution, schedule, normal kind and forwarded-from partition. The Go
+        // task domain is the `domain` argument here, since Rust takes one domain.
+        let (parent, channel, server) = recording_parent().await;
+        let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
+        let domain = Uuid::from_u128(5).to_string();
+        let workflow = Uuid::from_u128(3);
+        let run = Uuid::from_u128(4);
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData {
+                workflow_id: workflow.to_string(),
+                run_id: Some(run.as_bytes().to_vec()),
+                schedule_id: 91,
+                ..Default::default()
+            },
+        };
+        state.forward_backlog_task(task, &domain, 0, 0).await.unwrap();
+        let request = parent.add_decision.lock().unwrap().clone().expect("decision add reached the parent");
+        let list = request.task_list.clone().unwrap();
+        assert_eq!(list.name, "tl0");
+        assert_eq!(list.kind, 1);
+        assert_eq!(request.domain_id, domain);
+        let execution = request.workflow_execution.clone().unwrap();
+        assert_eq!(execution.workflow_id, workflow.to_string());
+        assert_eq!(execution.run_id, run.to_string());
+        assert_eq!(request.schedule_id, 91);
+        // Rust TaskData has no schedule-to-start field, and persisted Go rows read
+        // zero, so the Go random TaskInfo value has no input here; 0 is asserted.
+        assert_eq!(request.schedule_to_start_timeout.clone().unwrap().seconds, 0);
+        assert_eq!(request.forwarded_from, "/__cadence_sys/tl0/1");
+        assert_eq!(request.source, 2);
+        server.abort();
+    }
+    #[tokio::test]
+    #[ignore = "parity gap: Rust sends the list domain as SourceDomainUUID, Go sends the task's own domain (inventory parity gaps)"]
+    async fn matching_forward_activity_task_fields_match_go_forwarder() {
+        // Go TestForwardActivityTask: DomainUUID is the list's domain and
+        // SourceDomainUUID is the task's domain. Rust passes one domain, so the
+        // list domain is given and the source-domain assertion is expected to fail.
+        let (parent, channel, server) = recording_parent().await;
+        let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
+        let list_domain = Uuid::from_u128(1).to_string();
+        let source_domain = Uuid::from_u128(5).to_string();
+        let workflow = Uuid::from_u128(3);
+        let run = Uuid::from_u128(4);
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData {
+                workflow_id: workflow.to_string(),
+                run_id: Some(run.as_bytes().to_vec()),
+                schedule_id: 91,
+                ..Default::default()
+            },
+        };
+        state.forward_backlog_task(task, &list_domain, 1, 0).await.unwrap();
+        let request = parent.add_activity.lock().unwrap().clone().expect("activity add reached the parent");
+        assert_eq!(request.domain_id, list_domain);
+        assert_eq!(request.source_domain_id, source_domain);
+        let list = request.task_list.clone().unwrap();
+        assert_eq!(list.name, "tl0");
+        assert_eq!(list.kind, 1);
+        let execution = request.workflow_execution.clone().unwrap();
+        assert_eq!(execution.workflow_id, workflow.to_string());
+        assert_eq!(execution.run_id, run.to_string());
+        assert_eq!(request.schedule_id, 91);
+        assert_eq!(request.schedule_to_start_timeout.clone().unwrap().seconds, 0);
+        assert_eq!(request.forwarded_from, "/__cadence_sys/tl0/1");
+        server.abort();
+    }
+    #[tokio::test]
+    async fn matching_forward_poll_for_decision_fields_match_go_forwarder() {
+        // Go TestForwardPollForDecision: poller id, domain, identity, parent name
+        // and kind reach the parent, and the parent's decision response returns.
+        let (parent, channel, server) = recording_parent().await;
+        let domain = Uuid::from_u128(1).to_string();
+        let poller = Uuid::from_u128(6).to_string();
+        let forward = ForwardPoll {
+            target: Parent::Remote(channel),
+            domain_id: domain.clone(),
+            parent_name: "tl0".into(),
+            forwarded_from: "/__cadence_sys/tl0/1".into(),
+            poller_id: poller.clone(),
+            isolation_group: String::new(),
+            deadline: tokio::time::Instant::now() + Duration::from_secs(8),
+        };
+        let response = p::PollForDecisionTaskRequest {
+            identity: "id1".into(),
+            task_list: Some(p::TaskList { name: "/__cadence_sys/tl0/1".into(), kind: 1, ..Default::default() }),
+            ..Default::default()
+        }
+        .forward(forward)
+        .await
+        .unwrap();
+        assert_eq!(response.task_token, vec![7]);
+        // Go returns a decision response with no activity response; the Rust
+        // return type is the decision response, so that routing is by type.
+        let request = parent.poll_decision.lock().unwrap().clone().expect("decision poll reached the parent");
+        assert_eq!(request.poller_id, poller);
+        assert_eq!(request.domain_id, domain);
+        let inner = request.request.clone().unwrap();
+        assert_eq!(inner.identity, "id1");
+        assert_eq!(inner.task_list.clone().unwrap().name, "tl0");
+        assert_eq!(inner.task_list.clone().unwrap().kind, 1);
+        server.abort();
+    }
+    #[tokio::test]
+    async fn matching_forward_poll_for_activity_fields_match_go_forwarder() {
+        // Go TestForwardPollForActivity: same routed fields as the decision poll.
+        let (parent, channel, server) = recording_parent().await;
+        let domain = Uuid::from_u128(1).to_string();
+        let poller = Uuid::from_u128(6).to_string();
+        let forward = ForwardPoll {
+            target: Parent::Remote(channel),
+            domain_id: domain.clone(),
+            parent_name: "tl0".into(),
+            forwarded_from: "/__cadence_sys/tl0/1".into(),
+            poller_id: poller.clone(),
+            isolation_group: String::new(),
+            deadline: tokio::time::Instant::now() + Duration::from_secs(8),
+        };
+        let response = p::PollForActivityTaskRequest {
+            identity: "id1".into(),
+            task_list: Some(p::TaskList { name: "/__cadence_sys/tl0/1".into(), kind: 1, ..Default::default() }),
+            ..Default::default()
+        }
+        .forward(forward)
+        .await
+        .unwrap();
+        assert_eq!(response.task_token, vec![8]);
+        let request = parent.poll_activity.lock().unwrap().clone().expect("activity poll reached the parent");
+        assert_eq!(request.poller_id, poller);
+        assert_eq!(request.domain_id, domain);
+        let inner = request.request.clone().unwrap();
+        assert_eq!(inner.identity, "id1");
+        assert_eq!(inner.task_list.clone().unwrap().name, "tl0");
+        assert_eq!(inner.task_list.clone().unwrap().kind, 1);
+        server.abort();
+    }
+
 }

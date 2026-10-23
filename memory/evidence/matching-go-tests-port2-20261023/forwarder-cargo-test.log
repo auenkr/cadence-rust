@@ -1,0 +1,42 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-api)
+   Compiling mysql_async v0.37.1 (/mnt/storage/service/github/wt/gotests2/rust/vendor/mysql_async-0.37.1)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-thrift)
+   Compiling scylla v1.9.0 (/mnt/storage/service/github/wt/gotests2/rust/vendor/scylla-1.9.0)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 31s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 11 tests
+test matching_dispatch::tests::matching_forward_decision_task_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_activity_task_fields_match_go_forwarder ... FAILED
+test matching_dispatch::tests::matching_forward_poll_for_activity_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_task_error_is_no_parent_or_task_list_kind ... ok
+test matching_dispatch::tests::matching_forward_poll_for_decision_fields_match_go_forwarder ... ok
+test matching_forward::tests::matching_forward_classifies_service_busy_only ... ok
+test matching_dispatch::tests::matching_forward_task_rate_exceeded_after_two_forwards ... ok
+test matching_forward::tests::matching_forward_config_update_resizes_generation ... ok
+test matching_forward::tests::matching_forward_rate_refreshes_on_five_second_boundary ... ok
+test matching_forward::tests::matching_forward_tokens_replace_generation_without_inflation ... ok
+test matching_forward::tests::matching_forward_max_outstanding_concurrency ... ok
+
+failures:
+
+---- matching_dispatch::tests::matching_forward_activity_task_fields_match_go_forwarder stdout ----
+
+thread 'matching_dispatch::tests::matching_forward_activity_task_fields_match_go_forwarder' (1057171) panicked at crates/cadence-matching/src/matching_dispatch.rs:2276:9:
+assertion `left == right` failed
+  left: "00000000-0000-0000-0000-000000000001"
+ right: "00000000-0000-0000-0000-000000000005"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    matching_dispatch::tests::matching_forward_activity_task_fields_match_go_forwarder
+
+test result: FAILED. 10 passed; 1 failed; 0 ignored; 0 measured; 418 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p cadence-matching --lib`
