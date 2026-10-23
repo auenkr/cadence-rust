@@ -1034,7 +1034,7 @@ async fn matching_rpc_forward_task_limits_reload_and_rate_zero_blocks() {
 
 #[tokio::test]
 async fn matching_rpc_semaphore_acquire_grants_and_reports_no_slot() {
-    let (_dir, _store, matching, _key) = fixture();
+    let (_dir, _store, mut matching, _key) = fixture();
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
         "system.enableDistributedSemaphore", vec![bool_config(true, Some("domain"))]);
     let domain = Uuid::from_u128(1).to_string();
@@ -1101,6 +1101,9 @@ async fn matching_rpc_semaphore_acquire_grants_and_reports_no_slot() {
     // A cached manager skips the flag check, exactly like Go.
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
         "system.enableDistributedSemaphore", vec![bool_config(false, Some("domain"))]);
+    matching.membership = Some(crate::matching_membership::Membership::new("local", vec![cadence_common::membership::Host {
+        address: "remote:7935".into(), identity: "remote".into(), grpc_address: "127.0.0.1:1".into(),
+    }]));
     assert_eq!(acquire(&matching, "1:w:r9:1").await.unwrap().outcome, 2);
     for manager in matching.semaphores.all_managers() { matching.semaphores.unregister(&manager); }
     // An unloaded bucket must pass domain admission again.
@@ -3387,5 +3390,35 @@ async fn matching_failover_callback_disconnects_sticky_decision_and_keeps_manage
     assert!(!queue.queue.is_stopped());
     let next = matching.durable_queue(&key.domain_id.to_string(), &sticky, 0).await.unwrap();
     assert!(Arc::ptr_eq(&queue.queue, &next.queue));
+    registry.shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_failover_callback_excludes_sticky_activity_and_other_domains() {
+    let (_dir, _store, matching, key) = fixture();
+    let registry = matching.queues.as_ref().unwrap();
+    let sticky = p::TaskList { name: "sticky-activity".into(), kind: 2, ..Default::default() };
+    let queue = matching.durable_queue(&key.domain_id.to_string(), &sticky, 1).await.unwrap();
+    let worker = matching.clone();
+    let domain = key.domain_id.to_string();
+    let poll_list = sticky.clone();
+    let mut poll = tokio::spawn(async move {
+        worker.poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: domain, poller_id: "sticky-activity".into(),
+            request: Some(p::PollForActivityTaskRequest { task_list: Some(poll_list), identity: "worker".into(), ..Default::default() }),
+            ..Default::default()
+        }))).await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !queue.pollers.lock().unwrap().contains_poll("sticky-activity") { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    registry.release_domain_failover_polls(Uuid::from_u128(999)).await;
+    registry.release_domain_failover_polls(key.domain_id).await;
+    assert!(tokio::time::timeout(Duration::from_millis(30), &mut poll).await.is_err());
+    assert!(!queue.queue.is_stopped());
+    matching.cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+        domain_id: key.domain_id.to_string(), task_list: Some(sticky), task_list_type: 2, poller_id: "sticky-activity".into(),
+    })).await.unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(2), poll).await.unwrap().unwrap().unwrap().into_inner().task_token.is_empty());
     registry.shutdown(matching_now()).await.unwrap();
 }
