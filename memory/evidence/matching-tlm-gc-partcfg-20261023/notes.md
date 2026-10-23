@@ -13,3 +13,5 @@
 - No Rust program logic changed.
 
 ## CI
+- Run 40014961155 (sha before fix) failed: test type errors (HashMap vs BTreeMap, no PartialEq). Fixed.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/40015151528, sha 3945b4ec762a53d384dad7835a822930060054dd, workflow_dispatch package=cadence-matching, conclusion success.
