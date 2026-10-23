@@ -1,0 +1,10 @@
+{
+  "goBinary": {
+    "path": "/mnt/storage/service/github/wt/mixed3/artifacts/frozen/cadence-server-go",
+    "sha256": "8b4ada0eef7d036d72dbc0c5199883adc28bc1b2f23d11daf1f69be2df82bdc5"
+  },
+  "rustProductionBinary": {
+    "path": "artifacts/frozen/cadence-server-rust",
+    "sha256": "c6e1fc8e3645a0f13e037c54e9a9da060c0758b24fe895bba666e210b7f9355d"
+  }
+}

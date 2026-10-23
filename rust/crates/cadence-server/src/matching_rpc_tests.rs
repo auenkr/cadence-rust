@@ -8,6 +8,92 @@ use cadence_proto::history as h;
 use m::matching_api_server::MatchingApi;
 use std::{num::NonZeroU32, time::Duration};
 use uuid::Uuid;
+
+fn quota_config(value: i64, domain: Option<&str>) -> cadence_api::admin::DynamicConfigValue {
+    use cadence_api::{admin::{DynamicConfigFilter, DynamicConfigValue}, enums::EncodingType, types::DataBlob};
+    let blob = |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+    DynamicConfigValue {
+        value: blob(serde_json::json!(value)),
+        filters: domain.into_iter().map(|name| DynamicConfigFilter {
+            name: "domainName".into(),
+            value: blob(serde_json::json!(name)),
+        }).collect(),
+    }
+}
+
+#[tokio::test]
+async fn matching_long_polls_reject_missing_transport_deadlines_with_bad_request() {
+    let matching = Matching::new(crate::handlers::AppState::default());
+    let decision = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest::default())).await.unwrap_err();
+    assert_eq!(decision.code(), tonic::Code::InvalidArgument);
+    assert_eq!(decision.message(), "Context timeout is not set.");
+    let activity = matching.poll_for_activity_task(Request::new(m::PollForActivityTaskRequest::default())).await.unwrap_err();
+    assert_eq!(activity.code(), tonic::Code::InvalidArgument);
+    assert_eq!(activity.message(), "Context timeout is not set.");
+}
+
+#[tokio::test]
+async fn matching_rpc_quotas_classify_shared_protocol_handlers_and_preserve_count_only_calls() {
+    let state = crate::handlers::AppState::default();
+    let domain_id = Uuid::from_u128(9001);
+    state.domains.create(
+        cadence_api::types::DomainInfo { name: "quota-domain".into(), uuid: domain_id.to_string(), ..Default::default() },
+        Default::default(), Default::default(), false,
+    ).unwrap();
+    {
+        let mut config = state.admin.dynamic_config.lock().unwrap();
+        config.update(false, "matching.rps", vec![quota_config(20, None)]);
+        config.update(false, "matching.domainrps", vec![quota_config(1, Some("quota-domain"))]);
+        config.update(false, "matching.workerrps", vec![quota_config(20, None)]);
+        config.update(false, "matching.domainworkerrps", vec![quota_config(1, Some("quota-domain"))]);
+    }
+    let matching = Matching::new(state);
+
+    // `GetTaskListsByDomain` is a user RPC and its domain filter uses the
+    // request's name. The second call is rejected by only the domain bucket.
+    matching.get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+        domain: "quota-domain".into(),
+    })).await.unwrap();
+    let user_error = matching.get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+        domain: "quota-domain".into(),
+    })).await.unwrap_err();
+    assert_eq!(user_error.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(user_error.message(), "Matching host rps exceeded");
+    assert!(!user_error.details().is_empty(), "Go-compatible ServiceBusyError detail is required");
+
+    // Go counts these worker control calls but ignores a denied decision.
+    let cancel = || Request::new(m::CancelOutstandingPollRequest {
+        domain_id: domain_id.to_string(),
+        task_list_type: 1,
+        task_list: Some(p::TaskList { name: "queue".into(), ..Default::default() }),
+        poller_id: "poller".into(),
+    });
+    matching.cancel_outstanding_poll(cancel()).await.unwrap();
+    matching.cancel_outstanding_poll(cancel()).await.unwrap();
+
+    // Poll is a rejecting worker RPC and shares the same class/domain bucket.
+    let worker_error = matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: domain_id.to_string(),
+        request: None,
+        ..Default::default()
+    }))).await.unwrap_err();
+    assert_eq!(worker_error.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(worker_error.message(), "Matching host rps exceeded");
+}
+
+struct FailingShardOwnerLookup;
+impl crate::matching_shard_routing::ShardOwnerLookup for FailingShardOwnerLookup {
+    fn get_shard_owner(
+        &self,
+        _shard_key: String,
+        _deadline: tokio::time::Instant,
+    ) -> crate::matching_shard_distributor::BoxFuture<
+        Result<crate::matching_shard_distributor::ShardOwner, String>,
+    > {
+        Box::pin(async { Err("spectator unavailable".into()) })
+    }
+}
+
 fn fixture() -> (
     tempfile::TempDir,
     Arc<SqliteTaskStore>,
@@ -69,6 +155,263 @@ fn execution() -> Option<p::WorkflowExecution> {
         run_id: Uuid::from_u128(2).to_string(),
     })
 }
+
+#[tokio::test]
+async fn matching_remote_routing_propagates_spectator_failure_without_ring_fallback() {
+    use cadence_common::membership::Host;
+
+    let (_dir, _store, matching, _key) = fixture();
+    let router = crate::matching_shard_routing::MatchingShardRouter::new(
+        crate::matching_membership::Membership::new(
+            "self",
+            vec![Host {
+                address: "self:7935".into(),
+                identity: "self".into(),
+                grpc_address: "self:7835".into(),
+            }],
+        ),
+        Some(Arc::new(FailingShardOwnerLookup)),
+        Arc::new(|| 100),
+        Arc::new(|| false),
+    );
+    let matching = matching.with_shard_router(router);
+    let error = matching
+        .remote_channel_for_task_list("eligible-task-list")
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert!(error.message().contains("spectator unavailable"));
+}
+
+#[tokio::test]
+async fn matching_remote_adds_and_query_reach_go_yarpc_through_production_handlers() {
+    let Ok(address) = std::env::var("CADENCE_MATCHING_GO_PEER") else {
+        return;
+    };
+    let (_dir, store, matching, key) = fixture();
+    let child_name = "/__cadence_sys/queue/1";
+    let membership = membership_with_parent_remote(child_name, "queue", &address);
+    let matching = matching.with_membership(membership);
+
+    let mut decision = Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(),
+        workflow_execution: execution(),
+        task_list: Some(p::TaskList {
+            name: child_name.into(),
+            kind: 0,
+            ..Default::default()
+        }),
+        schedule_id: 31,
+        ..Default::default()
+    });
+    decision.set_timeout(Duration::from_secs(8));
+    matching.add_decision_task(decision).await.unwrap();
+    assert_eq!(
+        store
+            .task_list_size(
+                &TaskListKey {
+                    domain_id: key.domain_id,
+                    name: child_name.into(),
+                    task_type: 0,
+                },
+                0
+            )
+            .unwrap(),
+        0,
+        "successful remote sync match must not leave a local queued copy");
+
+    let mut activity = Request::new(m::AddActivityTaskRequest {
+        domain_id: key.domain_id.to_string(),
+        source_domain_id: key.domain_id.to_string(),
+        workflow_execution: execution(),
+        task_list: Some(p::TaskList {
+            name: child_name.into(),
+            kind: 1,
+            ..Default::default()
+        }),
+        schedule_id: 32,
+        ..Default::default()
+    });
+    activity.set_timeout(Duration::from_secs(8));
+    matching.add_activity_task(activity).await.unwrap();
+    assert_eq!(
+        store
+            .task_list_size(
+                &TaskListKey {
+                    domain_id: key.domain_id,
+                    name: child_name.into(),
+                    task_type: 1,
+                },
+                0
+            )
+            .unwrap(),
+        0,
+        "successful remote activity sync match must not leave a local queued copy");
+
+    let mut query = Request::new(m::QueryWorkflowRequest {
+        domain_id: key.domain_id.to_string(),
+        request: Some(p::QueryWorkflowRequest::default()),
+        task_list: Some(p::TaskList {
+            name: child_name.into(),
+            kind: 0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    query.set_timeout(Duration::from_secs(8));
+    let response = matching.query_workflow(query).await.unwrap().into_inner();
+    assert_eq!(response.query_result.unwrap().data, b"go-yarpc-query");
+    matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+}
+
+fn membership_with_parent_remote(
+    child: &str,
+    parent: &str,
+    remote_address: &str,
+) -> crate::matching_membership::Membership {
+    use cadence_common::membership::Host;
+    for candidate in 0..100_000 {
+        let membership = crate::matching_membership::Membership::new(
+            format!("rust-matching-{candidate}"),
+            vec![
+                Host {
+                    address: format!("rust-{candidate}:7935"),
+                    identity: format!("rust-matching-{candidate}"),
+                    grpc_address: format!("rust-{candidate}:7835"),
+                },
+                Host {
+                    address: remote_address.into(),
+                    identity: "go-matching".into(),
+                    grpc_address: remote_address.into(),
+                },
+            ],
+        );
+        if membership
+            .owner(child)
+            .is_ok_and(|host| host.identity() == format!("rust-matching-{candidate}"))
+            && membership.owner(parent).is_ok_and(|host| host.identity() == "go-matching")
+        {
+            return membership;
+        }
+    }
+    panic!("could not construct a matching membership ring with local child and remote parent");
+}
+
+#[tokio::test]
+async fn durable_queue_runs_ownership_preflight_before_registry_and_propagates_transient_error() {
+    use cadence_common::membership::Host;
+    use std::sync::Mutex;
+
+    let (_dir, _store, matching, key) = fixture();
+    let membership = crate::matching_membership::Membership::new(
+        "self",
+        vec![Host {
+            address: "self:7935".into(),
+            identity: "self".into(),
+            grpc_address: "self:7835".into(),
+        }],
+    );
+    let matching = matching.with_membership(membership);
+    let list = p::TaskList {
+        name: key.name.clone(),
+        kind: 1,
+        ..Default::default()
+    };
+    matching
+        .durable_queue(&key.domain_id.to_string(), &list, 0)
+        .await
+        .unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let check = {
+        let seen = seen.clone();
+        Arc::new(move |name: String, cached: bool| {
+            seen.lock().unwrap().push((name, cached));
+            Box::pin(async { Err(tonic::Status::unavailable("SD heartbeat failed")) })
+                as std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send>,
+                >
+        })
+    };
+    let matching = matching.with_task_list_ownership(check);
+    let error = matching
+        .durable_queue(&key.domain_id.to_string(), &list, 0)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert_eq!(*seen.lock().unwrap(), vec![(key.name.clone(), true)]);
+    assert!(matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .contains_cached(&key));
+}
+
+#[tokio::test]
+async fn durable_queue_preserves_typed_not_owned_error_from_shutdown_policy() {
+    use cadence_common::membership::Host;
+
+    let (_dir, _store, matching, key) = fixture();
+    let membership = crate::matching_membership::Membership::new(
+        "self",
+        vec![Host {
+            address: "self:7935".into(),
+            identity: "self".into(),
+            grpc_address: "self:7835".into(),
+        }],
+    );
+    let error_membership = membership.clone();
+    let check: crate::grpc_matching::TaskListOwnershipCheck =
+        Arc::new(move |name: String, _cached: bool| {
+            let error_membership = error_membership.clone();
+            Box::pin(async move {
+                Err(error_membership.task_list_not_owned_by(&name, "not known"))
+            })
+                as std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<Output = Result<(), tonic::Status>> + Send,
+                    >,
+                >
+        });
+    let matching = matching
+        .with_membership(membership)
+        .with_task_list_ownership(check);
+    let list = p::TaskList {
+        name: key.name.clone(),
+        kind: 1,
+        ..Default::default()
+    };
+    let error = matching
+        .durable_queue(&key.domain_id.to_string(), &list, 0)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), tonic::Code::Aborted);
+    use prost::Message;
+    #[derive(prost::Message)]
+    struct Details {
+        #[prost(message, repeated, tag = "3")]
+        errors: Vec<prost_types::Any>,
+    }
+    let detail = Details::decode(error.details()).unwrap().errors.remove(0);
+    assert_eq!(
+        detail.type_url,
+        "type.googleapis.com/uber.cadence.shared.v1.TaskListNotOwnedByHostError"
+    );
+    assert!(!matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .contains_cached(&key));
+}
+
 fn list() -> Option<p::TaskList> {
     Some(p::TaskList {
         name: "queue".into(),
@@ -86,14 +429,14 @@ async fn matching_rpc_isolation_toggle_returns_empty_poll_and_replaces_owner() {
             value: Some(DataBlob::new(EncodingType::JSON, if task_type == 0 { b"true".to_vec() } else { b"false".to_vec() })), filters: vec![],
         }]);
         if task_type == 0 {
-            let response = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            let response = matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
                 domain_id: key.domain_id.to_string(), request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
-            })).await.unwrap().into_inner();
+            }))).await.unwrap().into_inner();
             assert!(response.task_token.is_empty());
         } else {
-            let response = matching.poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+            let response = matching.poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
                 domain_id: key.domain_id.to_string(), request: Some(p::PollForActivityTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
-            })).await.unwrap().into_inner();
+            }))).await.unwrap().into_inner();
             assert!(response.task_token.is_empty());
         }
         assert!(original.queue.is_stopped());
@@ -116,7 +459,8 @@ async fn matching_rpc_isolation_toggle_stops_owner_before_admitting_add() {
         let request = || Request::new(m::AddDecisionTaskRequest {
             domain_id: key.domain_id.to_string(), task_list: list(), workflow_execution: execution(), schedule_id: 9, ..Default::default()
         });
-        assert_eq!(matching.add_decision_task(request()).await.unwrap_err().code(), tonic::Code::Unavailable);
+        // Go errShutdown reaches handleErr's default branch: InternalServiceError.
+        assert_eq!(matching.add_decision_task(request()).await.unwrap_err().code(), tonic::Code::Internal);
         matching.add_decision_task(request()).await.unwrap();
     }
     assert!(first.queue.is_stopped());
@@ -233,7 +577,7 @@ async fn matching_rpc_durable_cancel_unregisters_waiting_poller() {
     let poll_domain = domain.clone();
     let poll = tokio::spawn(async move {
         worker
-            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
                 domain_id: poll_domain,
                 poller_id: "poller".into(),
                 request: Some(p::PollForDecisionTaskRequest {
@@ -241,7 +585,7 @@ async fn matching_rpc_durable_cancel_unregisters_waiting_poller() {
                     ..Default::default()
                 }),
                 ..Default::default()
-            }))
+            })))
             .await
     });
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -263,13 +607,88 @@ async fn matching_rpc_durable_cancel_unregisters_waiting_poller() {
         }))
         .await
         .unwrap();
-    let error = tokio::time::timeout(Duration::from_secs(2), poll)
+    // Go returns an empty poll response (nil error) for a cancelled poll.
+    let response = tokio::time::timeout(Duration::from_secs(2), poll)
         .await
         .unwrap()
         .unwrap()
-        .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::Cancelled);
+        .unwrap()
+        .into_inner();
+    assert!(response.task_token.is_empty());
+    assert!(response.auto_config_hint.is_some());
     assert!(matching.polls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn matching_rpc_cancel_without_matching_poll_returns_ok() {
+    let (_dir, _store, matching, key) = fixture();
+    // Go CancelPoller returns nil whether or not a poll matched.
+    matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: key.domain_id.to_string(),
+            task_list: list(),
+            task_list_type: 1,
+            poller_id: "nobody".into(),
+        }))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_duplicate_poller_id_replaces_entry_without_cancelling_first() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let poll_key = || PollKey {
+        domain: domain.clone(),
+        task_list: list().unwrap().name,
+        task_type: 1,
+        poller: "dup".into(),
+    };
+    let first = matching.register_poll(poll_key());
+    let second = matching.register_poll(poll_key());
+    // Go poller.Manager.StartPoll overwrites the entry and does not cancel the earlier poll.
+    assert!(tokio::time::timeout(Duration::from_millis(50), first.cancel.notified())
+        .await
+        .is_err());
+    matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain,
+            task_list: list(),
+            task_list_type: 1,
+            poller_id: "dup".into(),
+        }))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), second.cancel.notified())
+        .await
+        .expect("cancel targets the newest poll with the poller ID");
+    // Go EndPoll deletes unconditionally, so finishing the first poll drops the second's entry.
+    drop(first);
+    assert!(matching.polls.lock().unwrap().is_empty());
+    drop(second);
+}
+
+#[tokio::test]
+async fn matching_rpc_cancel_outstanding_poll_checks_task_list_ownership() {
+    use std::{pin::Pin, sync::Arc as StdArc};
+
+    let (_dir, _store, matching, key) = fixture();
+    let check = StdArc::new(move |_name: String, _cached: bool| {
+        Box::pin(async { Err(tonic::Status::unavailable("not owner")) })
+            as Pin<Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send>>
+    });
+    let matching = matching.with_task_list_ownership(check);
+    // Go getOrCreateTaskListManager runs the ownership check before CancelPoller.
+    let error = matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: key.domain_id.to_string(),
+            task_list: list(),
+            task_list_type: 1,
+            poller_id: "anyone".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.message(), "not owner");
 }
 
 #[tokio::test]
@@ -279,11 +698,11 @@ async fn matching_rpc_decision_poll_preserves_isolation_group_history() {
     let worker = matching.clone();
     let domain = key.domain_id.to_string();
     let poll = tokio::spawn(async move {
-        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
             domain_id: domain, poller_id: "group-poller".into(), isolation_group: "zone-decision".into(),
             request: Some(p::PollForDecisionTaskRequest { task_list: list(), identity: "decision-worker".into(), ..Default::default() }),
             ..Default::default()
-        })).await
+        }))).await
     });
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
@@ -296,7 +715,8 @@ async fn matching_rpc_decision_poll_preserves_isolation_group_history() {
     matching.cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
         domain_id: key.domain_id.to_string(), task_list: list(), task_list_type: 1, poller_id: "group-poller".into(),
     })).await.unwrap();
-    assert_eq!(poll.await.unwrap().unwrap_err().code(), tonic::Code::Cancelled);
+    let response = poll.await.unwrap().unwrap().into_inner();
+    assert!(response.task_token.is_empty());
     let now = matching_now();
     let mut pollers = queue.pollers.lock().unwrap();
     assert_eq!(pollers.count_by_group(now, now - 2_000_000_000).get("zone-decision"), Some(&1));
@@ -314,7 +734,7 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
     let poll_domain = domain.clone();
     let poll = tokio::spawn(async move {
         worker
-            .poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+            .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
                 domain_id: poll_domain,
                 poller_id: "activity-poller".into(),
                 isolation_group: "zone-a".into(),
@@ -327,7 +747,7 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
                     ..Default::default()
                 }),
                 ..Default::default()
-            }))
+            })))
             .await
     });
     let describe = || {
@@ -378,10 +798,9 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
         }))
         .await
         .unwrap();
-    assert_eq!(
-        poll.await.unwrap().unwrap_err().code(),
-        tonic::Code::Cancelled
-    );
+    let response = poll.await.unwrap().unwrap().into_inner();
+    assert!(response.task_token.is_empty());
+    assert!(response.auto_config_hint.is_some());
     let ended = describe().await.unwrap().into_inner();
     assert_eq!(ended.pollers.len(), 1);
     assert_eq!(ended.task_list_status.unwrap().isolation_group_metrics["zone-a"].poller_count, 1);
@@ -685,6 +1104,31 @@ async fn matching_rpc_semaphore_acquire_grants_and_reports_no_slot() {
     assert_eq!(disabled.code(), tonic::Code::InvalidArgument);
 }
 
+#[tokio::test]
+async fn matching_rpc_sql_semaphore_matches_go_unsupported_backend_error() {
+    let (_dir, _store, mut matching, _key) = fixture();
+    matching.frontend.state.semaphore_enabled = true;
+    matching.semaphores = crate::matching_semaphore::Registry::new(Arc::new(
+        cadence_persistence::SqlUnsupportedSemaphorePersistence,
+    ));
+    let response = MatchingApi::acquire_semaphore(
+        &matching,
+        Request::new(m::AcquireSemaphoreRequest {
+            domain_id: Uuid::from_u128(1).to_string(),
+            semaphore_name: "sem".into(),
+            bucket: 0,
+            owner_id: "1:w:r1:1".into(),
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(response.code(), tonic::Code::InvalidArgument);
+    assert_eq!(
+        response.message(),
+        cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE
+    );
+}
+
 fn scaler_config_value(matching: &Matching, property: &str, json: &[u8]) {
     matching
         .frontend
@@ -729,6 +1173,46 @@ async fn matching_rpc_manual_partition_update_rejected_while_scaler_enabled() {
         .shutdown(matching_now())
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_partition_config_rpcs_reject_non_normal_kinds() {
+    let (_dir, _store, matching, key) = fixture();
+    // Proto kinds: 2 sticky, 3 ephemeral; Go accepts only normal (invalid maps to normal).
+    for kind in [2, 3] {
+        let task_list = Some(cadence_proto::api::TaskList {
+            name: "queue".into(),
+            kind,
+            ..Default::default()
+        });
+        let update = matching
+            .update_task_list_partition_config(Request::new(
+                m::UpdateTaskListPartitionConfigRequest {
+                    domain_id: key.domain_id.to_string(),
+                    task_list: task_list.clone(),
+                    task_list_type: 1,
+                    partition_config: Some(native_config(1, &[0, 1], &[0, 1])),
+                },
+            ))
+            .await
+            .expect_err("Go rejects non-normal kinds");
+        assert_eq!(update.code(), tonic::Code::InvalidArgument);
+        assert_eq!(update.message(), "Only normal tasklist's partition config can be updated.");
+        let refresh = matching
+            .refresh_task_list_partition_config(Request::new(
+                m::RefreshTaskListPartitionConfigRequest {
+                    domain_id: key.domain_id.to_string(),
+                    task_list,
+                    task_list_type: 1,
+                    partition_config: None,
+                },
+            ))
+            .await
+            .expect_err("Go rejects non-normal kinds");
+        assert_eq!(refresh.code(), tonic::Code::InvalidArgument);
+        assert_eq!(refresh.message(), "Only normal tasklist's partition config can be updated.");
+    }
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
 
 #[tokio::test]
@@ -808,11 +1292,11 @@ async fn matching_rpc_forwarded_root_backlog_waits_for_late_poller() {
     });
     tokio::time::sleep(Duration::from_millis(60)).await;
     assert!(!add.is_finished(), "forwarded backlog waits beyond the local 10ms offer");
-    let poll = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+    let poll = matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
         domain_id: key.domain_id.to_string(), poller_id: "late-backlog".into(),
         request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }),
         ..Default::default()
-    })).await.unwrap().into_inner();
+    }))).await.unwrap().into_inner();
     assert_eq!(poll.started_event_id, 72);
     add.await.unwrap().unwrap();
     assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
@@ -858,12 +1342,12 @@ async fn matching_rpc_sync_success_without_partition_metadata_does_not_persist()
     let worker = matching.clone();
     let domain = key.domain_id.to_string();
     let poll = tokio::spawn(async move {
-        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
             domain_id: domain,
             poller_id: "sync-worker".into(),
             request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }),
             ..Default::default()
-        })).await.unwrap().into_inner()
+        }))).await.unwrap().into_inner()
     });
     tokio::time::timeout(Duration::from_secs(2), async {
         while matching.polls.lock().unwrap().is_empty() {
@@ -893,14 +1377,14 @@ async fn matching_rpc_child_poll_forwards_to_parent_backlog() {
         ..Default::default()
     })).await.unwrap();
     assert_eq!(store.task_list_size(&key, 0).unwrap(), 1);
-    let response = tokio::time::timeout(Duration::from_secs(2), matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+    let response = tokio::time::timeout(Duration::from_secs(2), matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
         domain_id: key.domain_id.to_string(), poller_id: "child-worker".into(),
         request: Some(p::PollForDecisionTaskRequest {
             task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
             ..Default::default()
         }),
         ..Default::default()
-    }))).await.expect("child forwards instead of blocking on its empty reader").unwrap().into_inner();
+    })))).await.expect("child forwards instead of blocking on its empty reader").unwrap().into_inner();
     assert_eq!(response.started_event_id, 42);
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
@@ -912,11 +1396,11 @@ async fn matching_rpc_child_add_sync_matches_parent_without_duplicate_persistenc
     let worker = matching.clone();
     let domain = key.domain_id.to_string();
     let poll = tokio::spawn(async move {
-        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
             domain_id: domain, poller_id: "parent-worker".into(),
             request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }),
             ..Default::default()
-        })).await.unwrap().into_inner()
+        }))).await.unwrap().into_inner()
     });
     tokio::time::timeout(Duration::from_secs(2), async {
         while matching.polls.lock().unwrap().is_empty() {
@@ -941,13 +1425,13 @@ async fn matching_rpc_cancelled_forwarded_poll_unregisters_parent_waiter() {
     let worker = matching.clone();
     let domain = key.domain_id.to_string();
     let poll = tokio::spawn(async move {
-        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
             domain_id: domain, poller_id: "cancel-forward".into(),
             request: Some(p::PollForDecisionTaskRequest {
                 task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
                 identity: "cancel-forward".into(), ..Default::default()
             }), ..Default::default()
-        })).await
+        }))).await
     });
     let root = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -966,9 +1450,28 @@ async fn matching_rpc_cancelled_forwarded_poll_unregisters_parent_waiter() {
 }
 
 #[tokio::test]
+async fn matching_rpc_forwarder_max_children_below_one_clamps_to_one() {
+    // Go task_list_manager clamps matching.forwarderMaxChildrenPerNode to >= 1, so a
+    // configured 0 still forwards the child poll to its parent partition.
+    let address = start_starting_history().await;
+    let (_dir, _store, matching, key) = fixture_with_history(&address);
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.forwarderMaxChildrenPerNode", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, b"0".to_vec())), filters: vec![],
+    }]);
+    matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(), task_list: list(), workflow_execution: execution(), schedule_id: 61,
+        ..Default::default()
+    })).await.unwrap();
+    let child_list = p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() };
+    let child = matching.durable_queue(&key.domain_id.to_string(), &child_list, 0).await.unwrap();
+    let response = child.dispatcher.poll_decision(p::PollForDecisionTaskRequest { task_list: Some(child_list), ..Default::default() }, Duration::from_secs(2)).await.unwrap();
+    assert_eq!(response.started_event_id, 62, "a clamped degree of 1 forwards to the parent");
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
 async fn matching_rpc_forwarding_disabled_keeps_parent_backlog_untouched() {
     for (property, value) in [
-        ("matching.forwarderMaxChildrenPerNode", b"0".as_slice()),
         ("matching.forwarderMaxOutstandingPolls", b"0".as_slice()),
     ] {
         let address = start_starting_history().await;
@@ -1025,7 +1528,7 @@ async fn matching_rpc_delivers_query_to_decision_poller() {
     let poll_domain = domain.clone();
     let poll = tokio::spawn(async move {
         worker
-            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
                 domain_id: poll_domain,
                 poller_id: "sdk-worker".into(),
                 request: Some(p::PollForDecisionTaskRequest {
@@ -1034,7 +1537,7 @@ async fn matching_rpc_delivers_query_to_decision_poller() {
                     ..Default::default()
                 }),
                 ..Default::default()
-            }))
+            })))
             .await
     });
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -1154,7 +1657,7 @@ async fn matching_rpc_strong_query_rejects_a_worker_without_consistent_query() {
     let poll_domain = domain.clone();
     let poll = tokio::spawn(async move {
         worker
-            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
                 domain_id: poll_domain,
                 poller_id: "sdk-worker".into(),
                 request: Some(p::PollForDecisionTaskRequest {
@@ -1163,7 +1666,7 @@ async fn matching_rpc_strong_query_rejects_a_worker_without_consistent_query() {
                     ..Default::default()
                 }),
                 ..Default::default()
-            }))
+            })))
             .await
     });
     let root = matching
@@ -1260,7 +1763,7 @@ async fn child_query_on(partition: p::TaskList) {
     let poll_domain = domain.clone();
     let poll = tokio::spawn(async move {
         worker
-            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
                 domain_id: poll_domain,
                 poller_id: "parent-worker".into(),
                 request: Some(p::PollForDecisionTaskRequest {
@@ -1269,7 +1772,7 @@ async fn child_query_on(partition: p::TaskList) {
                     ..Default::default()
                 }),
                 ..Default::default()
-            }))
+            })))
             .await
     });
     // Wait until the parent poller parks on the query channel; Go's
@@ -1365,31 +1868,38 @@ async fn child_query_on(partition: p::TaskList) {
 }
 
 #[tokio::test]
-async fn matching_rpc_query_without_poller_fails_fast() {
+async fn matching_rpc_query_without_poller_waits_for_deadline() {
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
-    // Go `OfferQuery` at the root returns `ErrNoParent` when no poller waits
-    // instead of holding the query for the whole long-poll expiration.
-    let error = tokio::time::timeout(Duration::from_secs(2), matching.query_workflow(
-        Request::new(m::QueryWorkflowRequest {
-            request: Some(p::QueryWorkflowRequest {
-                domain: "domain".into(),
-                workflow_execution: execution(),
-                query: Some(p::WorkflowQuery {
-                    query_type: "ping".into(),
-                    query_args: None,
-                }),
-                ..Default::default()
+    // Go `OfferQuery` at the root has no fail-fast: with no poller it blocks on the
+    // unbuffered queryTaskC send until the RPC context ends. The raw ctx error then
+    // maps to InternalServiceError{"context deadline exceeded"} through handleErr.
+    let mut request = Request::new(m::QueryWorkflowRequest {
+        request: Some(p::QueryWorkflowRequest {
+            domain: "domain".into(),
+            workflow_execution: execution(),
+            query: Some(p::WorkflowQuery {
+                query_type: "ping".into(),
+                query_args: None,
             }),
-            domain_id: key.domain_id.to_string(),
-            task_list: list(),
-            forwarded_from: String::new(),
+            ..Default::default()
         }),
-    ))
-    .await
-    .expect("query without a poller must not wait out the poll expiration")
-    .expect_err("query without a poller must fail");
+        domain_id: key.domain_id.to_string(),
+        task_list: list(),
+        forwarded_from: String::new(),
+    });
+    request.set_timeout(Duration::from_millis(500));
+    let started = tokio::time::Instant::now();
+    let error = tokio::time::timeout(Duration::from_secs(5), matching.query_workflow(request))
+        .await
+        .expect("query must return once the RPC deadline elapses")
+        .expect_err("query without a poller must fail at the deadline");
+    assert!(
+        started.elapsed() >= Duration::from_millis(400),
+        "query returned before the RPC deadline"
+    );
     assert_eq!(error.code(), tonic::Code::Internal);
+    assert_eq!(error.message(), "context deadline exceeded");
     matching
         .queues
         .as_ref()
@@ -1642,7 +2152,7 @@ async fn matching_rpc_sticky_task_list_requires_a_recent_poller() {
     let poll_domain = domain.clone();
     let poll = tokio::spawn(async move {
         worker
-            .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
                 domain_id: poll_domain,
                 poller_id: "sticky-worker".into(),
                 request: Some(p::PollForDecisionTaskRequest {
@@ -1651,7 +2161,7 @@ async fn matching_rpc_sticky_task_list_requires_a_recent_poller() {
                     ..Default::default()
                 }),
                 ..Default::default()
-            }))
+            })))
             .await
     });
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -1743,6 +2253,200 @@ async fn matching_rpc_native_partition_cache_updates_refreshes_and_recovers() {
     let sticky = matching.durable_queue(&key.domain_id.to_string(), &p::TaskList { name: "sticky-config".into(), kind: 2, ..Default::default() }, 0).await.unwrap();
     assert!(sticky.partitions.get().is_none());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_rpc_partition_update_refreshes_remote_read_owner_and_ignores_write_only_owner() {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+
+    let history = start_starting_history().await;
+    let (_first_dir, _first_store, first, key) = fixture_with_history(&history);
+    let (_second_dir, _second_store, second, _) = fixture_with_history(&history);
+    let first_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let second_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: first_listener.local_addr().unwrap().to_string() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: second_listener.local_addr().unwrap().to_string() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let (root_name, root_host) = (0..100)
+        .map(|index| {
+            let name = format!("partition-refresh-root-{index}");
+            let owner = ring.lookup(&name).unwrap().identity().to_owned();
+            (name, owner)
+        })
+        .find(|(_, owner)| owner == "node-0")
+        .unwrap();
+    let read_partition = (1..=100)
+        .find(|partition| ring.lookup(&format!("/__cadence_sys/{root_name}/{partition}" )).unwrap().identity() != root_host)
+        .unwrap();
+    let write_only_partition = (1..=100)
+        .find(|partition| *partition != read_partition
+            && ring.lookup(&format!("/__cadence_sys/{root_name}/{partition}" )).unwrap().identity() != root_host)
+        .unwrap();
+    let first = first.with_membership(Membership::new("node-0", hosts.clone()));
+    let second = second.with_membership(Membership::new("node-1", hosts.clone()));
+    let first_service = first.clone();
+    let first_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(first_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(first_listener))
+            .await.unwrap();
+    });
+    let second_service = second.clone();
+    let second_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(second_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(second_listener))
+            .await.unwrap();
+    });
+    let domain = key.domain_id.to_string();
+    let root_list = p::TaskList { name: root_name.clone(), kind: 1, ..Default::default() };
+    let root = if root_host == "node-0" { first.clone() } else { second.clone() };
+    let read_owner = ring.lookup(&format!("/__cadence_sys/{root_name}/{read_partition}")).unwrap().identity();
+    let remote = if read_owner == "node-0" { first.clone() } else { second.clone() };
+    let update = |read: &[i32], write: &[i32]| Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: domain.clone(), task_list: Some(root_list.clone()), task_list_type: 1,
+        partition_config: Some(native_config(999, read, write)),
+    });
+
+    root.update_task_list_partition_config(update(&[0, read_partition], &[0])).await.unwrap();
+    let read_name = format!("/__cadence_sys/{root_name}/{read_partition}");
+    let read_queue = remote.durable_queue(&domain, &p::TaskList { name: read_name.clone(), kind: 1, ..Default::default() }, 0).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 1, "old/new read partition notification must load and refresh a remote owner");
+    let write_name = format!("/__cadence_sys/{root_name}/{write_only_partition}");
+    let write_host = ring.lookup(&write_name).unwrap().identity();
+    let write_owner = if write_host == "node-0" { &first } else { &second };
+    assert!(!write_owner.queues.as_ref().unwrap().contains_cached(&TaskListKey {
+        domain_id: key.domain_id, name: write_name.clone(), task_type: 0,
+    }), "Go refresh fanout does not create a manager for write-only partition IDs");
+
+    root.update_task_list_partition_config(update(&[0], &[0])).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 2, "removing a remote read partition sends the new config to the old partition owner");
+    remote.refresh_task_list_partition_config(Request::new(m::RefreshTaskListPartitionConfigRequest {
+        domain_id: domain.clone(), task_list: Some(p::TaskList { name: read_name, kind: 1, ..Default::default() }),
+        task_list_type: 1, partition_config: Some(native_config(1, &[0, read_partition], &[0])),
+    })).await.unwrap();
+    assert_eq!(read_queue.partitions.get().unwrap().version, 2, "out-of-order older push must be ignored by the owner manager");
+
+    // Remove the old owner from membership. The next root update must resolve
+    // the partition's new owner and refresh it there, including a local
+    // self-RPC that creates the manager if it is not loaded yet.
+    let moved_hosts = vec![hosts[0].clone()];
+    first.membership.as_ref().unwrap().replace(moved_hosts.clone());
+    second.membership.as_ref().unwrap().replace(moved_hosts);
+    root.update_task_list_partition_config(update(&[0, read_partition], &[0])).await.unwrap();
+    let moved_queue = first.durable_queue(&domain, &p::TaskList { name: format!("/__cadence_sys/{root_name}/{read_partition}"), kind: 1, ..Default::default() }, 0).await.unwrap();
+    assert_eq!(moved_queue.partitions.get().unwrap().version, 3, "partition config notification follows owner movement");
+
+    first.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    second.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    first_server.abort();
+    second_server.abort();
+}
+
+#[tokio::test]
+async fn matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_caller_deadline() {
+    use cadence_common::membership::{Host, Ring};
+    use crate::matching_membership::Membership;
+
+    let history = start_starting_history().await;
+    let (_root_dir, root_store, root, key) = fixture_with_history(&history);
+    let (_fast_dir, _fast_store, fast, _) = fixture_with_history(&history);
+
+    let fast_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let slow_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hosts = vec![
+        Host { address: "node-0:7935".into(), identity: "node-0".into(), grpc_address: "127.0.0.1:1".into() },
+        Host { address: "node-1:7935".into(), identity: "node-1".into(), grpc_address: fast_listener.local_addr().unwrap().to_string() },
+        Host { address: "node-2:7935".into(), identity: "node-2".into(), grpc_address: slow_listener.local_addr().unwrap().to_string() },
+    ];
+    let ring = Ring::new(hosts.clone());
+    let (root_name, slow_partition, fast_partition) = (0..10_000)
+        .map(|index| format!("partition-notify-deadline-{index}"))
+        .find_map(|name| {
+            if ring.lookup(&name)?.identity() != "node-0" {
+                return None;
+            }
+            let candidates = (1..=100).map(|partition| {
+                (partition, ring.lookup(&format!("/__cadence_sys/{name}/{partition}" )).unwrap().identity().to_owned())
+            }).collect::<Vec<_>>();
+            let slow = candidates.iter().find(|(_, owner)| owner == "node-2")?.0;
+            let fast = candidates
+                .iter()
+                .find(|(partition, owner)| owner == "node-1" && partition > &slow)?
+                .0;
+            Some((name, slow, fast))
+        })
+        .expect("find root and ascending slow/fast partition owners");
+
+    let root = root.with_membership(Membership::new("node-0", hosts.clone()));
+    let fast = fast.with_membership(Membership::new("node-1", hosts.clone()));
+    let fast_service = fast.clone();
+    let fast_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(fast_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(fast_listener))
+            .await
+            .unwrap();
+    });
+    let (slow_connected_tx, slow_connected_rx) = tokio::sync::oneshot::channel();
+    let slow_peer = tokio::spawn(async move {
+        let (stream, _) = slow_listener.accept().await.unwrap();
+        let _stream = stream; // Accept TCP, then leave the gRPC peer delayed indefinitely.
+        let _ = slow_connected_tx.send(());
+        std::future::pending::<()>().await;
+    });
+
+    let fast_name = format!("/__cadence_sys/{root_name}/{fast_partition}");
+    let fast_queue = fast.durable_queue(
+        &key.domain_id.to_string(),
+        &p::TaskList { name: fast_name, kind: 1, ..Default::default() },
+        0,
+    ).await.unwrap();
+    assert!(fast_queue.partitions.get().is_none(), "the fast owner starts without the new config");
+
+    let root_task_list = p::TaskList { name: root_name.clone(), kind: 1, ..Default::default() };
+    let mut request = Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: key.domain_id.to_string(),
+        task_list: Some(root_task_list),
+        task_list_type: 1,
+        partition_config: Some(native_config(0, &[0, slow_partition, fast_partition], &[0])),
+    });
+    // This is the caller's context deadline, forwarded by the real handler to
+    // every peer refresh. There is deliberately no test-only service hook.
+    request.metadata_mut().insert("grpc-timeout", "800m".parse().unwrap());
+    let started = tokio::time::Instant::now();
+    let updater = {
+        let root = root.clone();
+        tokio::spawn(async move { root.update_task_list_partition_config(request).await })
+    };
+    tokio::time::timeout(Duration::from_millis(600), async {
+        while fast_queue.partitions.get().is_none_or(|config| config.version != 1) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the later fast owner must receive its RPC before the caller deadline");
+    let fast_received_at = started.elapsed();
+    assert!(fast_received_at < Duration::from_millis(600));
+    updater.await.unwrap().unwrap();
+    let elapsed = started.elapsed();
+    tokio::time::timeout(Duration::from_secs(1), slow_connected_rx).await.unwrap().unwrap();
+
+    assert_eq!(fast_queue.partitions.get().unwrap().version, 1,
+        "the later fast owner receives its refresh while the lower-ID slow peer is still pending");
+    assert!(elapsed >= Duration::from_millis(600), "the update waits for the caller deadline on the delayed peer");
+    assert!(elapsed < Duration::from_secs(2), "the delayed peer is bounded by the caller deadline");
+    let root_key = TaskListKey { name: root_name.clone(), ..key.clone() };
+    assert_eq!(root_store.get_task_list(&root_key).unwrap().data.adaptive_partition_config.unwrap().version, 1,
+        "peer timeout remains best effort after the root config is persisted");
+
+    root.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    fast.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    fast_server.abort();
+    slow_peer.abort();
 }
 
 #[tokio::test]
@@ -1926,13 +2630,13 @@ async fn matching_rpc_standby_polls_leave_durable_backlog_unclaimed() {
     matching.add_activity_task(Request::new(m::AddActivityTaskRequest {
         domain_id: domain.clone(), source_domain_id: domain.clone(), task_list: list(), workflow_execution: execution(), schedule_id: 10, ..Default::default()
     })).await.unwrap();
-    let decision = matching.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+    let decision = matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
         domain_id: domain.clone(), request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
-    })).await.unwrap().into_inner();
+    }))).await.unwrap().into_inner();
     assert!(decision.task_token.is_empty());
-    let activity = matching.poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+    let activity = matching.poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
         domain_id: domain.clone(), request: Some(p::PollForActivityTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
-    })).await.unwrap().into_inner();
+    }))).await.unwrap().into_inner();
     assert!(activity.task_token.is_empty());
     for task_type in [0, 1] {
         let key = TaskListKey { domain_id: Uuid::parse_str(&domain).unwrap(), name: "queue".into(), task_type };
@@ -1967,6 +2671,8 @@ async fn matching_rpc_standby_completes_started_tasks_without_worker_poll() {
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
     });
     let (_dir, _store, matching, _key) = fixture_with_history(&peer);
+    let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+    let matching = matching.with_metrics(sink.clone());
     let domain = Uuid::from_u128(3).to_string();
     matching.frontend.state.domains.create(
         cadence_api::types::DomainInfo { name: "standby".into(), uuid: domain.clone(), ..Default::default() },
@@ -1986,6 +2692,13 @@ async fn matching_rpc_standby_completes_started_tasks_without_worker_poll() {
         }).await.expect("standby backlog should be acknowledged without SDK polls");
     }
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    let events = sink.events();
+    assert_eq!(
+        events.iter().filter(|event| event.name == crate::matching_metrics::STANDBY_TASKS_COMPLETED).count(),
+        2
+    );
+    assert!(!events.iter().any(|event| event.name == crate::matching_metrics::STANDBY_TASKS_NOT_STARTED));
+    assert!(!events.iter().any(|event| event.name == crate::matching_metrics::STANDBY_TASKS_COMPLETION_FAILURE));
     server.abort();
 }
 
@@ -2007,10 +2720,10 @@ async fn matching_rpc_domain_failover_releases_blocked_polls() {
     let worker = matching.clone();
     let poll_domain = domain.clone();
     let poll = tokio::spawn(async move {
-        worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
             domain_id: poll_domain, poller_id: "failover-poller".into(),
             request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
-        })).await
+        }))).await
     });
     let queue = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
     tokio::time::timeout(Duration::from_secs(2), async { while !queue.queries.has_waiters() { tokio::task::yield_now().await; } }).await.unwrap();
@@ -2062,18 +2775,18 @@ async fn matching_rpc_cross_host_poll_add_and_cancellation() {
     root.add_decision_task(Request::new(m::AddDecisionTaskRequest {
         domain_id: domain.clone(), workflow_execution: execution(), task_list: list(), schedule_id: 41, ..Default::default()
     })).await.unwrap();
-    let response = tokio::time::timeout(Duration::from_secs(3), child.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+    let response = tokio::time::timeout(Duration::from_secs(3), child.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
         domain_id: domain.clone(), poller_id: "remote-backlog".into(),
         request: Some(p::PollForDecisionTaskRequest { task_list: child_list(), ..Default::default() }), ..Default::default()
-    }))).await.unwrap().unwrap().into_inner();
+    })))).await.unwrap().unwrap().into_inner();
     assert_eq!(response.started_event_id, 42);
     let root_queue = root.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
     let worker = root.clone();
     let poll_domain = domain.clone();
-    let poll = tokio::spawn(async move { worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
         domain_id: poll_domain, poller_id: "remote-sync".into(),
         request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
-    })).await.unwrap().into_inner() });
+    }))).await.unwrap().into_inner() });
     tokio::time::timeout(Duration::from_secs(2), async {
         while !root_queue.pollers.lock().unwrap().contains_poll("remote-sync") { tokio::task::yield_now().await; }
     }).await.unwrap();
@@ -2086,10 +2799,10 @@ async fn matching_rpc_cross_host_poll_add_and_cancellation() {
     let worker = child.clone();
     let poll_domain = domain.clone();
     let poll_list = child_list();
-    let poll = tokio::spawn(async move { worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
         domain_id: poll_domain, poller_id: "remote-cancel".into(),
         request: Some(p::PollForDecisionTaskRequest { task_list: poll_list, ..Default::default() }), ..Default::default()
-    })).await });
+    }))).await });
     tokio::time::timeout(Duration::from_secs(2), async {
         while !root_queue.pollers.lock().unwrap().contains_poll("remote-cancel") { tokio::task::yield_now().await; }
     }).await.unwrap();
@@ -2116,10 +2829,10 @@ async fn matching_rpc_local_poll_wait_delays_forwarding_and_reloads() {
         let domain = domain.clone();
         let task_list = child_list.clone();
         let id = id.to_owned();
-        tokio::spawn(async move { service.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        tokio::spawn(async move { service.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
             domain_id: domain, poller_id: id,
             request: Some(p::PollForDecisionTaskRequest { task_list: Some(task_list), ..Default::default() }), ..Default::default()
-        })).await })
+        }))).await })
     };
     let delayed = start_poll("delayed");
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -2166,10 +2879,10 @@ async fn matching_rpc_cross_host_query_completes_on_accepting_host() {
     let queue = root.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
     let worker = root.clone();
     let poll_domain = domain.clone();
-    let poll = tokio::spawn(async move { worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
         domain_id: poll_domain, poller_id: "remote-query-worker".into(),
         request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
-    })).await.unwrap().into_inner() });
+    }))).await.unwrap().into_inner() });
     tokio::time::timeout(Duration::from_secs(2), async {
         while !queue.queries.has_waiters() { tokio::task::yield_now().await; }
     }).await.unwrap();
@@ -2224,8 +2937,8 @@ async fn matching_rpc_empty_polls_reserve_tailroom_and_read_live_expiration() {
     }
     // The same loaded manager reads the updated property on its next poll.
     scaler_config_value(&matching, "matching.longPollExpirationInterval", br#""1ms""#);
-    let request = Request::new(m::PollForDecisionTaskRequest { domain_id: key.domain_id.to_string(),
-        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default() });
+    let request = timed_poll(Request::new(m::PollForDecisionTaskRequest { domain_id: key.domain_id.to_string(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default() }));
     assert!(tokio::time::timeout(Duration::from_millis(500), matching.poll_for_decision_task(request)).await
         .expect("live expiration applies without reloading the manager").unwrap().into_inner().task_token.is_empty());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
@@ -2255,12 +2968,12 @@ async fn matching_rpc_child_poll_receives_parent_query_and_preserves_completion_
     let root = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
     let worker = matching.clone();
     let poll_domain = domain.clone();
-    let poll = tokio::spawn(async move { worker.poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
         domain_id: poll_domain, poller_id: "child-query-poll".into(),
         request: Some(p::PollForDecisionTaskRequest { task_list: Some(p::TaskList {
             name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default()
         }), ..Default::default() }), ..Default::default()
-    })).await.unwrap().into_inner() });
+    }))).await.unwrap().into_inner() });
     tokio::time::timeout(Duration::from_secs(2), async {
         while !root.queries.has_waiters() { tokio::task::yield_now().await; }
     }).await.expect("forwarded parent poll must wait for parent queries as well as backlog");
@@ -2300,8 +3013,8 @@ async fn matching_rpc_local_parent_poll_applies_its_own_expiration_and_tailroom(
         value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#""1ms""#.to_vec())),
         filters: vec![cadence_api::admin::DynamicConfigFilter { name: "taskListName".into(), value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#""queue""#.to_vec())) }],
     }]);
-    let request = Request::new(m::PollForActivityTaskRequest { domain_id: key.domain_id.to_string(),
-        request: Some(p::PollForActivityTaskRequest { task_list: child_list, ..Default::default() }), ..Default::default() });
+    let request = timed_poll(Request::new(m::PollForActivityTaskRequest { domain_id: key.domain_id.to_string(),
+        request: Some(p::PollForActivityTaskRequest { task_list: child_list, ..Default::default() }), ..Default::default() }));
     assert!(tokio::time::timeout(Duration::from_millis(500), matching.poll_for_activity_task(request)).await
         .expect("root-specific expiration applies to the forwarded activity poll").unwrap().into_inner().task_token.is_empty());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
@@ -2328,7 +3041,7 @@ async fn matching_rpc_live_rps_override_matches_go_precedence() {
         }]);
         for task_type in [0, 1] {
             let limiter = crate::matching_limiter::TaskListLimiter::with_defaults();
-            assert_eq!(matching.poll_rate(&domain, &key.name, task_type, worker, &limiter), expected);
+            assert_eq!(matching.poll_rate(&domain, &key.name, 0, task_type, worker, &limiter), expected);
             if expected != crate::matching_limiter::TASK_DISPATCH_RPS {
                 assert_eq!(limiter.limit(), expected);
             }
@@ -2368,7 +3081,7 @@ async fn matching_rpc_report_limit_does_not_hold_the_admin_overlay() {
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.overrideTaskListRps", vec![cadence_api::admin::DynamicConfigValue {
         value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, b"200".to_vec())), filters: vec![],
     }]);
-    assert_eq!(matching.poll_rate(&domain, &key.name, 1, Some(25.0), &limiter), 200.0);
+    assert_eq!(matching.poll_rate(&domain, &key.name, 0, 1, Some(25.0), &limiter), 200.0);
     // Two read partitions, so the accepted report halves the backing limit.
     assert_eq!(limiter.partitions(), 2);
     assert_eq!(limiter.limit(), 100.0);
@@ -2377,7 +3090,7 @@ async fn matching_rpc_report_limit_does_not_hold_the_admin_overlay() {
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "matching.overrideTaskListRps", vec![cadence_api::admin::DynamicConfigValue {
         value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, b"0".to_vec())), filters: vec![],
     }]);
-    assert_eq!(matching.poll_rate(&domain, &key.name, 1, Some(25.0), &limiter), 25.0);
+    assert_eq!(matching.poll_rate(&domain, &key.name, 0, 1, Some(25.0), &limiter), 25.0);
     assert_eq!(limiter.limit(), 12.5);
 }
 
@@ -2453,11 +3166,11 @@ async fn matching_rpc_poll_auto_config_hint_matches_go_scoping() {
         }]);
     let empty_activity = || async {
         matching
-            .poll_for_activity_task(Request::new(m::PollForActivityTaskRequest {
+            .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
                 domain_id: domain.clone(),
                 request: Some(p::PollForActivityTaskRequest { task_list: list(), ..Default::default() }),
                 ..Default::default()
-            }))
+            })))
             .await
             .unwrap()
             .into_inner()
@@ -2484,11 +3197,11 @@ async fn matching_rpc_poll_auto_config_hint_matches_go_scoping() {
     // activity-scoped value does not apply to an empty activity poll.
     assert!(!empty_activity().await.auto_config_hint.unwrap().enable_auto_config);
     let decision = matching
-        .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+        .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
             domain_id: domain.clone(),
             request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }),
             ..Default::default()
-        }))
+        })))
         .await
         .unwrap()
         .into_inner();
@@ -2497,4 +3210,28 @@ async fn matching_rpc_poll_auto_config_hint_matches_go_scoping() {
     // A delivered task is stamped by the matcher with the manager's own type.
     assert!(matching.auto_config_hint(&domain, "queue", 1, std::time::Instant::now()).enable_auto_config);
     assert!(!matching.auto_config_hint(&domain, "queue", 0, std::time::Instant::now()).enable_auto_config);
+}
+
+/// Long polls carry a caller deadline in Go, and Matching rejects them without one.
+fn timed_poll<T>(mut request: Request<T>) -> Request<T> {
+    request.set_timeout(Duration::from_secs(8));
+    request
+}
+
+#[tokio::test]
+async fn matching_rpc_task_list_type_non_activity_maps_to_decision() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    // Go `engine.go` treats any type other than Activity as Decision, so an
+    // unset type is accepted instead of failing with "TaskListType is invalid.".
+    let cancel = matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain,
+            task_list: list(),
+            task_list_type: 0,
+            poller_id: "poller".into(),
+        }))
+        .await;
+    assert!(cancel.is_ok(), "{cancel:?}");
 }

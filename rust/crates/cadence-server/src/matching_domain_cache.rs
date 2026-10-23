@@ -92,11 +92,29 @@ fn metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSo
         // Go converts other SQL scan/driver failures to InternalServiceError,
         // which the domain-cache retry policy treats as transient.
         MatchingDomainMetadataError::Sqlite(_) => true,
+        // Go's MySQL SQL plugin maps driver failures to timeout, throttled,
+        // or internal service errors. Domain cache refresh retries those.
+        MatchingDomainMetadataError::MySql(_)
+        | MatchingDomainMetadataError::MySqlAsync(_)
+        | MatchingDomainMetadataError::MySqlPool(_)
+        | MatchingDomainMetadataError::Postgres(_)
+        | MatchingDomainMetadataError::Cassandra(_) => true,
         _ => false,
     };
     DomainMetadataSourceError {
         message: error.to_string(),
         retryable,
+    }
+}
+
+fn mysql_metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSourceError {
+    if matches!(error, MatchingDomainMetadataError::OperationTimedOut) {
+        // Go's SQL MySQL checker wraps context and driver deadlines in
+        // persistence.TimeoutError, which its persistence retry policy treats
+        // as transient.
+        DomainMetadataSourceError::transient(error.to_string())
+    } else {
+        metadata_source_error(error)
     }
 }
 
@@ -155,6 +173,128 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
             .map_err(metadata_source_error)?;
         validate_typed_domain_config(&domain)?;
         Ok(domain)
+    }
+}
+
+impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore {
+    fn metadata_version(&self, _timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
+        self.metadata_version().map_err(|error| DomainMetadataSourceError::transient(error.to_string()))
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+        _timeout: Duration,
+    ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page = cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::list_domains(
+            self, page_size, next_page_token,
+        ).map_err(|error| match error {
+            MatchingDomainMetadataError::InvalidPageSize | MatchingDomainMetadataError::InvalidBlob(_) => DomainMetadataSourceError::permanent(error.to_string()),
+            _ => DomainMetadataSourceError::transient(error.to_string()),
+        })?;
+        for domain in &page.domains { validate_typed_domain_config(domain)?; }
+        Ok(DomainMetadataPage { domains: page.domains, next_page_token: page.next_page_token })
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+        _timeout: Duration,
+    ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(self, name, id)
+            .map_err(|error| match error {
+                MatchingDomainMetadataError::NotFound(_) | MatchingDomainMetadataError::BothIdAndName
+                | MatchingDomainMetadataError::EmptyIdentity | MatchingDomainMetadataError::InvalidUuid(_) => DomainMetadataSourceError::permanent(error.to_string()),
+                _ => DomainMetadataSourceError::transient(error.to_string()),
+            })
+    }
+}
+
+impl DomainMetadataSource for cadence_persistence::matching_domain_mysql::MySqlDomainMetadataStore {
+    fn metadata_version(&self, timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
+        self.get_metadata_version_with_timeout(timeout)
+            .map_err(mysql_metadata_source_error)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page = self
+            .list_domains_with_timeout(page_size, next_page_token, timeout)
+            .map_err(mysql_metadata_source_error)?;
+        for domain in &page.domains {
+            validate_typed_domain_config(domain)?;
+        }
+        Ok(DomainMetadataPage {
+            domains: page.domains,
+            next_page_token: page.next_page_token,
+        })
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+        timeout: Duration,
+    ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        let domain = self
+            .get_domain_with_timeout(name, id, timeout)
+            .map_err(mysql_metadata_source_error)?;
+        validate_typed_domain_config(&domain)?;
+        Ok(domain)
+    }
+}
+
+impl DomainMetadataSource
+    for cadence_persistence::matching_domain_postgres::PostgresDomainMetadataStore
+{
+    fn metadata_version(&self, timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
+        self.get_metadata_version_with_timeout(timeout)
+            .map_err(postgres_metadata_source_error)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+        let page = self
+            .list_domains_with_timeout(page_size, next_page_token, timeout)
+            .map_err(postgres_metadata_source_error)?;
+        for domain in &page.domains {
+            validate_typed_domain_config(domain)?;
+        }
+        Ok(DomainMetadataPage {
+            domains: page.domains,
+            next_page_token: page.next_page_token,
+        })
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+        timeout: Duration,
+    ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        let domain = self
+            .get_domain_with_timeout(name, id, timeout)
+            .map_err(postgres_metadata_source_error)?;
+        validate_typed_domain_config(&domain)?;
+        Ok(domain)
+    }
+}
+
+fn postgres_metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSourceError {
+    if matches!(error, MatchingDomainMetadataError::OperationTimedOut) {
+        DomainMetadataSourceError::transient(error.to_string())
+    } else {
+        metadata_source_error(error)
     }
 }
 
@@ -273,7 +413,24 @@ impl MatchingDomainCache {
         persistence: &crate::config::PersistenceConfig,
         current_cluster: &str,
     ) -> anyhow::Result<Arc<Self>> {
-        let name = persistence.default_store.trim();
+        Self::from_default_store_inner(persistence, current_cluster, None)
+    }
+
+    pub fn from_default_store_with_limiter(
+        persistence: &crate::config::PersistenceConfig,
+        current_cluster: &str,
+        limiter: Arc<crate::matching_persistence_limiter::MatchingPersistenceLimiter>,
+    ) -> anyhow::Result<Arc<Self>> {
+        Self::from_default_store_inner(persistence, current_cluster, Some(limiter))
+    }
+
+    fn from_default_store_inner(
+        persistence: &crate::config::PersistenceConfig,
+        current_cluster: &str,
+        limiter: Option<Arc<crate::matching_persistence_limiter::MatchingPersistenceLimiter>>,
+    ) -> anyhow::Result<Arc<Self>> {
+        // Go indexes persistence.datastores by the literal defaultStore value.
+        let name = persistence.default_store.as_str();
         if name.is_empty() {
             anyhow::bail!("Matching domain cache requires persistence.defaultStore");
         }
@@ -341,7 +498,12 @@ impl MatchingDomainCache {
             uri_mode,
             busy_timeout,
         )?;
-        Ok(Arc::new(Self::new(Arc::new(source))))
+        let source: Arc<dyn DomainMetadataSource> = Arc::new(source);
+        let source = match limiter {
+            Some(limiter) => crate::matching_persistence::limit_domain_source(source, limiter),
+            None => source,
+        };
+        Ok(Arc::new(Self::new(source)))
     }
 
     pub fn new(source: Arc<dyn DomainMetadataSource>) -> Self {
@@ -520,6 +682,13 @@ impl MatchingDomainCache {
 
     pub fn get_domain_name(&self, id: &str) -> Result<String, DomainCacheError> {
         Ok(self.get_domain_by_id(id)?.info.name)
+    }
+
+    /// Resolve a domain name from the current snapshot without querying or
+    /// refreshing persistence. Telemetry must never make a cache miss block an
+    /// RPC handler on the synchronous domain metadata store.
+    pub fn cached_domain_name(&self, id: &str) -> Option<String> {
+        self.by_id(id).map(|domain| domain.info.name)
     }
 
     fn by_name(&self, name: &str) -> Option<MatchingDomainMetadata> {
@@ -742,6 +911,12 @@ mod tests {
     use std::sync::mpsc::{Receiver, SyncSender};
 
     #[test]
+    fn mysql_persistence_timeouts_are_transient_for_domain_refresh() {
+        let error = mysql_metadata_source_error(MatchingDomainMetadataError::OperationTimedOut);
+        assert!(error.retryable);
+    }
+
+    #[test]
     fn production_source_uses_only_the_selected_sqlite_default_store() {
         let empty = crate::config::PersistenceConfig::default();
         assert!(MatchingDomainCache::from_default_store(&empty, "active")
@@ -749,6 +924,22 @@ mod tests {
             .unwrap()
             .to_string()
             .contains("persistence.defaultStore"));
+
+        let padded_name = crate::config::PersistenceConfig {
+            default_store: " sqlite ".into(),
+            datastores: HashMap::from([(
+                "sqlite".into(),
+                crate::config::DatastoreConfig::default(),
+            )]),
+            ..Default::default()
+        };
+        assert!(
+            MatchingDomainCache::from_default_store(&padded_name, "active")
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("defaultStore \" sqlite \" is not present")
+        );
 
         let unsupported = crate::config::PersistenceConfig {
             default_store: "no-sql".into(),
@@ -937,7 +1128,8 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("get:{}", name.or(id).unwrap_or("")));
-            let domain = self.records
+            let domain = self
+                .records
                 .lock()
                 .unwrap()
                 .iter()

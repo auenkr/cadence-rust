@@ -196,6 +196,12 @@ pub struct IsolationBalancer {
     groups: HashMap<String, GroupState>,
 }
 impl IsolationBalancer {
+    fn assignable_groups(&self) -> HashMap<String, bool> {
+        self.groups
+            .iter()
+            .map(|(group, state)| (group.clone(), state.assignable))
+            .collect()
+    }
     pub fn reset(&mut self) {
         self.groups.clear();
     }
@@ -523,10 +529,19 @@ pub struct Scaler {
     over: Sustain,
     under: Sustain,
     balancer: IsolationBalancer,
+    telemetry: Option<(crate::matching_metrics::MatchingMetrics, crate::matching_metrics::PollMetricContext)>,
 }
 impl Scaler {
     pub fn new() -> Self {
         Self::default()
+    }
+    pub fn with_metrics(
+        mut self,
+        metrics: crate::matching_metrics::MatchingMetrics,
+        context: crate::matching_metrics::PollMetricContext,
+    ) -> Self {
+        self.telemetry = Some((metrics, context));
+        self
     }
     /// One Go `run()` tick over already-collected metrics. Returns the new
     /// read/write maps when anything changed. A metrics-collection failure is
@@ -545,6 +560,16 @@ impl Scaler {
         metrics: &AggregateMetrics,
         describe: impl FnMut(i32) -> Option<PartitionMetrics>,
     ) -> Option<(PartitionMap, PartitionMap)> {
+        let current_write_count = current_write.len();
+        if let Some((metrics_sink, context)) = &self.telemetry {
+            metrics_sink.scaler_tick(
+                context,
+                metrics.total_qps,
+                current_write_count,
+                config.upscale_rps,
+                config.downscale_factor,
+            );
+        }
         let target = write_partition_count(
             metrics.total_qps,
             current_write.len() as i64,
@@ -553,9 +578,20 @@ impl Scaler {
             &mut self.under,
             now,
         );
+        if target as usize > current_write_count {
+            if let Some((metrics_sink, context)) = &self.telemetry {
+                metrics_sink.partition_scale_change(context, true);
+            }
+        } else if (target as usize) < current_write_count {
+            if let Some((metrics_sink, context)) = &self.telemetry {
+                metrics_sink.partition_scale_change(context, false);
+            }
+        }
         let (mut write, write_changed) =
             adjust_write_partitions(current_write, target.max(0) as usize);
         let mut isolation_changed = false;
+        let assignable_before = self.balancer.assignable_groups();
+        let counts_before = group_partition_counts(&write);
         if metrics.isolation_enabled {
             (write, isolation_changed) = self
                 .balancer
@@ -565,12 +601,76 @@ impl Scaler {
         }
         let (read, read_changed) =
             adjust_read_partitions(metrics, current_read, &write, describe);
+        if let Some((metrics_sink, context)) = &self.telemetry {
+            if isolation_changed {
+                metrics_sink.isolation_rebalance(context);
+            }
+            let assignable_after = self.balancer.assignable_groups();
+            let counts_after = group_partition_counts(&write);
+            let mut groups: Vec<String> = metrics
+                .has_pollers_by_group
+                .keys()
+                .chain(assignable_before.keys())
+                .chain(assignable_after.keys())
+                .chain(counts_before.keys())
+                .chain(counts_after.keys())
+                .cloned()
+                .collect();
+            groups.sort();
+            groups.dedup();
+            for group in groups {
+                let before = assignable_before.get(&group).copied().unwrap_or(false);
+                let after = assignable_after.get(&group).copied().unwrap_or(false);
+                if !before && after {
+                    metrics_sink.isolation_group_counter(
+                        crate::matching_metrics::ISOLATION_GROUP_STARTED_POLLING,
+                        context,
+                        &group,
+                    );
+                } else if before && !after {
+                    metrics_sink.isolation_group_counter(
+                        crate::matching_metrics::ISOLATION_GROUP_STOPPED_POLLING,
+                        context,
+                        &group,
+                    );
+                }
+                let old_count = counts_before.get(&group).copied().unwrap_or(0);
+                let new_count = counts_after.get(&group).copied().unwrap_or(0);
+                if new_count > old_count {
+                    metrics_sink.isolation_group_counter(
+                        crate::matching_metrics::ISOLATION_GROUP_UPSCALE,
+                        context,
+                        &group,
+                    );
+                } else if new_count < old_count {
+                    metrics_sink.isolation_group_counter(
+                        crate::matching_metrics::ISOLATION_GROUP_DOWNSCALE,
+                        context,
+                        &group,
+                    );
+                }
+                metrics_sink.isolation_group_partitions(context, &group, new_count);
+            }
+            if read_changed && read.len() < current_read.len() {
+                metrics_sink.partition_drained(context);
+            }
+        }
         if write_changed || isolation_changed || read_changed {
             Some((read, write))
         } else {
             None
         }
     }
+}
+
+fn group_partition_counts(write: &PartitionMap) -> HashMap<String, i64> {
+    let mut counts = HashMap::new();
+    for groups in write.values() {
+        for group in groups {
+            *counts.entry(group.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 impl Default for ScalerConfig {

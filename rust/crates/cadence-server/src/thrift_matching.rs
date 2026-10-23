@@ -664,6 +664,34 @@ pub async fn dispatch(
     args: &Struct,
     deadline: Instant,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    dispatch_with_context(
+        matching,
+        procedure,
+        args,
+        deadline,
+        crate::matching_metrics::InboundMetricContext::default(),
+    ).await
+}
+
+pub async fn dispatch_with_context(
+    matching: &Matching,
+    procedure: &str,
+    args: &Struct,
+    deadline: Instant,
+    context: crate::matching_metrics::InboundMetricContext,
+) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    matching.inbound_metrics().with_inbound_context(
+        context,
+        dispatch_inner(matching, procedure, args, deadline),
+    ).await
+}
+
+async fn dispatch_inner(
+    matching: &Matching,
+    procedure: &str,
+    args: &Struct,
+    deadline: Instant,
+) -> Result<(Struct, Option<(&'static str, String)>), String> {
     let method = cadence_thrift::service::find_method(procedure)
         .ok_or_else(|| format!("Unknown Matching procedure {procedure}"))?;
     if method.service == "Meta" {
@@ -788,7 +816,16 @@ async fn http_handler(
     let deadline = crate::yarpc::ttl_deadline(&headers, std::time::Duration::from_secs(60));
     match tokio::time::timeout(
         deadline.saturating_duration_since(Instant::now()),
-        dispatch(&matching, procedure, &args, deadline),
+        dispatch_with_context(
+            &matching,
+            procedure,
+            &args,
+            deadline,
+            crate::matching_metrics::InboundMetricContext {
+                caller: header("Rpc-Caller").map(str::to_owned),
+                transport: Some("http".to_owned()),
+            },
+        ),
     )
     .await
     {
@@ -821,9 +858,63 @@ async fn http_handler_with_procedures(
     http_handler(axum::extract::State(matching), headers, body).await
 }
 
+/// Persistence drivers enable rustls' aws-lc-rs backend next to the ring
+/// backend selected here, so rustls cannot pick a process default itself.
+pub fn install_tls_crypto_provider() {
+    // Err means a provider is already installed, which is fine.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn matching_inbound_metrics_count_native_and_thrift_dispatch_once_each() {
+        use crate::matching_metrics::{MetricKind, MetricValue, RecordingMetricSink, CADENCE_REQUESTS_PER_TASK_LIST};
+        use std::sync::Arc;
+
+        let sink = Arc::new(RecordingMetricSink::default());
+        let state = crate::handlers::AppState::default();
+        state.domains.create(
+            cadence_api::types::DomainInfo { name: "domain-a".into(), uuid: "00000000-0000-0000-0000-000000000001".into(), ..Default::default() },
+            Default::default(),
+            Default::default(),
+            false,
+        ).unwrap();
+        let matching = Matching::new(state).with_metrics(sink.clone());
+        let request = m::GetTaskListsByDomainRequest { domain: "domain-a".into() };
+        let mut request = Request::new(request);
+        request.metadata_mut().insert("rpc-caller", "sdk-client".parse().unwrap());
+        m::matching_api_server::MatchingApi::get_task_lists_by_domain(
+            &matching,
+            request,
+        ).await.unwrap();
+
+        let thrift_args = Struct {
+            fields: vec![(1, Value::Struct(Struct { fields: vec![(10, text("domain-a"))] }))],
+        };
+        dispatch_with_context(
+            &matching,
+            "MatchingService::GetTaskListsByDomain",
+            &thrift_args,
+            Instant::now() + std::time::Duration::from_secs(5),
+            crate::matching_metrics::InboundMetricContext {
+                caller: Some("worker-client".into()),
+                transport: Some("http".into()),
+            },
+        ).await.unwrap();
+
+        let events = sink.events();
+        let requests = events.iter().filter(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST).collect::<Vec<_>>();
+        assert_eq!(requests.len(), 2, "one event for each logical transport request");
+        assert!(requests.iter().all(|event| event.tags.get("operation").map(String::as_str) == Some("GetTaskListsByDomain")));
+        assert_eq!(requests[0].tags.get("caller").map(String::as_str), Some("sdk-client"));
+        assert_eq!(requests[0].tags.get("transport").map(String::as_str), Some("grpc"));
+        assert_eq!(requests[1].tags.get("caller").map(String::as_str), Some("worker-client"));
+        assert_eq!(requests[1].tags.get("transport").map(String::as_str), Some("http"));
+        assert!(events.iter().filter(|event| event.name == "cadence_latency_per_tl").all(|event| event.kind == MetricKind::Timer && matches!(event.value, MetricValue::Duration(_))));
+    }
     #[test]
     fn matching_thrift_preserves_nanos_and_internal_decision_field_ids() {
         let value = decision(m::PollForDecisionTaskResponse {
@@ -952,6 +1043,7 @@ mod tests {
 
     #[tokio::test]
     async fn dedicated_http_listener_enforces_tls_handshake() {
+        install_tls_crypto_provider();
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let generated = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
         let cert_path = tempfile::NamedTempFile::new().unwrap();

@@ -1,0 +1,6 @@
+Rust source revision: faed87d280f418bf723870e0b536a511f1b5becf
+Rust source SHA256 manifest: ../attempt-20261021-production-build/rust-source-sha256.json
+Frozen production binary: /home/ubuntu/.cache/cadence-rust-evidence/matching-telemetry/faed87d28/cadence-server
+Frozen production binary SHA256: fa35738b543ff1d7759995442ce4e11c55693e522540c006b039c90edcf031b5
+Build exit: 0
+Exporter harness was adjusted after this build; no Rust build inputs changed.

@@ -1,0 +1,11 @@
+# Matching production MySQL wiring checkpoint (2026-10-20)
+
+This source-only checkpoint follows merge commit `8d8c47854`, which merged the accepted runtime branch through `4e1fedba4`. The later runtime-branch commits `26d80e8d5` and `a1f86f39d` were intentionally excluded.
+
+The metadata decoder merge was audited against the accepted runtime snapshot. `domains.id` remains a raw 16-byte UUID converted to the canonical UUID string. The outer `domains.data` value remains direct ThriftRW with unknown fields preserved by the reader. Domain notification/config/failover versions and opaque DataBlob fields remain exposed. The `0x59` version prefix is stripped only when decoding nested DataBlobs emitted by Go's common ThriftRW codec; it is not stripped from the outer domain record. The shared decoder is used by SQLite and MySQL readers.
+
+Production source wiring now has a backend-neutral `MatchingTaskStore` at `QueueRegistry` and `MatchingRuntime`, a defaultStore factory for SQLite and single-database MySQL, Go-shaped SQL credentials/protocol/pool/lifetime/shard/encoding/TLS configuration, and a MySQL domain metadata reader attached to the existing Matching domain cache. The MySQL task adapter and domain reader share one pool, so domain-cache calls count against the same `maxConns`; both use the existing runtime/cache stop ownership. Configured store initialization and task schema checks run in `spawn_blocking`. The MySQL adapter only checks the existing task schema; neither task nor metadata paths create or migrate schema.
+
+Unsupported `multipleDatabasesConfig` and NoSQL stores fail explicitly. MySQL defaults map to Go's one database shard, ThriftRW encoding, unlimited open connections, two idle connections, and no connection lifetime cap. TLS uses the SQL MySQL plugin's `caFile`, cert/key pair, host-verification option, SSL mode, and connectAddr-derived server name behavior; the Go MySQL plugin does not consume the general `caFiles`, `serverName`, or `requireClientAuth` fields.
+
+Validation is intentionally pending because the build lane is reserved for the runtime worker. Rust files were parsed with rustfmt, `cargo metadata --locked --no-deps` succeeded, and `git diff --check` passed. No compile, unit, mixed-service SDK, restart, recovery, lease, or GC test has run for this wiring. Do not treat this as Matching service completion.

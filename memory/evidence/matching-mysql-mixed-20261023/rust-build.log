@@ -1,0 +1,42 @@
+   Compiling tokio v1.53.3
+   Compiling bitflags v2.13.2
+   Compiling rustix v1.1.5
+   Compiling tempfile v3.27.0
+   Compiling tokio-util v0.7.20
+   Compiling h2 v0.4.20
+   Compiling tokio-rustls v0.26.6
+   Compiling tower v0.5.3
+   Compiling hyper v1.12.0
+   Compiling prost-build v0.13.5
+   Compiling hyper-util v0.1.21
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/mixedmysql/rust/crates/cadence-common)
+   Compiling axum v0.7.9
+   Compiling tokio-postgres v0.7.18
+   Compiling openssl v0.10.81
+   Compiling tower v0.4.13
+   Compiling hyper-timeout v0.5.2
+   Compiling tonic-build v0.12.3
+   Compiling tokio-stream v0.1.19
+   Compiling mysql_common v0.35.5
+   Compiling mysql_common v0.37.3
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/mixedmysql/rust/crates/cadence-proto)
+   Compiling scylla-cql v2.0.0
+   Compiling tonic v0.12.3
+   Compiling tokio-openssl v0.6.5
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/mixedmysql/rust/crates/cadence-api)
+   Compiling hickory-proto v0.24.4
+   Compiling rusqlite v0.32.1
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/mixedmysql/rust/crates/cadence-thrift)
+   Compiling mysql v26.0.1
+   Compiling mysql_async v0.37.1 (/mnt/storage/service/github/wt/mixedmysql/rust/vendor/mysql_async-0.37.1)
+   Compiling scylla v1.9.0 (/mnt/storage/service/github/wt/mixedmysql/rust/vendor/scylla-1.9.0)
+   Compiling postgres-openssl v0.5.3
+   Compiling fs-err v3.3.2
+   Compiling postgres v0.19.14
+   Compiling hickory-resolver v0.24.4
+   Compiling axum v0.8.9
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/mixedmysql/rust/crates/cadence-persistence)
+   Compiling axum-server v0.8.0
+   Compiling tonic-reflection v0.12.3
+   Compiling cadence-server v0.1.0 (/mnt/storage/service/github/wt/mixedmysql/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7m 23s

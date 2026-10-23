@@ -1,0 +1,18 @@
+{
+  "repository": "/mnt/storage/service/github/wt/mixed3",
+  "head": "a3611a850ae5d29db95dea5b3db8150c415c4793",
+  "branch": "matching-mixed-gates-20261023",
+  "status": [
+    "M tests/matching-service-compat.cjs",
+    "?? artifacts/frozen/",
+    "?? artifacts/mysql-2node-b/",
+    "?? artifacts/mysql-2node/",
+    "?? artifacts/mysql-run/",
+    "?? memory/evidence/matching-mixed-gates-20261023/command-mysql-2node.txt",
+    "?? memory/evidence/matching-mixed-gates-20261023/mysql-2node-a-failed.log",
+    "?? memory/evidence/matching-mixed-gates-20261023/mysql-2node-b.log",
+    "?? memory/evidence/matching-mixed-gates-20261023/mysql-2node-b/",
+    "?? memory/evidence/matching-mixed-gates-20261023/mysql2-container.exit",
+    "?? memory/evidence/matching-mixed-gates-20261023/mysql2-container.log"
+  ]
+}

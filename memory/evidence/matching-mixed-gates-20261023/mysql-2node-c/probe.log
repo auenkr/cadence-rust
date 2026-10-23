@@ -1,0 +1,32 @@
+PROBE BODY FAILED: Error: 5 NOT_FOUND: Decision task not found.
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:135:67
+    at new Promise (<anonymous>)
+    at callRpc (/mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:135:10)
+    at call (/mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:127:10)
+    at run (/mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:515:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 5,
+  details: 'Decision task not found.',
+  metadata: Metadata {
+    internalRepr: Map(5) {
+      'grpc-status-details-bin' => [Array],
+      'rpc-application-error-details' => [Array],
+      'rpc-service' => [Array],
+      'rpc-application-error' => [Array],
+      'rpc-application-error-name' => [Array]
+    },
+    options: {}
+  }
+}
+Error: Rust Matching exited {"code":1,"signal":null}; see /mnt/storage/service/github/wt/mixed3/artifacts/mysql-2node-c/rust-matching/rust-server-after-restart.log
+    at run (/mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:1151:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

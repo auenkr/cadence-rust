@@ -1,0 +1,44 @@
+usage: run-go-service-baseline.py [-h] [--artifacts-dir ARTIFACTS_DIR]
+                                  [--rust-matching] [--matching-delivery]
+                                  [--matching-restart] [--binary BINARY]
+                                  [--go-mixed-server-bin GO_MIXED_SERVER_BIN]
+                                  [--rust-production-binary RUST_PRODUCTION_BINARY]
+                                  [--history-transport {grpc,tchannel}]
+                                  [--matching-exporter {prometheus,statsd,m3}]
+                                  [--mysql] [--evidence-dir EVIDENCE_DIR]
+
+Boot the original Go services with SQLite and check the shared service probe.
+Run in tmux cadence-rust. Default mode is an all-Go baseline. --matching-
+delivery checks the Rust Matching RPC/History boundary. --rust-matching
+replaces Go Matching with Rust using test-only Fx discovery. --history-
+transport selects Rust Matching's outbound History transport in the production
+Ringpop lane (grpc or tchannel).
+
+options:
+  -h, --help            show this help message and exit
+  --artifacts-dir ARTIFACTS_DIR
+  --rust-matching       route original Go Frontend/History/Worker to Rust
+                        Matching via test-only Fx discovery
+  --matching-delivery   run Rust durable queue delivery against original Go
+                        History
+  --matching-restart    restart Rust Matching over the same SQLite queue while
+                        Go services stay up
+  --binary BINARY       use an already built Go server
+  --go-mixed-server-bin GO_MIXED_SERVER_BIN
+                        reuse a Go test binary built with the Rust Matching
+                        discovery overlay
+  --rust-production-binary RUST_PRODUCTION_BINARY
+                        run an already built Rust server binary with the
+                        original Go Ringpop provider (requires production
+                        Matching Ringpop assembly)
+  --history-transport {grpc,tchannel}
+                        Rust Matching outbound History transport for --rust-
+                        production-binary (default: grpc)
+  --matching-exporter {prometheus,statsd,m3}
+                        configure and capture one Rust Matching exporter in
+                        the production Ringpop lane
+  --mysql               run production Rust Matching and Go services on the
+                        same MySQL schema
+  --evidence-dir EVIDENCE_DIR
+                        copy the selected run evidence into this directory
+                        before the artifacts directory is removed

@@ -1146,13 +1146,15 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
     semaphore_gate(state, &req.domain)?;
     validation::validate_create_semaphore_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
-    match executions.create_semaphore(
-        &req.domain,
+    let (semaphores, domain_id) = state
+        .semaphore_store_for_domain(&req.domain)
+        .map_err(|e| AppError::entity_not_exists(e.message))?;
+    match semaphores.create_semaphore(
+        &domain_id,
         &req.semaphore_name,
         req.capacity,
         req.bucket_capacity,
-    ) {
+    ).await {
         Ok(meta) => Ok(wrap_success(&CreateSemaphoreResponse {
             semaphore: Some(Semaphore {
                 semaphore_name: req.semaphore_name.clone(),
@@ -1167,9 +1169,17 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
         Err(cadence_persistence::SemaphoreError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }
+        Err(cadence_persistence::SemaphoreError::UnsupportedBackend) => Err(AppError::bad_request(
+            cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE.to_string(),
+        )),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
+        Err(cadence_persistence::SemaphoreError::Internal(message)) => {
+            let error = cadence_api::errors::InternalServiceError::new(message.clone());
+            Err(AppError { exc_name: "InternalServiceError", value: error.to_thrift(), message })
+        }
+        Err(cadence_persistence::SemaphoreError::Throttled(message)) => Err(AppError::busy(message)),
     }
 }
 

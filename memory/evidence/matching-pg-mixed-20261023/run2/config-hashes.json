@@ -1,0 +1,7 @@
+{
+  "/mnt/storage/service/github/wt/mixedpg/artifacts/pg-run2/config/base.yaml": "df4623e35de9684d110fee3b5e42005abda93655437fb18d2ba68b7ae36ec2f6",
+  "/mnt/storage/service/github/wt/mixedpg/artifacts/pg-run2/config/development.yaml": "677aeea2c99659287f9cfa3f634fa5908cd0b10c49105b9ea0106b9faba006d2",
+  "/mnt/storage/service/github/wt/mixedpg/artifacts/pg-run2/config/development_postgres.yaml": "41e0a3bd2d6aca5f78c36376b07f2b39c7afed1b93259e4e147babec676268ad",
+  "/mnt/storage/service/github/wt/mixedpg/artifacts/pg-run2/rust-matching.yaml": "87c80165cf703b8e5a13b2c3d669a99d55ee23d254ed6e7bcc93218ccce41c17",
+  "/mnt/storage/service/github/wt/mixedpg/artifacts/pg-run2/rust-dynamic-config.yaml": "9476788576d2c9fda37ec912f8a5cf0be3d55fe6b638a495ba2a76164b09918c"
+}

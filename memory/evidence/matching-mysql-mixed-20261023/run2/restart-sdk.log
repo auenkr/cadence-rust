@@ -1,0 +1,18 @@
+Existing Go SDK resumed and completed the pre-restart workflow/activity
+
+go: downloading go.uber.org/thriftrw v1.32.0
+go: downloading golang.org/x/net v0.28.0
+go: downloading github.com/pborman/uuid v0.0.0-20160209185913-a97ce2ca70fa
+go: downloading golang.org/x/oauth2 v0.22.0
+go: downloading golang.org/x/time v0.0.0-20170927054726-6dc17368e09b
+go: downloading golang.org/x/sys v0.28.0
+go: downloading go.uber.org/fx v1.22.0
+go: downloading google.golang.org/protobuf v1.34.2
+go: downloading go.uber.org/dig v1.17.1
+go: downloading google.golang.org/genproto/googleapis/rpc v0.0.0-20240814211410-ddb44dafa142
+go: downloading golang.org/x/text v0.17.0
+{"level":"info","ts":"2026-10-23T04:22:21.225+0530","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-10-23T04:22:21.225+0530","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-10-23T04:22:21.271+0530","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"service-compat-a1753793-63a5-464d-a94c-78e19cd122c7","TaskList":"restart-tasks-a1753793-63a5-464d-a94c-78e19cd122c7","WorkerID":"457928@appointy@restart-tasks-a1753793-63a5-464d-a94c-78e19cd122c7@b66d96e5-9c39-41bf-aeae-4f6d6a325807"}
+{"level":"info","ts":"2026-10-23T04:22:21.274+0530","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"service-compat-a1753793-63a5-464d-a94c-78e19cd122c7","TaskList":"restart-tasks-a1753793-63a5-464d-a94c-78e19cd122c7","WorkerID":"457928@appointy@restart-tasks-a1753793-63a5-464d-a94c-78e19cd122c7@b66d96e5-9c39-41bf-aeae-4f6d6a325807"}
+{"level":"info","ts":"2026-10-23T04:22:22.448+0530","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"service-compat-a1753793-63a5-464d-a94c-78e19cd122c7","TaskList":"restart-tasks-a1753793-63a5-464d-a94c-78e19cd122c7","WorkerID":"457928@appointy@restart-tasks-a1753793-63a5-464d-a94c-78e19cd122c7@b66d96e5-9c39-41bf-aeae-4f6d6a325807"}

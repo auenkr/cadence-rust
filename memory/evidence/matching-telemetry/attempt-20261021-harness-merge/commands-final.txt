@@ -1,0 +1,5 @@
+python3 - <<'PY' (AST parse tests/run-go-service-baseline.py and tests/matching_evidence.py)
+node --check tests/matching-service-compat.cjs
+python3 tests/run-go-service-baseline.py --help
+python3 tests/run-matching-probe-static-checks.py
+git diff --check

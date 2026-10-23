@@ -1,0 +1,7 @@
+Existing Go SDK resumed and completed the pre-restart workflow/activity
+
+{"level":"info","ts":"2026-10-21T12:31:03.668Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-10-21T12:31:03.668Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-10-21T12:31:03.722Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56","TaskList":"gc-backlog-761764fb-d708-4304-83bd-6e6f1d5a9e56","WorkerID":"3070366@arm-instance@gc-backlog-761764fb-d708-4304-83bd-6e6f1d5a9e56@afc7f5f4-13ca-469d-a083-64f5718e0664"}
+{"level":"info","ts":"2026-10-21T12:31:03.730Z","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56","TaskList":"gc-backlog-761764fb-d708-4304-83bd-6e6f1d5a9e56","WorkerID":"3070366@arm-instance@gc-backlog-761764fb-d708-4304-83bd-6e6f1d5a9e56@afc7f5f4-13ca-469d-a083-64f5718e0664"}
+{"level":"info","ts":"2026-10-21T12:31:03.916Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"service-compat-761764fb-d708-4304-83bd-6e6f1d5a9e56","TaskList":"gc-backlog-761764fb-d708-4304-83bd-6e6f1d5a9e56","WorkerID":"3070366@arm-instance@gc-backlog-761764fb-d708-4304-83bd-6e6f1d5a9e56@afc7f5f4-13ca-469d-a083-64f5718e0664"}

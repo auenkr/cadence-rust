@@ -37,6 +37,9 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 		t.Skip("requires native Rust Matching")
 	}
 	modes := []string{"tchannel", "http", "http-trailing-slash"}
+	if os.Getenv("CADENCE_MATCHING_TCHANNEL_ONLY") == "1" {
+		modes = []string{"tchannel"}
+	}
 	if os.Getenv("CADENCE_MATCHING_TLS_HTTP") != "" {
 		modes = append(modes, "http-tls")
 	}

@@ -529,6 +529,66 @@ func (s *matchingEngineSuite) TestQueryWorkflow() {
 	}, resp)
 }
 
+// TestMatchingPollMetricOracle pins Go's actual poll direction and isolation
+// emission branches to the exported Tally names and tags consumed by Rust's
+// source-level comparison tests.
+func TestMatchingPollMetricOracle(t *testing.T) {
+	root := tally.NewTestScope("oracle", nil)
+	client := metrics.NewClient(root, metrics.Matching, metrics.MigrationConfig{})
+	scope := client.Scope(
+		metrics.MatchingPollForDecisionTaskScope,
+		metrics.DomainTag("metric-domain"),
+		metrics.TaskListTag("metric-list"),
+	)
+	engine := &matchingEngineImpl{}
+	for _, row := range []struct {
+		taskForwarded bool
+		pollForwarded bool
+		name          string
+	}{
+		{false, false, "local_to_local_matches_per_tl"},
+		{false, true, "local_to_remote_matches_per_tl"},
+		{true, false, "remote_to_local_matches_per_tl"},
+		{true, true, "remote_to_remote_matches_per_tl"},
+	} {
+		engine.emitForwardedFromStats(scope, row.taskForwarded, map[bool]string{true: "child", false: ""}[row.pollForwarded])
+		found := false
+		for key, counter := range root.Snapshot().Counters() {
+			if strings.Contains(key, "."+row.name+"+") {
+				found = true
+				if counter.Value() != 1 {
+					t.Fatalf("counter %s = %d, want 1", key, counter.Value())
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("Go did not emit %s", row.name)
+		}
+	}
+
+	engine.emitTaskIsolationMetrics(scope, map[string]string{
+		isolationgroup.GroupKey:         "blue",
+		isolationgroup.OriginalGroupKey: "red",
+	}, "blue")
+	engine.emitTaskIsolationMetrics(scope, map[string]string{isolationgroup.GroupKey: "blue"}, "blue")
+	counters := root.Snapshot().Counters()
+	foundRed, foundBlue, foundSuccess := false, false, false
+	for key, counter := range counters {
+		if strings.Contains(key, ".isolation_task_matches_per_tl+") && strings.Contains(key, "isolation_group=red") {
+			foundRed = counter.Value() == 1 && strings.Contains(key, "poller_isolation_group=blue")
+		}
+		if strings.Contains(key, ".isolation_task_matches_per_tl+") && strings.Contains(key, "isolation_group=blue") {
+			foundBlue = counter.Value() == 1 && strings.Contains(key, "poller_isolation_group=blue")
+		}
+		if strings.Contains(key, ".isolation_success_per_tl+") && strings.Contains(key, "isolation_group=blue") {
+			foundSuccess = counter.Value() == 1
+		}
+	}
+	if !foundRed || !foundBlue || !foundSuccess {
+		t.Fatalf("Go isolation oracle mismatch: red=%t blue=%t success=%t counters=%v", foundRed, foundBlue, foundSuccess, counters)
+	}
+}
+
 func (s *matchingEngineSuite) TestAddActivityTasks() {
 	s.AddTasksTest(persistence.TaskListTypeActivity, false)
 }
@@ -543,6 +603,60 @@ func (s *matchingEngineSuite) TestAddActivityTasksForwarded() {
 
 func (s *matchingEngineSuite) TestAddDecisionTasksForwarded() {
 	s.AddTasksTest(persistence.TaskListTypeDecision, true)
+}
+
+// This is the Go metrics oracle for Rust Matching's AddTask counter. Keep the
+// serialized tally names/tags pinned here so exporter parity can compare the
+// same logical decision and activity requests.
+func (s *matchingEngineSuite) TestAddTaskTrafficMetricOracle() {
+	scope := tally.NewTestScope("oracle", nil)
+	s.matchingEngine.metricsClient = metrics.NewClient(scope, metrics.Matching, metrics.MigrationConfig{})
+	s.matchingEngine.config.HostName = "oracle-host"
+
+	normal := types.TaskListKindNormal
+	execution := &types.WorkflowExecution{WorkflowID: "workflow", RunID: "run"}
+	makeRequest := func(taskType int, taskList *types.TaskList, forwardedFrom string) *addTaskRequest {
+		return &addTaskRequest{
+			TaskType:      taskType,
+			DomainUUID:    "domainId",
+			Execution:     execution,
+			TaskList:      taskList,
+			ForwardedFrom: forwardedFrom,
+		}
+	}
+	_, err := addTask(s.matchingEngine, s.handlerContext, makeRequest(
+		persistence.TaskListTypeDecision,
+		&types.TaskList{Name: "metric-task", Kind: &normal},
+		"",
+	))
+	s.NoError(err)
+	_, err = addTask(s.matchingEngine, s.handlerContext, makeRequest(
+		persistence.TaskListTypeActivity,
+		&types.TaskList{Name: "metric-task", Kind: &normal},
+		"",
+	))
+	s.NoError(err)
+	_, err = addTask(s.matchingEngine, s.handlerContext, makeRequest(
+		persistence.TaskListTypeDecision,
+		&types.TaskList{Name: "metric-task", Kind: &normal},
+		"/child/metric-task",
+	))
+	s.Equal(errRemoteSyncMatchFailed, err)
+
+	counters := scope.Snapshot().Counters()
+	decisionCounter := counters["oracle.cadence_tasklist_request+domain=matching-test,matching_host=oracle-host,operation=AddTask,tasklist=metric_task,tasklistType=decision_task"]
+	activityCounter := counters["oracle.cadence_tasklist_request+domain=matching-test,matching_host=oracle-host,operation=AddTask,tasklist=metric_task,tasklistType=activity_task"]
+	s.NotNil(decisionCounter)
+	s.NotNil(activityCounter)
+	s.EqualValues(1, decisionCounter.Value())
+	s.EqualValues(1, activityCounter.Value())
+	addTaskCounters := 0
+	for name := range counters {
+		if strings.HasPrefix(name, "oracle.cadence_tasklist_request+") {
+			addTaskCounters++
+		}
+	}
+	s.Equal(2, addTaskCounters, "forwarded traffic is excluded from the AddTask counter")
 }
 
 func (s *matchingEngineSuite) AddTasksTest(taskType int, isForwarded bool) {

@@ -1,0 +1,13 @@
+AssertionError [ERR_ASSERTION]: other isolation group must not consume the isolated activity
+
+undefined !== 1
+
+    at run (/mnt/storage/service/github/wt/mixedmysql/tests/matching-service-compat.cjs:1013:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: undefined,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

@@ -1,0 +1,2 @@
+cd /home/ubuntu/.t3/worktrees/cadence-rust/matching-telemetry/rust
+env CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target cargo clippy --workspace --all-targets --locked -- -D warnings

@@ -1,0 +1,339 @@
+    Checking cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-persistence)
+    Checking tonic-reflection v0.12.3
+    Checking if-addrs v0.13.4
+    Checking yasna v0.5.2
+    Checking rcgen v0.13.2
+    Checking cadence-server v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-server)
+error[E0658]: attributes on expressions are experimental
+   --> crates/cadence-server/src/matching_quota.rs:297:13
+    |
+297 |             #[cfg(test)]
+    |             ^^^^^^^^^^^^
+    |
+    = note: see issue #15701 <https://github.com/rust-lang/rust/issues/15701> for more information
+
+error: removing an expression is not supported in this position
+   --> crates/cadence-server/src/matching_quota.rs:297:13
+    |
+297 |             #[cfg(test)]
+    |             ^^^^^^^^^^^^
+
+error[E0433]: cannot find module or crate `async_trait` in this scope
+   --> crates/cadence-server/src/matching_persistence.rs:207:3
+    |
+207 | #[async_trait::async_trait]
+    |   ^^^^^^^^^^^ use of unresolved module or unlinked crate `async_trait`
+
+error: items after a test module
+   --> crates/cadence-persistence/src/matching_cassandra.rs:275:1
+    |
+275 | mod tests {
+    | ^^^^^^^^^
+...
+440 | impl MatchingTaskStore for CassandraMatchingTaskStore {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#items_after_test_module
+    = note: `-D clippy::items-after-test-module` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`
+    = help: move the items to before the test module was defined
+
+error: unused import: `InMemoryExecutionStore`
+  --> crates/cadence-server/src/matching_semaphore.rs:18:33
+   |
+18 |     AcquireError, GrantOutcome, InMemoryExecutionStore, SemaphorePersist...
+   |                                 ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `-D unused-imports` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(unused_imports)]`
+
+error: could not compile `cadence-persistence` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error[E0195]: lifetime parameters or bounds on method `create_semaphore` do not match the trait declaration
+   --> crates/cadence-server/src/matching_persistence.rs:209:30
+    |
+209 |       async fn create_semaphore(
+    |                                ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:95:5
+    |
+ 95 | /     async fn create_semaphore(
+ 96 | |         &self,
+ 97 | |         domain_id: &str,
+ 98 | |         name: &str,
+ 99 | |         size: i32,
+100 | |         bucket_size: i32,
+101 | |     ) -> Result<SemaphoreMetadata, SemaphoreError>;
+    | |___________________________________________________- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_metadata` do not match the trait declaration
+   --> crates/cadence-server/src/matching_persistence.rs:221:36
+    |
+221 |       async fn get_semaphore_metadata(
+    |                                      ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:102:5
+    |
+102 | /     async fn get_semaphore_metadata(
+103 | |         &self,
+104 | |         domain_id: &str,
+105 | |         name: &str,
+106 | |     ) -> Result<SemaphoreMetadata, AcquireError>;
+    | |_________________________________________________- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `scan_semaphore_bucket` do not match the trait declaration
+   --> crates/cadence-server/src/matching_persistence.rs:229:35
+    |
+229 |       async fn scan_semaphore_bucket(
+    |                                     ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:107:5
+    |
+107 | /     async fn scan_semaphore_bucket(
+108 | |         &self,
+109 | |         domain_id: &str,
+110 | |         name: &str,
+111 | |         bucket: i32,
+112 | |     ) -> Result<Vec<SemaphoreRow>, AcquireError>;
+    | |_________________________________________________- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_ownership_by_token` do not match the trait declaration
+   --> crates/cadence-server/src/matching_persistence.rs:240:46
+    |
+240 |       async fn get_semaphore_ownership_by_token(
+    |                                                ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:113:5
+    |
+113 | /     async fn get_semaphore_ownership_by_token(
+114 | |         &self,
+115 | |         domain_id: &str,
+116 | |         name: &str,
+117 | |         bucket: i32,
+118 | |         token_id: i32,
+119 | |     ) -> Result<String, AcquireError>;
+    | |______________________________________- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_ownership_by_owner` do not match the trait declaration
+   --> crates/cadence-server/src/matching_persistence.rs:252:46
+    |
+252 |     async fn get_semaphore_ownership_by_owner(
+    |                                              ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 | #[async_trait::async_trait]
+    | --------------------------- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `grant_semaphore_token` do not match the trait declaration
+   --> crates/cadence-server/src/matching_persistence.rs:264:35
+    |
+264 |       async fn grant_semaphore_token(
+    |                                     ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:129:5
+    |
+129 | /     async fn grant_semaphore_token(
+130 | |         &self,
+131 | |         domain_id: &str,
+132 | |         name: &str,
+...   |
+135 | |         owner_id: &str,
+136 | |     ) -> Result<GrantOutcome, AcquireError>;
+    | |____________________________________________- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `release_semaphore_token` do not match the trait declaration
+   --> crates/cadence-server/src/matching_persistence.rs:277:37
+    |
+277 |     async fn release_semaphore_token(
+    |                                     ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 | #[async_trait::async_trait]
+    | --------------------------- lifetimes in impl do not match this method in trait
+
+error[E0308]: mismatched types
+   --> crates/cadence-server/src/handlers.rs:395:13
+    |
+392 | ...rr(cadence_persistence::SemaphoreError::UnsupportedBackend) => error_response(
+    |                                                                   -------------- arguments to this function are incorrect
+...
+395 | ...   cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE,
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `String`, found `&str`
+    |
+note: function defined here
+   --> crates/cadence-server/src/handlers.rs:212:15
+    |
+212 | ...fn error_response(kind: &'static str, status: StatusCode, message: String) -...
+    |       ^^^^^^^^^^^^^^                                         ---------------
+help: try using a conversion method
+    |
+395 |             cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE.to_string(),
+    |                                                                             ++++++++++++
+
+error[E0308]: mismatched types
+    --> crates/cadence-server/src/yarpc.rs:1173:13
+     |
+1172 | ...rr(cadence_persistence::SemaphoreError::UnsupportedBackend) => Err(AppError::bad_request(
+     |                                                                       --------------------- arguments to this function are incorrect
+1173 | ...   cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE,
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `String`, found `&str`
+     |
+note: associated function defined here
+    --> crates/cadence-server/src/yarpc.rs:93:8
+     |
+  93 |     fn bad_request(message: String) -> Self {
+     |        ^^^^^^^^^^^ ---------------
+help: try using a conversion method
+     |
+1173 |             cadence_persistence::SqlUnsupportedSemaphorePersistence::MESSAGE.to_string(),
+     |                                                                             ++++++++++++
+
+error[E0282]: type annotations needed
+    --> crates/cadence-server/src/matching_registry.rs:1669:24
+     |
+1669 |                 return Ok(None);
+     |                        ^^ cannot infer type of the type parameter `E` declared on the enum `Result`
+     |
+help: consider specifying the generic arguments
+     |
+1669 |                 return Ok::<std::option::Option<(cadence_persistence::StoredPartitionConfig, std::string::String, std::vec::Vec<i32>)>, E>(None);
+     |                          +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+error[E0283]: type annotations needed
+    --> crates/cadence-server/src/matching_registry.rs:1669:24
+     |
+1668 | ...((old, new)) = handle.partitions.update(&handle.queue, config, now)? el...
+     |                                                                       - type must be known at this point
+1669 | ...rn Ok(None);
+     |       ^^ cannot infer type of the type parameter `E` declared on the enum `Result`
+     |
+note: multiple `impl`s satisfying `_: std::convert::From<tonic::Status>` found
+    --> crates/cadence-server/src/matching_writer.rs:37:1
+     |
+  37 | impl From<Status> for WriteError {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: and another `impl` found in the `tonic` crate: `impl std::convert::From<tonic::Status> for h2::error::Error;`
+help: consider specifying the generic arguments
+     |
+1669 |                 return Ok::<std::option::Option<(cadence_persistence::StoredPartitionConfig, std::string::String, std::vec::Vec<i32>)>, E>(None);
+     |                          +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+error[E0283]: type annotations needed
+    --> crates/cadence-server/src/matching_registry.rs:1669:24
+     |
+1669 |                 return Ok(None);
+     |                        ^^ cannot infer type of the type parameter `E` declared on the enum `Result`
+...
+1680 |                 .map_err(Status::invalid_argument)?;
+     |                                                   - type must be known at this point
+     |
+note: multiple `impl`s satisfying `_: std::convert::From<tonic::Status>` found
+    --> crates/cadence-server/src/matching_writer.rs:37:1
+     |
+  37 | impl From<Status> for WriteError {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: and another `impl` found in the `tonic` crate: `impl std::convert::From<tonic::Status> for h2::error::Error;`
+help: consider specifying the generic arguments
+     |
+1669 |                 return Ok::<std::option::Option<(cadence_persistence::StoredPartitionConfig, std::string::String, std::vec::Vec<i32>)>, E>(None);
+     |                          +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+error[E0425]: cannot find function `notified_failover_domains` in this scope
+   --> crates/cadence-server/src/matching_runtime.rs:482:49
+    |
+482 | ...                   let (_, notified) = notified_failover_domains(
+    |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> crates/cadence-server/src/matching_runtime.rs:492:37
+    |
+492 | ...                   for domain in notified {
+    |                           ^^^^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `std::marker::Sized` is not implemented for `str`
+    = note: all local variables must have a statically known size
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> crates/cadence-server/src/matching_runtime.rs:492:33
+    |
+492 | / ...   for domain in notified {
+493 | | ...       if let Ok(domain) = uuid::Uuid::parse_str(&domain) {
+494 | | ...           let registry = registry.clone();
+495 | | ...           runtime.spawn(async move {
+...   |
+499 | | ...   }
+    | |_______^ doesn't have a size known at compile-time
+    |
+    = help: the trait `std::marker::Sized` is not implemented for `str`
+note: required by an implicit `Sized` bound in `std::option::Option`
+   --> /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library/core/src/option.rs:598:0
+
+error[E0308]: mismatched types
+   --> crates/cadence-server/src/grpc_matching.rs:323:67
+    |
+323 | ... = crate::matching_semaphore::Registry::new(state.executions.clone());
+    |       ---------------------------------------- ^^^^^^^^^^^^^^^^^^^^^^^^ expected `Arc<dyn SemaphorePersistence>`, found `InMemoryExecutionStore`
+    |       |
+    |       arguments to this function are incorrect
+    |
+    = note: expected struct `std::sync::Arc<(dyn cadence_persistence::SemaphorePersistence + 'static)>`
+               found struct `cadence_persistence::InMemoryExecutionStore`
+note: associated function defined here
+   --> crates/cadence-server/src/matching_semaphore.rs:426:12
+    |
+426 |     pub fn new(store: Arc<dyn SemaphorePersistence>) -> Self {
+    |            ^^^ ------------------------------------
+
+error[E0609]: no field `rejected` on type `&matching_quota::MatchingRpcQuota`
+   --> crates/cadence-server/src/matching_quota.rs:299:18
+    |
+299 |                 .rejected
+    |                  ^^^^^^^^ unknown field
+    |
+    = note: available fields are: `overlay`, `clock`, `state`, `metric_sink`
+
+error[E0004]: non-exhaustive patterns: `matching_semaphore::ManagerError::ServiceBusy(_)` not covered
+   --> crates/cadence-server/src/grpc_matching.rs:158:11
+    |
+158 |     match error {
+    |           ^^^^^ pattern `matching_semaphore::ManagerError::ServiceBusy(_)` not covered
+    |
+note: `matching_semaphore::ManagerError` defined here
+   --> crates/cadence-server/src/matching_semaphore.rs:83:10
+    |
+ 83 | pub enum ManagerError {
+    |          ^^^^^^^^^^^^
+...
+ 95 |     ServiceBusy(String),
+    |     ----------- not covered
+    = note: the matched value is of type `matching_semaphore::ManagerError`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern or an explicit pattern as shown
+    |
+172 ~         ManagerError::Internal(message) => Status::internal(message),
+173 ~         matching_semaphore::ManagerError::ServiceBusy(_) => todo!(),
+    |
+
+error: future cannot be sent between threads safely
+    --> crates/cadence-server/src/grpc_matching.rs:2789:5
+     |
+2789 |     async fn acquire_semaphore(
+     |     ^^^^^ future created by async block is not `Send`
+     |
+     = help: within `{async block@grpc_matching.rs:2789:5}`, the trait `std::marker::Send` is not implemented for `MutexGuard<'_, HashMap<Identifier, _>>`
+note: future is not `Send` as this value is used across an await
+    --> crates/cadence-server/src/matching_semaphore.rs:453:34
+     |
+ 449 |             let mut managers = self.managers.lock().expect("semaphore ...
+     |                 ------------ has type `std::sync::MutexGuard<'_, std::collections::HashMap<matching_semaphore::Identifier, std::sync::Arc<matching_semaphore::Manager>>>` which is not `Send`
+...
+ 453 |                 existing.start().await?;
+     |                                  ^^^^^ await occurs here, with `mut managers` maybe used later
+     = note: required for the cast from `Pin<Box<{async block@...}>>` to `Pin<Box<dyn Future<Output = _> + Send>>`
+     = note: the full name for the type has been written to '/home/ubuntu/.cache/cadence-rust-integration-target/debug/deps/cadence_server-725a7da23063daca.long-type-7534163372743566560.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+Some errors have detailed explanations: E0004, E0195, E0277, E0282, E0283, E0308, E0425, E0433, E0609...
+For more information about an error, try `rustc --explain E0004`.
+error: could not compile `cadence-server` (lib) due to 23 previous errors

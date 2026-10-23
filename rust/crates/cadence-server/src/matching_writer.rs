@@ -124,7 +124,8 @@ pub struct TaskWriter {
     inner: Arc<Inner>,
 }
 fn stopped() -> Status {
-    Status::unavailable("task list shutting down")
+    // Go errShutdown reaches handleErr's default branch: InternalServiceError.
+    Status::internal("task list shutting down")
 }
 fn full() -> Status {
     crate::grpc::detailed_status(
@@ -241,7 +242,7 @@ impl TaskWriter {
                     .collect::<Vec<_>>();
                 let queue_copy = queue.clone();
                 let result =
-                    tokio::task::spawn_blocking(move || queue_copy.append_pending(&data)).await;
+                    crate::matching_blocking::run(move || queue_copy.append_pending(&data, crate::matching_dispatch::now())).await;
                 let result = match result {
                     Ok(Ok(tasks)) => Ok(tasks),
                     Ok(Err(error)) => {
@@ -257,7 +258,8 @@ impl TaskWriter {
                             (QueueError::Storage(StorageError::ConditionFailed(_)), 1) => {
                                 Status::internal("StickyTaskConditionFailedError")
                             }
-                            _ => Status::unavailable(error.to_string()),
+                            // Go returns the raw persistence error, which handleErr maps to Internal.
+                            _ => Status::internal(error.to_string()),
                         };
                         Err(WriteError { status, retryable })
                     }
@@ -368,7 +370,8 @@ impl TaskWriter {
         tokio::select! {
             result = receiver => result.unwrap_or_else(|_| Err(stopped().into())),
             _ = stopped_rx.changed() => Err(stopped().into()),
-            _ = tokio::time::sleep_until(deadline) => Err(Status::deadline_exceeded("failed to receive a success response from the channel within a timeout threshold: context deadline exceeded").into()),
+            // Go wraps the ctx error (task_writer.go), which handleErr maps to Internal.
+            _ = tokio::time::sleep_until(deadline) => Err(Status::internal("failed to receive a success response from the channel within a timeout threshold: context deadline exceeded").into()),
         }
     }
 }
@@ -589,7 +592,7 @@ mod tests {
             source_domain: domain,
             schedule_to_start_seconds: 0,
         }).await });
-        tokio::task::spawn_blocking({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
+        crate::matching_blocking::run({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
 
         let busy = writer.append(WriteTask { data: TaskData::default(), source_domain: domain, schedule_to_start_seconds: 0 }).await.unwrap_err();
         assert_eq!(busy.code(), tonic::Code::ResourceExhausted, "no second append is accepted while persistence admission is busy");
@@ -604,9 +607,9 @@ mod tests {
         cancelled.abort();
 
         writer.stop();
-        tokio::task::spawn_blocking({ let release = release.clone(); move || release.wait() }).await.unwrap();
+        crate::matching_blocking::run({ let release = release.clone(); move || release.wait() }).await.unwrap();
         let first_result = tokio::time::timeout(Duration::from_secs(1), first).await.unwrap().unwrap();
-        assert!(first_result.is_ok() || first_result.as_ref().unwrap_err().code() == tonic::Code::Unavailable,
+        assert!(first_result.is_ok() || first_result.as_ref().unwrap_err().code() == tonic::Code::Internal,
             "the accepted write may race its successful response with Stop");
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
@@ -661,7 +664,8 @@ mod tests {
             schedule_to_start_seconds: 0,
         };
         let error = writer.append(task.clone()).await.unwrap_err();
-        assert_eq!(error.code(), tonic::Code::DeadlineExceeded);
+        // Go wraps the ctx error, which handleErr maps to InternalServiceError.
+        assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("failed to receive"));
         let error = writer.append(task).await.unwrap_err();
         assert_eq!(error.code(), tonic::Code::ResourceExhausted);
@@ -698,7 +702,7 @@ mod tests {
             parked: Mutex::new(Some(receiver)),
         }) };
         let task = WriteTask { data: TaskData::default(), source_domain: domain_id, schedule_to_start_seconds: 0 };
-        assert_eq!(writer.append(task.clone()).await.unwrap_err().code(), tonic::Code::DeadlineExceeded,
+        assert_eq!(writer.append(task.clone()).await.unwrap_err().code(), tonic::Code::Internal,
             "an accepted request keeps waiting for its response until its original deadline");
         overlay.lock().unwrap().update(false, "matching.appendTaskTimeout", vec![timeout_value("0s")]);
         assert_eq!(writer.append(task).await.unwrap_err().code(), tonic::Code::ResourceExhausted,
@@ -741,7 +745,7 @@ mod tests {
         };
         let (first, first_rx) = make_request(0);
         writer.inner.sender.send(first).await.unwrap();
-        tokio::task::spawn_blocking({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
+        crate::matching_blocking::run({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
         let mut responses = vec![first_rx];
         for n in 1..5 {
             let (request, response) = make_request(n);
@@ -753,7 +757,7 @@ mod tests {
         overlay.lock().unwrap().update(false, "matching.maxTaskBatchSize", vec![DynamicConfigValue {
             value: Some(DataBlob::new(EncodingType::JSON, b"1".to_vec())), filters: vec![],
         }]);
-        tokio::task::spawn_blocking({ let release = release.clone(); move || release.wait() }).await.unwrap();
+        crate::matching_blocking::run({ let release = release.clone(); move || release.wait() }).await.unwrap();
         for response in responses { response.await.unwrap().unwrap(); }
         assert_eq!(calls.load(Ordering::SeqCst), 6, "one construction-time capacity sample plus Go's per-loop batch samples");
         assert_eq!(store.get_tasks(&key, 0, 10, 10).unwrap().len(), 5);
@@ -833,7 +837,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .code(),
-            tonic::Code::Unavailable
+            tonic::Code::Internal
         );
     }
 }

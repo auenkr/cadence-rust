@@ -1,0 +1,46 @@
+    Checking postgres-openssl v0.5.3
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-proto)
+    Checking fs-err v3.3.2
+    Checking serde_urlencoded v0.7.1
+    Checking postgres v0.19.14
+    Checking axum-core v0.5.6
+   Compiling clap_derive v4.6.7
+    Checking anyhow v1.0.104
+    Checking serde_path_to_error v0.1.20
+    Checking sqlparser v0.53.0
+    Checking linux-raw-sys v0.12.1
+    Checking matchit v0.8.4
+    Checking resolv-conf v0.7.6
+    Checking unsafe-libyaml v0.2.11
+    Checking serde_yaml v0.9.34+deprecated
+    Checking hickory-resolver v0.24.4
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-persistence)
+    Checking axum v0.8.9
+    Checking rustix v1.1.5
+    Checking clap v4.6.7
+    Checking axum-server v0.8.0
+    Checking crc32c v0.6.8
+    Checking yasna v0.5.2
+    Checking tonic-reflection v0.12.3
+    Checking if-addrs v0.13.4
+    Checking fastrand v2.5.0
+    Checking tempfile v3.27.0
+    Checking rcgen v0.13.2
+    Checking cadence-server v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-server)
+error[E0063]: missing field `base_name` in initializer of `cadence_proto::api::TaskList`
+    --> crates/cadence-server/src/matching_registry.rs:1674:33
+     |
+1674 |                 task_list: Some(cadence_proto::api::TaskList {
+     |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `base_name`
+
+error[E0063]: missing field `base_name` in initializer of `cadence_proto::api::TaskList`
+    --> crates/cadence-server/src/matching_rpc_tests.rs:1107:30
+     |
+1107 |         let task_list = Some(cadence_proto::api::TaskList {
+     |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `base_name`
+
+For more information about this error, try `rustc --explain E0063`.
+error: could not compile `cadence-server` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `cadence-server` (lib test) due to 2 previous errors
+EXIT 101

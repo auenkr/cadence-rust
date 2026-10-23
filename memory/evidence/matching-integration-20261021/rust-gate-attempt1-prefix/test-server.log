@@ -1,0 +1,463 @@
+   Compiling smallvec v1.16.3
+   Compiling errno v0.3.14
+   Compiling parking_lot_core v0.9.12
+   Compiling signal-hook-registry v1.4.8
+   Compiling slab v0.4.12
+   Compiling parking_lot v0.12.5
+   Compiling futures-util v0.3.34
+   Compiling tokio v1.53.3
+   Compiling serde_core v1.0.229
+   Compiling tracing v0.1.44
+   Compiling serde v1.0.229
+   Compiling tokio-util v0.7.20
+   Compiling http v1.5.0
+   Compiling tower-service v0.3.3
+   Compiling rand v0.8.8
+   Compiling http-body v1.1.0
+   Compiling serde_json v1.0.154
+   Compiling tower-layer v0.3.3
+   Compiling try-lock v0.2.5
+   Compiling atomic-waker v1.1.2
+   Compiling fnv v1.0.7
+   Compiling h2 v0.4.20
+   Compiling want v0.3.2
+   Compiling icu_normalizer v2.3.0
+   Compiling httparse v1.10.1
+   Compiling form_urlencoded v1.2.2
+   Compiling sync_wrapper v1.0.2
+   Compiling httpdate v1.0.3
+   Compiling idna_adapter v1.2.2
+   Compiling http-body-util v0.1.5
+   Compiling mime v0.3.17
+   Compiling idna v1.1.0
+   Compiling either v1.19.0
+   Compiling url v2.5.8
+   Compiling hyper v1.12.0
+   Compiling tower v0.5.3
+   Compiling hyper-util v0.1.21
+   Compiling socket2 v0.5.10
+   Compiling hashbrown v0.12.3
+   Compiling indexmap v1.9.3
+   Compiling pin-project v1.1.13
+   Compiling itertools v0.15.0
+   Compiling tokio-rustls v0.26.6
+   Compiling axum-core v0.4.5
+   Compiling prost v0.13.5
+   Compiling matchit v0.7.3
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling cadence-common v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-common)
+   Compiling axum v0.7.9
+   Compiling tokio-postgres v0.7.18
+   Compiling async-stream v0.3.6
+   Compiling scylla-cql-core v1.9.0
+   Compiling tower v0.4.13
+   Compiling hyper-timeout v0.5.2
+   Compiling tokio-stream v0.1.19
+   Compiling futures-executor v0.3.34
+   Compiling anstyle-query v1.1.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle v1.0.14
+   Compiling ryu v1.0.23
+   Compiling anstream v1.0.0
+   Compiling thiserror v1.0.69
+   Compiling futures v0.3.34
+   Compiling scylla-cql v2.0.0
+   Compiling tonic v0.12.3
+   Compiling mysql_common v0.37.3
+   Compiling mysql_common v0.35.5
+   Compiling cadence-proto v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-proto)
+   Compiling tokio-openssl v0.6.5
+   Compiling cadence-api v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-api)
+   Compiling prost-types v0.13.5
+   Compiling dashmap v6.2.1
+   Compiling data-encoding v2.11.1
+   Compiling linked-hash-map v0.5.6
+   Compiling clap_lex v1.1.1
+   Compiling ipnet v2.12.2
+   Compiling mysql v26.0.1
+   Compiling hickory-proto v0.24.4
+   Compiling rusqlite v0.32.1
+   Compiling cadence-thrift v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-thrift)
+   Compiling clap_builder v4.6.7
+   Compiling lru-cache v0.1.2
+   Compiling mysql_async v0.37.1 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/vendor/mysql_async-0.37.1)
+   Compiling scylla v1.9.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/vendor/scylla-1.9.0)
+   Compiling postgres-openssl v0.5.3
+   Compiling fs-err v3.3.2
+   Compiling serde_urlencoded v0.7.1
+   Compiling postgres v0.19.14
+   Compiling axum-core v0.5.6
+   Compiling serde_path_to_error v0.1.20
+   Compiling resolv-conf v0.7.6
+   Compiling matchit v0.8.4
+   Compiling time-core v0.1.9
+   Compiling num-conv v0.2.2
+   Compiling deranged v0.5.9
+   Compiling unsafe-libyaml v0.2.11
+   Compiling powerfmt v0.2.1
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling time v0.3.55
+   Compiling axum v0.8.9
+   Compiling hickory-resolver v0.24.4
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-integration-20261021/rust/crates/cadence-persistence)
+   Compiling clap v4.6.7
+   Compiling axum-server v0.8.0
+error[E0195]: lifetime parameters or bounds on method `create_semaphore` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_mysql.rs:964:30
+    |
+964 |       async fn create_semaphore(
+    |                                ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+ 94 |   pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
+ 95 |       async fn create_semaphore(
+    |  ______________-
+ 96 | |         &self,
+    | |         - this bound might be missing in the impl
+ 97 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+ 98 | |         name: &str,
+    | |               - this bound might be missing in the impl
+ 99 | |         size: i32,
+100 | |         bucket_size: i32,
+101 | |     ) -> Result<SemaphoreMetadata, SemaphoreError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_metadata` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_mysql.rs:976:36
+    |
+976 |       async fn get_semaphore_metadata(
+    |                                      ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+102 |       async fn get_semaphore_metadata(
+    |  ______________-
+103 | |         &self,
+    | |         - this bound might be missing in the impl
+104 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+105 | |         name: &str,
+    | |               - this bound might be missing in the impl
+106 | |     ) -> Result<SemaphoreMetadata, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `scan_semaphore_bucket` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_mysql.rs:986:35
+    |
+986 |       async fn scan_semaphore_bucket(
+    |                                     ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+107 |       async fn scan_semaphore_bucket(
+    |  ______________-
+108 | |         &self,
+    | |         - this bound might be missing in the impl
+109 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+110 | |         name: &str,
+    | |               - this bound might be missing in the impl
+111 | |         bucket: i32,
+112 | |     ) -> Result<Vec<SemaphoreRow>, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_ownership_by_token` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_mysql.rs:997:46
+    |
+997 |       async fn get_semaphore_ownership_by_token(
+    |                                                ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+113 |       async fn get_semaphore_ownership_by_token(
+    |  ______________-
+114 | |         &self,
+    | |         - this bound might be missing in the impl
+115 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+116 | |         name: &str,
+    | |               - this bound might be missing in the impl
+117 | |         bucket: i32,
+118 | |         token_id: i32,
+119 | |     ) -> Result<String, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `grant_semaphore_token` do not match the trait declaration
+    --> crates/cadence-persistence/src/matching_mysql.rs:1009:35
+     |
+1009 |       async fn grant_semaphore_token(
+     |                                     ^ lifetimes do not match method in trait
+     |
+    ::: crates/cadence-persistence/src/semaphores.rs:93:1
+     |
+  93 |   #[async_trait::async_trait]
+     |   --------------------------- this bound might be missing in the impl
+...
+ 129 |       async fn grant_semaphore_token(
+     |  ______________-
+ 130 | |         &self,
+     | |         - this bound might be missing in the impl
+ 131 | |         domain_id: &str,
+     | |                    - this bound might be missing in the impl
+ 132 | |         name: &str,
+     | |               - this bound might be missing in the impl
+...    |
+ 135 | |         owner_id: &str,
+     | |                   - this bound might be missing in the impl
+ 136 | |     ) -> Result<GrantOutcome, AcquireError>;
+     | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `create_semaphore` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_postgres.rs:742:30
+    |
+742 |       async fn create_semaphore(
+    |                                ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+ 94 |   pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
+ 95 |       async fn create_semaphore(
+    |  ______________-
+ 96 | |         &self,
+    | |         - this bound might be missing in the impl
+ 97 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+ 98 | |         name: &str,
+    | |               - this bound might be missing in the impl
+ 99 | |         size: i32,
+100 | |         bucket_size: i32,
+101 | |     ) -> Result<SemaphoreMetadata, SemaphoreError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_metadata` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_postgres.rs:757:36
+    |
+757 |       async fn get_semaphore_metadata(
+    |                                      ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+102 |       async fn get_semaphore_metadata(
+    |  ______________-
+103 | |         &self,
+    | |         - this bound might be missing in the impl
+104 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+105 | |         name: &str,
+    | |               - this bound might be missing in the impl
+106 | |     ) -> Result<SemaphoreMetadata, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `scan_semaphore_bucket` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_postgres.rs:767:35
+    |
+767 |       async fn scan_semaphore_bucket(
+    |                                     ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+107 |       async fn scan_semaphore_bucket(
+    |  ______________-
+108 | |         &self,
+    | |         - this bound might be missing in the impl
+109 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+110 | |         name: &str,
+    | |               - this bound might be missing in the impl
+111 | |         bucket: i32,
+112 | |     ) -> Result<Vec<SemaphoreRow>, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_ownership_by_token` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_postgres.rs:776:46
+    |
+776 |       async fn get_semaphore_ownership_by_token(
+    |                                                ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+113 |       async fn get_semaphore_ownership_by_token(
+    |  ______________-
+114 | |         &self,
+    | |         - this bound might be missing in the impl
+115 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+116 | |         name: &str,
+    | |               - this bound might be missing in the impl
+117 | |         bucket: i32,
+118 | |         token_id: i32,
+119 | |     ) -> Result<String, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `grant_semaphore_token` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_postgres.rs:788:35
+    |
+788 |       async fn grant_semaphore_token(
+    |                                     ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+129 |       async fn grant_semaphore_token(
+    |  ______________-
+130 | |         &self,
+    | |         - this bound might be missing in the impl
+131 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+132 | |         name: &str,
+    | |               - this bound might be missing in the impl
+...   |
+135 | |         owner_id: &str,
+    | |                   - this bound might be missing in the impl
+136 | |     ) -> Result<GrantOutcome, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `create_semaphore` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_sqlite.rs:99:30
+    |
+ 99 |       async fn create_semaphore(
+    |                                ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+ 94 |   pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
+ 95 |       async fn create_semaphore(
+    |  ______________-
+ 96 | |         &self,
+    | |         - this bound might be missing in the impl
+ 97 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+ 98 | |         name: &str,
+    | |               - this bound might be missing in the impl
+ 99 | |         size: i32,
+100 | |         bucket_size: i32,
+101 | |     ) -> Result<SemaphoreMetadata, SemaphoreError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_metadata` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_sqlite.rs:114:36
+    |
+114 |       async fn get_semaphore_metadata(
+    |                                      ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+102 |       async fn get_semaphore_metadata(
+    |  ______________-
+103 | |         &self,
+    | |         - this bound might be missing in the impl
+104 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+105 | |         name: &str,
+    | |               - this bound might be missing in the impl
+106 | |     ) -> Result<SemaphoreMetadata, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `scan_semaphore_bucket` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_sqlite.rs:124:35
+    |
+124 |       async fn scan_semaphore_bucket(
+    |                                     ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+107 |       async fn scan_semaphore_bucket(
+    |  ______________-
+108 | |         &self,
+    | |         - this bound might be missing in the impl
+109 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+110 | |         name: &str,
+    | |               - this bound might be missing in the impl
+111 | |         bucket: i32,
+112 | |     ) -> Result<Vec<SemaphoreRow>, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `get_semaphore_ownership_by_token` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_sqlite.rs:133:46
+    |
+133 |       async fn get_semaphore_ownership_by_token(
+    |                                                ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+113 |       async fn get_semaphore_ownership_by_token(
+    |  ______________-
+114 | |         &self,
+    | |         - this bound might be missing in the impl
+115 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+116 | |         name: &str,
+    | |               - this bound might be missing in the impl
+117 | |         bucket: i32,
+118 | |         token_id: i32,
+119 | |     ) -> Result<String, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+error[E0195]: lifetime parameters or bounds on method `grant_semaphore_token` do not match the trait declaration
+   --> crates/cadence-persistence/src/matching_sqlite.rs:145:35
+    |
+145 |       async fn grant_semaphore_token(
+    |                                     ^ lifetimes do not match method in trait
+    |
+   ::: crates/cadence-persistence/src/semaphores.rs:93:1
+    |
+ 93 |   #[async_trait::async_trait]
+    |   --------------------------- this bound might be missing in the impl
+...
+129 |       async fn grant_semaphore_token(
+    |  ______________-
+130 | |         &self,
+    | |         - this bound might be missing in the impl
+131 | |         domain_id: &str,
+    | |                    - this bound might be missing in the impl
+132 | |         name: &str,
+    | |               - this bound might be missing in the impl
+...   |
+135 | |         owner_id: &str,
+    | |                   - this bound might be missing in the impl
+136 | |     ) -> Result<GrantOutcome, AcquireError>;
+    | |_____- lifetimes in impl do not match this method in trait
+
+For more information about this error, try `rustc --explain E0195`.
+error: could not compile `cadence-persistence` (lib) due to 15 previous errors
+warning: build failed, waiting for other jobs to finish...

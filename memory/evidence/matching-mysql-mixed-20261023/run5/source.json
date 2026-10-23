@@ -1,0 +1,11 @@
+{
+  "repository": "/mnt/storage/service/github/wt/mixedmysql",
+  "head": "13daac825ab2d6a48aad0bf314d5954c5d22226f",
+  "branch": "matching-mysql-mixed-20261023",
+  "status": [
+    "?? artifacts/mixed-run-5/",
+    "?? memory/evidence/matching-mysql-mixed-20261023/command-run5.txt",
+    "?? memory/evidence/matching-mysql-mixed-20261023/run5.log",
+    "?? memory/evidence/matching-mysql-mixed-20261023/run5/"
+  ]
+}

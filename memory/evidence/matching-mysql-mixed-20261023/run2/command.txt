@@ -1,0 +1,2 @@
+env CADENCE_MYSQL_DOCKER_CONTAINER=cadence-mysql-test
+/usr/bin/python3 tests/run-go-service-baseline.py --rust-matching --matching-restart --rust-production-binary /mnt/storage/service/github/wt/mixedmysql/artifacts/frozen/cadence-server-rust --binary /mnt/storage/service/github/wt/mixedmysql/artifacts/frozen/cadence-server-go --mysql --history-transport grpc --artifacts-dir /mnt/storage/service/github/wt/mixedmysql/artifacts/mixed-run-2 --evidence-dir /mnt/storage/service/github/wt/mixedmysql/memory/evidence/matching-mysql-mixed-20261023/run2

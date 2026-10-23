@@ -1,0 +1,5 @@
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-proto)
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-persistence)
+    Checking cadence-server v0.1.0 (/mnt/storage/service/github/wt/partcfg/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 00s
+EXIT 0

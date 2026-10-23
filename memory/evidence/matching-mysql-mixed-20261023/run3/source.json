@@ -1,0 +1,17 @@
+{
+  "repository": "/mnt/storage/service/github/wt/mixedmysql",
+  "head": "66487f62b3f4cbe9906d6504858257f8e686c785",
+  "branch": "matching-mysql-mixed-20261023",
+  "status": [
+    "M memory/evidence/matching-mysql-mixed-20261023/binaries.sha256",
+    " M rust/crates/cadence-server/src/main.rs",
+    "?? artifacts/frozen/",
+    "?? artifacts/mixed-run-3/",
+    "?? memory/evidence/matching-mysql-mixed-20261023/command-run3.txt",
+    "?? memory/evidence/matching-mysql-mixed-20261023/run3.log",
+    "?? memory/evidence/matching-mysql-mixed-20261023/run3/",
+    "?? memory/evidence/matching-mysql-mixed-20261023/rust-build2.exit",
+    "?? memory/evidence/matching-mysql-mixed-20261023/rust-build2.log",
+    "?? tests/__pycache__/matching_evidence.cpython-314.pyc"
+  ]
+}

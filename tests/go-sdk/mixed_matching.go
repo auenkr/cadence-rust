@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/cadence"
 	"go.uber.org/cadence/.gen/go/cadence/workflowserviceclient"
 	"go.uber.org/cadence/client"
 	"go.uber.org/cadence/worker"
@@ -46,6 +48,8 @@ func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interfac
 	w.RegisterWorkflow(WorkflowTaskRetryWorkflow)
 	w.RegisterWorkflow(ActivityTimeoutWorkflow)
 	w.RegisterWorkflow(SignalWorkflow)
+	w.RegisterWorkflow(CancelWorkflow)
+	w.RegisterActivity(CancelSleepActivity)
 	if err := w.Start(); err != nil {
 		panic(err)
 	}
@@ -93,5 +97,23 @@ func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interfac
 		panic(err)
 	}
 	require(signaled == "mixed-signal", "mixed Matching signal result changed")
+	// Cancellation: request cancel while the workflow has a pending activity; Go ends the run Canceled.
+	cancelRun, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: taskList + "-cancel", TaskList: taskList, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, CancelWorkflow)
+	if err != nil {
+		panic(err)
+	}
+	time.Sleep(2 * time.Second)
+	if err := c.CancelWorkflow(ctx, cancelRun.GetID(), cancelRun.GetRunID()); err != nil {
+		panic(err)
+	}
+	err = cancelRun.Get(ctx, nil)
+	var canceled *cadence.CanceledError
+	require(errors.As(err, &canceled), fmt.Sprintf("cancel workflow did not end Canceled: %v", err))
+	desc, err := c.DescribeWorkflowExecution(ctx, cancelRun.GetID(), cancelRun.GetRunID())
+	if err != nil {
+		panic(err)
+	}
+	require(desc.WorkflowExecutionInfo.GetCloseStatus().String() == "CANCELED", "cancel workflow close status is not CANCELED")
+	fmt.Println("Existing Go SDK workflow cancellation ended Canceled through Rust Matching")
 	fmt.Println("Existing Go SDK echo, activity retry, child, workflow retry, workflow-task retry, activity timeout and signal passed through Go Frontend/History and Rust Matching")
 }

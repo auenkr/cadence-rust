@@ -1,0 +1,16 @@
+{
+  "repository": "/mnt/storage/service/github/wt/mixedpg",
+  "head": "5337dce19b8f70f4422e460206e0a2c9d748e02a",
+  "branch": "matching-pg-mixed-20261023",
+  "status": [
+    "M tests/__pycache__/matching_evidence.cpython-314.pyc",
+    "?? artifacts/frozen/",
+    "?? artifacts/pg-run1/",
+    "?? memory/evidence/matching-pg-mixed-20261023/binaries.sha256",
+    "?? memory/evidence/matching-pg-mixed-20261023/command-run1.txt",
+    "?? memory/evidence/matching-pg-mixed-20261023/go-build.exit",
+    "?? memory/evidence/matching-pg-mixed-20261023/go-build.log",
+    "?? memory/evidence/matching-pg-mixed-20261023/run1.log",
+    "?? memory/evidence/matching-pg-mixed-20261023/run1/"
+  ]
+}

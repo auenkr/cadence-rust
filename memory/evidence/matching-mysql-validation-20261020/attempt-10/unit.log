@@ -1,0 +1,33 @@
+   Compiling cadence-persistence v0.1.0 (/home/ubuntu/.t3/worktrees/cadence-rust/matching-task-store-abstraction/rust/crates/cadence-persistence)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 40.84s
+     Running unittests src/lib.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/cadence_persistence-961fc7e2f428f683)
+
+running 19 tests
+test matching_mysql::tests::farmhash_32_uses_go_compatible_fingerprint ... ok
+test matching_mysql::tests::connectivity_errors_poison_only_their_connection_lease ... ok
+test matching_mysql::tests::go_tcp_connect_addresses_default_missing_port_to_3306 ... ok
+test matching_mysql::tests::mysql_async_tls_uses_go_socket_timeout_options ... ignored, requires the opt-in MySQL interoperability server with TLS enabled
+test matching_mysql::tests::mysql_driver_errors_keep_go_retry_categories ... ok
+test matching_mysql::tests::mysql_matching_schema_contract_matches_go_v8_primary_keys ... ok
+test matching_mysql::tests::mysql_timeout_duration_matches_go_composite_and_boundary_forms ... ok
+test matching_mysql::tests::mysql_async_options_apply_go_socket_timeout_attributes ... ok
+test matching_mysql::tests::query_runtime_final_owner_can_drop_on_its_worker ... ok
+test matching_mysql::tests::query_runtime_can_be_dropped_from_a_tokio_context ... ok
+test matching_mysql::tests::timed_domain_query_bounds_a_stalled_socket_read ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_bounds_connect_failure_and_releases_slot ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_cancels_only_its_dedicated_connection ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_cancels_while_draining_a_slow_result_set ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_completes_before_deadline_and_disconnects ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_releases_single_pool_slot_after_cancellation ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_resets_read_timeout_for_each_socket_operation ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::unsupported_mysql_connect_attributes_fail_closed ... ok
+test matching_mysql::tests::timed_domain_query_cancels_a_stalled_mysql_handshake ... ok
+
+test result: ok. 11 passed; 0 failed; 8 ignored; 0 measured; 211 filtered out; finished in 0.29s
+
+     Running tests/matching_mysql_interop.rs (/home/ubuntu/.t3/worktrees/cadence-rust/t3-6f14baa6/rust/target/debug/deps/matching_mysql_interop-7e511f1a175f3810)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

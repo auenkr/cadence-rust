@@ -1,14 +1,297 @@
 //! Select Matching's queue persistence from Go's configured default store.
 //!
-//! This adapter intentionally supports the existing single-database SQLite
-//! task tables only. It opens Cadence's shared schema and never creates a
+//! This adapter supports the existing SQLite, MySQL, and PostgreSQL task
+//! tables. It opens Cadence's shared schema and never creates a
 //! parallel production database or installs a partial schema.
-use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
+use cadence_persistence::{
+    matching_blob::BlobEncoding,
+    matching_mysql::{MySqlTaskStore, MySqlTaskStoreConfig, MySqlTlsConfig},
+    matching_postgres::{
+        PostgresShardConfig, PostgresTaskStore, PostgresTaskStoreConfig, PostgresTlsConfig,
+    },
+    matching_sqlite::SqliteTaskStore,
+    matching_task_store::MatchingTaskStore,
+};
 use std::{sync::Arc, time::Duration};
 
 const GO_DEFAULT_BUSY_TIMEOUT_MS: u64 = 60_000;
 const GO_DEFAULT_JOURNAL_MODE: &str = "wal";
 const GO_DEFAULT_TIME_FORMAT: &str = "2006-01-02T15:04:05.000000000Z07:00";
+
+pub struct ConfiguredMatchingStores {
+    pub task_store: Arc<dyn MatchingTaskStore>,
+    pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
+}
+
+fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
+    if sql.use_multiple_databases {
+        if !sql.database_name.is_empty()
+            || !sql.connect_addr.is_empty()
+            || !sql.user.is_empty()
+            || !sql.password.is_empty()
+        {
+            anyhow::bail!("SQL multipleDatabasesConfig requires databaseName, connectAddr, user, and password to be configured per endpoint");
+        }
+        if sql.n_shards <= 1 || sql.multiple_databases_config.len() != sql.n_shards as usize {
+            anyhow::bail!("SQL nShards must be greater than one and equal to the length of multipleDatabasesConfig");
+        }
+        if sql
+            .multiple_databases_config
+            .iter()
+            .any(|entry| entry.database_name.is_empty() || entry.connect_addr.is_empty())
+        {
+            anyhow::bail!(
+                "SQL multipleDatabasesConfig entries require databaseName and connectAddr"
+            );
+        }
+    } else if !sql.multiple_databases_config.is_empty() {
+        anyhow::bail!("SQL multipleDatabasesConfig requires useMultipleDatabases=true");
+    }
+    Ok(())
+}
+
+/// Open Matching's configured default store.
+fn cassandra_config(
+    nosql: &crate::config::NosqlConfig,
+) -> anyhow::Result<cadence_persistence::cassandra::CassandraSessionConfig> {
+    let proto_version = if nosql.proto_version == 0 {
+        std::env::var("CASSANDRA_PROTO_VERSION")
+            .ok()
+            .map(|version| version.parse::<i32>())
+            .transpose()?
+            .unwrap_or(4)
+    } else {
+        nosql.proto_version
+    };
+    let tls = nosql.tls.as_ref().filter(|tls| tls.enabled).map(|tls| {
+        cadence_persistence::cassandra::CassandraTlsConfig {
+            ca_files: tls
+                .ca_files
+                .iter()
+                .chain((!tls.ca_file.is_empty()).then_some(&tls.ca_file))
+                .map(std::path::PathBuf::from)
+                .collect(),
+            cert_file: (!tls.cert_file.is_empty()).then(|| tls.cert_file.clone().into()),
+            key_file: (!tls.key_file.is_empty()).then(|| tls.key_file.clone().into()),
+            verify_hostname: tls.enable_host_verification,
+            server_name: (!tls.server_name.is_empty()).then(|| tls.server_name.clone()),
+        }
+    });
+    let options = cadence_persistence::cassandra::CassandraSessionOptions {
+        timeout_nanos: nosql.timeout_nanos,
+        connect_timeout_nanos: nosql.connect_timeout_nanos,
+        consistency: nosql.consistency.clone(),
+        serial_consistency: nosql.serial_consistency.clone(),
+        max_conns: nosql.max_conns,
+        datacenter: nosql.datacenter.clone(),
+        region: nosql.region.clone(),
+        tls,
+        allowed_authenticators: nosql.allowed_authenticators.clone(),
+        proto_version,
+        connect_attributes: nosql.connect_attributes.clone(),
+        host_selection_policy: nosql.host_selection_policy.clone(),
+    };
+    cadence_persistence::cassandra::CassandraSessionConfig::from_parts(
+        nosql.hosts_list(),
+        nosql.port,
+        nosql.user.clone(),
+        nosql.password.clone(),
+        nosql.keyspace.clone(),
+    )?
+    .with_go_options(options)
+}
+
+/// Open the configured default store's semaphore adapter. SQL deliberately
+/// returns Go's unsupported implementation; Cassandra uses the same async
+/// session primitives as the task/domain adapters.
+pub async fn open_configured_semaphore_store(
+    persistence: &crate::config::PersistenceConfig,
+) -> anyhow::Result<Arc<dyn cadence_persistence::SemaphorePersistence>> {
+    let name = persistence.default_store.as_str();
+    let datastore = persistence.datastores.get(name).ok_or_else(|| {
+        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
+    })?;
+    if let Some(nosql) = datastore.nosql.as_ref() {
+        if nosql.plugin_name != "cassandra" {
+            anyhow::bail!("Matching NoSQL persistence does not support plugin {:?}; supported plugin is cassandra", nosql.plugin_name);
+        }
+        let config = cassandra_config(nosql)?;
+        let session = std::sync::Arc::new(config.connect().await?);
+        return Ok(Arc::new(
+            cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session),
+        ));
+    }
+    if datastore.sql.is_some() {
+        return Ok(Arc::new(
+            cadence_persistence::SqlUnsupportedSemaphorePersistence,
+        ));
+    }
+    anyhow::bail!("Matching defaultStore {name:?} has neither SQL nor NoSQL configuration")
+}
+
+pub fn open_configured_default_store(
+    persistence: &crate::config::PersistenceConfig,
+    active_cluster_name: &str,
+    all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
+) -> anyhow::Result<ConfiguredMatchingStores> {
+    let name = persistence.default_store.as_str();
+    if name.is_empty() {
+        anyhow::bail!("Matching task persistence requires persistence.defaultStore");
+    }
+    let datastore = persistence.datastores.get(name).ok_or_else(|| {
+        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
+    })?;
+    if let Some(nosql) = datastore.nosql.as_ref() {
+        if datastore.sql.is_some() {
+            anyhow::bail!("Matching defaultStore {name:?} configures both SQL and NoSQL backends");
+        }
+        if nosql.plugin_name != "cassandra" {
+            anyhow::bail!("Matching NoSQL persistence does not support plugin {:?}; supported plugin is cassandra", nosql.plugin_name);
+        }
+        let config = cassandra_config(nosql)?;
+        let driver =
+            Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
+        return Ok(ConfiguredMatchingStores {
+            task_store: Arc::new(
+                cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::with_all_consistency_delete(
+                    driver.clone(),
+                    all_consistency_delete,
+                ),
+            ),
+            domain_metadata_source: Some(Arc::new(
+                cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
+                    driver,
+                    active_cluster_name,
+                ),
+            )),
+        });
+    }
+    let sql = datastore.sql.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("Matching defaultStore {name:?} has no supported SQL configuration")
+    })?;
+    match sql.plugin_name.as_str() {
+        "sqlite" => {
+            if sql.use_multiple_databases || !sql.multiple_databases_config.is_empty() {
+                anyhow::bail!("Matching SQLite task persistence does not support multipleDatabasesConfig");
+            }
+            let task_store: Arc<dyn MatchingTaskStore> =
+                SqliteTaskStoreConfig::from_default_store(persistence)?.open_store()?;
+            Ok(ConfiguredMatchingStores {
+                task_store,
+                domain_metadata_source: None,
+            })
+        }
+        "mysql" => {
+            validate_sql_shards(sql)?;
+            if !sql.use_multiple_databases && sql.database_name.is_empty() {
+                anyhow::bail!("Matching MySQL SQL persistence databaseName cannot be empty");
+            }
+            if !sql.use_multiple_databases && sql.connect_addr.is_empty() {
+                anyhow::bail!("Matching MySQL SQL persistence connectAddr cannot be empty");
+            }
+            let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
+            if n_shards < 1 {
+                anyhow::bail!("Matching MySQL nShards must be positive, got {n_shards}");
+            }
+            let encoding = if sql.encoding_type.is_empty() {
+                BlobEncoding::ThriftRW
+            } else {
+                BlobEncoding::parse(&sql.encoding_type)?
+            };
+            let tls = sql.tls.as_ref().map(|tls| MySqlTlsConfig {
+                enabled: tls.enabled,
+                ssl_mode: tls.ssl_mode.clone(),
+                ca_file: tls.ca_file.clone(),
+                cert_file: tls.cert_file.clone(),
+                key_file: tls.key_file.clone(),
+                enable_host_verification: tls.enable_host_verification,
+                require_client_auth: tls.require_client_auth,
+            });
+            let config = MySqlTaskStoreConfig {
+                user: sql.user.clone(),
+                password: sql.password.clone(),
+                database_name: sql.database_name.clone(),
+                connect_protocol: sql.connect_protocol.clone(),
+                connect_addr: sql.connect_addr.clone(),
+                connect_attributes: sql.connect_attributes.clone(),
+                max_conns: sql.max_conns,
+                max_idle_conns: sql.max_idle_conns,
+                max_conn_lifetime: (sql.max_conn_lifetime_nanos > 0)
+                    .then(|| Duration::from_nanos(sql.max_conn_lifetime_nanos as u64)),
+                n_shards: n_shards as usize,
+                use_multiple_databases: sql.use_multiple_databases,
+                multiple_databases_config: sql.multiple_databases_config.iter().map(|entry| cadence_persistence::matching_mysql::MySqlShardConfig {
+                    user: entry.user.clone(), password: entry.password.clone(), database_name: entry.database_name.clone(), connect_addr: entry.connect_addr.clone(),
+                }).collect(),
+                encoding,
+                tls,
+            };
+            let (store, metadata) = MySqlTaskStore::connect_with_domain_metadata(
+                config,
+                active_cluster_name,
+            )?;
+            Ok(ConfiguredMatchingStores {
+                task_store: Arc::new(store),
+                domain_metadata_source: Some(Arc::new(metadata)),
+            })
+        }
+        "postgres" => {
+            validate_sql_shards(sql)?;
+            if !sql.use_multiple_databases && sql.database_name.is_empty() {
+                anyhow::bail!("Matching PostgreSQL SQL persistence databaseName cannot be empty");
+            }
+            if !sql.use_multiple_databases && sql.connect_addr.is_empty() {
+                anyhow::bail!("Matching PostgreSQL SQL persistence connectAddr cannot be empty");
+            }
+            let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
+            if n_shards < 1 {
+                anyhow::bail!("Matching PostgreSQL nShards must be positive, got {n_shards}");
+            }
+            let encoding = if sql.encoding_type.is_empty() {
+                BlobEncoding::ThriftRW
+            } else {
+                BlobEncoding::parse(&sql.encoding_type)?
+            };
+            let tls = sql.tls.as_ref().map(|tls| PostgresTlsConfig {
+                enabled: tls.enabled,
+                ssl_mode: tls.ssl_mode.clone(),
+                ca_file: tls.ca_file.clone(),
+                cert_file: tls.cert_file.clone(),
+                key_file: tls.key_file.clone(),
+            });
+            let config = PostgresTaskStoreConfig {
+                shards: if sql.use_multiple_databases { sql.multiple_databases_config.iter().map(|entry| PostgresShardConfig {
+                    connect_addr: entry.connect_addr.clone(), user: entry.user.clone(), password: entry.password.clone(), database_name: entry.database_name.clone(), connect_attributes: sql.connect_attributes.clone(), tls: tls.clone(),
+                }).collect() } else { vec![PostgresShardConfig {
+                    connect_addr: sql.connect_addr.clone(),
+                    user: sql.user.clone(),
+                    password: sql.password.clone(),
+                    database_name: sql.database_name.clone(),
+                    connect_attributes: sql.connect_attributes.clone(),
+                    tls,
+                }] },
+                n_shards: n_shards as usize,
+                use_multiple_databases: sql.use_multiple_databases,
+                max_conns: sql.max_conns,
+                max_idle_conns: sql.max_idle_conns,
+                max_conn_lifetime: (sql.max_conn_lifetime_nanos > 0)
+                    .then(|| Duration::from_nanos(sql.max_conn_lifetime_nanos as u64)),
+                encoding,
+            };
+            let (store, metadata) = PostgresTaskStore::connect_with_domain_metadata(
+                config,
+                active_cluster_name,
+            )?;
+            Ok(ConfiguredMatchingStores {
+                task_store: Arc::new(store),
+                domain_metadata_source: Some(Arc::new(metadata)),
+            })
+        }
+        other => anyhow::bail!(
+            "Matching task persistence does not support SQL plugin {other:?}; supported plugins are sqlite, mysql, and postgres"
+        ),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SqliteTaskStoreConfig {
@@ -23,7 +306,9 @@ impl SqliteTaskStoreConfig {
     pub fn from_default_store(
         persistence: &crate::config::PersistenceConfig,
     ) -> anyhow::Result<Self> {
-        let name = persistence.default_store.trim();
+        // Go indexes persistence.datastores with the configured name exactly;
+        // whitespace is part of the key and must not be normalized here.
+        let name = persistence.default_store.as_str();
         if name.is_empty() {
             anyhow::bail!("Matching task persistence requires persistence.defaultStore");
         }
@@ -209,6 +494,40 @@ mod tests {
     }
 
     #[test]
+    fn configured_sql_shards_validate_go_endpoint_count_and_endpoint_fields() {
+        let mut sql = SqlConfig {
+            plugin_name: "mysql".into(),
+            use_multiple_databases: true,
+            n_shards: 2,
+            multiple_databases_config: vec![
+                crate::config::MultipleDatabasesConfigEntry {
+                    database_name: "cadence0".into(),
+                    connect_addr: "db0:3306".into(),
+                    ..Default::default()
+                },
+                crate::config::MultipleDatabasesConfigEntry {
+                    database_name: "cadence1".into(),
+                    connect_addr: "db1:3306".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(validate_sql_shards(&sql).is_ok());
+        sql.multiple_databases_config.pop();
+        assert!(validate_sql_shards(&sql)
+            .unwrap_err()
+            .to_string()
+            .contains("equal to the length"));
+        sql.multiple_databases_config
+            .push(crate::config::MultipleDatabasesConfigEntry::default());
+        assert!(validate_sql_shards(&sql)
+            .unwrap_err()
+            .to_string()
+            .contains("require databaseName and connectAddr"));
+    }
+
+    #[test]
     fn rejects_unimplemented_persistence_shapes_and_attributes() {
         assert!(SqliteTaskStoreConfig::from_default_store(
             &crate::config::PersistenceConfig::default()
@@ -227,6 +546,19 @@ mod tests {
                 .to_string()
                 .contains("not present in persistence.datastores")
         );
+
+        let padded_name = crate::config::PersistenceConfig {
+            default_store: " primary ".into(),
+            ..persistence(Some(SqlConfig {
+                plugin_name: "sqlite".into(),
+                database_name: "cadence.sqlite".into(),
+                ..Default::default()
+            }))
+        };
+        assert!(SqliteTaskStoreConfig::from_default_store(&padded_name)
+            .unwrap_err()
+            .to_string()
+            .contains("defaultStore \" primary \" is not present"));
 
         let mut config = persistence(Some(SqlConfig {
             plugin_name: "sqlite".into(),

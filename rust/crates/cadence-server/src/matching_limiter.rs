@@ -78,6 +78,7 @@ pub enum WaitOutcome {
 /// queue owner, exactly like Go's per-`taskListManager` limiter.
 pub struct TaskListLimiter {
     clock: Clock,
+    ttl: i64,
     /// Go `taskListLimiter.countPartitions`: read at construction and whenever
     /// `tryUpdate` re-snapshots the partition count. The caller is responsible
     /// for Go's `max(1, cfg.NumTasklistWritePartitions(...))` clamp.
@@ -104,6 +105,7 @@ impl TaskListLimiter {
         let snapshot = rate.snapshot();
         Self {
             clock,
+            ttl,
             count_partitions,
             inner: Mutex::new(Limiter {
                 rate,
@@ -148,10 +150,18 @@ impl TaskListLimiter {
     }
     /// Go `taskListLimiter.ReportLimit`. The partition divisor is re-read from
     /// the live provider exactly when Go's `tryUpdate` re-snapshots it.
-    pub fn report_limit(&self, rps: f64) {
+    /// Return the aggregate value when Go would update its rate-limit gauge.
+    pub fn report_limit(&self, rps: f64) -> Option<f64> {
         let clock = self.clock.clone();
         let count_partitions = self.count_partitions.clone();
         let mut inner = self.inner.lock().expect("matching limiter lock");
+        let before = inner.rate.snapshot();
+        let now = (self.clock)();
+        let elapsed = now.saturating_sub(before.last_update);
+        let within_ttl_update = elapsed < self.ttl
+            && rps <= before.value
+            && (before.value - rps).abs() >= 0.001;
+        let ttl_elapsed = elapsed >= self.ttl;
         if inner
             .rate
             .report_with_clock(rps, || clock(), || count_partitions())
@@ -159,6 +169,8 @@ impl TaskListLimiter {
             let snapshot = inner.rate.snapshot();
             inner.bucket.set_limit_and_burst(snapshot.limit, snapshot.burst);
         }
+        let after = inner.rate.snapshot();
+        (within_ttl_update || ttl_elapsed).then_some(after.value)
     }
     /// Current partition divisor used by the backing limit.
     pub fn partitions(&self) -> i64 {
@@ -268,6 +280,26 @@ mod tests {
         limiter.report_limit(8.0);
         assert_eq!(limiter.partitions(), 4);
         assert_eq!(limiter.limit(), 2.0);
+    }
+    #[test]
+    fn report_limit_returns_go_rate_gauge_updates() {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = TaskListLimiter::new(
+            fake_clock(&now),
+            TASK_DISPATCH_RPS,
+            TASK_DISPATCH_RPS_TTL_NANOS,
+            MIN_TASK_THROTTLING_BURST_SIZE,
+            Arc::new(|| 1),
+        );
+        assert_eq!(limiter.report_limit(8.0), Some(8.0));
+        assert_eq!(limiter.report_limit(50.0), None);
+        // Refresh the low value just before expiry. Go retains it on the TTL
+        // path when the lower report is still recent, while emitting the
+        // aggregate gauge again.
+        now.store(TASK_DISPATCH_RPS_TTL_NANOS - 1, Ordering::SeqCst);
+        assert_eq!(limiter.report_limit(8.0), None);
+        now.store(TASK_DISPATCH_RPS_TTL_NANOS + 1, Ordering::SeqCst);
+        assert_eq!(limiter.report_limit(50.0), Some(8.0));
     }
     #[test]
     fn default_limit_and_report_divide_by_partitions() {

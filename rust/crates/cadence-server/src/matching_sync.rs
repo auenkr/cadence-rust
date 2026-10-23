@@ -15,6 +15,9 @@ use tonic::Status;
 pub struct SyncTask {
     pub task: AllocatedTask,
     pub source_domain: String,
+    /// Transient Go `InternalTask.forwardedFrom` state. Go does not persist
+    /// this bit with TaskData: it exists only for a successful sync handoff.
+    pub forwarded: bool,
     response: oneshot::Sender<Result<(), Status>>,
 }
 impl SyncTask {
@@ -123,6 +126,7 @@ impl SyncMatcher {
         mut data: TaskData,
         group: &str,
         source_domain: &str,
+        forwarded: bool,
         local_wait: Duration,
         deadline: Instant,
     ) -> bool {
@@ -139,6 +143,7 @@ impl SyncMatcher {
         let mut task = Some(SyncTask {
             task: AllocatedTask { task_id: 0, data },
             source_domain: source_domain.into(),
+            forwarded,
             response,
         });
         let queued = {
@@ -300,6 +305,7 @@ mod tests {
                     offered,
                     "a",
                     "00000000-0000-0000-0000-000000000001",
+                    false,
                     Duration::from_secs(1),
                     Instant::now() + Duration::from_secs(2),
                 )
@@ -318,6 +324,27 @@ mod tests {
         assert!(add.await.unwrap());
     }
     #[tokio::test]
+    async fn sync_match_preserves_only_the_transient_forwarded_request_signal() {
+        let (_stop, matcher) = fixture();
+        let producer = matcher.clone();
+        let add = tokio::spawn(async move {
+            producer
+                .offer(
+                    task(),
+                    "a",
+                    "00000000-0000-0000-0000-000000000001",
+                    true,
+                    Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(2),
+                )
+                .await
+        });
+        let received = matcher.poll("a").await.unwrap();
+        assert!(received.forwarded);
+        received.finish(Ok(()));
+        assert!(add.await.unwrap());
+    }
+    #[tokio::test]
     async fn sync_match_does_not_deliver_to_other_or_unknown_groups() {
         let (_stop, matcher) = fixture();
         for group in ["b", "unknown", ""] {
@@ -328,6 +355,7 @@ mod tests {
                         task(),
                         "a",
                         "00000000-0000-0000-0000-000000000001",
+                        false,
                         Duration::from_millis(10),
                         Instant::now() + Duration::from_secs(1),
                     )
@@ -347,6 +375,7 @@ mod tests {
                     task(),
                     "",
                     "00000000-0000-0000-0000-000000000001",
+                    false,
                     Duration::from_secs(1),
                     Instant::now() + Duration::from_secs(2),
                 )
@@ -370,6 +399,7 @@ mod tests {
                     task(),
                     "a",
                     "00000000-0000-0000-0000-000000000001",
+                    false,
                     Duration::from_secs(1),
                     Instant::now() + Duration::from_secs(2),
                 )
@@ -385,6 +415,7 @@ mod tests {
                     task(),
                     "a",
                     "00000000-0000-0000-0000-000000000001",
+                    false,
                     Duration::from_secs(1),
                     Instant::now() + Duration::from_secs(2),
                 )
@@ -404,6 +435,7 @@ mod tests {
                     task(),
                     "a",
                     "00000000-0000-0000-0000-000000000001",
+                    false,
                     Duration::ZERO,
                     Instant::now() + Duration::from_secs(1)
                 )
@@ -416,6 +448,7 @@ mod tests {
                     task(),
                     "a",
                     "00000000-0000-0000-0000-000000000001",
+                    false,
                     Duration::from_secs(1),
                     Instant::now() + Duration::from_secs(2),
                 )
@@ -440,6 +473,7 @@ mod tests {
                     task(),
                     "a",
                     "00000000-0000-0000-0000-000000000001",
+                    false,
                     Duration::ZERO,
                     Instant::now() + Duration::from_secs(1)
                 )
@@ -452,6 +486,7 @@ mod tests {
                     task(),
                     "a",
                     "00000000-0000-0000-0000-000000000001",
+                    false,
                     Duration::from_millis(1),
                     Instant::now() + Duration::from_secs(1)
                 )

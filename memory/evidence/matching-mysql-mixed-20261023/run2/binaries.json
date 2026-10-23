@@ -1,0 +1,10 @@
+{
+  "goBinary": {
+    "path": "/mnt/storage/service/github/wt/mixedmysql/artifacts/frozen/cadence-server-go",
+    "sha256": "bc651be594b3cf9c9d470280dbd0f9d4838b8b7434fa81d745adc07e35205f3c"
+  },
+  "rustProductionBinary": {
+    "path": "/mnt/storage/service/github/wt/mixedmysql/artifacts/frozen/cadence-server-rust",
+    "sha256": "0686e43be5341ea352610950a299cc6329dd7b19bdb10de8f5a37f0195d46429"
+  }
+}

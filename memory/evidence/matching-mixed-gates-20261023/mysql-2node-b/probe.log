@@ -1,0 +1,46 @@
+PROBE BODY FAILED: Error: 14 UNAVAILABLE: No connection established. Last error: Error: connect ECONNREFUSED 127.0.0.1:53211. Resolution note: 
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)
+    at runNextTicks (node:internal/process/task_queues:69:3)
+    at process.processImmediate (node:internal/timers:472:9)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:296:52
+    at new Promise (<anonymous>)
+    at directPartitionOwner (/mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:296:12)
+    at /mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:420:11
+    at Array.map (<anonymous>)
+    at run (/mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:417:62)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 14,
+  details: 'No connection established. Last error: Error: connect ECONNREFUSED 127.0.0.1:53211. Resolution note: ',
+  metadata: Metadata { internalRepr: Map(0) {}, options: {} }
+}
+Error: 14 UNAVAILABLE: No connection established. Last error: Error: connect ECONNREFUSED 127.0.0.1:53211. Resolution note: 
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)
+    at runNextTicks (node:internal/process/task_queues:69:3)
+    at process.processImmediate (node:internal/timers:472:9)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:296:52
+    at new Promise (<anonymous>)
+    at directPartitionOwner (/mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:296:12)
+    at /mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:420:11
+    at Array.map (<anonymous>)
+    at run (/mnt/storage/service/github/wt/mixed3/tests/matching-service-compat.cjs:417:62)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 14,
+  details: 'No connection established. Last error: Error: connect ECONNREFUSED 127.0.0.1:53211. Resolution note: ',
+  metadata: Metadata { internalRepr: Map(0) {}, options: {} }
+}
