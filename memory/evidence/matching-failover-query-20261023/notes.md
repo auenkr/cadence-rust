@@ -42,4 +42,6 @@ Final crate test: `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mn
 
 The ignored library tests are the existing activity source-domain parity gap and two Go TChannel oracle tests. Integration ignores are Go History delivery and Go shard-distributor interoperability. They were not enabled or claimed as evidence here.
 
-Pending: final clippy. All cargo commands run from the worktree `rust/` directory through cargo-safe with the user-requested shared target, in tmux session `cadence-rust`. No mixed-cluster gate is claimed by this change. This is unit and local RPC-server evidence, not a full service parity or deployment claim.
+Final clippy: `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe clippy -p cadence-matching --all-targets -- -D warnings` exited **0** on 2026-10-24 (Asia/Kolkata); `clippy.log` and `clippy.exit` record the run. Final source hashes were rechecked after clippy and still match `fb380b574`. Subsequent commits only add evidence.
+
+Both required final commands exited 0. All task-owned Cargo jobs have finished. All cargo commands run from the worktree `rust/` directory through cargo-safe with the user-requested shared target, in tmux session `cadence-rust`. No mixed-cluster gate is claimed by this change. This is unit and local RPC-server evidence, not a full service parity or deployment claim.
