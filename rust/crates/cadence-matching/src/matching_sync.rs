@@ -702,4 +702,113 @@ mod tests {
         );
         poll.abort();
     }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_zero_local_wait_hands_off_to_waiting_poller() {
+        // Go TestOffer_NoTimeoutSyncMatchedNoError: LocalTaskWaitTime is zero,
+        // but a poller is already parked, so the offer still sync-matches.
+        let (_stop, matcher) = fixture();
+        let poller = matcher.clone();
+        let poll = tokio::spawn(async move {
+            if let Some(received) = poller.poll("").await {
+                received.finish(Ok(()));
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            matcher
+                .offer(
+                    task(),
+                    "",
+                    SOURCE,
+                    false,
+                    Duration::ZERO,
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await
+        );
+        poll.await.unwrap();
+    }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_offer_without_waiting_poller_is_not_queued() {
+        // Go TestOffer_AsyncMatchedNoError / TestOffer_NoTimeoutAsyncMatchedNoError:
+        // with no poller and no local wait the offer is not matched synchronously
+        // and is not left in the offer queue for a later poll.
+        let (_stop, matcher) = fixture();
+        assert!(
+            !matcher
+                .offer(
+                    task(),
+                    "",
+                    SOURCE,
+                    false,
+                    Duration::ZERO,
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await
+        );
+        assert_eq!(matcher.state.lock().unwrap().offers.len(), 0);
+    }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_offer_deadline_before_poll_withdraws_offer() {
+        // Go TestOfferOrTimeout_SyncMatchTimedOut: the offer's 1ms budget expires
+        // before a poller arrives 100ms later, so no match is reported and the
+        // offer is withdrawn from the queue.
+        let (_stop, matcher) = fixture();
+        let poller = matcher.clone();
+        let poll = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            poller.poll("").await.map(|received| received.finish(Ok(())))
+        });
+        assert!(
+            !matcher
+                .offer(
+                    task(),
+                    "",
+                    SOURCE,
+                    false,
+                    Duration::from_millis(1),
+                    Instant::now() + Duration::from_millis(1)
+                )
+                .await
+        );
+        assert_eq!(matcher.state.lock().unwrap().offers.len(), 0);
+        poll.abort();
+    }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_poll_after_stop_returns_no_task() {
+        // Go TestPollersDisconnectedAfterDisconnectBlockedPollers: once the matcher
+        // is disconnected, a poll returns no task at once (Go ErrNoTasks). The
+        // stop signal stands in for DisconnectBlockedPollers.
+        let (stop, matcher) = fixture();
+        stop.send(true).unwrap();
+        let polled = tokio::time::timeout(Duration::from_secs(1), matcher.poll("")).await;
+        assert!(polled.expect("poll returns without waiting").is_none());
+    }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_stop_while_parked_releases_poller_without_task() {
+        // Go Test_poll_ContextExpired: the poll's context ends while it waits, so
+        // no task is returned. The stop signal is the Rust analog of that context.
+        let (stop, matcher) = fixture();
+        let poller = matcher.clone();
+        let poll = tokio::spawn(async move { poller.poll("").await.is_none() });
+        tokio::task::yield_now().await;
+        stop.send(true).unwrap();
+        assert!(poll.await.unwrap());
+    }
+    #[tokio::test]
+    // parity gap: Go Test_pollNonBlocking_NoTasks (go/service/matching/tasklist/matcher_test.go:1224) expects a non-blocking poll with no tasks to return ErrNoTasks at once; Rust SyncMatcher::poll has no non-blocking mode and parks until a task arrives or stop fires (matching_sync.rs:90-123).
+    #[ignore = "parity gap: Rust SyncMatcher::poll has no non-blocking mode (matcher_test.go:1224)"]
+    async fn sync_match_non_blocking_poll_with_no_tasks_returns_immediately() {
+        let (_stop, matcher) = fixture();
+        let polled = tokio::time::timeout(Duration::from_millis(100), matcher.poll("")).await;
+        assert!(matches!(polled, Ok(None)), "poll with no tasks returns None without waiting");
+    }
+    #[tokio::test]
+    // parity gap: Go TestIsolationPollFailure (go/service/matching/tasklist/matcher_test.go:673) expects a poll for an unknown isolation group to fail; Rust poll_group maps unknown groups to the default group and parks (matching_sync.rs:80-86).
+    #[ignore = "parity gap: unknown isolation group is not rejected (matcher_test.go:673)"]
+    async fn sync_match_invalid_isolation_group_poll_gets_no_task() {
+        let (_stop, matcher) = fixture();
+        let polled = tokio::time::timeout(Duration::from_millis(100), matcher.poll("invalid-group")).await;
+        assert!(matches!(polled, Ok(None)), "unknown group poll returns no task without waiting");
+    }
 }

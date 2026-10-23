@@ -591,4 +591,18 @@ mod tests {
             .is_ok());
         assert!(receiver.await.is_ok());
     }
+    #[tokio::test]
+    async fn sync_match_non_blocking_query_poll_returns_queued_query_once() {
+        // Go Test_pollNonBlocking_QueryTask: a queued query is returned with no
+        // wait, and once taken the query channel is empty again.
+        let channel = QueryChannel::new();
+        channel.offer(query("query-1"));
+        let received = tokio::time::timeout(std::time::Duration::from_millis(100), channel.next())
+            .await
+            .expect("queued query is returned without waiting");
+        assert_eq!(received.task_id, "query-1");
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), channel.next())
+            .await
+            .is_err());
+    }
 }
