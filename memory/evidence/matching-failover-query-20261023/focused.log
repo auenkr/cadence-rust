@@ -1,0 +1,24 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/failoverq/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/failoverq/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/failoverq/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/failoverq/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/failoverq/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/failoverq/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/failoverq/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 42s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 10 tests
+test grpc_matching::durable_tests::matching_rpc_standby_completes_started_tasks_without_worker_poll ... ok
+test grpc_matching::durable_tests::matching_rpc_standby_polls_leave_durable_backlog_unclaimed ... ok
+test matching_dispatch::tests::matching_standby_query_failover_cancels_each_forward_wait ... ok
+test matching_dispatch::tests::matching_standby_query_poll_forwards_to_parent_without_claiming_backlog ... ok
+test matching_standby::tests::matching_standby_original_go_completion_decisions ... ok
+test matching_standby::tests::standby_activity_requires_started_or_absent_activity ... ok
+test matching_dispatch::tests::matching_standby_query_failover_releases_wait_and_refreshes_for_next_poll ... ok
+test matching_standby::tests::standby_completion_failure_excludes_not_started_but_counts_young_missing ... ok
+test matching_standby::tests::standby_decision_uses_schedule_order_and_started_state ... ok
+test matching_standby::tests::standby_cancelled_checker_counts_one_completion_failure ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 439 filtered out; finished in 0.10s
+
