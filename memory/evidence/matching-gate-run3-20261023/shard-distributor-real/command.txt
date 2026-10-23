@@ -1,0 +1,2 @@
+env CADENCE_SD_REAL_LAUNCHER=/mnt/storage/service/gate-runs/g6/bin/shard-distributor-real
+/usr/bin/python3 tests/run-go-service-baseline.py --rust-services matching --real-shard-distributor --rust-production-binary /mnt/storage/service/gate-runs/g6/bin/cadence-matching --binary /mnt/storage/service/gate-runs/g6/build/cadence-server --history-transport grpc --artifacts-dir /mnt/storage/service/gate-runs/g6/sdreal --evidence-dir /mnt/storage/service/gate-runs/g6/ev-sdreal

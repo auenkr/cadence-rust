@@ -1,0 +1,2 @@
+env CADENCE_MYSQL_ADDR=127.0.0.1:3306 CADENCE_MYSQL_DOCKER_CONTAINER=cadence-rust-gate-mysql-lane-20261023T134729-1082644
+/usr/bin/python3 /mnt/storage/service/github/wt/gate6/tests/run-go-service-baseline.py --rust-services matching --mysql --rust-production-binary /mnt/storage/service/gate-runs/g6/bin/cadence-matching --artifacts-dir /mnt/storage/service/gate-runs/g6/thrift/run --binary /mnt/storage/service/gate-runs/g6/build/cadence-server --matching-transport thrift --history-transport grpc --evidence-dir /mnt/storage/service/gate-runs/g6/ev-thrift

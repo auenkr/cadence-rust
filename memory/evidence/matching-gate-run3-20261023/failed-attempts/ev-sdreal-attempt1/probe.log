@@ -1,0 +1,4 @@
+PROBE BODY FAILED: Error: second Rust Matching instance did not join the original Ringpop cluster
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:449:50)
+Error: second Rust Matching instance did not join the original Ringpop cluster
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:449:50)

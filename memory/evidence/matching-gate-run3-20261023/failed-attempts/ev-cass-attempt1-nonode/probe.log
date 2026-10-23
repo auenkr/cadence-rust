@@ -1,0 +1,22 @@
+node:internal/modules/cjs/loader:1478
+  throw err;
+  ^
+
+Error: Cannot find module '@grpc/grpc-js'
+Require stack:
+- /mnt/storage/service/github/wt/gate6/cadence-web/package.json
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1475:15)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1048:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1072:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1093:12)
+    at Module._load (node:internal/modules/cjs/loader:1261:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1575:12)
+    at require (node:internal/modules/helpers:191:16)
+    at Object.<anonymous> (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:10:14)
+    at Module._compile (node:internal/modules/cjs/loader:1829:14) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [ '/mnt/storage/service/github/wt/gate6/cadence-web/package.json' ]
+}
+
+Node.js v25.9.0

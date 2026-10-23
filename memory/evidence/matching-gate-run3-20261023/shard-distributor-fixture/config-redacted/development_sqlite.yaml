@@ -1,0 +1,18 @@
+persistence:
+  defaultStore: sqlite-default
+  visibilityStore: sqlite-visibility
+  datastores:
+    sqlite-default:
+      sql:
+        pluginName: "sqlite"
+        maxConns: 1
+        maxIdleConns: 1
+        maxConnLifetime: "128h"
+        databaseName: "/mnt/storage/service/gate-runs/g6/sdfix/cadence.db"
+    sqlite-visibility:
+      sql:
+        pluginName: "sqlite"
+        maxConns: 1
+        maxIdleConns: 1
+        maxConnLifetime: "128h"
+        databaseName: "/mnt/storage/service/gate-runs/g6/sdfix/cadence_visibility.db"

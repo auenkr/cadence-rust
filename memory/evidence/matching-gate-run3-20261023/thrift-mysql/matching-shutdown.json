@@ -1,0 +1,7 @@
+{
+  "signal": "SIGTERM",
+  "sigtermSentUnixNs": 1792763372942000000,
+  "exitCode": 0,
+  "childSignal": null,
+  "completedAtUnixNs": 1792763373827000000
+}

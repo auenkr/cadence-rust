@@ -1,0 +1,6 @@
+PROBE BODY FAILED: TypeError: Cannot read properties of null (reading 'version')
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:1229:46)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+TypeError: Cannot read properties of null (reading 'version')
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:1229:46)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

@@ -1,0 +1,2 @@
+env 
+/usr/bin/python3 /mnt/storage/service/github/wt/gate6/tests/run-go-service-baseline.py --rust-services matching --cassandra --cassandra-port 9042 --cassandra-keyspace cadence --cassandra-visibility-keyspace cadence_visibility --rust-production-binary /mnt/storage/service/gate-runs/g6/bin/cadence-matching --artifacts-dir /mnt/storage/service/gate-runs/g6/cass/run --binary /mnt/storage/service/gate-runs/g6/build/cadence-server --history-transport grpc --evidence-dir /mnt/storage/service/gate-runs/g6/ev-cass

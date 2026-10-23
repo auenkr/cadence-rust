@@ -1,0 +1,6 @@
+PROBE BODY FAILED: Error: production idle probe poll was not registered
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:527:44)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+Error: production idle probe poll was not registered
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:527:44)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

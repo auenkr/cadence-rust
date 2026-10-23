@@ -157,6 +157,10 @@ Cassandra: check `uptime; free -h` first. To use an existing Cassandra instead, 
 the harness directly with `--cassandra --cassandra-hosts H --cassandra-port P
 --cassandra-keyspace K --cassandra-visibility-keyspace V`; the schemas must already exist.
 
+## MySQL lane wrapper
+
+`tests/gates/run-mysql-lane.sh ARTIFACTS_DIR BINARY [harness args]` starts a limited, uniquely named `mysql:8.0.36` container, creates both databases, runs `--rust-services matching --mysql` and removes only that container. Add `--matching-transport thrift` for the Thrift lane.
+
 ## Shard-distributor lane (`--shard-distributor`)
 
 Rust Matching with `shardDistributorClient` and `shard-distributor-matching` pointing at
@@ -209,7 +213,7 @@ logger, no-op metrics, nop dynamic config, a YARPC gRPC dispatcher and the
 required once) changed `go/go.mod`/`go.sum`. The shard-distributor restart scenario restarts
 only the launcher; etcd state persists (unlike the empty-state fixture restart).
 
-Status: builds, vets and dry-runs; not yet run end to end. Unknowns: whether the 15 s
+Status: passed end to end on 2026-10-23 (`memory/evidence/matching-gate-run3-20261023`). Set `CADENCE_SD_REAL_LAUNCHER=PATH` to use a launcher built beforehand under the cargo lock. The probe sends direct Matching calls to the owner the real `GetShardOwner` picked and follows the ring owner for short-lived task lists. Unknowns: whether the 15 s
 READY wait in `registerShardWithGoManager` is enough while a dead executor still owns the
 shard (the probe waits for expiry first); executor expiry also depends on the leader being
 elected (up to `maxRandomDelay` 500 ms); etcd image must be pullable.

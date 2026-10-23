@@ -1,0 +1,4 @@
+sdfix.exit 0
+sdreal.exit 0
+thrift.exit 0
+cass.exit 0

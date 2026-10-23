@@ -1,0 +1,29 @@
+Error: 2 UNKNOWN: cadence internal error, msg: Failed to update domain metadata. <>1 rows affected.
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:289:129
+    at new Promise (<anonymous>)
+    at callRpc (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:289:10)
+    at call (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:259:29)
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:364:9)
+    at Object.<anonymous> (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:1378:1)
+    at Module._compile (node:internal/modules/cjs/loader:1829:14)
+    at Object..js (node:internal/modules/cjs/loader:1969:10) {
+  code: 2,
+  details: 'cadence internal error, msg: Failed to update domain metadata. <>1 rows affected.',
+  metadata: Metadata {
+    internalRepr: Map(3) {
+      'rpc-service' => [Array],
+      'rpc-application-error' => [Array],
+      'rpc-application-error-details' => [Array]
+    },
+    options: {}
+  }
+}

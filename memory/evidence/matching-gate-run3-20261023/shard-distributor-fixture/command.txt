@@ -1,0 +1,2 @@
+env 
+/usr/bin/python3 tests/run-go-service-baseline.py --rust-services matching --shard-distributor --rust-production-binary /mnt/storage/service/gate-runs/g6/bin/cadence-matching --binary /mnt/storage/service/gate-runs/g6/build/cadence-server --history-transport grpc --artifacts-dir /mnt/storage/service/gate-runs/g6/sdfix --evidence-dir /mnt/storage/service/gate-runs/g6/ev-sdfix

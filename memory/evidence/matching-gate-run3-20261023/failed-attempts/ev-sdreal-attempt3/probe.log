@@ -1,0 +1,8 @@
+PROBE BODY FAILED: Error: shard-distributor after-sigkill: real leader loop did not expire executor(s) ae9cd09f-3cdd-463d-a9f0-8b52ebb68307 within 90s
+    at sdAssertExecutorExpired (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:188:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:917:7)
+Error: shard-distributor after-sigkill: real leader loop did not expire executor(s) ae9cd09f-3cdd-463d-a9f0-8b52ebb68307 within 90s
+    at sdAssertExecutorExpired (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:188:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:917:7)
