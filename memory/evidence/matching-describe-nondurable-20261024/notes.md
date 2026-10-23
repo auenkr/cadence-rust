@@ -67,4 +67,11 @@ deadline so the handler records the poller exactly as production does.
 ## Verification
 
 Not run locally (per instructions). Verified on GitHub Actions `rust-ci.yml`,
-package `cadence-matching`. Run URL and result: see the final section below.
+package `cadence-matching`, commit 295094c63.
+
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/40033300362 (success, first attempt)
+- Clippy: pass. Test: `601 passed; 0 failed; 16 ignored` in the main crate suite.
+- `matching_rpc_non_durable_describe_lists_pollers_per_task_list_and_type`: ok.
+- Three parity-gap tests: ignored with reasons (listed above).
+- Note: the new tests appear under the `grpc_matching::durable_tests` module label
+  because `matching_rpc_tests.rs` is included there; the name says "non_durable".
