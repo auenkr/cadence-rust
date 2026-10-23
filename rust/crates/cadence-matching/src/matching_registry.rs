@@ -3081,6 +3081,93 @@ mod tests {
         assert!(handle.queue.is_stopped());
         assert!(registry.state.lock().unwrap().owners.is_empty());
     }
+    // Go: TestTaskListManagerRegistryNotification (task_list_manager_test.go:272). Go's Stop
+    // unregisters the manager once and a second Stop is a no-op; Rust's unload removes the
+    // owner once and refuses the repeat.
+    #[tokio::test]
+    async fn unload_notifies_registry_once_and_second_unload_is_noop() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        assert!(registry.unload(key.clone(), handle.clone(), 2).await.unwrap());
+        assert!(handle.queue.is_stopped());
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+        assert!(!registry.unload(key, handle, 3).await.unwrap());
+    }
+    // Go: TestCheckIdleTaskList (task_list_manager_test.go:497). An owner is unloaded only once
+    // a full TTL passes without MarkAlive activity; poller (GetTask) and add-task (AddTask)
+    // activity restart the TTL. Rust sweeps with explicit times, so the idle case uses fixed
+    // nanos and the add-task case uses wall-clock times because append marks alive with it.
+    #[tokio::test]
+    async fn idle_check_unloads_only_after_full_ttl_without_activity() {
+        const TTL: i64 = 1_000_000_000;
+        fn fixture_with_ttl() -> (tempfile::TempDir, Arc<SqliteTaskStore>, QueueRegistry, TaskListKey) {
+            let (dir, store, registry, key) = fixture();
+            let registry = registry
+                .with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| TTL));
+            (dir, store, registry, key)
+        }
+
+        // Idle task list: no activity at all.
+        let (_dir, _store, registry, key) = fixture_with_ttl();
+        let idle = registry.get(key.clone(), 0, 1).await.unwrap();
+        idle.liveness.mark_alive(0);
+        registry.sweep_idle(TTL - 1, false).await.unwrap();
+        assert!(!idle.queue.is_stopped(), "idle check interval had not passed yet");
+        registry.sweep_idle(TTL, false).await.unwrap();
+        assert!(idle.queue.is_stopped());
+
+        // Active poller: GetTask marks alive, so the manager survives half a TTL more.
+        let (_dir, _store, registry, key) = fixture_with_ttl();
+        let poller = registry.get(key.clone(), 0, 1).await.unwrap();
+        poller.liveness.mark_alive(TTL / 2);
+        registry.sweep_idle(TTL, false).await.unwrap();
+        assert!(!poller.queue.is_stopped(), "manager should be alive after MarkAlive");
+        registry.sweep_idle(TTL / 2 + TTL, false).await.unwrap();
+        assert!(poller.queue.is_stopped());
+
+        // Active add-task: AppendTask marks alive at wall-clock time, restarting the TTL.
+        let (_dir, _store, registry, key) = fixture_with_ttl();
+        let adding = registry.get(key.clone(), 0, 1).await.unwrap();
+        let base = registry_now();
+        adding.append(vec![TaskData::default()], 1).await.unwrap();
+        registry.sweep_idle(base + TTL / 2, false).await.unwrap();
+        assert!(!adding.queue.is_stopped(), "manager should be alive after AddTask MarkAlive");
+        registry.sweep_idle(base + 2 * TTL, false).await.unwrap();
+        assert!(adding.queue.is_stopped());
+    }
+    // Go: TestQueriesPerSecond (task_list_manager_test.go:457), case "returns zero QPS". Go reads
+    // the manager's qpsTracker; Rust sums the tracker of loaded, unstopped owners with the name.
+    // The non-zero tracker case needs an injected clock and is not ported here (see inventory).
+    #[tokio::test]
+    async fn loaded_owner_reports_zero_qps_before_arrivals() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        assert_eq!(handle.qps.qps(), 0.0);
+        assert_eq!(registry.qps_for_task_list_name(&key.name), 0.0);
+    }
+    // Go: TestDescribeTaskList (task_list_manager_test.go:304), case "no status, pollers, or
+    // config". Rust describes loaded owners through describe_by_domain; the status, pollers
+    // and partition-config cases are not ported here (see inventory).
+    #[tokio::test]
+    async fn describe_by_domain_lists_loaded_root_without_config_or_pollers() {
+        let (_dir, _store, registry, key) = fixture();
+        let _handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        let response = registry.describe_by_domain(key.domain_id, false, registry_now());
+        let described = &response.decision_task_list_map["queue"];
+        assert_eq!(described.task_list.as_ref().unwrap().name, "queue");
+        assert!(described.pollers.is_empty());
+        assert!(described.partition_config.is_none());
+    }
+    // Go: TestAddTaskStandby (task_list_manager_test.go:590). Go stops the task writer so an
+    // AddTask cannot persist and returns errShutdown. The standby-domain branch is not ported.
+    #[tokio::test]
+    async fn append_after_writer_stop_fails_without_persisting() {
+        let (_dir, store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        handle.queue.stop();
+        assert!(handle.append(vec![TaskData::default()], 2).await.is_err());
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
+    }
     #[tokio::test]
     async fn describe_lookup_does_not_refresh_liveness_but_append_does() {
         let (_dir, _store, registry, key) = fixture();
