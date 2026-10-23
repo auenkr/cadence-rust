@@ -122,6 +122,85 @@ Results:
 - `--evidence-dir DIR` copies the configs, binaries' SHA-256 sums and results into
   `DIR` before the artifacts directory is removed.
 
+## Cassandra lane (`--cassandra`)
+
+Rust Matching plus Go Frontend/History/Worker on Go's own Cassandra schema
+(`go/schema/cassandra/{cadence,visibility}/schema.cql`). Go runs with `--zone cassandra`
+and a generated `development_cassandra.yaml`; Rust gets matching `cass-default` /
+`cass-visibility` stores. `system.enableDistributedSemaphore` is on for both. It runs
+the same SDK scenarios as the MySQL lane and implies `--matching-failure-recovery`
+(two Rust nodes, owner SIGKILL, SIGTERM drain; the probe reads task rows and the
+semaphore owner/token rows through the Go gocql helper in `tests/matching-cassandra-interop`).
+It is the only lane that sets `acceptanceEligible: true`.
+
+Run it through the wrapper, which owns the container lifecycle:
+
+```sh
+tests/gates/run-cassandra-lane.sh /mnt/storage/service/gate-runs/matching-cassandra \
+  /path/to/cadence-matching [extra harness args]
+```
+
+The wrapper starts a uniquely named `cadence-rust-gate-cassandra-lane-*` container
+(`cassandra:4.1.7`, override with `CADENCE_CASSANDRA_IMAGE`), applies both Go schemas,
+runs the harness, and removes only that container in an EXIT/INT/TERM trap (logs saved to
+`cassandra-container.log`). It never touches `local-postgres` or `cadence-mysql-gate`.
+Port 9042 must be free (`CADENCE_CASSANDRA_PORT` to change). Needs about 2 GB RAM for
+Cassandra: check `uptime; free -h` first. To use an existing Cassandra instead, run
+the harness directly with `--cassandra --cassandra-hosts H --cassandra-port P
+--cassandra-keyspace K --cassandra-visibility-keyspace V`; the schemas must already exist.
+
+## Shard-distributor lane (`--shard-distributor`)
+
+Rust Matching with `shardDistributorClient` and `shard-distributor-matching` pointing at
+the shard-distributor, `matching.percentageOnboardedToShardManager: 100` in both dynamic
+configs, and Go Frontend/History/Worker given the same endpoint. Implies
+`--matching-restart --matching-failure-recovery`.
+
+The harness itself starts, restarts and stops the shard-distributor, always in a `finally`
+(SIGKILL of its process group). What runs is `go/tests/shard-distributor-interoperability`:
+the pinned Go shard-manager gRPC handlers over an in-memory store, with a control
+endpoint. It is NOT the full Go shard-distributor service. The harness reserves its ports
+(`SD_FIXTURE_ADDR`, `SD_FIXTURE_CONTROL_ADDR`) so a restart reuses them. It starts empty;
+the probe assigns task-list shards to the heartbeating Rust executor (existing
+`registerShardWithGoManager`). No Docker container is used.
+
+Scenarios added to `tests/matching-service-compat.cjs` (recorded under `shardDistributor`
+in the probe's final JSON):
+
+- executor heartbeat seen before each disruption and again after each restart;
+- normal dispatch through shard-distributor-owned task lists (all SDK/RPC calls assign the
+  list before dispatch);
+- Rust SIGKILL then restart: new heartbeat, ownership reassigned, workflow completes;
+- SIGTERM drain: the executor stops heartbeating, then the restarted node re-registers,
+  ownership is reassigned and the workflow completes;
+- shard-distributor restart while Matching runs (harness handshake via
+  `sd-control/restart.request` and `restart.done`): Rust must heartbeat to the empty
+  fixture again and serve a new task list.
+
+### Why not Go's real shard-distributor
+
+The pinned `github.com/cadence-workflow/shard-manager` module has no server binary
+(`cmd/` holds only `sharddistributor-canary`, `smctl`, `tools`; there is no `main.go`
+under `service/sharddistributor`). The service exists only as the fx module
+`service/sharddistributor/sharddistributorfx`, which needs an etcd `store.Store`,
+leader-election and namespace configuration (`config.StaticConfig.ShardDistribution`),
+and a YARPC dispatcher. Go's `go/cmd/server` starts none of this: it only builds a
+client from `shardDistributorClient` and the `shard-distributor-matching` section. To
+run the real service the harness would need a new Go launcher that wires that fx
+module, an etcd container, and a config with a fixed namespace. That launcher is not
+written. Until it is, this lane tests Rust against the real Go handlers but with
+fixture-controlled assignment, so automatic reassignment after a crash (the leader
+rebalancing loop and TTL-based executor expiry) is not exercised.
+
+### Unknowns before the first run
+
+- Executor stats field names and status values are read defensively
+  (`LastHeartbeat`, `Status`); the first run may need the check calibrated.
+- "Executor stopped" is judged as no heartbeat for 3 s; the drain status value is unrecorded.
+- Whether `--matching-restart` and `--matching-failure-recovery` can run in the same
+  invocation has not been exercised; if not, split them into two runs.
+- Go Frontend/History with a 100 % onboarding percentage and this fixture are untested.
+
 ## Adding a Rust service later
 
 1. Make the crate's binary real. It must accept `start --config ... --services <svc>`.

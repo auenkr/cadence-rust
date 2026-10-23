@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -43,6 +44,12 @@ parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'
     help='configure and capture one Rust Matching exporter in the production Ringpop lane')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
 parser.add_argument('--postgres', action='store_true', help='run production Rust Matching and original Go services against the same Go-configured PostgreSQL schema; requires CADENCE_POSTGRES_* settings')
+parser.add_argument('--cassandra', action='store_true', help='run production Rust Matching and original Go services on the same Go-schema Cassandra keyspaces (container managed by tests/gates/run-cassandra-lane.sh; implies the two-node failure-recovery probe)')
+parser.add_argument('--cassandra-hosts', default=os.environ.get('CADENCE_CASSANDRA_CONTACT_POINTS', '127.0.0.1'))
+parser.add_argument('--cassandra-port', type=int, default=int(os.environ.get('CADENCE_CASSANDRA_PORT', '9042')))
+parser.add_argument('--cassandra-keyspace', default=os.environ.get('CADENCE_CASSANDRA_KEYSPACE', 'cadence'))
+parser.add_argument('--cassandra-visibility-keyspace', default=os.environ.get('CADENCE_CASSANDRA_VISIBILITY_KEYSPACE', 'cadence_visibility'))
+parser.add_argument('--shard-distributor', action='store_true', help='run Rust Matching with shard-distributor-matching namespaces against the pinned Go shard-manager handlers (go/tests/shard-distributor-interoperability fixture, in-memory store; NOT a full etcd-backed Go shard-distributor service); the harness starts, restarts and stops the fixture')
 parser.add_argument('--matching-failure-recovery', action='store_true', help='run a two-instance production Matching failure/recovery probe')
 parser.add_argument('--matching-idle-check-seconds', type=int, help='override the Matching idle-task-list check interval in seconds')
 parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
@@ -328,6 +335,29 @@ if args.postgres and not production_matching:
     parser.error('--postgres requires --rust-services matching')
 if args.mysql and args.postgres:
     parser.error('--mysql and --postgres select different production databases; choose one')
+if args.cassandra and (args.mysql or args.postgres):
+    parser.error('--cassandra, --mysql and --postgres select different production databases; choose one')
+if args.cassandra and not production_matching:
+    parser.error('--cassandra requires --rust-services matching')
+if args.cassandra and not args.matching_failure_recovery:
+    args.matching_failure_recovery = True
+if args.cassandra and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', args.cassandra_keyspace):
+    parser.error('--cassandra-keyspace must be a CQL identifier')
+if args.cassandra and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', args.cassandra_visibility_keyspace):
+    parser.error('--cassandra-visibility-keyspace must be a CQL identifier')
+if args.cassandra and (not args.cassandra_hosts or any(char in args.cassandra_hosts for char in '\r\n"')):
+    parser.error('--cassandra-hosts must be a non-empty comma-separated host list without YAML control characters')
+if args.cassandra and not 1 <= args.cassandra_port <= 65535:
+    parser.error('--cassandra-port must be between 1 and 65535')
+if args.shard_distributor and not production_matching:
+    parser.error('--shard-distributor requires --rust-services matching')
+if args.shard_distributor:
+    # SIGKILL/restart and shard-distributor restart hooks live in the restart flow,
+    # the SIGTERM drain hook in the two-node failure-recovery flow.
+    args.matching_restart = True
+    args.matching_failure_recovery = True
+if args.shard_distributor and args.matching_exporter:
+    parser.error('--shard-distributor cannot be combined with --matching-exporter')
 postgres_addr = os.environ.get('CADENCE_POSTGRES_ADDR', '127.0.0.1:5432')
 postgres_user = os.environ.get('CADENCE_POSTGRES_USER', 'postgres')
 postgres_password = os.environ.get('CADENCE_POSTGRES_PASSWORD', 'cadence')
@@ -425,6 +455,11 @@ if production_matching or args.rust_matching or args.matching_restart:
         'system.allIsolationGroups:\n'
         '  - value: ["zone-a", "zone-b"]\n'
     )
+if args.cassandra:
+    dynamic_text += '\nsystem.enableDistributedSemaphore:\n  - value: true\n'
+if args.shard_distributor:
+    # Onboard every task list so ownership comes from the shard-distributor.
+    dynamic_text += '\nmatching.percentageOnboardedToShardManager:\n  - value: 100\n'
 if args.matching_idle_check_seconds is not None:
     dynamic_text += (
         '\nmatching.idleTasklistCheckInterval:\n'
@@ -440,6 +475,8 @@ if production_matching:
     keys.append('RUST_MATCHING_PORT')
     if args.matching_failure_recovery:
         keys.extend(['RUST_MATCHING_SECONDARY_PORT', 'RUST_MATCHING_SECONDARY_PORT_GRPC'])
+if args.shard_distributor:
+    keys.extend(['SD_FIXTURE_PORT', 'SD_FIXTURE_CONTROL_PORT'])
 reservations = [socket.socket() for _ in keys]
 try:
     for listener in reservations:
@@ -457,12 +494,24 @@ text = text.replace('"127.0.0.1:7933", "127.0.0.1:7934", "127.0.0.1:7935"',
     ', '.join(f'"127.0.0.1:{ports[key]}"' for key in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT' if production_matching or args.rust_matching or args.matching_restart else 'MATCHING_PORT']))
 text = text.replace('localhost:7833', f'localhost:{ports["FRONTEND_PORT_GRPC"]}')
 text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(dynamic_config)))
+if args.shard_distributor:
+    # Go Frontend/History/Worker use the same shard-distributor endpoint and namespace as Rust Matching.
+    text = text.replace('localhost:7943', f'127.0.0.1:{ports["SD_FIXTURE_PORT"]}')
+    text = text.replace('namespace: cadence-matching-dev', 'namespace: matching')
 # Keep archival outputs in this baseline's artifacts directory as well.
 text = text.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 text = text.replace('/tmp/blobstore', str(work / 'blobstore'))
 (config / 'development.yaml').write_text(text)
-if args.postgres:
+if args.cassandra:
+    go_config = text
+    go_config = re.sub(r'(?m)^(\s+hosts:)\s*.*$',
+        lambda match: f'{match.group(1)} {json.dumps(args.cassandra_hosts)}\n{match.group(1)[:-len("hosts:")]}port: {args.cassandra_port}',
+        go_config)
+    go_config = go_config.replace('keyspace: "cadence"', f'keyspace: "{args.cassandra_keyspace}"')
+    go_config = go_config.replace('keyspace: "cadence_visibility"', f'keyspace: "{args.cassandra_visibility_keyspace}"')
+    (config / 'development_cassandra.yaml').write_text(go_config)
+elif args.postgres:
     text = (root / 'go/config/development_postgres.yaml').read_text()
     text = re.sub(r'(?m)^(\s*databaseName:)\s*"cadence"\s*$', r'\1 ' + json.dumps(postgres_database), text, count=1)
     text = re.sub(r'(?m)^(\s*databaseName:)\s*"cadence_visibility"\s*$', r'\1 ' + json.dumps(postgres_visibility_database), text, count=1)
@@ -602,6 +651,33 @@ if production_matching:
         '        pluginName: sqlite\n'
         '        databaseName: ' + json.dumps(str(work / 'cadence_visibility.db')) + '\n'
         )
+    if args.cassandra:
+        persistence_config = (
+            'persistence:\n'
+            '  defaultStore: cass-default\n'
+            '  visibilityStore: cass-visibility\n'
+            '  numHistoryShards: 4\n'
+            '  datastores:\n'
+            '    cass-default:\n'
+            '      nosql:\n'
+            '        pluginName: cassandra\n'
+            f'        hosts: {json.dumps(args.cassandra_hosts)}\n'
+            f'        port: {args.cassandra_port}\n'
+            f'        keyspace: {args.cassandra_keyspace}\n'
+            '        connectTimeout: 2s\n'
+            '        timeout: 5s\n'
+            '        consistency: LOCAL_QUORUM\n'
+            '        serialConsistency: LOCAL_SERIAL\n'
+            '    cass-visibility:\n'
+            '      nosql:\n'
+            '        pluginName: cassandra\n'
+            f'        hosts: {json.dumps(args.cassandra_hosts)}\n'
+            f'        port: {args.cassandra_port}\n'
+            f'        keyspace: {args.cassandra_visibility_keyspace}\n'
+        )
+    if args.shard_distributor:
+        rust_text = rust_text.replace('localhost:7943', f'127.0.0.1:{ports["SD_FIXTURE_PORT"]}')
+        rust_text = rust_text.replace('namespace: cadence-matching-dev', 'namespace: matching')
     rust_text, replaced = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', persistence_config, rust_text, count=1)
     if replaced != 1:
         raise RuntimeError('could not replace Rust Matching persistence config')
@@ -625,7 +701,7 @@ if production_matching:
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
         '--data-dir', str(work / 'rust-matching-data')], indent=2) + '\n')
-command = [str(binary), '--config', str(config), '--zone', 'mysql' if args.mysql else ('postgres' if args.postgres else 'sqlite'), 'start',
+command = [str(binary), '--config', str(config), '--zone', 'cassandra' if args.cassandra else ('mysql' if args.mysql else ('postgres' if args.postgres else 'sqlite')), 'start',
            '--auto-setup', '--services', ','.join(go_services)]
 environment = None
 if (args.rust_matching or args.matching_restart) and not production_matching:
@@ -642,7 +718,13 @@ results = {
     'historyTransport': args.history_transport if production_matching else None,
     'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
     'historyRoutingGate': ('Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client' if production_matching else None),
-    'acceptanceEligible': not production_matching,
+    'acceptanceEligible': bool(args.cassandra) and not args.shard_distributor,
+    'persistence': ({'backend': 'cassandra', 'hosts': args.cassandra_hosts, 'port': args.cassandra_port,
+                     'defaultKeyspace': args.cassandra_keyspace, 'visibilityKeyspace': args.cassandra_visibility_keyspace}
+                    if args.cassandra else None),
+    'shardDistributor': ({'fixture': 'go/tests/shard-distributor-interoperability (pinned shard-manager handlers, in-memory store)',
+                          'address': f'127.0.0.1:{ports["SD_FIXTURE_PORT"]}', 'control': f'http://127.0.0.1:{ports["SD_FIXTURE_CONTROL_PORT"]}',
+                          'namespace': 'matching', 'onboardingPercentage': 100} if args.shard_distributor else None),
     'serverCommand': command,
     'artifactsDirectory': str(work),
 }
@@ -677,13 +759,62 @@ if args.dry_run:
         'goBinary': str(binary), 'rustMatchingBinary': str(rust_matching_binary) if production_matching else None,
         'rustMatchingBinaryIsPlanned': production_matching and not args.rust_production_binary,
         'serverCommand': command, 'rustCommandRecord': str(work / 'rust-matching-command.json') if production_matching else None,
+        'cassandra': args.cassandra, 'shardDistributor': args.shard_distributor,
         'probe': 'tests/matching-service-compat.cjs' if production_matching or args.rust_matching or args.matching_restart
                  else ('tests/matching-history-compat.cjs' if args.matching_delivery else 'tests/service-workflow-compat.cjs')}, indent=2) + '\n')
     print(f'Dry run planned without building or starting services: {work / "dry-run.json"}', flush=True)
     sys.exit(0)
+sd_fixture = {'process': None}
+sd_restart_stop = threading.Event()
+
+
+def start_sd_fixture():
+    """Start the shard-manager fixture on its reserved ports; wait for its ready line."""
+    env = {**os.environ, 'SD_FIXTURE_ADDR': f'127.0.0.1:{ports["SD_FIXTURE_PORT"]}',
+           'SD_FIXTURE_CONTROL_ADDR': f'127.0.0.1:{ports["SD_FIXTURE_CONTROL_PORT"]}'}
+    log = (work / 'shard-distributor-fixture.log').open('a')
+    process = subprocess.Popen(['go', 'run', './tests/shard-distributor-interoperability'], cwd=root / 'go',
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, env=env,
+                               start_new_session=True)
+    ready = process.stdout.readline()
+    if not ready:
+        raise RuntimeError(f'shard-distributor fixture exited during startup; see {work / "shard-distributor-fixture.log"}')
+    sd_fixture['process'] = process
+    return json.loads(ready)
+
+
+def stop_sd_fixture(sig=signal.SIGKILL):
+    process = sd_fixture['process']
+    if process is not None and process.poll() is None:
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=20)
+    sd_fixture['process'] = None
+
+
+def watch_sd_restarts():
+    """Restart the fixture (empty state, same ports) whenever the probe drops restart.request."""
+    request, done = sd_dir / 'restart.request', sd_dir / 'restart.done'
+    while not sd_restart_stop.wait(0.25):
+        if request.exists():
+            request.unlink()
+            stop_sd_fixture()
+            start_sd_fixture()
+            done.write_text('ok\n')
+
+
 exit_code = 0
 failure = None
+sd_thread = None
 try:
+    if args.shard_distributor:
+        sd_dir = work / 'sd-control'
+        sd_dir.mkdir(exist_ok=True)
+        results['shardDistributorFixture'] = start_sd_fixture()
+        sd_thread = threading.Thread(target=watch_sd_restarts, daemon=True)
+        sd_thread.start()
     with (work / 'server.log').open('w') as log:
         server = subprocess.Popen(command, cwd=work, stdout=log, stderr=subprocess.STDOUT, env=environment)
         try:
@@ -789,6 +920,18 @@ try:
                         })
                         if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
                             probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
+                    if args.cassandra:
+                        probe_environment.update({
+                            'CADENCE_MATCHING_CASSANDRA_GATE': '1',
+                            'CADENCE_CASSANDRA_CONTACT_POINTS': args.cassandra_hosts,
+                            'CADENCE_CASSANDRA_PORT': str(args.cassandra_port),
+                            'CADENCE_CASSANDRA_KEYSPACE': args.cassandra_keyspace})
+                        probe_environment.pop('CADENCE_MATCHING_SQLITE_DB', None)
+                    if args.shard_distributor:
+                        probe_environment.update({
+                            'CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL': f'http://127.0.0.1:{ports["SD_FIXTURE_CONTROL_PORT"]}',
+                            'CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE': 'matching',
+                            'CADENCE_MATCHING_SHARD_DISTRIBUTOR_RESTART_DIR': str(sd_dir)})
                     if args.matching_failure_recovery:
                         probe_environment.update({
                             'CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL': ports['RUST_MATCHING_SECONDARY_PORT'],
@@ -863,6 +1006,10 @@ except BaseException as error:
     failure = f'{type(error).__name__}: {error}'
     raise
 finally:
+    sd_restart_stop.set()
+    if sd_thread is not None:
+        sd_thread.join(timeout=5)
+    stop_sd_fixture()
     results['runExitCode'] = exit_code
     results['failure'] = failure
     (work / 'run.exit').write_text(f'{exit_code}\n')
@@ -870,7 +1017,9 @@ finally:
     if args.evidence_dir:
         copied = copy_evidence(args.evidence_dir, results)
         print(f'Selected evidence copied to {args.evidence_dir}: {copied}', flush=True)
-if production_matching:
+if args.cassandra:
+    print(f'Cassandra mixed-service Matching gate finished (service parity audit still required): {work / "results.json"}', flush=True)
+elif production_matching:
     print(f'Preliminary production process probe completed; it is not Matching acceptance evidence: {work / "results.json"}', flush=True)
 else:
     print(f'Service baseline passed: {work / "results.json"}', flush=True)

@@ -154,10 +154,19 @@ type command struct {
 	Metadata  map[string]string `json:"metadata"`
 }
 
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
 func main() {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	// Optional fixed addresses let the mixed gate restart this process on the
+	// same ports the Rust executor was configured with.
+	listener, err := net.Listen("tcp", envOr("SD_FIXTURE_ADDR", "127.0.0.1:0"))
 	must(err)
-	controlListener, err := net.Listen("tcp", "127.0.0.1:0")
+	controlListener, err := net.Listen("tcp", envOr("SD_FIXTURE_CONTROL_ADDR", "127.0.0.1:0"))
 	must(err)
 	fixture := newFixtureStore()
 	timeSource := clock.NewRealTimeSource()
