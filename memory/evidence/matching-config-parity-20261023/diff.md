@@ -60,3 +60,25 @@ Gaps: Go also injects on the domain/config managers and on every other Matching-
 `cadence-service-core` `config::tests`: `env_expansion_follows_go_uber_config`, `env_expansion_skips_yaml_comments_but_not_quoted_hashes`, `layered_config_merges_base_env_and_zone_like_go_loader`, `dynamic_config_provider_selection_matches_dynamicconfigfx`, `persistence_validation_follows_go_validate`.
 `cadence-matching`: `matching_fault_injection::tests::*` (4), `matching_task_info_log::tests::info_requires_debug_mode_and_domain_id_flag_otherwise_dropped`.
 No runtime (mixed-cluster) evidence: unit tests only.
+
+## Validation (branch matching-config-parity-20261023, code commit before evidence: see git log; final SHA 4cfdc71f0)
+Commands run from `rust/` via `/mnt/storage/service/bin/cargo-safe` (one job, shared lock):
+
+| Step | Command | Exit | Files |
+|---|---|---|---|
+| check #1 | `check -p cadence-persistence -p cadence-service-core -p cadence-matching --all-targets` | **101** (stale persistence artifact, see below) | check1.log / check1.exit |
+| check #2 (after `touch`) | same | **0** | check2.log / check2.exit |
+| clippy #1 | `clippy ... --all-targets -- -D warnings` | **101** (result_large_err in matching_fault_injection) | clippy1.log / clippy1.exit |
+| clippy #2 (allow added in lib.rs) | same | **0** | clippy.log / clippy.exit |
+| test #1 | `test -p cadence-persistence -p cadence-service-core -p cadence-matching` | **101** (my test bug: legacy cassandra alias compared unequal after plugin name was set; fixed in config.rs) | test1.log / test1.exit |
+| test #2 | same, `--no-fail-fast` | **101** (stale service-core rlib reused, compile errors) | test2.log / test2.exit |
+| test #3 (after `touch`) | same, `--no-fail-fast` | **101**: only `matching_rpc_durable_cancel_unregisters_waiting_poller` failed (timeout, `matching_rpc_tests.rs:613`; known load flake); cadence-matching lib 400 passed / 1 failed, cadence-persistence 241 passed, cadence-service-core 99 passed + 27 integration passed | test.log / test.exit |
+| flaky test alone | `test -p cadence-matching --lib matching_rpc_durable_cancel_unregisters_waiting_poller` | **0** (first attempt 101 = stale persistence artifact again: test-cancel-alone-stale.*) | test-cancel-alone.log / .exit |
+
+So the full run has exactly one failure, the known load-sensitive timeout, which passes alone. No full re-run was done after that (the single-allowed test run was already used up on the config.rs fix).
+
+### Build-system finding (affects every worker)
+Cargo hashes path crates relative to the workspace root, so worktrees sharing `cargo-target-shared` reuse each other's artifacts for the same crate name. Three times a build in this worktree saw another worktree's older `cadence-persistence`/`cadence-service-core` rmeta (errors such as "cannot find function `float` in module `cadence_persistence::dynamic_config`" for functions that exist in the source). Fix used: `touch crates/<crate>/src/lib.rs` for every edited crate right before `cargo-safe`, which forces a rebuild. A per-worktree `CARGO_TARGET_DIR` avoids it at the cost of a full rebuild.
+
+### Not validated
+Unit tests only; no mixed-cluster run. Field contents of the info-log events and the live client-injection call sites (poll/backlog forward) are not asserted by tests; only the filter logic, the injection decision functions, the task-store wrapper and the client wrapper are.
