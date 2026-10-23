@@ -341,7 +341,9 @@ if args.cassandra and (args.mysql or args.postgres):
     parser.error('--cassandra, --mysql and --postgres select different production databases; choose one')
 if args.cassandra and not production_matching:
     parser.error('--cassandra requires --rust-services matching')
-if args.cassandra and not args.matching_failure_recovery:
+if args.cassandra:
+    # Same scenario set as the MySQL lane (restart/drain plus two-node recovery).
+    args.matching_restart = True
     args.matching_failure_recovery = True
 if args.cassandra and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', args.cassandra_keyspace):
     parser.error('--cassandra-keyspace must be a CQL identifier')

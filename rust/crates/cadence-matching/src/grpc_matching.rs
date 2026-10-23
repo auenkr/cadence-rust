@@ -329,7 +329,12 @@ pub type TaskListOwnershipCheck = Arc<
 >;
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
-        let semaphores = crate::matching_semaphore::Registry::new(Arc::new(state.executions.clone()));
+        // Go builds the semaphore registry on the configured default datastore.
+        let semaphore_store: Arc<dyn cadence_persistence::SemaphorePersistence> = match &state.semaphore_persistence {
+            Some(store) => store.clone(),
+            None => Arc::new(state.executions.clone()),
+        };
+        let semaphores = crate::matching_semaphore::Registry::new(semaphore_store);
         let rpc_quota = Arc::new(crate::matching_quota::MatchingRpcQuota::with_metric_sink(
             state.admin.dynamic_config.clone(), Arc::new(|_| {}),
         ));

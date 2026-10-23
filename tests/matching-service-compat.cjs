@@ -448,7 +448,7 @@ async function run() {
       });
       assert.equal(createdSemaphore.semaphore.capacity, 1);
       assert.equal(createdSemaphore.semaphore.bucketCapacity, 1);
-      const semaphoreClients = [clients.Matching, directMatchingClient(process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT)];
+      const semaphoreClients = [directMatchingClient(`127.0.0.1:${rustGrpcPort}`), directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`)];
       semaphoreAcquire = (owner, clientIndex = 0) => acquireSemaphore(semaphoreClients[clientIndex], {
         domainId, semaphoreName, bucket: 0, ownerId: owner,
       }).catch(error => {

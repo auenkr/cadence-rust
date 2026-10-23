@@ -253,7 +253,7 @@ impl CassandraDomainMetadataStore {
         name: &str,
     ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
         use crate::cassandra::{
-            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraDomainUdt,
+            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraNullableDomainUdt,
         };
         let session = self.driver.session();
         let result = self.driver.run(session.query_unpaged(
@@ -265,7 +265,7 @@ impl CassandraDomainMetadataStore {
             .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
         let row = rows
             .maybe_first_row::<(
-                CassandraDomainUdt,
+                CassandraNullableDomainUdt,
                 Option<CassandraDomainConfigUdt>,
                 Option<CassandraDomainReplicationConfigUdt>,
                 Option<bool>,
@@ -279,9 +279,13 @@ impl CassandraDomainMetadataStore {
             )>()
             .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
             .ok_or_else(|| MatchingDomainMetadataError::NotFound(name.to_string()))?;
+        let domain = row
+            .0
+            .into_domain()
+            .ok_or_else(|| MatchingDomainMetadataError::NotFound(name.to_string()))?;
         // gocql reads NULL columns as zero values; the seeded cadence-system row has several.
         decode_go_cassandra_domain_metadata(
-            row.0,
+            domain,
             row.1.unwrap_or_default(),
             row.2.unwrap_or_default(),
             row.3.unwrap_or_default(),
@@ -349,7 +353,7 @@ impl CassandraDomainMetadataStore {
         next_page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         use crate::cassandra::{
-            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraDomainUdt,
+            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraNullableDomainUdt,
         };
         use scylla::{response::PagingState, statement::Statement};
         if page_size == 0 {
@@ -374,7 +378,7 @@ impl CassandraDomainMetadataStore {
         for row in rows
             .rows::<(
                 String,
-                Option<CassandraDomainUdt>,
+                Option<CassandraNullableDomainUdt>,
                 Option<CassandraDomainConfigUdt>,
                 Option<CassandraDomainReplicationConfigUdt>,
                 Option<bool>,
@@ -403,7 +407,10 @@ impl CassandraDomainMetadataStore {
                 notify,
             ) = row.map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
             // The metadata record has a NULL domain UDT; Go skips it before decoding.
-            let Some(domain) = domain.filter(|_| name != "cadence-domain-metadata") else {
+            let Some(domain) = domain
+                .filter(|_| name != "cadence-domain-metadata")
+                .and_then(CassandraNullableDomainUdt::into_domain)
+            else {
                 continue;
             };
             domains.push(decode_go_cassandra_domain_metadata(
