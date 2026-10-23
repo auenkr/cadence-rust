@@ -4996,7 +4996,10 @@ async fn wait_for_parked_poller(queue: &crate::matching_registry::QueueHandle) {
 /// root poller must never see the query, because the sticky list is not forwarded.
 #[tokio::test]
 async fn matching_rpc_sticky_partition_query_reaches_only_the_sticky_poller() {
-    let (_dir, _store, matching, key) = fixture();
+    // A delivered query makes the poll load mutable state from history
+    // (grpc_matching.rs `query_mutable_state_with_deadline`), so serve it.
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, matching, key) = fixture_with_history(&peer);
     let domain = key.domain_id.to_string();
     let parent_poll = decision_poll(&matching, &domain, list().unwrap(), "parent-worker", Duration::from_secs(8));
     let root = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
