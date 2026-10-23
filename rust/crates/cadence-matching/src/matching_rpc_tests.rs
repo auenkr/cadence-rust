@@ -2046,6 +2046,233 @@ async fn child_query_on(partition: p::TaskList) {
         .unwrap();
 }
 
+/// Go-shaped remote parent for forwarded queries: records each QueryWorkflow it
+/// receives, then answers with "answer", or ServiceBusy when `busy` is set.
+#[derive(Clone)]
+struct QueryParent {
+    forwarded: std::sync::Arc<std::sync::Mutex<Option<m::QueryWorkflowRequest>>>,
+    received: std::sync::Arc<tokio::sync::Notify>,
+    busy: bool,
+}
+
+#[tonic::async_trait]
+impl MatchingApi for QueryParent {
+    async fn query_workflow(
+        &self,
+        request: tonic::Request<m::QueryWorkflowRequest>,
+    ) -> Result<tonic::Response<m::QueryWorkflowResponse>, tonic::Status> {
+        *self.forwarded.lock().unwrap() = Some(request.into_inner());
+        self.received.notify_one();
+        if self.busy {
+            return Err(crate::grpc::detailed_status(
+                tonic::Code::ResourceExhausted,
+                "parent busy",
+                "ServiceBusyError",
+                p::ServiceBusyError { reason: String::new() },
+            ));
+        }
+        Ok(tonic::Response::new(m::QueryWorkflowResponse {
+            query_result: Some(p::Payload { data: b"answer".to_vec() }),
+            ..Default::default()
+        }))
+    }
+}
+
+async fn serve_query_parent(parent: QueryParent) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(parent))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    (address, server)
+}
+
+fn child_query_list() -> p::TaskList {
+    p::TaskList {
+        name: "/__cadence_sys/queue/1".into(),
+        kind: 1,
+        ..Default::default()
+    }
+}
+
+fn child_forwardable_query(domain_id: String) -> Request<m::QueryWorkflowRequest> {
+    let mut request = Request::new(m::QueryWorkflowRequest {
+        domain_id,
+        task_list: Some(child_query_list()),
+        request: Some(p::QueryWorkflowRequest {
+            domain: "domain".into(),
+            workflow_execution: execution(),
+            query: Some(p::WorkflowQuery {
+                query_type: "ping".into(),
+                query_args: None,
+            }),
+            ..Default::default()
+        }),
+        forwarded_from: String::new(),
+    });
+    request.set_timeout(Duration::from_secs(3));
+    request
+}
+
+#[tokio::test]
+async fn matching_rpc_remote_query_sync_match_forwards_to_parent_and_returns_answer() {
+    // Go TestQueryRemoteSyncMatch, forwarding leg: with no local query poller the
+    // child forwards QueryWorkflow to its remote parent and returns the parent's
+    // answer. The forwarded poll leg is covered by
+    // matching_rpc_child_query_forwards_to_parent_poller.
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, child, key) = fixture_with_history(&peer);
+    let parent = QueryParent {
+        forwarded: Default::default(),
+        received: Default::default(),
+        busy: false,
+    };
+    let (address, server) = serve_query_parent(parent.clone()).await;
+    let child = child.with_membership(membership_with_parent_remote(
+        "/__cadence_sys/queue/1",
+        "queue",
+        &address,
+    ));
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        child.query_workflow(child_forwardable_query(key.domain_id.to_string())),
+    )
+    .await
+    .expect("forwarded query should complete")
+    .unwrap()
+    .into_inner();
+    assert_eq!(
+        result.query_result.map(|payload| payload.data),
+        Some(b"answer".to_vec())
+    );
+    let forwarded = parent
+        .forwarded
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("query should reach the remote parent");
+    assert_eq!(forwarded.forwarded_from, "/__cadence_sys/queue/1");
+    assert_eq!(forwarded.task_list.unwrap().name, "queue");
+    child
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn matching_rpc_remote_query_sync_match_error_falls_back_to_local_poller() {
+    // Go TestQueryRemoteSyncMatchError: the parent answers ServiceBusy, so the
+    // child keeps the query for a local poller. Go starts that poller only after
+    // the forward was attempted (ready()); the poller here waits for the parent's
+    // receipt in the same way and then receives and answers the query.
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, child, key) = fixture_with_history(&peer);
+    let domain = key.domain_id.to_string();
+    let parent = QueryParent {
+        forwarded: Default::default(),
+        received: Default::default(),
+        busy: true,
+    };
+    let (address, server) = serve_query_parent(parent.clone()).await;
+    let child = child.with_membership(membership_with_parent_remote(
+        "/__cadence_sys/queue/1",
+        "queue",
+        &address,
+    ));
+    let received = parent.received.clone();
+    let worker = child.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move {
+        received.notified().await;
+        worker
+            .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+                domain_id: poll_domain,
+                poller_id: "child-worker".into(),
+                request: Some(p::PollForDecisionTaskRequest {
+                    task_list: Some(child_query_list()),
+                    identity: "child-worker".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })))
+            .await
+    });
+    let querier = child.clone();
+    let query_request = child_forwardable_query(domain.clone());
+    let query = tokio::spawn(async move { querier.query_workflow(query_request).await });
+    let delivered = tokio::time::timeout(Duration::from_secs(5), poll)
+        .await
+        .expect("local poller should receive the query after ServiceBusy")
+        .unwrap()
+        .expect("poll should succeed")
+        .into_inner();
+    assert_eq!(
+        delivered.query.as_ref().map(|q| q.query_type.clone()),
+        Some("ping".to_string())
+    );
+    let token =
+        cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
+            &delivered.task_token,
+        )
+        .expect("poll should carry a query task token");
+    child
+        .respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+            request: Some(p::RespondQueryTaskCompletedRequest {
+                task_token: Vec::new(),
+                result: Some(p::WorkflowQueryResult {
+                    result_type: p::QueryResultType::Answered as i32,
+                    answer: Some(p::Payload {
+                        data: b"answer".to_vec(),
+                    }),
+                    error_message: String::new(),
+                }),
+                worker_version_info: None,
+            }),
+            domain_id: domain,
+            task_list: Some(p::TaskList {
+                name: token.task_list,
+                kind: 1,
+                ..Default::default()
+            }),
+            task_id: token.task_id,
+        }))
+        .await
+        .unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), query)
+        .await
+        .expect("query should complete after the local answer")
+        .unwrap()
+        .expect("local answer should be returned")
+        .into_inner();
+    assert_eq!(
+        result.query_result.map(|payload| payload.data),
+        Some(b"answer".to_vec())
+    );
+    let forwarded = parent
+        .forwarded
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the busy parent should have been asked first");
+    assert_eq!(forwarded.forwarded_from, "/__cadence_sys/queue/1");
+    child
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+    server.abort();
+}
+
 #[tokio::test]
 async fn matching_rpc_query_without_poller_waits_for_deadline() {
     let peer = start_fake_history(mutable_state()).await;
