@@ -55,7 +55,13 @@ Worker AGENT:
 Like gpt 6 luna, haiku 5.5, or opencode free model(Medium thinking mode). Normal speed mode(Not fast mode)
 
 ## NOTE
-This machine have only 100GB storage, so clean up the things which are not needed or saved already.
+This machine has 4 CPUs (i5-7300HQ), 7.7GB RAM and ~117GB free on /mnt/storage, so clean up the things which are not needed or saved already.
+
+Build rules (RAM is the limit, a cadence-server rustc can use 2-3GB):
+- Use the shared target dir: `export CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared`.
+- At most TWO cargo jobs at once, each with `-j2`, each wrapped in `flock /tmp/cargo-1.lock` or `flock /tmp/cargo-2.lock` (pick a free one with `flock -n`, else wait).
+- While a mixed-cluster gate (MySQL/PostgreSQL + Go services) is running, allow only ONE cargo job.
+- Always record the exit code to a file: `cmd > log 2>&1; echo $? > file.exit`.
 Do not keep running subagents forever. Sometimes agents get stuck and in status it shows working since 16+hr.
 So after assigning Keep checking on subagents weather they are working correctly or not.
 
