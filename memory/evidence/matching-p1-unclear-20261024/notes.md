@@ -7,7 +7,7 @@ Method: read the Go and Rust sources named by each item at `e9b8e9a0e`. Cargo wa
 |---|---|---|---|---|
 | P1-3 | FIXED | See P1-3 section below | none (comparison only) | n/a (no code change) |
 | P1-7 | FIXED | See P1-7 section below | none | n/a |
-| P1-11 | STILL OPEN before this branch; FIXED by the test below once CI is green | See P1-11 section below | `matching_rpc_tests.rs:3189` `matching_rpc_standby_child_query_poll_receives_parent_query` (+45 lines) | PENDING |
+| P1-11 | FIXED (STILL OPEN at base; closed by this branch) | See P1-11 section below | `matching_rpc_tests.rs:3189` `matching_rpc_standby_child_query_poll_receives_parent_query` (+45 lines) | https://github.com/auenkr/cadence-rust/actions/runs/40032293998 (head `e15ab7b2a`, success, 566 passed, new test `... ok`) |
 | P1-14 | STILL OPEN | See P1-14 section below | none (needs a PostgreSQL gate run) | n/a |
 
 ## P1-3: persistence metric names, tags, buckets vs Go metered wrapper
@@ -57,7 +57,9 @@ Gap found: no test drove a standby query poll through the `poll_for_decision_tas
 
 Change: `matching_rpc_tests.rs:3189` `matching_rpc_standby_child_query_poll_receives_parent_query` (+45 lines). Standby domain uuid `from_u128(3)` with `active_cluster_name = "remote"`, as in `:2705`. The child's standby poll forwards a query poll to the parent, a `query_workflow` RPC delivers "ping" to the parent's query channel, the poll returns it, the query is answered with "pong".
 
-CI: PENDING (see table).
+CI: `rust-ci.yml` `workflow_dispatch` with `package=cadence-matching` on head `e15ab7b2a`, run https://github.com/auenkr/cadence-rust/actions/runs/40032293998, conclusion success. Log line: `grpc_matching::durable_tests::matching_rpc_standby_child_query_poll_receives_parent_query ... ok`, and `566 passed; 0 failed`. The push-triggered run for the same SHA (`40032273137`) was cancelled by the concurrency group, which is expected. A mutation check (removing the standby branch) was not run.
+
+Verdict FIXED. The dispatcher-level test (`:2375`) passes as well. The RPC-level gap is closed by this branch.
 
 ## P1-14: PostgreSQL gate after e9b8e9a0e with GC and domain-metadata checks
 
