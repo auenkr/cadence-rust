@@ -59,7 +59,7 @@ This machine has 4 CPUs (i5-7300HQ), 7.7GB RAM and ~117GB free on /mnt/storage, 
 
 Build rules (RAM is the limit, a cadence-server rustc can use 2-3GB):
 - Use the shared target dir: `export CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared`.
-- At most ONE cargo job host-wide (observed: 2-3 concurrent workspace builds drove load to 12 on 4 cores and filled swap). Every cargo/rustc invocation must be wrapped in the single lock: `flock /tmp/cargo.lock cargo <cmd> -j3`. Never start cargo without the lock; never use another lock file.
+- At most ONE cargo job host-wide (observed: 2-3 concurrent workspace builds drove load to 12 on 4 cores and filled swap). Every cargo/rustc invocation must be wrapped in the single lock: `flock /tmp/cargo.lock cargo <cmd> -j2` (RAM-bound: -j3 caused swap thrash, load 16). Never start cargo without the lock; never use another lock file.
 - Do not run `cargo check --workspace` separately: `cargo clippy --workspace --all-targets -- -D warnings` already type-checks. Run clippy, then `cargo test --workspace`, never both in parallel. For small changes use `-p <crate>` first, full workspace only for the final gate.
 - Do not run cargo at all while a mixed-cluster gate (MySQL/PostgreSQL + Go services) is running, and run only one gate at a time. Build the gate binaries first, then start the gate.
 - Check load before starting heavy work: `uptime` load above 6 or `free` available below 2GB means wait.
