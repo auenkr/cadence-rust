@@ -312,9 +312,10 @@ impl ForwardState {
             .map(|id| id.to_string()).unwrap_or_default();
         let execution = Some(p::WorkflowExecution { workflow_id: task.data.workflow_id.clone(), run_id });
         let partition_config = task.data.partition_config.clone().unwrap_or_default().into_iter().collect();
-        let timeout_seconds = if task.data.expiry_nanos > 0 {
-            task.data.expiry_nanos.saturating_sub(task.data.created_nanos).div_euclid(1_000_000_000).clamp(0, i32::MAX as i64) as i32
-        } else { 0 };
+        // Go persistence GetTasks leaves ScheduleToStartTimeoutSeconds at
+        // zero (SQL and NoSQL). Expiry is for reader filtering, not a new
+        // timeout to reconstruct when forwarding an already-persisted task.
+        let timeout_seconds = 0i32;
         let forwarded_from = self.source.clone();
         let result = match parent {
             Parent::Remote(channel) => {
@@ -1947,7 +1948,7 @@ mod tests {
             assert_eq!(task.forwarded_from, "/__cadence_sys/queue/1");
             assert_eq!(task.source, 2);
             assert_eq!(task.schedule_id, 91);
-            assert_eq!(task.schedule_to_start_timeout.unwrap().seconds, 9);
+            assert_eq!(task.schedule_to_start_timeout.unwrap().seconds, 0);
             assert_eq!(task.partition_config.get("isolation-group").unwrap(), "zone-a");
             Ok(tonic::Response::new(m::AddDecisionTaskResponse::default()))
         }
