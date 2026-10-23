@@ -255,8 +255,19 @@ function clientsForTaskList(taskListName) {
 }
 function call(service, method, request) {
   const taskListName = request.taskList?.name || request.request?.taskList?.name;
-  if (taskListName) return registerShardWithGoManager(taskListName).then(() => callRpc(service, method, request));
-  return callRpc(service, method, request);
+  if (!taskListName) return callRpc(service, method, request);
+  if (!realShardDistributor) return registerShardWithGoManager(taskListName).then(() => callRpc(service, method, request));
+  // The real leader loop may move a shard between executors at any time; a non-owner answers a typed
+  // ABORTED before doing any work, so the call is re-resolved to the new owner and sent again.
+  return (async () => {
+    for (let attempt = 0; ; attempt++) {
+      await registerShardWithGoManager(taskListName);
+      try { return await callRpc(service, method, request); } catch (error) {
+        if (attempt >= 8 || !/not owned by this host/.test(error.message)) throw error;
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+  })();
 }
 function callRpc(service, method, request) {
   const taskListName = request.taskList?.name || request.request?.taskList?.name;
