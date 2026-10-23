@@ -15,7 +15,7 @@ Branch: `matching-http-tls-20261023`.
 
 HTTP startup now loads the CA pool and certificate pair even when TLSMode is disabled, as Go does. Required client authentication uses WebPKI verification with explicit or native trust roots. An empty explicit CA pool still permits startup but rejects all clients. Existing YAML field renames cover every Go TLS field. Invalid modes and unreadable CA/certificate/key files keep contextual startup errors. No Go code changed and no TChannel encryption was added.
 
-Generated-certificate network test covers permissive plaintext, enforced plaintext rejection, trusted TLS client acceptance, missing/untrusted certificate rejection in both modes, ignored inbound-only options, disabled transport file validation, and empty CA startup. Existing listener tests cover mode and certificate error handling and handshake timeout.
+Generated-certificate network test covers permissive plaintext, enforced plaintext rejection, trusted TLS client acceptance, missing/untrusted certificate rejection in both modes, options with no inbound effect, disabled transport file validation, and empty CA startup. Existing listener tests cover mode and certificate error handling and handshake timeout.
 
 ## Scope
 
