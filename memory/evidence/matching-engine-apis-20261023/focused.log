@@ -1,0 +1,19 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/engineapis/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/engineapis/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/engineapis/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/engineapis/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/engineapis/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/engineapis/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/engineapis/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 13s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 5 tests
+test grpc_matching::durable_tests::engine_apis_describe_identifier_errors_precede_domain_lookup_like_go ... ok
+test grpc_matching::durable_tests::engine_apis_durable_describe_and_domain_listing_share_go_manager_fields ... ok
+test grpc_matching::durable_tests::engine_apis_partition_order_owners_and_lookup_errors_match_go ... ok
+test grpc_matching::durable_tests::engine_apis_partition_spectator_failure_is_empty_owner_like_go ... ok
+test grpc_matching::durable_tests::engine_apis_poller_groups_and_list_info_match_go_boundaries ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 444 filtered out; finished in 0.01s
+
