@@ -1,0 +1,16 @@
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: remaining Rust host did not own the released semaphore bucket
++ actual - expected
+
++ ''
+- '127.0.0.1:58445'
+
+    at run (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:768:14) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: '',
+  expected: '127.0.0.1:58445',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+Error: Rust Matching exited {"code":null,"signal":"SIGKILL"}; see /mnt/storage/service/gate-runs/g5-cass/run/rust-matching/rust-server-after-restart.log
+    at run (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:1261:34)

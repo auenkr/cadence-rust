@@ -1,15 +1,21 @@
 {
   "repository": "/mnt/storage/service/github/wt/gate5",
-  "head": "8be17b8a785ab3a5095188994053ecec0f06702d",
+  "head": "83ae3451df6917d296b1a7c3b1db52e61b0e4dd8",
   "branch": "matching-gate-run2-20261023",
   "status": [
-    "M memory/evidence/matching-gate-run2-20261023/cassandra/config-redacted/development.yaml",
+    "M memory/evidence/matching-gate-run2-20261023/cassandra/binaries.json",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/config-hashes.json",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/config-redacted/development.yaml",
     " M memory/evidence/matching-gate-run2-20261023/cassandra/config-redacted/development_cassandra.yaml",
     " M memory/evidence/matching-gate-run2-20261023/cassandra/config-redacted/rust-matching.yaml",
     " M memory/evidence/matching-gate-run2-20261023/cassandra/matching-shutdown.json",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/probe.log",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/results-copy.json",
     " M memory/evidence/matching-gate-run2-20261023/cassandra/results.json",
     " M memory/evidence/matching-gate-run2-20261023/cassandra/rust-server-logs/rust-server-before-restart.log",
     " M memory/evidence/matching-gate-run2-20261023/cassandra/rust-server-logs/rust-server-secondary.log",
-    " M memory/evidence/matching-gate-run2-20261023/cassandra/server.log"
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/server.log",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/source.json",
+    "?? memory/evidence/matching-gate-run2-20261023/cass-attempts/attempt-createdomain-flake.log"
   ]
 }

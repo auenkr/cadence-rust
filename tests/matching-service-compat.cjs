@@ -750,6 +750,24 @@ async function run() {
       const recoveredOwnerProcess = recoveredOwnerIndex === 0 ? rust : secondaryRust;
       const remainingOwnerIndex = semaphoreEvidence.bucketOwnerIndex;
       const remainingPeer = directMatchingClient(`127.0.0.1:${remainingOwnerIndex === 0 ? rustGrpcPort : process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
+      // The originally crashed bucket owner is still dead here; bring it back so a
+      // second host exists to own the released bucket once the recovered one is killed.
+      if (remainingOwnerIndex === 0) {
+        rust = startRust('after-semaphore-owner-crash');
+        await waitForRustReady('after-semaphore-owner-crash');
+      } else {
+        secondaryRust = startSecondaryRust();
+        const rejoinDeadline = Date.now() + 30000;
+        let rejoined = false;
+        while (Date.now() < rejoinDeadline) {
+          try {
+            await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-semaphore-owner-restarted-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+            rejoined = true;
+            break;
+          } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
+        }
+        assert(rejoined, 'restarted semaphore bucket owner did not rejoin Go discovery');
+      }
       const recoveredOwnerExitPromise = new Promise(resolve => recoveredOwnerProcess.once('exit', (code, signal) => resolve({ code, signal })));
       recoveredOwnerProcess.kill('SIGKILL');
       const recoveredOwnerExit = await recoveredOwnerExitPromise;

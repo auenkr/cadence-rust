@@ -36,7 +36,7 @@
   ],
   "artifactsDirectory": "/mnt/storage/service/gate-runs/g5-cass/run",
   "probeExitCode": 1,
-  "goServicesPid": 967886,
+  "goServicesPid": 985364,
   "goServicesAliveAfterProbe": true,
   "matchingExporter": null,
   "matchingExporterAddress": null,
