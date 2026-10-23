@@ -59,8 +59,11 @@ This machine has 4 CPUs (i5-7300HQ), 7.7GB RAM and ~117GB free on /mnt/storage, 
 
 Build rules (RAM is the limit, a cadence-server rustc can use 2-3GB):
 - Use the shared target dir: `export CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared`.
-- At most TWO cargo jobs at once, each with `-j2`, each wrapped in `flock /tmp/cargo-1.lock` or `flock /tmp/cargo-2.lock` (pick a free one with `flock -n`, else wait).
-- While a mixed-cluster gate (MySQL/PostgreSQL + Go services) is running, allow only ONE cargo job.
+- At most ONE cargo job host-wide (observed: 2-3 concurrent workspace builds drove load to 12 on 4 cores and filled swap). Every cargo/rustc invocation must be wrapped in the single lock: `flock /tmp/cargo.lock cargo <cmd> -j3`. Never start cargo without the lock; never use another lock file.
+- Do not run `cargo check --workspace` separately: `cargo clippy --workspace --all-targets -- -D warnings` already type-checks. Run clippy, then `cargo test --workspace`, never both in parallel. For small changes use `-p <crate>` first, full workspace only for the final gate.
+- Do not run cargo at all while a mixed-cluster gate (MySQL/PostgreSQL + Go services) is running, and run only one gate at a time. Build the gate binaries first, then start the gate.
+- Check load before starting heavy work: `uptime` load above 6 or `free` available below 2GB means wait.
+- Max 5 subagents, but most should be code-writing or read-only audit work. At most 2 may be waiting on or running cargo at the same time (the lock queues the rest); do not poll in tight loops (sleep >= 60s).
 - Always record the exit code to a file: `cmd > log 2>&1; echo $? > file.exit`.
 Do not keep running subagents forever. Sometimes agents get stuck and in status it shows working since 16+hr.
 So after assigning Keep checking on subagents weather they are working correctly or not.
