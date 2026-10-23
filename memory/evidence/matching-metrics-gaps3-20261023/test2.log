@@ -1,0 +1,121 @@
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-matching)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-service-core)
+error[E0425]: cannot find value `PERSISTENCE_ERRORS_DB_UNAVAILABLE` in this scope
+  --> crates/cadence-matching/src/matching_persistence_limiter.rs:69:17
+   |
+69 |                 PERSISTENCE_ERRORS_DB_UNAVAILABLE,
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `PERSISTENCE_ERRORS_DB_UNAVAILABLE_PER_DOMAIN` in this scope
+  --> crates/cadence-matching/src/matching_persistence_limiter.rs:70:17
+   |
+70 |                 PERSISTENCE_ERRORS_DB_UNAVAILABLE_PER_DOMAIN,
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+  --> crates/cadence-service-core/src/matching_metrics.rs:228:0
+   |
+   = note: similarly named constant `PERSISTENCE_ERRORS_BUSY_PER_DOMAIN` defined here
+help: a constant with a similar name exists
+   |
+70 -                 PERSISTENCE_ERRORS_DB_UNAVAILABLE_PER_DOMAIN,
+70 +                 PERSISTENCE_ERRORS_BUSY_PER_DOMAIN,
+   |
+
+error[E0425]: cannot find value `PERSISTENCE_ERRORS_BAD_REQUEST` in this scope
+  --> crates/cadence-matching/src/matching_persistence_limiter.rs:74:17
+   |
+74 |                 PERSISTENCE_ERRORS_BAD_REQUEST,
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+  --> crates/cadence-service-core/src/matching_metrics.rs:225:0
+   |
+   = note: similarly named constant `PERSISTENCE_ERRORS_BUSY` defined here
+help: a constant with a similar name exists
+   |
+74 -                 PERSISTENCE_ERRORS_BAD_REQUEST,
+74 +                 PERSISTENCE_ERRORS_BUSY,
+   |
+
+error[E0425]: cannot find value `PERSISTENCE_ERRORS_BAD_REQUEST_PER_DOMAIN` in this scope
+  --> crates/cadence-matching/src/matching_persistence_limiter.rs:75:17
+   |
+75 |                 PERSISTENCE_ERRORS_BAD_REQUEST_PER_DOMAIN,
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+  --> crates/cadence-service-core/src/matching_metrics.rs:228:0
+   |
+   = note: similarly named constant `PERSISTENCE_ERRORS_BUSY_PER_DOMAIN` defined here
+help: a constant with a similar name exists
+   |
+75 -                 PERSISTENCE_ERRORS_BAD_REQUEST_PER_DOMAIN,
+75 +                 PERSISTENCE_ERRORS_BUSY_PER_DOMAIN,
+   |
+
+error[E0027]: pattern does not mention fields `env`, `zone`
+   --> crates/cadence-matching/src/launcher.rs:486:9
+    |
+486 | /         Command::Start {
+487 | |             config,
+488 | |             root,
+489 | |             services,
+...   |
+496 | |             data_dir,
+497 | |         } => {
+    | |_________^ missing fields `env`, `zone`
+    |
+help: include the missing fields in the pattern
+    |
+496 -             data_dir,
+497 -         } => {
+496 +             data_dir, env, zone } => {
+    |
+help: if you don't care about these missing fields, you can explicitly ignore them
+    |
+496 -             data_dir,
+497 -         } => {
+496 +             data_dir, env: _, zone: _ } => {
+    |
+help: or always ignore missing fields here
+    |
+496 -             data_dir,
+497 -         } => {
+496 +             data_dir, .. } => {
+    |
+
+error[E0599]: no variant, associated function, or constant named `DbUnavailable` found for enum `BackendErrorKind` in the current scope
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:225:35
+    |
+225 |                 BackendErrorKind::DbUnavailable => PersistenceErrorClass::DbUnavailable,
+    |                                   ^^^^^^^^^^^^^ variant, associated function, or constant not found in `BackendErrorKind`
+
+error[E0599]: no variant, associated function, or constant named `BadRequest` found for enum `BackendErrorKind` in the current scope
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:226:35
+    |
+226 |                 BackendErrorKind::BadRequest => PersistenceErrorClass::BadRequest,
+    |                                   ^^^^^^^^^^ variant, associated function, or constant not found in `BackendErrorKind`
+
+error[E0425]: cannot find function `record_persistence_response_rows` in this scope
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:364:13
+    |
+364 |             record_persistence_response_rows(sink.as_ref(), operation, rows);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   --> crates/cadence-service-core/src/matching_metrics.rs:309:0
+    |
+    = note: similarly named function `record_persistence_empty_response` defined here
+help: a function with a similar name exists
+    |
+364 -             record_persistence_response_rows(sink.as_ref(), operation, rows);
+364 +             record_persistence_empty_response(sink.as_ref(), operation, rows);
+    |
+
+error[E0425]: cannot find function `record_persistence_response_payload` in this scope
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:366:9
+    |
+366 |         record_persistence_response_payload(sink.as_ref(), operation, payload_bytes);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+Some errors have detailed explanations: E0027, E0425, E0599.
+For more information about an error, try `rustc --explain E0027`.
+error: could not compile `cadence-matching` (lib) due to 9 previous errors
+warning: build failed, waiting for other jobs to finish...

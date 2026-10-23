@@ -1,0 +1,21 @@
+    Checking cadence-common v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-proto)
+    Checking cadence-api v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-api)
+    Checking mysql_async v0.37.1 (/mnt/storage/service/github/wt/metrics3/rust/vendor/mysql_async-0.37.1)
+    Checking cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-thrift)
+    Checking scylla v1.9.0 (/mnt/storage/service/github/wt/metrics3/rust/vendor/scylla-1.9.0)
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-matching)
+error[E0609]: no field `id` on type `DomainInfo`
+   --> crates/cadence-matching/src/matching_persistence.rs:302:38
+    |
+302 |                     .map(|d| (d.info.id.len() + d.info.name.len()) as u64 + 128)
+    |                                      ^^ unknown field
+    |
+    = note: available fields are: `name`, `status`, `description`, `owner_email`, `data`, `uuid`
+
+For more information about this error, try `rustc --explain E0609`.
+error: could not compile `cadence-matching` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `cadence-matching` (lib test) due to 1 previous error

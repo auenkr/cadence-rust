@@ -1,0 +1,16 @@
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-matching)
+warning: method `record_empty_response` is never used
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:370:19
+    |
+107 | impl MatchingPersistenceLimiter {
+    | ------------------------------- method in this implementation
+...
+370 |     pub(crate) fn record_empty_response(&self, operation: &'static str) {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cadence-matching` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 57.21s
