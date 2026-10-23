@@ -187,6 +187,29 @@ impl<T> Rendezvous<T> {
             }
         }
     }
+    async fn offer_until(
+        &self,
+        item: T,
+        mut stop: watch::Receiver<bool>,
+        deadline: tokio::time::Instant,
+    ) -> Option<bool> {
+        if *stop.borrow() { return None; }
+        let pending = Arc::new(Pending { item: Mutex::new(Some(item)), accepted: Notify::new() });
+        let _guard = OfferGuard { channel: self, pending: pending.clone() };
+        self.offers.lock().expect("Matching handoff lock").push_back(pending.clone());
+        self.available.notify_one();
+        tokio::select! {
+            _ = pending.accepted.notified() => return Some(true),
+            _ = tokio::time::sleep_until(deadline) => (),
+            _ = stop.changed() => return None,
+        }
+        let mut offers = self.offers.lock().expect("Matching handoff lock");
+        if pending.item.lock().expect("Matching offered task lock").is_none() {
+            return Some(true);
+        }
+        offers.retain(|offer| !Arc::ptr_eq(offer, &pending));
+        Some(false)
+    }
     // Select the local rendezvous and forward token atomically with respect
     // to pollers. Dropping a raced offer future alone could forward a task
     // that another runtime thread has already claimed locally.
@@ -632,10 +655,10 @@ impl TaskReader {
                                 };
                             };
                             let first_deadline = tokio::time::Instant::now() + (forwarder.local_wait)();
-                            match tokio::time::timeout_at(first_deadline, target.offer(dispatched.clone(), dispatch_stop.clone())).await {
-                                Ok(true) => return Attempt::Offered,
-                                Ok(false) => return Attempt::Stopped,
-                                Err(_) => (),
+                            match target.offer_until(dispatched.clone(), dispatch_stop.clone(), first_deadline).await {
+                                Some(true) => return Attempt::Offered,
+                                None => return Attempt::Stopped,
+                                Some(false) => (),
                             }
                             let mut attempt = 0u64;
                             loop {
@@ -665,13 +688,10 @@ impl TaskReader {
                                     }
                                     Err(_) => (),
                                 }
-                                let retry_deadline = forward_deadline;
-                                tokio::select! {
-                                    local = target.offer(dispatched.clone(), dispatch_stop.clone()) => {
-                                        return if local { Attempt::OfferedAfterForwardFailure(attempt) } else { Attempt::Stopped };
-                                    }
-                                    _ = tokio::time::sleep_until(retry_deadline) => (),
-                                    _ = dispatch_stop.changed() => return Attempt::Stopped,
+                                match target.offer_until(dispatched.clone(), dispatch_stop.clone(), forward_deadline).await {
+                                    Some(true) => return Attempt::OfferedAfterForwardFailure(attempt),
+                                    None => return Attempt::Stopped,
+                                    Some(false) => (),
                                 }
                                 attempt = attempt.saturating_add(1);
                             }
