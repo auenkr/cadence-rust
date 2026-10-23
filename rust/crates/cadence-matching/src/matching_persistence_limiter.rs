@@ -43,6 +43,8 @@ pub struct MatchingPersistenceLimiter {
     rejected: AtomicU64,
     metric_sink: RwLock<Arc<dyn crate::matching_metrics::MetricSink>>,
     domain_name: RwLock<DomainNameResolver>,
+    host_name: RwLock<String>,
+    manual_latency_histogram: RwLock<bool>,
 }
 
 impl std::fmt::Debug for MatchingPersistenceLimiter {
@@ -85,7 +87,23 @@ impl MatchingPersistenceLimiter {
             rejected: AtomicU64::new(0),
             metric_sink: RwLock::new(Arc::new(crate::matching_metrics::NoopMetricSink)),
             domain_name: RwLock::new(Arc::new(|_| None)),
+            host_name: RwLock::new(String::new()),
+            manual_latency_histogram: RwLock::new(false),
         })
+    }
+
+    /// Go's metered persistence reads `HostName` from the process (`os.Hostname`);
+    /// an empty name disables the per-host series, as in Go.
+    pub fn with_host_name(&self, host: &str) {
+        *self.host_name.write().expect("Matching persistence host lock") = host.to_owned();
+    }
+
+    /// Go `enablePersistenceLatencyHistogramMetrics`, read once at startup.
+    pub fn with_manual_latency_histogram(&self, enabled: bool) {
+        *self
+            .manual_latency_histogram
+            .write()
+            .expect("Matching persistence histogram lock") = enabled;
     }
 
     /// Attach the configured production sink before Matching listeners start.
@@ -216,6 +234,17 @@ impl MatchingPersistenceLimiter {
             tags: histogram_tags,
             histogram: Some(HistogramSpec::GoDefault1ms100s),
         });
+        let host = self.host_name.read().expect("Matching persistence host lock");
+        if !host.is_empty() {
+            record_persistence_host_latency(sink.as_ref(), &host, elapsed);
+        }
+        if *self
+            .manual_latency_histogram
+            .read()
+            .expect("Matching persistence histogram lock")
+        {
+            record_persistence_manual_latency(sink.as_ref(), operation, elapsed);
+        }
         if let Err(error) = result {
             let (name, failure) = match error {
                 MatchingTaskStoreError::ConditionFailed(_) => (
@@ -279,6 +308,12 @@ impl MatchingPersistenceLimiter {
                 );
             }
         }
+    }
+
+    /// Go `emptyMetric` for a successful call that returned no rows.
+    pub(crate) fn record_empty_response(&self, operation: &'static str) {
+        let sink = self.metric_sink.read().expect("Matching metrics sink lock");
+        crate::matching_metrics::record_persistence_empty_response(sink.as_ref(), operation);
     }
 
     /// Consume one backend-operation permit without waiting, as Go's
@@ -483,6 +518,73 @@ mod metered_task_tests {
             .iter()
             .all(|event| event.tags["domain"] == "_unknown_"
                 && !event.tags.contains_key("task_category")));
+    }
+
+    #[test]
+    fn empty_rows_and_host_latency_follow_go_metered_wrapper() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        limiter.with_host_name("matching-host-a");
+        limiter.record_task_call(
+            "GetTasks",
+            Some(uuid::Uuid::nil()),
+            std::time::Duration::from_millis(1),
+            &Ok::<_, MatchingTaskStoreError>(()),
+        );
+        limiter.record_empty_response("GetTasks");
+        let events = sink.events();
+        let empty = events
+            .iter()
+            .find(|e| e.name == "persistence_empty_response")
+            .unwrap();
+        assert_eq!(empty.tags["operation"], "GetTasks");
+        assert_eq!(empty.tags["task_category"], "none");
+        assert!(!empty.tags.contains_key("domain"));
+        let host = events
+            .iter()
+            .find(|e| e.name == "persistence_latency_histogram_per_host")
+            .unwrap();
+        assert_eq!(host.tags["host"], "matching-host-a");
+        assert_eq!(host.tags["operation"], "persistence_operations");
+    }
+
+    #[test]
+    fn manual_latency_histogram_is_opt_in_and_operation_tagged() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        let call = |limiter: &MatchingPersistenceLimiter| {
+            limiter.record_task_call(
+                "GetTasks",
+                None,
+                std::time::Duration::from_millis(2),
+                &Ok::<_, MatchingTaskStoreError>(()),
+            );
+        };
+        call(&limiter);
+        assert!(!sink
+            .events()
+            .iter()
+            .any(|e| e.name == "persistence_latency_histogram"));
+        limiter.with_manual_latency_histogram(true);
+        call(&limiter);
+        let manual = sink
+            .events()
+            .into_iter()
+            .find(|e| e.name == "persistence_latency_histogram")
+            .unwrap();
+        assert_eq!(manual.kind, MetricKind::Histogram);
+        assert_eq!(
+            manual.tags,
+            std::collections::BTreeMap::from([("operation".to_owned(), "GetTasks".to_owned())])
+        );
     }
 
     #[test]

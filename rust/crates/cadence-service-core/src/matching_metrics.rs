@@ -228,6 +228,12 @@ pub const PERSISTENCE_FAILURES_PER_DOMAIN: &str = "persistence_errors_per_domain
 pub const PERSISTENCE_ERRORS_BUSY_PER_DOMAIN: &str = "persistence_errors_busy_per_domain";
 pub const MATCHING_PERSISTENCE_QPS_REJECTIONS: &str = "matching_persistence_qps_rejections";
 pub const TASK_CATEGORY_TAG: &str = "task_category";
+pub const PERSISTENCE_EMPTY_RESPONSE: &str = "persistence_empty_response";
+pub const PERSISTENCE_LATENCY_HISTOGRAM: &str = "persistence_latency_histogram";
+pub const PERSISTENCE_LATENCY_HISTOGRAM_PER_HOST: &str = "persistence_latency_histogram_per_host";
+/// Go `PersistencePerHostScope` operation tag (`defs.go`).
+pub const GO_PERSISTENCE_PER_HOST_OPERATION: &str = "persistence_operations";
+pub const HOST_TAG: &str = "host";
 
 /// Emit the Go metered persistence counters for a call rejected by Matching's
 /// shared host/cluster persistence limiter. Go records the request before the
@@ -294,6 +300,55 @@ pub fn record_persistence_qps_rejection(
             });
         }
     }
+}
+
+/// Go `base.emptyMetric` for a successful list call that returned no rows.
+/// Only the count is emitted; Go's row-size and payload-size histograms need
+/// `ResponseRowSizeBuckets` and `ResponsePayloadSizeBuckets`, which no exporter
+/// models yet.
+pub fn record_persistence_empty_response(sink: &dyn MetricSink, operation: &'static str) {
+    sink.record(MetricEvent {
+        name: PERSISTENCE_EMPTY_RESPONSE,
+        kind: MetricKind::Counter,
+        value: MetricValue::Count(1),
+        tags: BTreeMap::from([
+            (OPERATION_TAG.to_owned(), operation.to_owned()),
+            (TASK_CATEGORY_TAG.to_owned(), "none".to_owned()),
+        ]),
+        histogram: None,
+    });
+}
+
+/// Go `base.recordLatencyHistogram` opt-in manual series. Go records it on the
+/// operation scope only, so the tag set is just `operation`.
+pub fn record_persistence_manual_latency(
+    sink: &dyn MetricSink,
+    operation: &'static str,
+    elapsed: Duration,
+) {
+    sink.record(MetricEvent {
+        name: PERSISTENCE_LATENCY_HISTOGRAM,
+        kind: MetricKind::Histogram,
+        value: MetricValue::Duration(elapsed),
+        tags: BTreeMap::from([(OPERATION_TAG.to_owned(), operation.to_owned())]),
+        histogram: None,
+    });
+}
+
+/// Go `base.recordLatencyHistogram`: the per-host series is emitted on Go's
+/// `persistence_operations` scope with only a host tag, for every metered call
+/// when the process has a host name.
+pub fn record_persistence_host_latency(sink: &dyn MetricSink, host: &str, elapsed: Duration) {
+    sink.record(MetricEvent {
+        name: PERSISTENCE_LATENCY_HISTOGRAM_PER_HOST,
+        kind: MetricKind::Histogram,
+        value: MetricValue::Duration(elapsed),
+        tags: BTreeMap::from([
+            (OPERATION_TAG.to_owned(), GO_PERSISTENCE_PER_HOST_OPERATION.to_owned()),
+            (HOST_TAG.to_owned(), host.to_owned()),
+        ]),
+        histogram: None,
+    });
 }
 
 #[cfg(test)]
@@ -1319,25 +1374,9 @@ impl MatchingMetrics {
         } else {
             (POLL_LOCAL_MATCH_LATENCY, POLL_LOCAL_MATCH_LATENCY_NS)
         };
-        let tags = BTreeMap::from([
-            (
-                DOMAIN_TAG.to_owned(),
-                if context.domain.is_empty() {
-                    "_unknown_".to_owned()
-                } else {
-                    context.domain.clone()
-                },
-            ),
-            (
-                TASK_LIST_TAG.to_owned(),
-                go_sanitize_metric_value(match context.task_list_kind {
-                    1 => "__sticky__",
-                    2 => "__ephemeral__",
-                    0 if !context.task_list.is_empty() => context.task_list.as_str(),
-                    _ => "_unknown_",
-                }),
-            ),
-        ]);
+        // Go `matcher.go` records these on the task-list manager scope, which
+        // carries operation=TaskListMgr and tasklistType in addition to
+        // domain and tasklist.
         for name in [timer, histogram] {
             self.0.record(MetricEvent {
                 name,
@@ -1347,8 +1386,40 @@ impl MatchingMetrics {
                     MetricKind::Histogram
                 },
                 value: MetricValue::Duration(elapsed),
-                tags: tags.clone(),
+                tags: self.task_list_metric_tags(name, context),
                 histogram: (name == histogram).then_some(HistogramSpec::GoLow1ms100s),
+            });
+        }
+    }
+
+    /// Go `createPollFor{Decision,Activity}TaskResponse`: a task that was not
+    /// sync matched records its async handoff latency on the poll RPC scope.
+    pub fn async_match_handler_latency(&self, context: &PollMetricContext, elapsed: Duration) {
+        let method = if context.task_type == "activity_task" {
+            "PollForActivityTask"
+        } else {
+            "PollForDecisionTask"
+        };
+        let tags = Self::request_tags(
+            method,
+            Some(&context.domain),
+            Some((&context.task_list, Some(context.task_list_kind))),
+            None,
+        );
+        for (name, kind, histogram) in [
+            (ASYNC_MATCH_LATENCY, MetricKind::Timer, None),
+            (
+                ASYNC_MATCH_LATENCY_NS,
+                MetricKind::Histogram,
+                Some(HistogramSpec::GoLow1ms100s),
+            ),
+        ] {
+            self.0.record(MetricEvent {
+                name,
+                kind,
+                value: MetricValue::Duration(elapsed),
+                tags: tags.clone(),
+                histogram,
             });
         }
     }
@@ -1944,6 +2015,74 @@ mod matcher_metric_tests {
         assert_eq!(events[0].kind, MetricKind::Counter);
         assert_eq!(events[0].tags[OPERATION_TAG], "AcquireSemaphore");
         assert_eq!(events[0].tags[SEMAPHORE_NAME_TAG], "sem");
+    }
+
+    #[test]
+    fn poll_match_latency_carries_manager_scope_tags() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        MatchingMetrics::new(sink.clone()).poll_match_latency(
+            &context(),
+            Duration::from_millis(4),
+            false,
+            false,
+        );
+        let events = sink.events();
+        assert_eq!(events.len(), 2);
+        for event in &events {
+            assert_eq!(event.tags[OPERATION_TAG], "TaskListMgr");
+            assert_eq!(event.tags[TASK_LIST_TYPE_TAG], "decision");
+            assert_eq!(event.tags[DOMAIN_TAG], "domain-a");
+            assert_eq!(event.tags[TASK_LIST_TAG], "queue_a");
+        }
+    }
+
+    #[test]
+    fn async_match_handler_latency_uses_poll_rpc_scope() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let elapsed = Duration::from_millis(9);
+        let mut poll_context = context();
+        poll_context.task_type = "activity_task";
+        MatchingMetrics::new(sink.clone()).async_match_handler_latency(&poll_context, elapsed);
+        let events = sink.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name, "asyncmatch_latency_per_tl");
+        assert_eq!(events[0].kind, MetricKind::Timer);
+        assert_eq!(events[1].name, "asyncmatch_latency_per_tl_ns");
+        assert_eq!(events[1].kind, MetricKind::Histogram);
+        assert_eq!(events[1].histogram, Some(HistogramSpec::GoLow1ms100s));
+        for event in &events {
+            assert_eq!(event.value, MetricValue::Duration(elapsed));
+            assert_eq!(event.tags[OPERATION_TAG], "PollForActivityTask");
+            assert_eq!(event.tags[DOMAIN_TAG], "domain-a");
+            assert_eq!(event.tags[TASK_LIST_TAG], "queue_a");
+            assert!(!event.tags.contains_key(TASK_LIST_TYPE_TAG));
+        }
+    }
+
+    #[test]
+    fn persistence_empty_response_and_host_latency_use_go_tags() {
+        let sink = RecordingMetricSink::default();
+        record_persistence_empty_response(&sink, "GetTasks");
+        record_persistence_host_latency(&sink, "matching-1", Duration::from_millis(2));
+        let events = sink.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name, PERSISTENCE_EMPTY_RESPONSE);
+        assert_eq!(
+            events[0].tags,
+            BTreeMap::from([
+                (OPERATION_TAG.to_owned(), "GetTasks".to_owned()),
+                (TASK_CATEGORY_TAG.to_owned(), "none".to_owned()),
+            ])
+        );
+        assert_eq!(events[1].name, PERSISTENCE_LATENCY_HISTOGRAM_PER_HOST);
+        assert_eq!(events[1].kind, MetricKind::Histogram);
+        assert_eq!(
+            events[1].tags,
+            BTreeMap::from([
+                (OPERATION_TAG.to_owned(), "persistence_operations".to_owned()),
+                (HOST_TAG.to_owned(), "matching-1".to_owned()),
+            ])
+        );
     }
 
     #[test]
