@@ -622,8 +622,10 @@ mod metered_task_tests {
         assert!(events
             .iter()
             .any(|event| event.name == "persistence_errors_entity_not_exists_per_domain"));
+        // Rollups are root-scope (untagged) in Go.
         assert!(events
             .iter()
+            .filter(|event| !event.name.ends_with("_rollup"))
             .all(|event| event.tags["domain"] == "_unknown_"
                 && !event.tags.contains_key("task_category")));
     }

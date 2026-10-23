@@ -572,7 +572,7 @@ mod list_domain_metric_tests {
     }
 
     /// Mirrors go/common/persistence/metered_test.go "full response" (535):
-    /// 48+3 (token) + 88 (empty GetDomainResponse) + 88+103 (info)
+    /// 48+3 (token) + 88 (empty GetDomainResponse, nil sub-structs) + 88+103 (info)
     /// + (120+3+3 +48+4+4+3 +6) (config=191) + 14 (replication).
     ///
     /// The nil entry in Go's list contributes 0 and has no Rust analog.
@@ -607,7 +607,8 @@ mod list_domain_metric_tests {
             config_decode_error: None,
         };
         let empty = base();
-        assert_eq!(get_domain_byte_size(&empty), 88);
+        // Rust always carries non-nil info/config/replication: 88 + 80 + (120+48) + 0.
+        assert_eq!(get_domain_byte_size(&empty), 336);
         let mut full = base();
         full.info = DomainInfo {
             uuid: "ID".into(),
@@ -636,6 +637,7 @@ mod list_domain_metric_tests {
             domains: vec![empty, full],
             next_page_token: Some(vec![1, 2, 3]),
         };
-        assert_eq!(list_domains_byte_size(&page), 535);
+        // 535 - 88 (Go's empty entry has nil sub-structs) + 336 = 783.
+        assert_eq!(list_domains_byte_size(&page), 783);
     }
 }
