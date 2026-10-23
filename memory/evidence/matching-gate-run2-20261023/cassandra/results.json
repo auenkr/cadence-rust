@@ -1,0 +1,45 @@
+{
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goMatchingStarted": false,
+  "rustServices": [
+    "matching"
+  ],
+  "goServices": [
+    "frontend",
+    "history",
+    "worker"
+  ],
+  "rustProductionBinary": "/mnt/storage/service/gate-runs/g5-bin/cadence-matching",
+  "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+  "historyTransport": "grpc",
+  "rustDynamicConfigFile": "/mnt/storage/service/gate-runs/g5-cass/run/rust-dynamic-config.yaml",
+  "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+  "acceptanceEligible": true,
+  "persistence": {
+    "backend": "cassandra",
+    "hosts": "127.0.0.1",
+    "port": 9042,
+    "defaultKeyspace": "cadence",
+    "visibilityKeyspace": "cadence_visibility"
+  },
+  "shardDistributor": null,
+  "serverCommand": [
+    "/mnt/storage/service/gate-runs/g5-build/cadence-server",
+    "--config",
+    "/mnt/storage/service/gate-runs/g5-cass/run/config",
+    "--zone",
+    "cassandra",
+    "start",
+    "--auto-setup",
+    "--services",
+    "frontend,history,worker"
+  ],
+  "artifactsDirectory": "/mnt/storage/service/gate-runs/g5-cass/run",
+  "probeExitCode": 1,
+  "goServicesPid": 962994,
+  "goServicesAliveAfterProbe": true,
+  "matchingExporter": null,
+  "matchingExporterAddress": null,
+  "runExitCode": 1,
+  "failure": "RuntimeError: Go baseline probe failed; see /mnt/storage/service/gate-runs/g5-cass/run/probe.log"
+}

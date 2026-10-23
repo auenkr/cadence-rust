@@ -1,0 +1,9 @@
+{
+  "repository": "/mnt/storage/service/github/wt/gate5",
+  "head": "7b84c01d1b934faa2499078fdb6312ebe7520d14",
+  "branch": "matching-gate-run2-20261023",
+  "status": [
+    "M tests/__pycache__/matching_evidence.cpython-314.pyc",
+    "?? memory/evidence/matching-gate-run2-20261023/"
+  ]
+}

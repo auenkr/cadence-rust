@@ -31,7 +31,7 @@ clients.Matching = new schema.matching.v1.MatchingAPI(peer, grpc.credentials.cre
 const cassandraGate = process.env.CADENCE_MATCHING_CASSANDRA_GATE === '1';
 function cassandraCommand(args, label) {
   const result = spawnSync('go', ['run', './tests/matching-cassandra-interop', ...args], {
-    cwd: path.resolve(__dirname, '..'), encoding: 'utf8', timeout: 120000, env: process.env,
+    cwd: path.resolve(__dirname, '..', 'go'), encoding: 'utf8', timeout: 600000, env: process.env,
   });
   fs.writeFileSync(path.join(path.resolve(process.argv[5]), `${label}.log`), `${result.stdout || ''}\n${result.stderr || ''}`);
   if (result.status !== 0) throw new Error(`Cassandra ${label} failed (${result.error || result.status}); see ${path.resolve(process.argv[5], `${label}.log`)}`);

@@ -1,0 +1,8 @@
+PROBE BODY FAILED: Error: Cassandra semaphore-before-recovery failed (1); see /mnt/storage/service/gate-runs/g5-cass/run/rust-matching/semaphore-before-recovery.log
+    at cassandraCommand (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:37:34)
+    at run (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:467:22)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+Error: Cassandra semaphore-before-recovery failed (1); see /mnt/storage/service/gate-runs/g5-cass/run/rust-matching/semaphore-before-recovery.log
+    at cassandraCommand (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:37:34)
+    at run (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:467:22)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
