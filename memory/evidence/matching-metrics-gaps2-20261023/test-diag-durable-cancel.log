@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.41s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 1 test
+test grpc_matching::durable_tests::matching_rpc_durable_cancel_unregisters_waiting_poller ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 397 filtered out; finished in 0.01s
+

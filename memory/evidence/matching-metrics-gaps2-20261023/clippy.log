@@ -1,0 +1,8 @@
+    Checking cadence-common v0.1.0 (/mnt/storage/service/github/wt/metrics2/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/metrics2/rust/crates/cadence-proto)
+    Checking cadence-api v0.1.0 (/mnt/storage/service/github/wt/metrics2/rust/crates/cadence-api)
+    Checking cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/metrics2/rust/crates/cadence-thrift)
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/metrics2/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/metrics2/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/metrics2/rust/crates/cadence-matching)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 22s
