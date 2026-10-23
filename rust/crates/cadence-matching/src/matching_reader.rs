@@ -1095,6 +1095,43 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
+    // Go config_test.go TestGetTasksBatchSizeValidation: positive live batch sizes pass through unchanged.
+    #[test]
+    fn go_get_tasks_batch_size_positive_values_pass_through() {
+        for value in [1000i64, 1] {
+            let live = Arc::new(ReaderLive {
+                batch_size: Arc::new(move || value),
+                read_range_size: Arc::new(|| 50_000i64),
+                dispatch_timeout: Arc::new(|| 3_000_000_000i64),
+                update_ack_interval: Arc::new(|| 20_000_000i64),
+            });
+            let config = ReaderConfig {
+                live: Some(live),
+                ..Default::default()
+            };
+            assert_eq!(config.read_batch_size().get() as i64, value);
+        }
+    }
+
+    // Go config_test.go TestGetTasksBatchSizeValidation expects the raw 0 and -5 from GetTasksBatchSize.
+    #[test]
+    #[ignore = "parity gap: Rust has no raw GetTasksBatchSize accessor. The read path substitutes DEFAULT_TASKS_BATCH_SIZE (1000) for 0 and -5, where Go's Config returns the raw 0 / -5"]
+    fn go_get_tasks_batch_size_returns_raw_non_positive_values() {
+        for value in [0i64, -5] {
+            let live = Arc::new(ReaderLive {
+                batch_size: Arc::new(move || value),
+                read_range_size: Arc::new(|| 50_000i64),
+                dispatch_timeout: Arc::new(|| 3_000_000_000i64),
+                update_ack_interval: Arc::new(|| 20_000_000i64),
+            });
+            let config = ReaderConfig {
+                live: Some(live),
+                ..Default::default()
+            };
+            assert_eq!(config.read_batch_size().get() as i64, value);
+        }
+    }
+
     #[test]
     fn reader_live_properties_match_go_reads() {
         let batch = Arc::new(AtomicI64::new(4));
