@@ -150,39 +150,109 @@ async fn matching_http_tls(
     let Some(tls) = tls.filter(|tls| tls.enabled) else {
         return Ok(None);
     };
-    if tls.require_client_auth
-        || !tls.ca_file.is_empty()
-        || !tls.ca_files.is_empty()
-        || tls.enable_host_verification
-        || !tls.server_name.is_empty()
-        || !tls.ssl_mode.is_empty()
-    {
-        anyhow::bail!(
-            "Matching HTTP TLS configured CA/client-auth/host-verification/serverName/sslmode options are unsupported"
-        );
+    // Go ToTLSConfig reads CA files even when TLSMode disables the transport.
+    // sslmode is a database option; host verification and serverName only
+    // affect outbound connections, so none changes this inbound listener.
+    let mut roots = rustls::RootCertStore::empty();
+    let mut files = tls.ca_files.clone();
+    if !tls.ca_file.is_empty() {
+        files.push(tls.ca_file.clone());
     }
-    if mode == "disabled" {
-        if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
-            axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert_file, &tls.key_file)
-                .await
-                .map_err(|error| anyhow::anyhow!("creating TLS config for HTTP: {error}"))?;
+    if files.is_empty() && tls.require_client_auth {
+        for cert in rustls_native_certs::load_native_certs().certs {
+            let _ = roots.add(cert);
         }
+    }
+    for file in files {
+        let pem = std::fs::read(&file)
+            .map_err(|error| anyhow::anyhow!("reading HTTP TLS CA file {file}: {error}"))?;
+        for cert in rustls_pemfile::certs(&mut pem.as_slice()).filter_map(Result::ok) {
+            let _ = roots.add(cert);
+        }
+    }
+    let builder = rustls::ServerConfig::builder();
+    let builder = if tls.require_client_auth {
+        let verifier: std::sync::Arc<dyn rustls::server::danger::ClientCertVerifier> = if roots
+            .is_empty()
+        {
+            // Go permits an empty CA pool at startup but rejects every client.
+            std::sync::Arc::new(EmptyClientCaPool)
+        } else {
+            rustls::server::WebPkiClientVerifier::builder(std::sync::Arc::new(roots))
+                .build()
+                .map_err(|error| anyhow::anyhow!("creating HTTP TLS client CA verifier: {error}"))?
+        };
+        builder.with_client_cert_verifier(verifier)
+    } else {
+        builder.with_no_client_auth()
+    };
+    let mut server = if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
+        let cert = std::fs::read(&tls.cert_file);
+        let key = std::fs::read(&tls.key_file);
+        let identity = (|| -> anyhow::Result<_> {
+            let cert = cert?;
+            let key = key?;
+            let certs =
+                rustls_pemfile::certs(&mut cert.as_slice()).collect::<Result<Vec<_>, _>>()?;
+            let key = rustls_pemfile::private_key(&mut key.as_slice())?
+                .ok_or_else(|| anyhow::anyhow!("no private key"))?;
+            Ok(builder.with_single_cert(certs, key)?)
+        })();
+        identity.map_err(|error| {
+            anyhow::anyhow!("loading Matching HTTP TLS certificate/key: {error}")
+        })?
+    } else {
+        builder.with_cert_resolver(std::sync::Arc::new(NoServerCertificate))
+    };
+    if mode == "disabled" {
         return Ok(None);
     }
-    let config = if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
-        axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert_file, &tls.key_file)
-            .await
-            .map_err(|error| {
-                anyhow::anyhow!("loading Matching HTTP TLS certificate/key: {error}")
-            })?
-    } else {
-        let no_certificate = std::sync::Arc::new(NoServerCertificate);
-        let server = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_cert_resolver(no_certificate);
-        axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(server))
-    };
+    server.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    let config = axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(server));
     Ok(Some(config))
+}
+
+// AppendCertsFromPEM may leave Go's explicit CA pool empty. Keep startup
+// successful while requiring and rejecting client certificates in that case.
+#[derive(Debug)]
+struct EmptyClientCaPool;
+impl rustls::server::danger::ClientCertVerifier for EmptyClientCaPool {
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+    fn verify_client_cert(
+        &self,
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        Err(rustls::Error::InvalidCertificate(
+            rustls::CertificateError::UnknownIssuer,
+        ))
+    }
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _signature: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Err(rustls::Error::InvalidCertificate(
+            rustls::CertificateError::UnknownIssuer,
+        ))
+    }
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        signature: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.verify_tls12_signature(message, cert, signature)
+    }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
 }
 
 #[derive(Debug)]
@@ -406,6 +476,142 @@ async fn serve_matching_http_permissive(
 #[cfg(test)]
 mod matching_http_listener_tests {
     use super::*;
+    #[tokio::test]
+    async fn http_mutual_tls_and_permissive_round_trips() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = tempfile::tempdir().unwrap();
+        let mut params = rcgen::CertificateParams::new(Vec::new()).unwrap();
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let ca_key = rcgen::KeyPair::generate().unwrap();
+        let ca = params.self_signed(&ca_key).unwrap();
+        let issue = || {
+            let key = rcgen::KeyPair::generate().unwrap();
+            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
+                .unwrap()
+                .signed_by(&key, &ca, &ca_key)
+                .unwrap();
+            (cert, key)
+        };
+        let (cert, key) = issue();
+        let write = |name: &str, data: String| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, data).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let mut http = config::HttpConfig {
+            tls_mode: Some("permissive".into()),
+            tls: Some(config::TlsConfig {
+                enabled: true,
+                cert_file: write("cert", cert.pem()),
+                key_file: write("key", key.serialize_pem()),
+                ca_files: vec![write("ca", ca.pem())],
+                require_client_auth: true,
+                enable_host_verification: true,
+                server_name: "ignored-on-server".into(),
+                ssl_mode: "ignored-for-rpc".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for mode in ["permissive", "enforced"] {
+            http.tls_mode = Some(mode.into());
+            let tls = matching_http_tls(&http).await.unwrap().unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            drop(listener);
+            let app = axum::Router::new().route("/", axum::routing::get(|| async { "ok" }));
+            let task = tokio::spawn(async move {
+                if mode == "permissive" {
+                    serve_matching_http_permissive(addr, app, tls).await
+                } else {
+                    axum_server::bind_rustls(addr, tls)
+                        .serve(app.into_make_service())
+                        .await
+                        .map_err(anyhow::Error::from)
+                }
+            });
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+            let tcp = loop {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "HTTP listener did not start"
+                );
+                match tokio::net::TcpStream::connect(addr).await {
+                    Ok(tcp) => break tcp,
+                    Err(_) => tokio::task::yield_now().await,
+                }
+            };
+            async fn request<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+                mut stream: S,
+            ) -> bool {
+                if stream
+                    .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                    .await
+                    .is_err()
+                {
+                    return false;
+                }
+                let mut response = Vec::new();
+                matches!(
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        stream.read_to_end(&mut response)
+                    )
+                    .await,
+                    Ok(Ok(_))
+                ) && response.starts_with(b"HTTP/1.1 200")
+            }
+            assert_eq!(request(tcp).await, mode == "permissive");
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add(ca.der().clone()).unwrap();
+            for identity in ["trusted", "absent", "untrusted"] {
+                let builder = rustls::ClientConfig::builder().with_root_certificates(roots.clone());
+                let client = if identity != "absent" {
+                    let (cert, key) = if identity == "trusted" {
+                        issue()
+                    } else {
+                        let key = rcgen::KeyPair::generate().unwrap();
+                        let cert = rcgen::CertificateParams::new(vec!["rogue".into()])
+                            .unwrap()
+                            .self_signed(&key)
+                            .unwrap();
+                        (cert, key)
+                    };
+                    builder
+                        .with_client_auth_cert(
+                            vec![cert.der().clone()],
+                            rustls::pki_types::PrivatePkcs8KeyDer::from(key.serialize_der()).into(),
+                        )
+                        .unwrap()
+                } else {
+                    builder.with_no_client_auth()
+                };
+                let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+                let connection = tokio_rustls::TlsConnector::from(std::sync::Arc::new(client))
+                    .connect("localhost".try_into().unwrap(), tcp)
+                    .await;
+                let success = match connection {
+                    Ok(stream) => request(stream).await,
+                    Err(_) => false,
+                };
+                assert_eq!(success, identity == "trusted", "{identity}");
+            }
+            task.abort();
+            let _ = task.await;
+        }
+        http.tls_mode = Some("disabled".into());
+        assert!(matching_http_tls(&http).await.unwrap().is_none());
+        http.tls.as_mut().unwrap().ca_files = vec![write("empty-ca", "not a certificate".into())];
+        assert!(matching_http_tls(&http).await.unwrap().is_none());
+        http.tls.as_mut().unwrap().ca_file = "/missing-http-ca".into();
+        assert!(matching_http_tls(&http)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("CA file"));
+    }
+
     #[test]
     fn history_outbound_selector_uses_last_unfiltered_global_value() {
         use cadence_api::{
