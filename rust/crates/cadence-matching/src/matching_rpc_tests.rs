@@ -1203,10 +1203,12 @@ async fn matching_rpc_manual_partition_update_rejected_while_scaler_enabled() {
 }
 
 #[tokio::test]
-async fn matching_rpc_partition_config_rpcs_reject_non_normal_kinds() {
-    let (_dir, _store, matching, key) = fixture();
-    // Proto kinds: 2 sticky, 3 ephemeral; Go accepts only normal (invalid maps to normal).
-    for kind in [2, 3] {
+async fn matching_rpc_partition_config_kind_gate_matches_go() {
+    // Go `ToTaskListKind` (go/common/types/mapper/proto/api.go:4051): INVALID(0) and any
+    // unknown value map to nil, which `TaskList.GetKind()` reads as Normal, so they are
+    // accepted. NORMAL(1) is accepted. STICKY(2) and EPHEMERAL(3) are rejected.
+    for (kind, accepted) in [(0, true), (1, true), (2, false), (3, false), (4, true), (-1, true)] {
+        let (_dir, _store, matching, key) = fixture();
         let task_list = Some(cadence_proto::api::TaskList {
             name: "queue".into(),
             kind,
@@ -1221,10 +1223,7 @@ async fn matching_rpc_partition_config_rpcs_reject_non_normal_kinds() {
                     partition_config: Some(native_config(1, &[0, 1], &[0, 1])),
                 },
             ))
-            .await
-            .expect_err("Go rejects non-normal kinds");
-        assert_eq!(update.code(), tonic::Code::InvalidArgument);
-        assert_eq!(update.message(), "Only normal tasklist's partition config can be updated.");
+            .await;
         let refresh = matching
             .refresh_task_list_partition_config(Request::new(
                 m::RefreshTaskListPartitionConfigRequest {
@@ -1234,10 +1233,43 @@ async fn matching_rpc_partition_config_rpcs_reject_non_normal_kinds() {
                     partition_config: None,
                 },
             ))
-            .await
-            .expect_err("Go rejects non-normal kinds");
-        assert_eq!(refresh.code(), tonic::Code::InvalidArgument);
-        assert_eq!(refresh.message(), "Only normal tasklist's partition config can be updated.");
+            .await;
+        if accepted {
+            update.unwrap_or_else(|e| panic!("kind {kind}: Go accepts, Rust rejected: {e}"));
+            refresh.unwrap_or_else(|e| panic!("kind {kind}: Go accepts, Rust rejected: {e}"));
+        } else {
+            let update = update.expect_err("Go rejects sticky/ephemeral kinds");
+            assert_eq!(update.code(), tonic::Code::InvalidArgument, "kind {kind}");
+            assert_eq!(update.message(), "Only normal tasklist's partition config can be updated.");
+            let refresh = refresh.expect_err("Go rejects sticky/ephemeral kinds");
+            assert_eq!(refresh.code(), tonic::Code::InvalidArgument, "kind {kind}");
+            assert_eq!(refresh.message(), "Only normal tasklist's partition config can be updated.");
+        }
+        matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn matching_thrift_has_no_partition_config_procedure() {
+    // Go's Thrift matching IDL (go/idls/thrift/matching.thrift) has no partition-config
+    // procedure, and the Go TChannel client returns "Feature not supported on TChannel".
+    // The kind gate is therefore gRPC-only; Thrift dispatch must reject both procedures
+    // as unknown.
+    let (_dir, _store, matching, _key) = fixture();
+    let args = cadence_thrift::value::Struct::default();
+    for procedure in [
+        "MatchingService::UpdateTaskListPartitionConfig",
+        "MatchingService::RefreshTaskListPartitionConfig",
+    ] {
+        let err = crate::thrift_matching::dispatch(
+            &matching,
+            procedure,
+            &args,
+            std::time::Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .expect_err("partition-config procedures are not in the Thrift IDL");
+        assert!(err.starts_with("Unknown Matching procedure"), "{procedure}: {err}");
     }
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
