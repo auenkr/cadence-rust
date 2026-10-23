@@ -79,12 +79,12 @@ Rust rollup/migration configuration remains a gap.
 | `PersistenceErrDuplicateRequestCounterPerDomain` / `persistence_errors_duplicate_request_per_domain` | Counter | P: operation=Persistence scope operation, is_retry; domain for per_domain family, task_category=none for overall family | — | go/common/persistence/wrappers/metered/base.go:117 | — | MISSING |
 | `PersistenceErrDBUnavailableCounterPerDomain` / `persistence_errors_db_unavailable_per_domain` | Counter | P: operation=Persistence scope operation, is_retry; domain for per_domain family, task_category=none for overall family | — | go/common/persistence/wrappers/metered/base.go:125 | — | MISSING |
 | `CadenceTasklistRequests` / `cadence_tasklist_request` | Counter | operation=AddTask, domain, tasklist, tasklistType=decision_task or activity_task, matching_host | — | go/service/matching/handler/engine.go:549<br>go/service/matching/handler/engine.go:632 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
-| `HashringViewIdentifier` / `hashring_view_identifier` | Gauge (Go UpdateGauge; catalog Counter) | operation=Hashring, service, host | — | go/common/membership/hashring.go:394 | — | MISSING |
+| `HashringViewIdentifier` / `hashring_view_identifier` | Gauge (Go UpdateGauge; catalog Counter) | operation=Hashring, service, host | — | go/common/membership/hashring.go:394 | rust/crates/cadence-server/src/matching_metrics.rs<br>rust/crates/cadence-server/src/matching_membership.rs | implemented emission; final validation pending |
 | `TaskListPartitionConfigVersionGauge` / `task_list_partition_config_version` | Gauge | M: operation=TaskListMgr, domain, tasklist, tasklistType, tasklist_root_partition | — | go/service/matching/tasklist/task_list_manager.go:381 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
 | `TaskListPartitionConfigNumReadGauge` / `task_list_partition_config_num_read` | Gauge | M: operation=TaskListMgr, domain, tasklist, tasklistType, tasklist_root_partition | — | go/service/matching/tasklist/task_list_manager.go:372<br>go/service/matching/tasklist/task_list_manager.go:379 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
 | `TaskListPartitionConfigNumWriteGauge` / `task_list_partition_config_num_write` | Gauge | M: operation=TaskListMgr, domain, tasklist, tasklistType, tasklist_root_partition | — | go/service/matching/tasklist/task_list_manager.go:373<br>go/service/matching/tasklist/task_list_manager.go:380 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
 | `ShardDistributorResolverLookups` / `shard_distributor_resolver_lookups` | Counter | operation=ShardDistributorResolver, routing_path=hash_ring or shard_distributor | — | go/common/membership/sharddistributorresolver.go:172 | rust/crates/cadence-server/src/matching_metrics.rs<br>rust/crates/cadence-server/src/matching_shard_routing.rs | implemented name; see branch notes and limitations |
-| `RingResolverError` / `ring_resolver_error` | Counter | operation=ResolverHostNotFound | — | go/common/membership/resolver.go:237 | — | MISSING |
+| `RingResolverError` / `ring_resolver_error` | Counter | operation=ResolverHostNotFound | — | go/common/membership/resolver.go:237 | rust/crates/cadence-server/src/matching_metrics.rs<br>rust/crates/cadence-server/src/matching_membership.rs | implemented emission; final validation pending |
 | `PollSuccessPerTaskListCounter` / `poll_success_per_tl` | Counter | M: operation=TaskListMgr, domain, tasklist, tasklistType | — | go/service/matching/tasklist/matcher.go:529<br>go/service/matching/tasklist/matcher.go:550<br>go/service/matching/tasklist/matcher.go:567<br>go/service/matching/tasklist/matcher.go:619<br>go/service/matching/tasklist/matcher.go:640<br>go/service/matching/tasklist/matcher.go:657<br>go/service/matching/tasklist/matcher.go:682<br>go/service/matching/tasklist/matcher.go:701<br>go/service/matching/tasklist/matcher.go:718<br>go/service/matching/tasklist/matcher.go:748<br>go/service/matching/tasklist/matcher.go:767<br>go/service/matching/tasklist/matcher.go:784 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
 | `PollTimeoutPerTaskListCounter` / `poll_timeouts_per_tl` | Counter | M: operation=TaskListMgr, domain, tasklist, tasklistType | — | go/service/matching/tasklist/matcher.go:570<br>go/service/matching/tasklist/matcher.go:660 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
 | `PollSuccessWithSyncPerTaskListCounter` / `poll_success_sync_per_tl` | Counter | M: operation=TaskListMgr, domain, tasklist, tasklistType | — | go/service/matching/tasklist/matcher.go:525<br>go/service/matching/tasklist/matcher.go:546<br>go/service/matching/tasklist/matcher.go:566<br>go/service/matching/tasklist/matcher.go:615<br>go/service/matching/tasklist/matcher.go:636<br>go/service/matching/tasklist/matcher.go:656<br>go/service/matching/tasklist/matcher.go:680<br>go/service/matching/tasklist/matcher.go:699<br>go/service/matching/tasklist/matcher.go:717<br>go/service/matching/tasklist/matcher.go:746<br>go/service/matching/tasklist/matcher.go:765<br>go/service/matching/tasklist/matcher.go:783 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
@@ -259,7 +259,7 @@ MatchingAcquireSemaphoreScope:               {operation: "AcquireSemaphore"},
 ## Remaining gaps
 
 - Backlog forwarding emissions require the separate backlog behavior work; do not fabricate them on local dispatch.
-- Shared persistence domain/semaphore success/latency/error emissions and membership view/error wiring need completion. Task-store success/typed errors and shard-routing emissions are now wired.
+- Shared persistence domain/semaphore success/latency/error emissions need completion. Task-store, membership view/error and shard-routing emissions are now wired.
 - Engine counters now inherit task-local RPC tags; background poll completion falls back to the poll RPC scope. Full mixed-cluster metric comparison remains required.
 - Go rollups, migration selection, domain-all timer duplication and optional persistence histograms need implementation.
 - Matrix statuses are conservative: a constant/helper is not proof of an emit site.
@@ -300,7 +300,7 @@ This branch is **partial**, not a declaration of Matching metrics completion.
 The ten backlog forwarding series have helpers but no behavior path at the base;
 they must be wired by the backlog-forwarding implementation, not fabricated on
 local handoff. Membership `hashring_view_identifier` (Go UpdateGauge despite
-Counter catalog type) and `ring_resolver_error` still lack emit sites. External
+Counter catalog type) and `ring_resolver_error` are now wired. External
 shard-manager client/executor/spectator metrics are outside the direct Go
 `common/metrics/defs.go` inventory and need a separate upstream-client audit.
 Domain metadata / semaphore metering, persistence retry tagging, row-count and
@@ -336,3 +336,10 @@ GetMetadata, ListDomain and GetDomain; its adapters still need metering.
 `is_retry` is Go's retry-context count > 0. Per-domain root rollups discard the
 scoped dimensions; their names are listed verbatim in defs.go. These root
 rollups are not implemented here.
+
+Membership follow-up (`759c37eba`): `hashring_view_identifier` emits only after
+an address-changing refresh, with operation=Hashring, service=cadence-matching,
+host=local identity. Its value is Go FarmHash32 over descending addresses with
+trailing newlines, modulo 1000. `ring_resolver_error` emits on failed
+AddressToHost lookup with operation=ResolverHostNotFound. Test-sink assertions
+cover the names, metric types, dimensions and no repeat on unchanged addresses.

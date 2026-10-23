@@ -2,7 +2,7 @@
 
 Worktree: `/mnt/storage/service/github/wt/metrics`.
 Branch: `matching-metrics-parity-20261023`, based on candidate `4f5fb6722`.
-Code frozen at `cd9309695` (subsequent evidence-only commits do not change code).
+Code frozen at `759c37eba` (subsequent evidence-only commits do not change code).
 Go IDL submodule initialized at `bfbf273b41b9e36ce21e47a49600d22d73e4614c`.
 Root checkout was not edited.
 
@@ -33,7 +33,7 @@ exit codes after all processes finish. No mixed-cluster metrics parity is claime
 RecordingMetricSink assertions cover manager/scaler scope dimensions,
 canonical tasklist/semaphore keys, duration/integer histogram metadata,
 RPC-scope inheritance for engine counters, persistence names/error semantics,
-overall/per-domain dimensions, and shard routing metrics on failed lookup.
+overall/per-domain dimensions, shard routing metrics on failed lookup, membership view dimensions, and resolver error scope.
 Exporter tests cover the existing duration/integer bucket paths; the new
 persistence histogram uses the Go Default1ms100s formula in all exporters.
 
