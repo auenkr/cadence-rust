@@ -206,6 +206,41 @@ where
     }
 }
 
+/// Go `adaptiveScalerImpl` Start/Stop. Start runs the periodic loop once and
+/// Stop aborts it; repeated calls are no-ops and a stopped daemon never
+/// restarts, like Go's `DaemonStatus` CAS transitions.
+#[derive(Default)]
+pub struct ScalerDaemon {
+    status: std::sync::Mutex<DaemonStatus>,
+}
+#[derive(Default)]
+enum DaemonStatus {
+    #[default]
+    Initialized,
+    Started(tokio::task::AbortHandle),
+    Stopped,
+}
+impl ScalerDaemon {
+    pub fn start<F>(&self, periodic: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let mut status = self.status.lock().expect("Matching scaler lock");
+        if matches!(*status, DaemonStatus::Initialized) {
+            *status = DaemonStatus::Started(tokio::spawn(periodic).abort_handle());
+        }
+    }
+    pub fn stop(&self) {
+        let mut status = self.status.lock().expect("Matching scaler lock");
+        if let DaemonStatus::Started(handle) = std::mem::replace(&mut *status, DaemonStatus::Stopped) {
+            handle.abort();
+        }
+    }
+    pub fn is_started(&self) -> bool {
+        matches!(*self.status.lock().expect("Matching scaler lock"), DaemonStatus::Started(_))
+    }
+}
+
 struct GroupState {
     under_load: Sustain,
     over_load: Sustain,

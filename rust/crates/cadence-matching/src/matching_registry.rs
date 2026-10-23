@@ -104,10 +104,10 @@ struct Owner {
     sync_wait: Arc<dyn Fn() -> std::time::Duration + Send + Sync>,
     forward_tasks: Arc<crate::matching_forward::RequestTokens>,
     forward_rate: Arc<crate::matching_forward::ForwardRate>,
-    /// Go `adaptiveScalerImpl` daemon handle. Aborted on unload/shutdown/drop
+    /// Go `adaptiveScalerImpl` daemon handle. Stopped on unload/shutdown/drop
     /// so a stale loop can neither resurrect the owner through `get` nor pin
     /// the registry (and its task store) past its lifetime.
-    scaler: Mutex<Option<tokio::task::AbortHandle>>,
+    scaler: crate::matching_scaler::ScalerDaemon,
     /// Go `taskListManagerImpl.createTime`: when the manager was created, used
     /// to withhold `LoadBalancerHints` for a task list's first 10s.
     created: i64,
@@ -118,11 +118,6 @@ struct Owner {
     liveness: Arc<cadence_common::liveness::Liveness>,
 }
 impl Owner {
-    fn abort_scaler(&self) {
-        if let Some(handle) = self.scaler.lock().expect("Matching scaler lock").take() {
-            handle.abort();
-        }
-    }
     fn stop(&self) {
         self.writer.stop();
         self.reader.stop();
@@ -134,7 +129,7 @@ impl Owner {
         now: i64,
         readers: &mut Vec<crate::matching_reader::TaskReader>,
     ) -> Result<(), Status> {
-        self.abort_scaler();
+        self.scaler.stop();
         self.stop();
         readers.push(self.reader.clone());
         let ack = self.queue.persist_final_ack(now);
@@ -159,7 +154,7 @@ fn tolerate_lost_ownership(
 }
 impl Drop for Owner {
     fn drop(&mut self) {
-        self.abort_scaler();
+        self.scaler.stop();
     }
 }
 #[derive(Default)]
@@ -1472,7 +1467,7 @@ impl QueueRegistry {
                                     ),
                         ),
                         liveness,
-                        scaler: Mutex::new(None),
+                        scaler: Default::default(),
                     });
                     state = registry.state.lock().expect("Matching registry lock");
                     if state.stopped {
@@ -1566,12 +1561,10 @@ impl QueueRegistry {
                                     name: key.name.clone(),
                                     task_type: key.task_type,
                                 };
-                                let task = tokio::spawn(async move {
+                                owner.scaler.start(async move {
                                     let mut scaler_registry = scaler_registry;
                                     scaler_registry.scaler_loop(root, scaler_state).await;
                                 });
-                                    *owner.scaler.lock().expect("Matching scaler lock") =
-                                        Some(task.abort_handle());
                             }
                         }
                     }
@@ -3098,6 +3091,45 @@ mod tests {
         registry.sweep_idle(500_000_000, false).await.unwrap();
         assert!(handle.queue.is_stopped());
         assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+    // Go: liveness ticks at TTL/2 and calls shutdown once the owner has been inactive for a full TTL
+    // (liveness/liveness.go). Unlike the sweep tests above, this drives the production `maintain_until`
+    // pump on real time and asserts unload lands in [TTL, 1.5·TTL] after the owner was created.
+    #[tokio::test]
+    async fn liveness_idle_pump_unloads_owner_between_ttl_and_one_and_a_half_ttl() {
+        const TTL: i64 = 500_000_000;
+        let (_dir, _store, registry, key) = fixture();
+        let registry =
+            registry.with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| TTL));
+        let started = tokio::time::Instant::now();
+        let handle = registry.get(key.clone(), 0, registry_now()).await.unwrap();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let pump = {
+            let registry = registry.clone();
+            tokio::spawn(async move {
+                registry
+                    .maintain_until(Duration::from_secs(3600), async {
+                        let _ = stop_rx.await;
+                    })
+                    .await
+            })
+        };
+        while !handle.queue.is_stopped() {
+            assert!(
+                started.elapsed() < Duration::from_nanos(3 * TTL as u64),
+                "owner still loaded after 3 TTL"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let elapsed = started.elapsed();
+        assert!(elapsed >= Duration::from_nanos(TTL as u64), "unloaded before one TTL: {elapsed:?}");
+        assert!(
+            elapsed <= Duration::from_nanos(3 * TTL as u64 / 2),
+            "unloaded after 1.5 TTL: {elapsed:?}"
+        );
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+        stop_tx.send(()).unwrap();
+        pump.await.unwrap().unwrap();
     }
     // Go: TestTaskListManagerRegistryNotification (task_list_manager_test.go:272). Go's Stop
     // unregisters the manager once and a second Stop is a no-op; Rust's unload removes the
