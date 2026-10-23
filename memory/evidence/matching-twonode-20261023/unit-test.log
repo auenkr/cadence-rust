@@ -1,0 +1,16 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/twonode/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/twonode/rust/crates/cadence-proto)
+   Compiling mysql_async v0.37.1 (/mnt/storage/service/github/wt/twonode/rust/vendor/mysql_async-0.37.1)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/twonode/rust/crates/cadence-api)
+   Compiling scylla v1.9.0 (/mnt/storage/service/github/wt/twonode/rust/vendor/scylla-1.9.0)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/twonode/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/twonode/rust/crates/cadence-persistence)
+   Compiling cadence-server v0.1.0 (/mnt/storage/service/github/wt/twonode/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10m 50s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_server-62279a61c31ec698)
+
+running 1 test
+test matching_registry::tests::shutdown_tolerates_lost_task_list_ownership ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 450 filtered out; finished in 0.00s
+

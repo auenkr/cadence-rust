@@ -139,8 +139,22 @@ impl Owner {
         readers.push(self.reader.clone());
         let ack = self.queue.persist_final_ack(now);
         let garbage = self.queue.run_garbage_collection(true);
-        ack.and(garbage.map(|_| ()))
+        tolerate_lost_ownership(ack.and(garbage.map(|_| ())))
             .map_err(|error| Status::unavailable(error.to_string()))
+    }
+}
+/// Go's task list Stop logs and ignores a final-update failure. Losing the
+/// lease to a peer (ConditionFailed) during shutdown is expected, not fatal.
+fn tolerate_lost_ownership(
+    result: cadence_persistence::matching_queue::Result<()>,
+) -> cadence_persistence::matching_queue::Result<()> {
+    use cadence_persistence::{matching_queue::QueueError, matching_sqlite::StorageError};
+    match result {
+        Err(QueueError::Storage(StorageError::ConditionFailed(reason))) => {
+            eprintln!("Matching task list lost ownership during shutdown: {reason}");
+            Ok(())
+        }
+        other => other,
     }
 }
 impl Drop for Owner {
@@ -2263,6 +2277,15 @@ async fn resolve_parent_dispatcher(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shutdown_tolerates_lost_task_list_ownership() {
+        use cadence_persistence::{matching_queue::QueueError, matching_sqlite::StorageError};
+        let lost = Err(QueueError::Storage(StorageError::ConditionFailed(
+            "Task list range ID was 12 when it was should have been 11".into(),
+        )));
+        assert!(super::tolerate_lost_ownership(lost).is_ok());
+        assert!(super::tolerate_lost_ownership(Err(QueueError::Stopped)).is_err());
+    }
     use super::*;
     use cadence_persistence::matching_blob::BlobEncoding;
     use cadence_persistence::matching_sqlite::SqliteTaskStore;
