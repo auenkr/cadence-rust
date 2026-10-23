@@ -75,4 +75,8 @@ Conclusion for gRPC matching: **Go accepts proto 0, 1, and every unknown value; 
 
 - Test: `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe test -p cadence-matching --lib partition_config`
   (log: `/tmp/pk.log`, exit: `/tmp/pk.exit`) — see result below.
-- Full: `cargo-safe test -p cadence-matching` and `cargo-safe clippy -p cadence-matching --all-targets -- -D warnings` — results below.
+- Filtered (`partition_config`): 2 passed, 0 failed (exit 0).
+- Full: `cargo-safe test -p cadence-matching`: 442 passed, 0 failed, 3 ignored (exit 0), log `/tmp/pkfull.log`.
+- `cargo-safe clippy -p cadence-matching --all-targets -- -D warnings`: exit 0, log `/tmp/pkclippy.log`.
+- Target dir: shared (`/mnt/storage/service/cargo-target-shared`), not the final dedicated dir. This is a
+  parity fix, not a final gate; rerun in `cargo-target-final` before any gate claim.
