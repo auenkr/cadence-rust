@@ -22,3 +22,4 @@ Branch `matching-persistence-tests-20261023`. Not run locally (no cargo); CI res
 
 ## CI
 (see below)
+- Run https://github.com/auenkr/cadence-rust/actions/runs/40015106530, commit d40c20e94b6b8058da4570a815e94bbfefcd80e6, clippy+test (cadence-persistence): success
