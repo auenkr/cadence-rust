@@ -871,6 +871,55 @@ mod tests {
         assert_in_go_ci(go, "UPDATE tasks SET range_id = ?, last_updated_time = ? WHERE domain_id = ? and task_list_name = ? and task_list_type = ? and type = ? and task_id = ? IF range_id = ?");
     }
 
+    /// Go tasks_test.go TestInsertTasks "successfully applied" (:757-794):
+    /// TTL 0 uses the plain insert, a TTL above maxCassandraTTL is capped at
+    /// 157680000, and the lease fence is the last batch member.
+    #[test]
+    fn go_insert_tasks_batch_ttl_variants_and_fence() {
+        let key = TaskListKey {
+            domain_id: Uuid::from_u128(1),
+            name: "tasklist1".into(),
+            task_type: 1,
+        };
+        let base_nanos = 1_711_922_921_000_000_000_i64; // 2024-04-01T22:08:41Z
+        let plain = TaskData {
+            workflow_id: "wid1".into(),
+            schedule_id: 42,
+            created_nanos: base_nanos,
+            expiry_nanos: 0,
+            ..Default::default()
+        };
+        let capped = TaskData {
+            workflow_id: "wid1".into(),
+            schedule_id: 43,
+            created_nanos: base_nanos + 1_000_000_000,
+            expiry_nanos: base_nanos + 1_000_000_000 + (157_680_001_i64 * 1_000_000_000),
+            ..Default::default()
+        };
+        let first = insert_task_statement(&key, 3, &plain).unwrap();
+        let second = insert_task_statement(&key, 4, &capped).unwrap();
+        assert!(!first.contains("USING TTL"), "TTL 0 uses the plain insert");
+        assert!(first.contains("schedule_id: 42"));
+        assert!(first.starts_with("INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES ("));
+        assert!(second.ends_with(" USING TTL 157680000"), "{second}");
+        assert!(second.contains(", 4, {domain_id:"));
+        // Fence: range_id bound twice (SET and IF), type 1, sentinel -12345.
+        let fence = range_fence_statement(&key, 25, base_nanos);
+        assert!(fence.starts_with("UPDATE tasks SET range_id = 25, last_updated_time = 1711922921000 WHERE"));
+        assert!(fence.contains("type = 1 AND task_id = -12345 IF range_id = 25"));
+    }
+
+    /// Go tasks_test.go TestRangeDeleteTasks / TestSelectTasks use the
+    /// statement templates pinned by cassandra_cql_matches_go_tasks_cql;
+    /// bound parameter order is domain, name, type, row type, then ids.
+    #[test]
+    fn cassandra_task_row_constants_match_go() {
+        assert_eq!(TASK_ROW, 0, "Go rowTypeTask");
+        assert_eq!(LIST_ROW, 1, "Go rowTypeTaskList");
+        assert_eq!(LIST_SENTINEL, -12345, "Go taskListTaskID");
+        assert_eq!(MAX_CASSANDRA_TTL_SECONDS, 157_680_000, "Go maxCassandraTTL");
+    }
+
     #[test]
     fn delete_fallback_consistency_is_go_constant_local_quorum() {
         assert_eq!(
