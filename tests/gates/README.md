@@ -177,7 +177,36 @@ in the probe's final JSON):
   `sd-control/restart.request` and `restart.done`): Rust must heartbeat to the empty
   fixture again and serve a new task list.
 
-### Why not Go's real shard-distributor
+### Real Go shard-distributor lane (`--real-shard-distributor`)
+
+Implies `--shard-distributor`. The harness builds `go/tests/shard-distributor-real` once
+(`flock /tmp/cargo.lock nice ionice go build`, `GOFLAGS=-p=2 GOMAXPROCS=2`), starts a
+single-node etcd container `cadence-rust-gate-etcd-<pid>-<ts>` (`--etcd-image`, default
+`quay.io/coreos/etcd:v3.5.5`, bound to a reserved loopback port, removed in `finally` and on
+SIGTERM; it never touches `local-postgres` or `cadence-mysql-gate`), then the launcher, which
+runs the real `sharddistributorfx` module: etcd executor store, etcd leader election,
+namespace manager and the rebalancing leader loop, for an `ephemeral` namespace `matching`
+(heartbeat TTL 5 s, rebalance period 1 s). Per-run etcd key prefix. The launcher's HTTP control
+endpoint only reads state (`stats`, `assignments`) and, for `assign`, asks the real
+`GetShardOwner` handler so the ephemeral namespace assigns the shard itself; it never writes
+assignments. The same probe scenarios as the fixture lane run, plus: after SIGKILL of Rust
+Matching the probe waits until the real leader loop has dropped the dead executor and its
+assignments (`executor-expired-by-ttl` evidence with elapsed ms), then the restarted Rust
+node heartbeats, is given the task list and the workflow completes.
+
+Wiring facts: the pinned shard-manager module has no server main, so the launcher supplies
+logger, no-op metrics, nop dynamic config, a YARPC gRPC dispatcher and the
+`config.ShardDistribution` struct (parsed from YAML). `go.etcd.io/etcd/client/v3` and
+`api/v3` v3.5.5 were NOT in the module cache or `go/go.mod`; adding them (`go get`, network
+required once) changed `go/go.mod`/`go.sum`. The shard-distributor restart scenario restarts
+only the launcher; etcd state persists (unlike the empty-state fixture restart).
+
+Status: builds, vets and dry-runs; not yet run end to end. Unknowns: whether the 15 s
+READY wait in `registerShardWithGoManager` is enough while a dead executor still owns the
+shard (the probe waits for expiry first); executor expiry also depends on the leader being
+elected (up to `maxRandomDelay` 500 ms); etcd image must be pullable.
+
+### Why the default lane is a fixture, not Go's real shard-distributor
 
 The pinned `github.com/cadence-workflow/shard-manager` module has no server binary
 (`cmd/` holds only `sharddistributor-canary`, `smctl`, `tools`; there is no `main.go`
