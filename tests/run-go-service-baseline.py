@@ -50,6 +50,8 @@ parser.add_argument('--cassandra-port', type=int, default=int(os.environ.get('CA
 parser.add_argument('--cassandra-keyspace', default=os.environ.get('CADENCE_CASSANDRA_KEYSPACE', 'cadence'))
 parser.add_argument('--cassandra-visibility-keyspace', default=os.environ.get('CADENCE_CASSANDRA_VISIBILITY_KEYSPACE', 'cadence_visibility'))
 parser.add_argument('--shard-distributor', action='store_true', help='run Rust Matching with shard-distributor-matching namespaces against the pinned Go shard-manager handlers (go/tests/shard-distributor-interoperability fixture, in-memory store; NOT a full etcd-backed Go shard-distributor service); the harness starts, restarts and stops the fixture')
+parser.add_argument('--real-shard-distributor', action='store_true', help='like --shard-distributor but runs the REAL Go shard-distributor (go/tests/shard-distributor-real: sharddistributorfx over a single-node etcd docker container cadence-rust-gate-etcd-*, ephemeral namespace "matching", real leader loop with heartbeat TTL); adds a SIGKILL executor-expiry-by-TTL check')
+parser.add_argument('--etcd-image', default=os.environ.get('CADENCE_ETCD_IMAGE', 'quay.io/coreos/etcd:v3.5.5'), help='etcd image for --real-shard-distributor')
 parser.add_argument('--matching-failure-recovery', action='store_true', help='run a two-instance production Matching failure/recovery probe')
 parser.add_argument('--matching-idle-check-seconds', type=int, help='override the Matching idle-task-list check interval in seconds')
 parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
@@ -349,6 +351,8 @@ if args.cassandra and (not args.cassandra_hosts or any(char in args.cassandra_ho
     parser.error('--cassandra-hosts must be a non-empty comma-separated host list without YAML control characters')
 if args.cassandra and not 1 <= args.cassandra_port <= 65535:
     parser.error('--cassandra-port must be between 1 and 65535')
+if args.real_shard_distributor:
+    args.shard_distributor = True
 if args.shard_distributor and not production_matching:
     parser.error('--shard-distributor requires --rust-services matching')
 if args.shard_distributor:
@@ -477,6 +481,8 @@ if production_matching:
         keys.extend(['RUST_MATCHING_SECONDARY_PORT', 'RUST_MATCHING_SECONDARY_PORT_GRPC'])
 if args.shard_distributor:
     keys.extend(['SD_FIXTURE_PORT', 'SD_FIXTURE_CONTROL_PORT'])
+    if args.real_shard_distributor:
+        keys.append('SD_ETCD_PORT')
 reservations = [socket.socket() for _ in keys]
 try:
     for listener in reservations:
@@ -724,7 +730,8 @@ results = {
                     if args.cassandra else None),
     'shardDistributor': ({'fixture': 'go/tests/shard-distributor-interoperability (pinned shard-manager handlers, in-memory store)',
                           'address': f'127.0.0.1:{ports["SD_FIXTURE_PORT"]}', 'control': f'http://127.0.0.1:{ports["SD_FIXTURE_CONTROL_PORT"]}',
-                          'namespace': 'matching', 'onboardingPercentage': 100} if args.shard_distributor else None),
+                          'namespace': 'matching', 'onboardingPercentage': 100,
+                          'real': bool(args.real_shard_distributor), 'etcdImage': args.etcd_image if args.real_shard_distributor else None} if args.shard_distributor else None),
     'serverCommand': command,
     'artifactsDirectory': str(work),
 }
@@ -765,15 +772,54 @@ if args.dry_run:
     print(f'Dry run planned without building or starting services: {work / "dry-run.json"}', flush=True)
     sys.exit(0)
 sd_fixture = {'process': None}
+etcd = {'name': None}
+etcd_prefix = f'gate-{os.getpid()}-{int(time.time())}'
 sd_restart_stop = threading.Event()
 
 
+def start_etcd():
+    """Single-node etcd in a uniquely named container; never reuses another container."""
+    name = f'cadence-rust-gate-etcd-{os.getpid()}-{int(time.time())}'
+    etcd['name'] = name
+    subprocess.run(['docker', 'run', '-d', '--name', name, '-p', f'127.0.0.1:{ports["SD_ETCD_PORT"]}:2379', args.etcd_image,
+                    'etcd', '--name', 'gate', '--data-dir', '/tmp/etcd-data',
+                    '--listen-client-urls', 'http://0.0.0.0:2379', '--advertise-client-urls', 'http://0.0.0.0:2379'],
+                   check=True, stdout=subprocess.DEVNULL)
+    deadline = time.monotonic() + 60
+    while subprocess.run(['docker', 'exec', name, 'etcdctl', 'endpoint', 'health'], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL).returncode != 0:
+        if time.monotonic() > deadline:
+            raise RuntimeError(f'etcd container {name} did not become healthy')
+        time.sleep(1)
+
+
+def stop_etcd():
+    name, etcd['name'] = etcd['name'], None
+    if name:
+        subprocess.run(['docker', 'rm', '-f', '-v', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def build_real_sd():
+    """One Go build, queued behind cargo on the shared lock; the launcher binary is exec'd afterwards."""
+    binary = work / 'shard-distributor-real'
+    env = {**os.environ, 'GOFLAGS': '-p=2', 'GOMAXPROCS': '2'}
+    subprocess.run(['flock', '/tmp/cargo.lock', 'nice', '-n', '10', 'ionice', '-c3', 'go', 'build', '-o', str(binary),
+                    './tests/shard-distributor-real'], cwd=root / 'go', env=env, check=True)
+    return binary
+
+
 def start_sd_fixture():
-    """Start the shard-manager fixture on its reserved ports; wait for its ready line."""
+    """Start the shard-manager fixture (or real launcher) on its reserved ports; wait for its ready line."""
     env = {**os.environ, 'SD_FIXTURE_ADDR': f'127.0.0.1:{ports["SD_FIXTURE_PORT"]}',
            'SD_FIXTURE_CONTROL_ADDR': f'127.0.0.1:{ports["SD_FIXTURE_CONTROL_PORT"]}'}
+    sd_command = ['go', 'run', './tests/shard-distributor-interoperability']
+    if args.real_shard_distributor:
+        env.update({'SD_REAL_ADDR': env['SD_FIXTURE_ADDR'], 'SD_REAL_CONTROL_ADDR': env['SD_FIXTURE_CONTROL_ADDR'],
+                    'SD_REAL_ETCD': f'127.0.0.1:{ports["SD_ETCD_PORT"]}', 'SD_REAL_PREFIX': etcd_prefix,
+                    'SD_REAL_NAMESPACE': 'matching', 'SD_REAL_HEARTBEAT_TTL': '5s'})
+        sd_command = [str(sd_fixture['binary'])]
     log = (work / 'shard-distributor-fixture.log').open('a')
-    process = subprocess.Popen(['go', 'run', './tests/shard-distributor-interoperability'], cwd=root / 'go',
+    process = subprocess.Popen(sd_command, cwd=root / 'go',
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, env=env,
                                start_new_session=True)
     ready = process.stdout.readline()
@@ -808,10 +854,16 @@ def watch_sd_restarts():
 exit_code = 0
 failure = None
 sd_thread = None
+# A TERM from the orchestrator must still run the finally block that removes the etcd container.
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 try:
     if args.shard_distributor:
         sd_dir = work / 'sd-control'
         sd_dir.mkdir(exist_ok=True)
+        if args.real_shard_distributor:
+            sd_fixture['binary'] = build_real_sd()
+            start_etcd()
+            results['etcd'] = {'container': etcd['name'], 'image': args.etcd_image, 'port': ports['SD_ETCD_PORT'], 'prefix': etcd_prefix}
         results['shardDistributorFixture'] = start_sd_fixture()
         sd_thread = threading.Thread(target=watch_sd_restarts, daemon=True)
         sd_thread.start()
@@ -932,6 +984,8 @@ try:
                             'CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL': f'http://127.0.0.1:{ports["SD_FIXTURE_CONTROL_PORT"]}',
                             'CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE': 'matching',
                             'CADENCE_MATCHING_SHARD_DISTRIBUTOR_RESTART_DIR': str(sd_dir)})
+                        if args.real_shard_distributor:
+                            probe_environment['CADENCE_MATCHING_SHARD_DISTRIBUTOR_REAL'] = '1'
                     if args.matching_failure_recovery:
                         probe_environment.update({
                             'CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL': ports['RUST_MATCHING_SECONDARY_PORT'],
@@ -1010,6 +1064,7 @@ finally:
     if sd_thread is not None:
         sd_thread.join(timeout=5)
     stop_sd_fixture()
+    stop_etcd()
     results['runExitCode'] = exit_code
     results['failure'] = failure
     (work / 'run.exit').write_text(f'{exit_code}\n')

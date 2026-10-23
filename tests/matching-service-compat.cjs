@@ -162,6 +162,24 @@ async function sdAssertExecutorStopped(label, previousIds) {
     await new Promise(resolve => setTimeout(resolve, 500));
   }
 }
+// Real shard-distributor only: after Rust Matching is SIGKILLed the real leader loop must
+// drop the dead executor once its heartbeat TTL lapses and release its shard assignments.
+const realShardDistributor = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_REAL === '1';
+async function sdAssertExecutorExpired(label, previousIds, killedAt) {
+  if (!shardManagerControl || !realShardDistributor) return;
+  const deadline = Date.now() + 90000;
+  for (;;) {
+    const stats = (await shardManagerCommand({ op: 'stats' })) || {};
+    const assignments = (await shardManagerCommand({ op: 'assignments' })) || {};
+    const lingering = previousIds.filter(id => id in stats || (assignments[id] || []).length > 0);
+    if (lingering.length === 0) {
+      shardDistributorEvidence.push({ check: 'executor-expired-by-ttl', label, expired: previousIds, elapsedMsSinceKill: Date.now() - killedAt });
+      return;
+    }
+    if (Date.now() > deadline) throw new Error(`shard-distributor ${label}: real leader loop did not expire executor(s) ${lingering.join(',')} within 90s`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
 async function sdReassign(label, taskListName) {
   if (!shardManagerControl) return;
   await registerShardWithGoManager(taskListName, true);
@@ -817,6 +835,7 @@ async function run() {
     restartState.watermark = await awaitPersistedTask(restartTaskList, 0);
     const beforePid = rust.pid;
     const sdBeforeKill = await sdAssertHeartbeat('before-sigkill');
+    const sdKilledAt = Date.now();
     rust.kill('SIGKILL');
     const beforeExit = await exited;
     assert.equal(beforeExit.signal, 'SIGKILL', 'first Rust Matching process did not terminate');
@@ -824,6 +843,7 @@ async function run() {
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
     if (sdBeforeKill) {
+      await sdAssertExecutorExpired('after-sigkill', sdBeforeKill.executors, sdKilledAt);
       await sdAssertHeartbeat('after-sigkill-restart', { excludeIds: [] });
       await sdReassign('after-sigkill-restart', restartTaskList);
     }
