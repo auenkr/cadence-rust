@@ -28,6 +28,10 @@ use uuid::Uuid;
 const LIST_ROW: i32 = 1;
 const TASK_ROW: i32 = 0;
 const LIST_SENTINEL: i64 = -12345;
+/// Go's `cassandraDefaultConsLevel`: the retry level after an ALL delete hits
+/// UNAVAILABLE. It is a constant in Go, not the configured `consistency`.
+const FALLBACK_CONSISTENCY: scylla::frame::types::Consistency =
+    scylla::frame::types::Consistency::LocalQuorum;
 const MAX_CASSANDRA_TTL_SECONDS: i64 = 157_680_000;
 const SELECT_LIST: &str = "SELECT range_id, task_list FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=?";
 const UPDATE_LIST: &str = "UPDATE tasks SET range_id=?, task_list=?, last_updated_time=? WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=? IF range_id=?";
@@ -586,7 +590,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 Ok(_) => {}
                 Err(error) if is_unavailable(&error) => {
                     let mut fallback = Statement::new(DELETE);
-                    fallback.set_consistency(self.driver.default_consistency());
+                    fallback.set_consistency(FALLBACK_CONSISTENCY);
                     self.driver
                         .run(session.query_unpaged(fallback, params))
                         .map_err(Self::internal)?;
@@ -621,7 +625,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 Ok(result) => result,
                 Err(error) if is_unavailable(&error) => {
                     let mut fallback = Statement::new(DELETE_LIST);
-                    fallback.set_consistency(self.driver.default_consistency());
+                    fallback.set_consistency(FALLBACK_CONSISTENCY);
                     self.driver
                         .run(session.query_unpaged(fallback, params))
                         .map_err(Self::internal)?
@@ -643,6 +647,14 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn delete_fallback_consistency_is_go_constant_local_quorum() {
+        assert_eq!(
+            super::FALLBACK_CONSISTENCY,
+            scylla::frame::types::Consistency::LocalQuorum
+        );
+    }
+
     use super::*;
 
     #[test]
