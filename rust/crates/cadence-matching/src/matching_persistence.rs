@@ -345,7 +345,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
             .list_domains(page_size, next_page_token, timeout);
         self.record("ListDomain", started.elapsed(), &result);
         if let Ok(page) = &result {
-            let payload = list_domains_byte_size(&page);
+            let payload = list_domains_byte_size(page);
             self.limiter
                 .record_list_response("ListDomain", page.domains.len() as u64, payload);
         }
@@ -574,6 +574,7 @@ mod list_domain_metric_tests {
     /// Mirrors go/common/persistence/metered_test.go "full response" (535):
     /// 48+3 (token) + 88 (empty GetDomainResponse) + 88+103 (info)
     /// + (120+3+3 +48+4+4+3 +6) (config=191) + 14 (replication).
+    ///
     /// The nil entry in Go's list contributes 0 and has no Rust analog.
     #[test]
     fn list_domains_byte_size_matches_go_metered_test_vector() {
