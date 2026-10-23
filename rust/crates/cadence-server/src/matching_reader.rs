@@ -465,6 +465,25 @@ impl TaskReader {
             crate::matching_metrics::PollMetricContext,
         )>,
     ) -> Self {
+        Self::with_dispatch_check_metrics_forwarding(queue, wake, config, active, limiter, isolation, dispatch_check, metric_context, None)
+    }
+    // Install forwarding before spawning either the reader pump or dispatchers.
+    // A restored child backlog must never get stuck in a local-only offer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_dispatch_check_metrics_forwarding(
+        queue: Arc<DurableTaskQueue>,
+        wake: Arc<Notify>,
+        config: ReaderConfig,
+        active: Arc<dyn Fn() -> bool + Send + Sync>,
+        limiter: Arc<TaskListLimiter>,
+        isolation: IsolationConfig,
+        dispatch_check: Option<DispatchCheck>,
+        metric_context: Option<(
+            crate::matching_metrics::MatchingMetrics,
+            crate::matching_metrics::PollMetricContext,
+        )>,
+        backlog_forward: Option<BacklogForward>,
+    ) -> Self {
         let (stop, stopped) = watch::channel(false);
         let matcher = Arc::new(Rendezvous::default());
         let isolated: HashMap<_, _> = isolation
@@ -485,7 +504,7 @@ impl TaskReader {
             metric_context: Arc::new(Mutex::new(
                 metric_context.map(|(metrics, context)| ReaderMetricContext { metrics, context }),
             )),
-            backlog_forward: Arc::new(Mutex::new(None)),
+            backlog_forward: Arc::new(Mutex::new(backlog_forward)),
         });
         let mut buffer_senders = HashMap::new();
         for buffer_group in std::iter::once(String::new()).chain(isolated.keys().cloned()) {
@@ -1147,6 +1166,20 @@ mod tests {
         TaskReader,
         Arc<Notify>,
     ) {
+        configured_fixture_with_forwarding(count, batch, dispatch_timeout, active, None)
+    }
+    fn configured_fixture_with_forwarding(
+        count: usize,
+        batch: u32,
+        dispatch_timeout: Duration,
+        active: bool,
+        forward: Option<BacklogForward>,
+    ) -> (
+        tempfile::TempDir,
+        Arc<DurableTaskQueue>,
+        TaskReader,
+        Arc<Notify>,
+    ) {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
             SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
@@ -1170,7 +1203,7 @@ mod tests {
             .append(&vec![TaskData::default(); count], now())
             .unwrap();
         let wake = Arc::new(Notify::new());
-        let reader = TaskReader::with_domain_activity(
+        let reader = TaskReader::with_dispatch_check_metrics_forwarding(
             queue.clone(),
             wake.clone(),
             ReaderConfig {
@@ -1180,6 +1213,11 @@ mod tests {
                 ..ReaderConfig::default()
             },
             Arc::new(move || active),
+            Arc::new(TaskListLimiter::with_defaults()),
+            IsolationConfig::default(),
+            None,
+            None,
+            forward,
         );
         (directory, queue, reader, wake)
     }
@@ -1457,6 +1495,26 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), stop(queue.clone(), reader)).await.unwrap();
         assert_eq!(queue.levels().1, 0);
         assert!(tokens.try_acquire().is_some());
+    }
+    #[tokio::test]
+    async fn matching_reader_restored_backlog_has_forwarder_before_pump_starts() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = calls.clone();
+        let forward = BacklogForward {
+            tokens: test_tokens(1),
+            forward: Arc::new(move |_| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        };
+        // The row exists before the reader starts, as after manager reload.
+        let (_directory, queue, reader, _wake) = configured_fixture_with_forwarding(1, 1, Duration::from_secs(3), true, Some(forward));
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while queue.levels().1 < 1 { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        stop(queue, reader).await;
     }
     async fn wait_read(queue: &DurableTaskQueue, expected: i64) {
         tokio::time::timeout(Duration::from_secs(2), async {

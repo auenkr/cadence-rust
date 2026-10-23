@@ -30,3 +30,7 @@ The local rendezvous/forward-token selection withdraws the local offer under its
 - Remote transport test checks request fields, protobuf task-list kind, YARPC metadata, typed busy error classification and shared rate consumption.
 
 No Go source changes. This branch's tests do not establish multi-host mixed Go/Rust cluster acceptance or overall Matching completion.
+
+## Restored-backlog startup ordering
+
+Forwarding is installed in the reader constructor before spawning the pump or dispatchers. The initial WIP setter-after-construction could race a restored row on a multi-thread runtime and enter a local-only offer before forwarding became available. Registry wiring now creates the forward state first and passes the backlog callback into construction. A regression test preloads a durable row before reader startup and requires it to forward/ack without any local poller. The previous constructor remains available and delegates with no forwarder.
