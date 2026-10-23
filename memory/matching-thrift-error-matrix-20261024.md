@@ -55,3 +55,7 @@ Tests (`thrift_matching.rs`): `matching_thrift_forwarded_sync_miss_and_failed_qu
 - Row 14: out-of-range `QueryResultType` on the wire.
 - Message text differs in some Internal and ShardOwnershipLost cases (kind matches; not byte-compared).
 - Unit tests only. No cargo was run locally (project rule); verification is GitHub Actions.
+
+## Evidence
+
+CI: https://github.com/auenkr/cadence-rust/actions/runs/40017926341 (branch `matching-thrift-errors-20261024`, sha `bc12d6c84`, `package=cadence-matching`). Conclusion: success. Clippy `-D warnings` passed. `cadence-matching` tests: 553 passed, 0 failed, 10 ignored. The new test `thrift_matching::tests::matching_thrift_forwarded_sync_miss_and_failed_query_use_go_exception_types` passed.
