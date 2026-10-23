@@ -60,4 +60,7 @@ None found by reading the code. No `#[ignore]` added. The result must come from 
 
 ## CI evidence
 
-Pending. Filled in after `gh workflow run rust-ci.yml --ref matching-query-remote-sync-20261024 -f package=cadence-matching`.
+- Commit `fc8a16037`, run https://github.com/auenkr/cadence-rust/actions/runs/40033180011 (workflow_dispatch, `package=cadence-matching`): conclusion **success**, job `clippy-test`.
+- Log: `grpc_matching::durable_tests::matching_rpc_remote_query_sync_match_forwards_to_parent_and_returns_answer ... ok`
+- Log: `grpc_matching::durable_tests::matching_rpc_remote_query_sync_match_error_falls_back_to_local_poller ... ok`
+- Crate result: `602 passed; 0 failed; 13 ignored` (main unit-test binary).
