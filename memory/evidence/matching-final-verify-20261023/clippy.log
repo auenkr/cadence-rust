@@ -1,0 +1,8 @@
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/mergeall/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/mergeall/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/mergeall/rust/crates/cadence-matching)
+    Checking cadence-history v0.1.0 (/mnt/storage/service/github/wt/mergeall/rust/crates/cadence-history)
+    Checking cadence-worker v0.1.0 (/mnt/storage/service/github/wt/mergeall/rust/crates/cadence-worker)
+    Checking cadence-frontend v0.1.0 (/mnt/storage/service/github/wt/mergeall/rust/crates/cadence-frontend)
+    Checking cadence-server v0.1.0 (/mnt/storage/service/github/wt/mergeall/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 45.63s
