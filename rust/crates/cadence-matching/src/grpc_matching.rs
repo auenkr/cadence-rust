@@ -3649,3 +3649,7 @@ fn log_tasklist_counter(
 #[cfg(test)]
 #[path = "matching_rpc_tests.rs"]
 mod durable_tests;
+
+#[cfg(test)]
+#[path = "matching_query_forward_family_tests.rs"]
+mod query_forward_family_tests;
