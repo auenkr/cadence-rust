@@ -1093,6 +1093,119 @@ mod tests {
             .is_err());
         assert_eq!(store.get_tasks(&source, 0, 100, 10).unwrap().len(), 1);
     }
+    // Go: TestTaskListManagerGetTaskBatch (task_list_manager_test.go:974). rangeSize=10 and
+    // ReadRangeSize=5 over 1200 persisted tasks: a bounded read returns one range of rows and
+    // reports a read level at the range upper bound; a read at max returns nothing.
+    #[test]
+    fn matching_queue_get_task_batch_bounds_follow_read_range() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(10), 1).unwrap();
+        let tasks = queue.append(&vec![data(); 1200], 2).unwrap();
+        assert_eq!(tasks.last().unwrap().task_id, 1200);
+        let max = 1200;
+        let at_max = scan_batch(store.as_ref(), &key(), max, max, 5, n(1000)).unwrap();
+        assert!(at_max.tasks.is_empty());
+        assert_eq!(at_max.read_level, max);
+        assert!(at_max.finished);
+        let first = scan_batch(store.as_ref(), &key(), 0, max, 5, n(1000)).unwrap();
+        assert_eq!(first.tasks.len(), 5);
+        assert_eq!(first.read_level, 5);
+        assert!(first.finished);
+        let limited = scan_batch(store.as_ref(), &key(), 0, max, 5, n(3)).unwrap();
+        assert_eq!(limited.tasks.len(), 3);
+        assert_eq!(limited.read_level, 5);
+        // Completing the first range leaves later reads starting at the new read level.
+        let batch = queue.read_batch(5, n(1000), 3).unwrap();
+        assert_eq!(batch.tasks.len(), 5);
+        for task in &batch.tasks {
+            queue.complete(task.task_id).unwrap();
+        }
+        let next = scan_batch(store.as_ref(), &key(), queue.levels().1, max, 5, n(1000)).unwrap();
+        assert!(!next.tasks.is_empty() && next.tasks.len() <= 10);
+        assert!(next.finished);
+    }
+    // Go: TestTaskListManagerGetTaskBatch_ReadBatchDone (task_list_manager_test.go:1196). With no
+    // rows, a scan covers at most ten ranges per call and is only done at max read level.
+    #[test]
+    fn matching_queue_get_task_batch_done_only_at_max_read_level() {
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap();
+        store.lease(&key(), 0, 0, 1).unwrap();
+        let first = scan_batch(&store, &key(), 0, 120, 5, n(1000)).unwrap();
+        assert!(first.tasks.is_empty());
+        assert_eq!(first.read_level, 50);
+        assert!(!first.finished);
+        let second = scan_batch(&store, &key(), first.read_level, 120, 5, n(1000)).unwrap();
+        assert!(second.tasks.is_empty());
+        assert_eq!(second.read_level, 100);
+        assert!(!second.finished);
+        let third = scan_batch(&store, &key(), second.read_level, 120, 5, n(1000)).unwrap();
+        assert!(third.tasks.is_empty());
+        assert_eq!(third.read_level, 120);
+        assert!(third.finished);
+    }
+    // Go: TestTaskListReaderPumpAdvancesAckLevelAfterEmptyReads (task_list_manager_test.go:1104).
+    // Fifteen lease renewals without writes, then Start's renewal: empty reads advance the ack
+    // level over every leased range and new writes continue past the max read level.
+    #[test]
+    fn matching_queue_empty_reads_advance_ack_over_renewed_ranges() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let mut range = 0;
+        for _ in 0..15 {
+            range = store.lease(&key(), 0, range, 1).unwrap().range_id;
+        }
+        assert_eq!(range, 15);
+        let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(10), 2).unwrap();
+        let expected_ack = 10 * 15;
+        for _ in 0..20 {
+            if queue.levels().1 == expected_ack {
+                break;
+            }
+            queue.read_batch(5, n(1000), 3).unwrap();
+        }
+        assert_eq!(queue.levels().1, expected_ack);
+        assert_eq!(queue.levels().0, expected_ack);
+        for i in 0..5 {
+            let written = queue.append(&[data()], 4).unwrap();
+            assert_eq!(written[0].task_id, expected_ack + i + 1);
+        }
+    }
+    // Go: allocTaskIDBlock/renewLeaseWithRetry (task_writer.go:209,222). A new block is leased
+    // when the current one is exhausted, task IDs stay contiguous, and a writer whose range was
+    // superseded is fenced.
+    #[test]
+    fn matching_queue_range_id_renews_per_block_and_fences_stale_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(10), 1).unwrap();
+        assert_eq!(store.get_task_list(&key()).unwrap().range_id, 1);
+        let ids: Vec<i64> = queue
+            .append(&vec![data(); 25], 2)
+            .unwrap()
+            .iter()
+            .map(|task| task.task_id)
+            .collect();
+        assert_eq!(ids, (1..=25).collect::<Vec<_>>());
+        assert_eq!(store.get_task_list(&key()).unwrap().range_id, 3);
+        let newer = DurableTaskQueue::open(store.clone(), key(), 0, n(10), 3).unwrap();
+        assert_eq!(store.get_task_list(&key()).unwrap().range_id, 4);
+        assert!(queue.append(&[data()], 4).is_err());
+        assert!(queue.is_stopped());
+        assert_eq!(newer.append(&[data()], 5).unwrap()[0].task_id, 31);
+    }
     #[test]
     fn matching_queue_original_go_reader_fixtures() {
         let cases: serde_json::Value = serde_json::from_str(include_str!(

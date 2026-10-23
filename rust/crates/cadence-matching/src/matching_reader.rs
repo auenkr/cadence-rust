@@ -1803,6 +1803,30 @@ mod tests {
         assert_eq!(queue.levels().1, 0);
         stop(queue, reader).await;
     }
+    // Go: TestDispatchTask (task_list_manager_test.go:1822), success path. A task persisted
+    // while a poller is already waiting is dispatched to that poller, and completing it
+    // advances the ack level.
+    #[tokio::test]
+    async fn matching_reader_dispatches_new_task_to_waiting_poller_then_acks() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let waiting = reader.inner.clone();
+        let poller = tokio::spawn(async move {
+            waiting.matcher.poll(waiting.stop.subscribe()).await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        queue.append(&[TaskData::default()], now()).unwrap();
+        wake.notify_waiters();
+        let task = tokio::time::timeout(Duration::from_secs(5), poller)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.task_id, 1);
+        assert_eq!(queue.levels().1, 0);
+        queue.complete(task.task_id).unwrap();
+        assert_eq!(queue.levels().1, 1);
+        stop(queue, reader).await;
+    }
     #[tokio::test]
     async fn matching_reader_prefetch_backpressure_and_stop_preserve_unacked_rows() {
         for batch in [1, 3] {
