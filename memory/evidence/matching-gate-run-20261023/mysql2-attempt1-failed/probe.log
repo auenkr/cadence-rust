@@ -1,0 +1,20 @@
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: task-list range was not leased before the owner crash
+    at run (/mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:536:5)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: task-list range was not leased before the owner crash
+    at run (/mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:536:5)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}

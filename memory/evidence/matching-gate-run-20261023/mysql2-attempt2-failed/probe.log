@@ -1,0 +1,74 @@
+PROBE BODY FAILED: Error: 10 ABORTED: task list is not owned by this host: OwnedBy: 127.0.0.1:52077, Me: 127.0.0.1:54913, Tasklist: isolated-438b2d1d-9a5a-4cf7-b955-060b7b2cd395
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:137:67
+    at new Promise (<anonymous>)
+    at callRpc (/mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:137:10)
+    at /mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:128:80
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async run (/mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:1006:18) {
+  code: 10,
+  details: 'task list is not owned by this host: OwnedBy: 127.0.0.1:52077, Me: 127.0.0.1:54913, Tasklist: isolated-438b2d1d-9a5a-4cf7-b955-060b7b2cd395',
+  metadata: Metadata {
+    internalRepr: Map(4) {
+      'content-type' => [Array],
+      'grpc-status-details-bin' => [Array],
+      'content-length' => [Array],
+      'date' => [Array]
+    },
+    options: {}
+  }
+}
+node:internal/process/promises:332
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+Error: 10 ABORTED: task list is not owned by this host: OwnedBy: 127.0.0.1:52077, Me: 127.0.0.1:54913, Tasklist: isolated-438b2d1d-9a5a-4cf7-b955-060b7b2cd395
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:137:67
+    at new Promise (<anonymous>)
+    at callRpc (/mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:137:10)
+    at /mnt/storage/service/github/wt/gate4/tests/matching-service-compat.cjs:128:80
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 10,
+  details: 'task list is not owned by this host: OwnedBy: 127.0.0.1:52077, Me: 127.0.0.1:54913, Tasklist: isolated-438b2d1d-9a5a-4cf7-b955-060b7b2cd395',
+  metadata: Metadata {
+    internalRepr: Map(4) {
+      'content-type' => [ 'application/grpc' ],
+      'grpc-status-details-bin' => [
+        Buffer(302) [Uint8Array] [
+            8,  10,  18, 139,   1, 116,  97, 115, 107,  32, 108, 105,
+          115, 116,  32, 105, 115,  32, 110, 111, 116,  32, 111, 119,
+          110, 101, 100,  32,  98, 121,  32, 116, 104, 105, 115,  32,
+          104, 111, 115, 116,  58,  32,  79, 119, 110, 101, 100,  66,
+          121,  58,  32,  49,  50,  55,  46,  48,  46,  48,  46,  49,
+           58,  53,  50,  48,  55,  55,  44,  32,  77, 101,  58,  32,
+           49,  50,  55,  46,  48,  46,  48,  46,  49,  58,  53,  52,
+           57,  49,  51,  44,  32,  84,  97, 115, 107, 108, 105, 115,
+          116,  58,  32, 105,
+          ... 202 more items
+        ]
+      ],
+      'content-length' => [ '0' ],
+      'date' => [ 'Fri, 23 Oct 2026 08:27:22 GMT' ]
+    },
+    options: {}
+  }
+}
+
+Node.js v25.9.0

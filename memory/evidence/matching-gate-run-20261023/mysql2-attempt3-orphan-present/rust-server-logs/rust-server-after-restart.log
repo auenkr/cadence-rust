@@ -1,0 +1,22 @@
+starting matching (api v1-thrift)
+cadence-server running on 0.0.0.0:0: matching
+Cadence internal matching gRPC listening on 127.0.0.1:45745
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:52577
+dynamic config integer read failed (value was missing or had the wrong type); using default
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+Matching task list lost ownership during shutdown: Task list range ID was 6 when it was should have been 5
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+Matching task list lost ownership during shutdown: Task list range ID was 6 when it was should have been 5
+Matching task list lost ownership during shutdown: Task list range ID was 6 when it was should have been 5
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+Matching task list lost ownership during shutdown: Task list range ID was 8 when it was should have been 7
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+Matching task list lost ownership during shutdown: Task list range ID was 5 when it was should have been 4
+Matching task list lost ownership during shutdown: Task list range ID was 8 when it was should have been 7
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+Matching task list lost ownership during shutdown: Task list range ID was 5 when it was should have been 4
+Matching task list lost ownership during shutdown: Task list range ID was 7 when it was should have been 6
+flushing Matching metrics failed: Connection refused (os error 111)
+shutting down

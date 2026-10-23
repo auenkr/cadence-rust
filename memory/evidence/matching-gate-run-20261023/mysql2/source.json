@@ -1,0 +1,11 @@
+{
+  "repository": "/mnt/storage/service/github/wt/gate4",
+  "head": "6788e65555ddf4ec0f047df579147a90e67ebc91",
+  "branch": "matching-gate-run-20261023",
+  "status": [
+    "M tests/__pycache__/matching_evidence.cpython-314.pyc",
+    " M tests/matching-mysql-gate.cjs",
+    " M tests/matching-service-compat.cjs",
+    "?? memory/evidence/matching-gate-run-20261023/"
+  ]
+}

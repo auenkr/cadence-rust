@@ -1,0 +1,7 @@
+Existing Go SDK resumed and completed the pre-restart workflow/activity
+
+{"level":"info","ts":"2026-10-23T13:46:30.424+0530","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-10-23T13:46:30.424+0530","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-10-23T13:46:30.474+0530","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"service-compat-9e6298b3-7d5b-4b94-82c7-92efa62d8e58","TaskList":"gc-backlog-9e6298b3-7d5b-4b94-82c7-92efa62d8e58","WorkerID":"794371@appointy@gc-backlog-9e6298b3-7d5b-4b94-82c7-92efa62d8e58@66ca5b13-073a-4a95-9345-3da795099bcf"}
+{"level":"info","ts":"2026-10-23T13:46:30.477+0530","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"service-compat-9e6298b3-7d5b-4b94-82c7-92efa62d8e58","TaskList":"gc-backlog-9e6298b3-7d5b-4b94-82c7-92efa62d8e58","WorkerID":"794371@appointy@gc-backlog-9e6298b3-7d5b-4b94-82c7-92efa62d8e58@66ca5b13-073a-4a95-9345-3da795099bcf"}
+{"level":"info","ts":"2026-10-23T13:46:30.836+0530","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"service-compat-9e6298b3-7d5b-4b94-82c7-92efa62d8e58","TaskList":"gc-backlog-9e6298b3-7d5b-4b94-82c7-92efa62d8e58","WorkerID":"794371@appointy@gc-backlog-9e6298b3-7d5b-4b94-82c7-92efa62d8e58@66ca5b13-073a-4a95-9345-3da795099bcf"}

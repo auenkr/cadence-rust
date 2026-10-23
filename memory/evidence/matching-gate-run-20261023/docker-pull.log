@@ -1,0 +1,39 @@
+8.0.36: Pulling from library/mysql
+13702d9fe3c3: Pulling fs layer
+6586d096303c: Pulling fs layer
+c38d8660e1fa: Pulling fs layer
+cf55ff1c80af: Pulling fs layer
+83bcc87284a1: Pulling fs layer
+bd37f6d99203: Pulling fs layer
+bddd54b9c549: Pulling fs layer
+4eaae1e844ac: Pulling fs layer
+7e1bc321f421: Pulling fs layer
+d2433cba0951: Pulling fs layer
+5196e1e87d8f: Pulling fs layer
+c38d8660e1fa: Download complete
+6586d096303c: Download complete
+13702d9fe3c3: Download complete
+cf55ff1c80af: Download complete
+83bcc87284a1: Download complete
+bd37f6d99203: Download complete
+4eaae1e844ac: Download complete
+d2433cba0951: Download complete
+7e1bc321f421: Download complete
+bd37f6d99203: Pull complete
+3fb5bbaea6ae: Download complete
+d2433cba0951: Pull complete
+13702d9fe3c3: Pull complete
+83bcc87284a1: Pull complete
+c38d8660e1fa: Pull complete
+7e1bc321f421: Pull complete
+2c945633a533: Download complete
+5196e1e87d8f: Download complete
+bddd54b9c549: Download complete
+bddd54b9c549: Pull complete
+4eaae1e844ac: Pull complete
+5196e1e87d8f: Pull complete
+6586d096303c: Pull complete
+cf55ff1c80af: Pull complete
+Digest: sha256:a532724022429812ec797c285c1b540a644c15e248579c6bfdf12a8fbaab4964
+Status: Downloaded newer image for mysql:8.0.36
+docker.io/library/mysql:8.0.36
