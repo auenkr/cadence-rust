@@ -90,7 +90,13 @@ async function registerShardWithGoManager(shardName, force = false) {
     let executorId, heartbeat;
     while (Date.now() < deadline) {
       const stats = await shardManagerCommand({ op: 'stats' });
-      const entries = Object.entries(stats || {}).sort((a, b) =>
+      // The probe talks to the primary Rust node's gRPC port, so shards go to the executor that
+      // registered that port (alternating onto the secondary would reload task lists mid-scenario).
+      const primaryGrpc = String(process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT || '');
+      const allEntries = Object.entries(stats || {});
+      const primaryEntries = allEntries.filter(([, e]) => String((e.Metadata || e.metadata || {}).grpc) === primaryGrpc
+        && Date.now() - (Date.parse(e.LastHeartbeat || e.lastHeartbeat || '') || 0) < 10000);
+      const entries = (primaryEntries.length ? primaryEntries : allEntries).sort((a, b) =>
         (Date.parse(b[1].LastHeartbeat || b[1].lastHeartbeat || '') || 0)
           - (Date.parse(a[1].LastHeartbeat || a[1].lastHeartbeat || '') || 0));
       if (entries.length) {
@@ -520,11 +526,13 @@ async function run() {
     'both Rust Matching members must expose the same Ringpop ownership map, including keys owned by each host');
     const idleList = { name: `production-idle-${id}` };
     const pendingIdlePoll = call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: idleList, identity: 'production-idle-probe' });
+    let idlePollSettled = 'pending';
+    pendingIdlePoll.then(() => { idlePollSettled = 'resolved'; }, error => { idlePollSettled = `rejected: ${error.message}`; });
     const idleDeadline = Date.now() + 10000;
     for (;;) {
       const info = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
       if (info.pollers.some(poller => poller.identity === 'production-idle-probe')) break;
-      if (Date.now() > idleDeadline) throw new Error('production idle probe poll was not registered');
+      if (Date.now() > idleDeadline) throw new Error(`production idle probe poll was not registered (poll ${idlePollSettled}; describe ${JSON.stringify(info).slice(0, 400)}; sd ${JSON.stringify(await shardManagerCommand({ op: 'stats' })).slice(0, 1500)})`);
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     const evictionDeadline = Date.now() + 30000;
