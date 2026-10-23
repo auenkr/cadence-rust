@@ -1,0 +1,31 @@
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/gotests2/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 35s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 23 tests
+test matching_config::tests::activity_sync_match_wait_defaults_to_go_50ms ... ok
+test matching_dispatch::tests::matching_isolation_remote_sync_match_blocking_waits_for_root_poller ... ok
+test matching_dispatch::tests::matching_isolation_remote_sync_match_forwards_to_root_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_child_add_sync_matches_parent_without_duplicate_persistence ... ok
+test matching_dispatch::tests::matching_remote_sync_match_forwards_to_root_poller ... ok
+test matching_dispatch::tests::matching_sync_match_failure_reports_busy_without_matching ... ok
+test matching_query::tests::sync_match_query_hands_off_to_parked_poller ... ok
+test matching_query::tests::sync_match_queued_query_is_returned_to_next ... ok
+test matching_sync::tests::sync_match_cancellation_and_history_failure_allow_persistence_fallback ... ok
+test matching_sync::tests::sync_match_child_context_preserves_parent_tailroom ... ok
+test matching_dispatch::tests::matching_remote_sync_match_blocking_waits_for_root_poller ... ok
+test matching_sync::tests::sync_match_isolation_group_hands_off_within_its_group ... ok
+test matching_sync::tests::sync_match_isolation_group_mismatch_does_not_match ... ok
+test matching_sync::tests::sync_match_isolation_queued_offer_is_returned_to_its_group ... ok
+test matching_sync::tests::sync_match_local_match_hands_off_to_waiting_poller ... ok
+test matching_sync::tests::sync_match_local_timeout_reports_no_match_when_poller_finishes_late ... ok
+test matching_sync::tests::sync_match_non_blocking_isolated_poll_returns_queued_offer_without_waiting ... ok
+test matching_sync::tests::sync_match_non_blocking_poll_returns_queued_offer_without_waiting ... ok
+test matching_sync::tests::sync_match_preserves_only_the_transient_forwarded_request_signal ... ok
+test matching_sync::tests::sync_match_queued_offer_is_returned_to_poll ... ok
+test matching_sync::tests::sync_match_waits_for_history_completion_and_preserves_original_metadata ... ok
+test matching_sync::tests::sync_match_zero_wait_claims_registered_poller_and_timeouts_withdraw_offers ... ok
+test matching_sync::tests::sync_match_does_not_deliver_to_other_or_unknown_groups ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 418 filtered out; finished in 0.09s
+
