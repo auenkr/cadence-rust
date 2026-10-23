@@ -1,0 +1,9 @@
+{
+  "repository": "/mnt/storage/service/github/wt/gatefinal3",
+  "head": "bafd65a77df2110acb4e22383f51a11c9b54960a",
+  "branch": "matching-gate-final3-20261024",
+  "status": [
+    "M tests/matching-service-compat.cjs",
+    "?? memory/evidence/matching-gate-final3-20261024/"
+  ]
+}

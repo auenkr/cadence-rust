@@ -1,0 +1,2 @@
+env
+tests/gates/run-cassandra-lane.sh /mnt/storage/service/gate-runs/gatefinal3/l4 /mnt/storage/service/cargo-target-final/debug/cadence-matching --binary /mnt/storage/service/gate-runs/gatefinal3/build/cadence-server --history-transport grpc --evidence-dir /mnt/storage/service/github/wt/gatefinal3/memory/evidence/matching-gate-final3-20261024/4-cassandra/evidence

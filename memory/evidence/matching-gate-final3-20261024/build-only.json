@@ -1,0 +1,14 @@
+{
+  "goBinary": "/mnt/storage/service/gate-runs/gatefinal3/build/cadence-server",
+  "rustMatchingBinary": "/mnt/storage/service/cargo-target-final/debug/cadence-matching",
+  "rustMatchingTestExecutable": null,
+  "rustServices": [
+    "matching"
+  ],
+  "goServices": [
+    "frontend",
+    "history",
+    "worker"
+  ],
+  "cargoSafe": "/mnt/storage/service/bin/cargo-safe"
+}

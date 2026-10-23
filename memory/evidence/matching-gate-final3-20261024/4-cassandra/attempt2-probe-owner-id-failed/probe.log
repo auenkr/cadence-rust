@@ -1,0 +1,54 @@
+PROBE BODY FAILED: Error: 3 INVALID_ARGUMENT: invalid owner id: owner_id "36:b2439927-4739-47c5-bfe8-db956a47e635:48a87c79-f565-4ee3-8183-9215a4edb46e:gap" has an invalid hold id "gap"
+    at callErrorFromStatus (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:71:50
+    at new Promise (<anonymous>)
+    at acquireSemaphore (/mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:71:10)
+    at run (/mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:549:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 3,
+  details: 'invalid owner id: owner_id "36:b2439927-4739-47c5-bfe8-db956a47e635:48a87c79-f565-4ee3-8183-9215a4edb46e:gap" has an invalid hold id "gap"',
+  metadata: Metadata {
+    internalRepr: Map(3) {
+      'content-type' => [Array],
+      'content-length' => [Array],
+      'date' => [Array]
+    },
+    opaqueData: Map(0) {},
+    options: {}
+  }
+}
+Error: 3 INVALID_ARGUMENT: invalid owner id: owner_id "36:b2439927-4739-47c5-bfe8-db956a47e635:48a87c79-f565-4ee3-8183-9215a4edb46e:gap" has an invalid hold id "gap"
+    at callErrorFromStatus (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/github/wt/gatefinal3/cadence-web/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:71:50
+    at new Promise (<anonymous>)
+    at acquireSemaphore (/mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:71:10)
+    at run (/mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:549:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 3,
+  details: 'invalid owner id: owner_id "36:b2439927-4739-47c5-bfe8-db956a47e635:48a87c79-f565-4ee3-8183-9215a4edb46e:gap" has an invalid hold id "gap"',
+  metadata: Metadata {
+    internalRepr: Map(3) {
+      'content-type' => [Array],
+      'content-length' => [Array],
+      'date' => [Array]
+    },
+    opaqueData: Map(0) {},
+    options: {}
+  }
+}

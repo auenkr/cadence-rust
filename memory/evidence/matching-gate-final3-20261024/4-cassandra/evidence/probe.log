@@ -1,0 +1,26 @@
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: DescribeTaskList must report the reported backing rate
+
+100000 !== 1
+
+    at run (/mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:1168:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 100000,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: DescribeTaskList must report the reported backing rate
+
+100000 !== 1
+
+    at run (/mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:1168:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 100000,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
