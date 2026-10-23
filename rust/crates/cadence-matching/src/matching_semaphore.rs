@@ -653,6 +653,33 @@ mod tests {
         assert_eq!(manager.acquire("1:w:r1:1").await, Err(ManagerError::NotReady));
     }
 
+    // Go: TestAcquireRejectsAnEmptyOwnerID (semaphore/semaphore_manager_test.go:307). A rejected
+    // request must not touch the free set.
+    #[tokio::test]
+    async fn matching_semaphore_rejects_empty_owner_without_touching_free_set() {
+        let registry = Registry::new(Arc::new(store()));
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
+        assert_eq!(
+            manager.acquire("").await,
+            Err(ManagerError::BadRequest("ownerID is required".into()))
+        );
+        assert_eq!(manager.free_count(), 2);
+    }
+
+    // Go: TestUnreserveIsIdempotent (semaphore/semaphore_manager_test.go:829). A double unreserve
+    // must not list the same slot twice, or two acquires could draw it.
+    #[tokio::test]
+    async fn matching_semaphore_unreserve_is_idempotent() {
+        let registry = Registry::new(Arc::new(store()));
+        let manager = registry.get_or_create(identifier(0)).await.unwrap();
+        let token_id = manager.reserve().unwrap();
+        assert_eq!(manager.free_count(), 1);
+        manager.unreserve(token_id);
+        assert_eq!(manager.free_count(), 2);
+        manager.unreserve(token_id);
+        assert_eq!(manager.free_count(), 2);
+    }
+
     // Go: TestRingKey. Buckets of one semaphore must hash to different ring keys.
     #[test]
     fn matching_semaphore_ring_key_separates_buckets() {

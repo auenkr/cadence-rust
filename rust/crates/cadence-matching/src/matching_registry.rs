@@ -3047,6 +3047,40 @@ mod tests {
         let recovered = take(&registry, &new).await;
         assert_eq!(recovered.task_id, 1);
     }
+    // Go: livenessSuite.TestEventLoop_Noop (liveness/liveness_test.go:89). Go's ttl/2 ticker
+    // is replaced here by the registry idle sweep; the 500ms TTL matches the Go fixture.
+    #[tokio::test]
+    async fn liveness_event_loop_noop_keeps_marked_owner_loaded() {
+        let (_dir, _store, registry, key) = fixture();
+        let registry =
+            registry.with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| 500_000_000));
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        // Go: advance ttl/2 and mark alive.
+        handle.liveness.mark_alive(250_000_000);
+        // Go: advance ttl/2 more; the owner is still alive at ttl.
+        registry.sweep_idle(500_000_000, false).await.unwrap();
+        assert!(handle.liveness.is_alive(500_000_000));
+        assert!(!handle.queue.is_stopped());
+        assert!(registry
+            .state
+            .lock()
+            .unwrap()
+            .owners
+            .contains_key(&(key.domain_id, key.name.clone(), key.task_type)));
+    }
+    // Go: livenessSuite.TestEventLoop_Shutdown (liveness/liveness_test.go:105). With no mark
+    // for a full TTL, Go calls the shutdown callback; Rust unloads the owner and stops its queue.
+    #[tokio::test]
+    async fn liveness_event_loop_shutdown_unloads_owner_at_ttl() {
+        let (_dir, _store, registry, key) = fixture();
+        let registry =
+            registry.with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| 500_000_000));
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        handle.liveness.mark_alive(0);
+        registry.sweep_idle(500_000_000, false).await.unwrap();
+        assert!(handle.queue.is_stopped());
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
     #[tokio::test]
     async fn describe_lookup_does_not_refresh_liveness_but_append_does() {
         let (_dir, _store, registry, key) = fixture();
