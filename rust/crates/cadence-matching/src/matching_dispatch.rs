@@ -323,10 +323,14 @@ impl ForwardState {
         self.add_permits.clone()
     }
 
+    /// `domain_id` is the task-list domain; `source_domain` is the task's own
+    /// domain (Go `task.Event.DomainID`). Persisted backlog reads pass the queue
+    /// domain for both, as pinned Go SQL GetTasks does (sql_task_store.go:527-528).
     pub(crate) async fn forward_backlog_task(
         &self,
         task: AllocatedTask,
         domain_id: &str,
+        source_domain: &str,
         task_type: i32,
         kind: i16,
     ) -> Result<(), crate::matching_forward::ForwardError> {
@@ -365,7 +369,7 @@ impl ForwardState {
                 let mut client = m::matching_api_client::MatchingApiClient::new(channel);
                 if task_type == 0 {
                     let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
-                        domain_id: domain_id.to_owned(), workflow_execution: execution,
+                        domain_id: source_domain.to_owned(), workflow_execution: execution,
                         task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
                         schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
                         source: 2, forwarded_from, partition_config,
@@ -375,7 +379,7 @@ impl ForwardState {
                     client.add_decision_task(request).await.map(|_| ())
                 } else {
                     let mut request = tonic::Request::new(m::AddActivityTaskRequest {
-                        domain_id: domain_id.to_owned(), source_domain_id: domain_id.to_owned(),
+                        domain_id: domain_id.to_owned(), source_domain_id: source_domain.to_owned(),
                         workflow_execution: execution,
                         task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
                         schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
@@ -390,7 +394,7 @@ impl ForwardState {
                 use m::matching_api_server::MatchingApi;
                 if task_type == 0 {
                     let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
-                        domain_id: domain_id.to_owned(), workflow_execution: execution,
+                        domain_id: source_domain.to_owned(), workflow_execution: execution,
                         task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
                         schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
                         source: 2, forwarded_from, partition_config,
@@ -399,7 +403,7 @@ impl ForwardState {
                     service.add_decision_task(request).await.map(|_| ())
                 } else {
                     let mut request = tonic::Request::new(m::AddActivityTaskRequest {
-                        domain_id: domain_id.to_owned(), source_domain_id: domain_id.to_owned(),
+                        domain_id: domain_id.to_owned(), source_domain_id: source_domain.to_owned(),
                         workflow_execution: execution,
                         task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
                         schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
@@ -410,7 +414,7 @@ impl ForwardState {
                 }
             }
             Parent::Dispatcher(dispatcher) => {
-                dispatcher.accept_forwarded_backlog(task, domain_id, &parent_name, task_type).await
+                dispatcher.accept_forwarded_backlog(task, source_domain, &parent_name, task_type).await
             }
         } }).await;
         result.map_err(crate::matching_forward::ForwardError::classify)
@@ -491,7 +495,7 @@ impl TaskDispatcher {
         if !root {
             if let Some(forward) = &self.forward {
                 if let Some(_permit) = forward.add_permits.try_acquire() {
-                    if Box::pin(forward.forward_backlog_task(task, &self.domain_id, task_type, 0)).await.is_ok() {
+                    if Box::pin(forward.forward_backlog_task(task, &self.domain_id, &self.domain_id, task_type, 0)).await.is_ok() {
                         return Ok(());
                     }
                 }
@@ -2097,19 +2101,19 @@ mod tests {
             ..Default::default()
         }};
         let domain = uuid::Uuid::from_u128(1).to_string();
-        state.forward_backlog_task(task.clone(), &domain, 0, 0).await.unwrap();
-        assert!(matches!(state.forward_backlog_task(task.clone(), &domain, 1, 0).await, Err(ForwardError::SlowDown)));
+        state.forward_backlog_task(task.clone(), &domain, &domain, 0, 0).await.unwrap();
+        assert!(matches!(state.forward_backlog_task(task.clone(), &domain, &domain, 1, 0).await, Err(ForwardError::SlowDown)));
         let mut limited = state.clone();
         limited.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 0), now()));
-        assert!(matches!(limited.forward_backlog_task(task.clone(), &domain, 0, 0).await, Err(ForwardError::SlowDown)), "zero forwarding rate rejects before issuing an RPC");
-        assert!(matches!(state.forward_backlog_task(task, &domain, 0, 1).await, Err(ForwardError::TaskListKind)));
+        assert!(matches!(limited.forward_backlog_task(task.clone(), &domain, &domain, 0, 0).await, Err(ForwardError::SlowDown)), "zero forwarding rate rejects before issuing an RPC");
+        assert!(matches!(state.forward_backlog_task(task, &domain, &domain, 0, 1).await, Err(ForwardError::TaskListKind)));
         let task = AllocatedTask { task_id: 2, data: Default::default() };
         let mut root = state.clone();
         root.source = "queue".into();
-        assert!(matches!(root.forward_backlog_task(task.clone(), &domain, 0, 0).await, Err(ForwardError::NoParent)));
+        assert!(matches!(root.forward_backlog_task(task.clone(), &domain, &domain, 0, 0).await, Err(ForwardError::NoParent)));
         let mut invalid = state.clone();
         invalid.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 1), now()));
-        assert!(matches!(invalid.forward_backlog_task(task, &domain, 2, 0).await, Err(ForwardError::InvalidTaskListType)));
+        assert!(matches!(invalid.forward_backlog_task(task, &domain, &domain, 2, 0).await, Err(ForwardError::InvalidTaskListType)));
         server.abort();
     }
     fn forward_state(source: &str, rate: i64) -> ForwardState {
@@ -2133,12 +2137,12 @@ mod tests {
         // list cannot forward.
         let root = forward_state("queue", 10);
         assert!(matches!(
-            root.forward_backlog_task(unallocated_task(), "domain", 0, 0).await,
+            root.forward_backlog_task(unallocated_task(), "domain", "domain", 0, 0).await,
             Err(ForwardError::NoParent)
         ));
         let partition = forward_state("/__cadence_sys/queue/1", 10);
         assert!(matches!(
-            partition.forward_backlog_task(unallocated_task(), "domain", 1, 1).await,
+            partition.forward_backlog_task(unallocated_task(), "domain", "domain", 1, 1).await,
             Err(ForwardError::TaskListKind)
         ));
     }
@@ -2149,12 +2153,12 @@ mod tests {
         let forward = forward_state("/__cadence_sys/queue/1", 2);
         for _ in 0..2 {
             assert!(matches!(
-                forward.forward_backlog_task(unallocated_task(), "domain", 1, 0).await,
+                forward.forward_backlog_task(unallocated_task(), "domain", "domain", 1, 0).await,
                 Err(ForwardError::Remote(_))
             ));
         }
         assert!(matches!(
-            forward.forward_backlog_task(unallocated_task(), "domain", 1, 0).await,
+            forward.forward_backlog_task(unallocated_task(), "domain", "domain", 1, 0).await,
             Err(ForwardError::SlowDown)
         ));
     }
@@ -2233,7 +2237,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        state.forward_backlog_task(task, &domain, 0, 0).await.unwrap();
+        state.forward_backlog_task(task, &domain, &domain, 0, 0).await.unwrap();
         let request = parent.add_decision.lock().unwrap().clone().expect("decision add reached the parent");
         let list = request.task_list.clone().unwrap();
         assert_eq!(list.name, "tl0");
@@ -2251,11 +2255,10 @@ mod tests {
         server.abort();
     }
     #[tokio::test]
-    #[ignore = "parity gap: Rust sends the list domain as SourceDomainUUID, Go sends the task's own domain (inventory parity gaps)"]
     async fn matching_forward_activity_task_fields_match_go_forwarder() {
         // Go TestForwardActivityTask: DomainUUID is the list's domain and
-        // SourceDomainUUID is the task's domain. Rust passes one domain, so the
-        // list domain is given and the source-domain assertion is expected to fail.
+        // SourceDomainUUID is the task's domain. The caller supplies both, as Go's
+        // InternalTask carries its own DomainID.
         let (parent, channel, server) = recording_parent().await;
         let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
         let list_domain = Uuid::from_u128(1).to_string();
@@ -2271,7 +2274,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        state.forward_backlog_task(task, &list_domain, 1, 0).await.unwrap();
+        state.forward_backlog_task(task, &list_domain, &source_domain, 1, 0).await.unwrap();
         let request = parent.add_activity.lock().unwrap().clone().expect("activity add reached the parent");
         assert_eq!(request.domain_id, list_domain);
         assert_eq!(request.source_domain_id, source_domain);
@@ -2421,7 +2424,7 @@ mod tests {
         };
         let domain = Uuid::from_u128(1).to_string();
         assert!(
-            forward.forward_backlog_task(task, &domain, 0, 0).await.is_ok(),
+            forward.forward_backlog_task(task, &domain, &domain, 0, 0).await.is_ok(),
             "forwarded add reports a remote sync match"
         );
         let (workflow_id, forwarded) = parked.await.unwrap().expect("root poller received the forwarded task");
@@ -2476,7 +2479,7 @@ mod tests {
             data: TaskData { workflow_id: "child-workflow".into(), schedule_id: 91, ..Default::default() },
         };
         let domain = Uuid::from_u128(1).to_string();
-        assert!(matches!(state.forward_backlog_task(task, &domain, 0, 0).await, Err(ForwardError::SlowDown)));
+        assert!(matches!(state.forward_backlog_task(task, &domain, &domain, 0, 0).await, Err(ForwardError::SlowDown)));
         server.abort();
     }
 

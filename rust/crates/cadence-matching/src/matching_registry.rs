@@ -1378,7 +1378,7 @@ impl QueueRegistry {
                                 let forward_state = forward_state.clone();
                                 let domain = forward_domain.clone();
                                 Box::pin(async move {
-                                    forward_state.forward_backlog_task(task, &domain, forward_task_type, forward_kind).await
+                                    forward_state.forward_backlog_task(task, &domain, &domain, forward_task_type, forward_kind).await
                                 })
                             }),
                             local_wait: Arc::new(move || std::time::Duration::from_nanos(
