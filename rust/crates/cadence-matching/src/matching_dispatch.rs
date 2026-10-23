@@ -1206,6 +1206,20 @@ impl TaskDispatcher {
                         lifecycle.forwarded,
                         task.task.data.partition_config.as_ref(),
                     );
+                    // Go records async handoff latency only when the poll
+                    // response is built for a task that was not sync matched.
+                    if task.sync.is_none() {
+                        let now_nanos = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |since_epoch| since_epoch.as_nanos() as i64);
+                        lifecycle.metrics.async_match_handler_latency(
+                            context,
+                            std::time::Duration::from_nanos(
+                                now_nanos.saturating_sub(task.task.data.created_nanos).max(0)
+                                    as u64,
+                            ),
+                        );
+                    }
                 }
             }
             drop(waiting.take());

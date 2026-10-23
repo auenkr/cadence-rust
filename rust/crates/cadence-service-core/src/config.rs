@@ -413,6 +413,9 @@ pub struct PersistenceConfig {
     pub num_history_shards: i32,
     #[serde(default, rename = "datastores")]
     pub datastores: HashMap<String, DatastoreConfig>,
+    /// Go `EnablePersistenceLatencyHistogramMetrics`; off unless configured.
+    #[serde(default, rename = "enablePersistenceLatencyHistogramMetrics")]
+    pub enable_persistence_latency_histogram_metrics: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

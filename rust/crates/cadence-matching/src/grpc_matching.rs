@@ -27,7 +27,7 @@ fn domain_name_for(
         .and_then(|response| response.domain_info.map(|info| info.name))
         .filter(|name| !name.is_empty())
 }
-fn matching_host_name() -> &'static str {
+pub(crate) fn matching_host_name() -> &'static str {
     static HOSTNAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     HOSTNAME.get_or_init(|| {
         let mut hostname = [0 as libc::c_char; 256];

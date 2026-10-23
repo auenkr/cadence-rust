@@ -866,6 +866,12 @@ pub async fn run(
             {
                 limiter.with_metric_sink(sink.clone());
             }
+            if let Some(limiter) = matching_persistence_limiter.as_ref() {
+                limiter.with_host_name(crate::grpc_matching::matching_host_name());
+                limiter.with_manual_latency_histogram(
+                    cfg.persistence.enable_persistence_latency_histogram_metrics,
+                );
+            }
             // Reserve production endpoints before Ringpop publishes them.
             let mut matching_grpc_listener = if run_matching && !embedded_development {
                 Some(tokio::net::TcpListener::bind(matching_addr).await?)

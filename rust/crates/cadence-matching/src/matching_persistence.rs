@@ -139,6 +139,9 @@ impl MatchingTaskStore for RateLimitedTaskStore {
             .get_tasks(key, read_level, max_read_level, batch_size);
         self.limiter
             .record_task_call("GetTasks", Some(key.domain_id), started.elapsed(), &result);
+        if matches!(&result, Ok(tasks) if tasks.is_empty()) {
+            self.limiter.record_empty_response("GetTasks");
+        }
         result
     }
     fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> TaskResult<i64> {
