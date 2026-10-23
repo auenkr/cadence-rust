@@ -3173,6 +3173,33 @@ mod tests {
             (3, 2, 2)
         );
     }
+    // Go: TestDisconnectBlockedPollers (task_list_manager_test.go:1961), case "disconnect blocked
+    // pollers and refresh cancel context". Go disconnects the matcher's blocked polls; a waiting
+    // decision poll returns an empty task. The shutting-down no-op case is covered by
+    // shutdown_wakes_blocked_dispatcher.
+    #[tokio::test]
+    async fn release_blocked_pollers_wakes_waiting_decision_poll() {
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key, 0, 1).await.unwrap();
+        let waiting = handle.clone();
+        let poll = tokio::spawn(async move {
+            waiting
+                .dispatcher
+                .poll_decision(
+                    cadence_proto::api::PollForDecisionTaskRequest::default(),
+                    Duration::from_secs(10),
+                )
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        handle.dispatcher.release_blocked_pollers();
+        let response = tokio::time::timeout(Duration::from_secs(2), poll)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(response.task_token.is_empty());
+    }
     // Go: TestTaskListManagerImpl_HasPollerAfter (task_list_manager_test.go:1343). An outstanding
     // poller counts, and so does one that finished after the query time; Go's zero time.Time{}
     // is before every poll, which i64::MIN mirrors here.
