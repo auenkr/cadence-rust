@@ -51,3 +51,14 @@ Evidence:
 Test: none added. The memory's "add one TChannel TLS handshake test if in scope" does not apply, since scope is out.
 The existing gRPC TLS and HTTP TLS coverage stays as it is. P1-15 should be closed as an accepted difference
 (Go has no feature to match).
+
+## CI verification
+
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/40031936087 (`rust-ci.yml`, `-f package=cadence-matching`)
+- Head: `4940e5809`. Conclusion: success on the first run, no reruns.
+- Clippy `-p cadence-matching --all-targets -D warnings`: exit 0.
+- Test `-p cadence-matching`: `568 passed; 0 failed; 7 ignored` (main unit-test binary).
+- The three un-ignored tests report `ok`:
+  - `matching_semaphore::parity_tests::matching_semaphore_acquire_honors_deadline_while_starting`
+  - `matching_semaphore::parity_tests::matching_semaphore_grant_stops_retrying_at_deadline`
+  - `matching_semaphore::parity_tests::matching_semaphore_grant_rejects_unknown_write_outcome`
