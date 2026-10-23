@@ -231,7 +231,7 @@ impl Frontend {
         }
         self.state
             .execution_store(name)
-            .map_err(|e| domain_not_found(e.message))
+            .map_err(|e| Status::not_found(e.message))
     }
 }
 
@@ -525,7 +525,7 @@ impl p::domain_api_server::DomainApi for Frontend {
             .state
             .domains
             .describe(&input)
-            .map_err(|e| domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         Ok(Response::new(p::DescribeDomainResponse {
             domain: Some(domain_response(result)),
         }))

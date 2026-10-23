@@ -114,7 +114,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         let execution = cadence_api::types::WorkflowExecution {
             workflow_id,
             run_id: v.run_id.clone(),
@@ -234,7 +234,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         match store.refresh_tasks(&domain, &execution) {
             Ok(()) => Ok(Response::new(h::RefreshWorkflowTasksResponse {})),
             Err(cadence_persistence::WorkflowMutationError::NotFound(e)) => {
@@ -278,7 +278,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         let (_, _, state_json) = store
             .describe_admin(
                 &domain,
@@ -325,7 +325,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         match store.schedule_decision_task(
             &domain,
             &cadence_api::types::WorkflowExecution {
@@ -354,7 +354,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         match store.remove_signal(
             &domain,
             &cadence_api::types::WorkflowExecution {
@@ -554,7 +554,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         let events: Vec<cadence_api::service_types::HistoryEvent> =
             serde_json::from_slice(&blob.data).unwrap_or_default();
         let signals: Vec<_> = events
@@ -694,7 +694,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         match store.record_decision_started(
             &domain,
             &cadence_api::types::WorkflowExecution {
@@ -762,7 +762,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         let identity = r
             .poll_request
             .as_ref()
@@ -827,7 +827,7 @@ impl h::history_api_server::HistoryApi for History {
             .frontend
             .state
             .execution_store(&domain)
-            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+            .map_err(|e| Status::not_found(e.message))?;
         match store.record_child_completed(
             &domain,
             &cadence_api::types::WorkflowExecution {
@@ -1045,7 +1045,7 @@ fn mutable_state_response(
         .frontend
         .state
         .execution_store(&domain)
-        .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+        .map_err(|e| Status::not_found(e.message))?;
     let view = store
         .mutable_state_view(&domain, &execution)
         .map_err(|e| Status::not_found(e.message))?;
