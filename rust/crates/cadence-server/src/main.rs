@@ -1380,6 +1380,7 @@ async fn main() -> anyhow::Result<()> {
                 .map_or(matching_service.clone(), |sink| {
                     matching_service.with_metrics(sink.clone())
                 });
+            let matching_service = matching_service.with_start_pending();
             let matching_tchannel_service = matching_service.clone();
             // Start the shared listener before provider bootstrap so JOIN is reachable.
             let (mut matching_tchannel_task, mut matching_tchannel_done) = if run_matching {
@@ -1453,6 +1454,7 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
             }
+            matching_service.mark_started();
             let app = if run_matching {
                 if matching_http_addr.is_some() {
                     app

@@ -1035,8 +1035,8 @@ async fn matching_rpc_forward_task_limits_reload_and_rate_zero_blocks() {
 #[tokio::test]
 async fn matching_rpc_semaphore_acquire_grants_and_reports_no_slot() {
     let (_dir, _store, matching, _key) = fixture();
-    let mut matching = matching;
-    matching.frontend.state.semaphore_enabled = true;
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
+        "system.enableDistributedSemaphore", vec![bool_config(true, Some("domain"))]);
     let domain = Uuid::from_u128(1).to_string();
     // Registration normally happens on the RegisterDomain path; mirror it so
     // the bucket metadata is keyed by the domain UUID the request carries.
@@ -1098,8 +1098,12 @@ async fn matching_rpc_semaphore_acquire_grants_and_reports_no_slot() {
     .await
     .unwrap_err();
     assert_eq!(missing.code(), tonic::Code::NotFound);
-    // Disabled domains are rejected before any bucket work.
-    matching.frontend.state.semaphore_enabled = false;
+    // A cached manager skips the flag check, exactly like Go.
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
+        "system.enableDistributedSemaphore", vec![bool_config(false, Some("domain"))]);
+    assert_eq!(acquire(&matching, "1:w:r9:1").await.unwrap().outcome, 2);
+    for manager in matching.semaphores.all_managers() { matching.semaphores.unregister(&manager); }
+    // An unloaded bucket must pass domain admission again.
     let disabled = acquire(&matching, "1:w:r9:1").await.unwrap_err();
     assert_eq!(disabled.code(), tonic::Code::InvalidArgument);
 }
@@ -1107,7 +1111,8 @@ async fn matching_rpc_semaphore_acquire_grants_and_reports_no_slot() {
 #[tokio::test]
 async fn matching_rpc_sql_semaphore_matches_go_unsupported_backend_error() {
     let (_dir, _store, mut matching, _key) = fixture();
-    matching.frontend.state.semaphore_enabled = true;
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
+        "system.enableDistributedSemaphore", vec![bool_config(true, Some("domain"))]);
     matching.semaphores = crate::matching_semaphore::Registry::new(Arc::new(
         cadence_persistence::SqlUnsupportedSemaphorePersistence,
     ));
@@ -3234,4 +3239,153 @@ async fn matching_rpc_task_list_type_non_activity_maps_to_decision() {
         }))
         .await;
     assert!(cancel.is_ok(), "{cancel:?}");
+}
+
+fn bool_config(value: bool, domain: Option<&str>) -> cadence_api::admin::DynamicConfigValue {
+    let mut config = quota_config(0, domain);
+    config.value = Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON,
+        serde_json::to_vec(&value).unwrap()));
+    config
+}
+
+#[tokio::test]
+async fn matching_meta_health_waits_for_start_on_both_transports() {
+    use cadence_proto::api::meta_api_server::MetaApi;
+    let matching = Matching::new(crate::handlers::AppState::default()).with_start_pending();
+    let grpc = matching.health(Request::new(p::HealthRequest {}));
+    let args = cadence_thrift::value::Struct::default();
+    let thrift = crate::thrift_matching::dispatch(&matching, "Meta::health", &args,
+        std::time::Instant::now() + Duration::from_secs(5));
+    tokio::pin!(grpc, thrift);
+    assert!(tokio::time::timeout(Duration::from_millis(30), &mut grpc).await.is_err());
+    assert!(tokio::time::timeout(Duration::from_millis(30), &mut thrift).await.is_err());
+    matching.mark_started();
+    let health = grpc.await.unwrap().into_inner();
+    assert!(health.ok);
+    assert_eq!(health.message, "matching good");
+    let (response, error) = thrift.await.unwrap();
+    assert!(error.is_none());
+    let Some(cadence_thrift::value::Value::Struct(status)) = response.get(0) else { panic!("missing status") };
+    assert_eq!(status.get(1), Some(&cadence_thrift::value::Value::Bool(true)));
+    assert_eq!(status.get(2), Some(&cadence_thrift::value::Value::Bytes(b"matching good".to_vec())));
+}
+
+#[tokio::test]
+async fn matching_cancel_loads_unknown_partition_without_cancelling_other_partition() {
+    let (_dir, _store, matching, key) = fixture();
+    let child = "/__cadence_sys/queue/1";
+    let guard = matching.register_poll(PollKey { domain: key.domain_id.to_string(),
+        task_list: "queue".into(), task_type: 1, poller: "same-id".into() });
+    matching.cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+        domain_id: key.domain_id.to_string(), task_list: Some(p::TaskList { name: child.into(), kind: 1, ..Default::default() }),
+        task_list_type: 1, poller_id: "same-id".into(),
+    })).await.unwrap();
+    assert!(matching.queues.as_ref().unwrap().contains_cached(&TaskListKey { name: child.into(), ..key }));
+    assert!(tokio::time::timeout(Duration::from_millis(30), guard.cancel.notified()).await.is_err());
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_cancel_outstanding_forwarded_parent_poll() {
+    let (_dir, _store, matching, key) = fixture();
+    let worker = matching.clone();
+    let domain = key.domain_id.to_string();
+    let poll = tokio::spawn(async move {
+        worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain, poller_id: "forwarded".into(),
+            request: Some(p::PollForDecisionTaskRequest {
+                task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
+                identity: "worker".into(), ..Default::default()
+            }), ..Default::default()
+        }))).await
+    });
+    let root = matching.durable_queue(&key.domain_id.to_string(), &list().unwrap(), 0).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root.pollers.lock().unwrap().contains_poll("forwarded") { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    matching.cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+        domain_id: key.domain_id.to_string(), task_list: list(), task_list_type: 1, poller_id: "forwarded".into(),
+    })).await.unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(2), poll).await.unwrap().unwrap().unwrap().into_inner().task_token.is_empty());
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while root.pollers.lock().unwrap().contains_poll("forwarded") { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_semaphore_domain_filter_and_ring_admission_precede_creation() {
+    use cadence_common::membership::Host;
+    let (_dir, _store, matching, key) = fixture();
+    // The legacy process flag cannot enable Matching buckets.
+    let mut matching = matching;
+    matching.frontend.state.semaphore_enabled = true;
+    let request = || Request::new(m::AcquireSemaphoreRequest { domain_id: key.domain_id.to_string(),
+        semaphore_name: "sem".into(), bucket: 0, owner_id: "1:w:r:1".into() });
+    assert_eq!(matching.acquire_semaphore(request()).await.unwrap_err().code(), tonic::Code::InvalidArgument);
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
+        "system.enableDistributedSemaphore", vec![bool_config(true, Some("other-domain"))]);
+    assert_eq!(matching.acquire_semaphore(request()).await.unwrap_err().code(), tonic::Code::InvalidArgument);
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
+        "system.enableDistributedSemaphore", vec![bool_config(true, Some("domain"))]);
+    let membership = crate::matching_membership::Membership::new("local", vec![Host {
+        address: "remote:7935".into(), identity: "remote".into(), grpc_address: "127.0.0.1:1".into(),
+    }]);
+    let matching = matching.with_membership(membership);
+    let error = matching.acquire_semaphore(request()).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Aborted);
+    assert!(error.message().contains("not owned by this host"));
+    assert!(matching.semaphores.all_managers().is_empty());
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_domain_listing_filters_kinds_and_collapses_partition_roots() {
+    let (_dir, _store, matching, key) = fixture();
+    for (name, kind, task_type) in [("queue", 1, 0), ("/__cadence_sys/queue/1", 1, 0),
+        ("sticky", 2, 0), ("activity", 1, 1)] {
+        matching.durable_queue(&key.domain_id.to_string(), &p::TaskList { name: name.into(), kind, ..Default::default() }, task_type).await.unwrap();
+    }
+    let request = || Request::new(m::GetTaskListsByDomainRequest { domain: "domain".into() });
+    let normal = matching.get_task_lists_by_domain(request()).await.unwrap().into_inner();
+    assert_eq!(normal.decision_task_list_map.len(), 1);
+    assert!(normal.decision_task_list_map.contains_key("queue"));
+    assert_eq!(normal.activity_task_list_map.len(), 1);
+    // Go iterates maps; either loaded partition may win the root-key collision.
+    let name = &normal.decision_task_list_map["queue"].task_list.as_ref().unwrap().name;
+    assert!(name == "queue" || name == "/__cadence_sys/queue/1");
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
+        "matching.matchingReturnAllTaskListKinds", vec![bool_config(true, None)]);
+    let all = matching.get_task_lists_by_domain(request()).await.unwrap().into_inner();
+    assert_eq!(all.decision_task_list_map.len(), 2);
+    assert!(all.decision_task_list_map.contains_key("sticky"));
+    assert!(all.decision_task_list_map.values().all(|description| description.task_list_status.is_none()));
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn matching_failover_callback_disconnects_sticky_decision_and_keeps_manager() {
+    let (_dir, _store, matching, key) = fixture();
+    let sticky = p::TaskList { name: "sticky-failover".into(), kind: 2, ..Default::default() };
+    let queue = matching.durable_queue(&key.domain_id.to_string(), &sticky, 0).await.unwrap();
+    let worker = matching.clone();
+    let domain = key.domain_id.to_string();
+    let poll_list = sticky.clone();
+    let poll = tokio::spawn(async move {
+        worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain, poller_id: "sticky-failover".into(),
+            request: Some(p::PollForDecisionTaskRequest { task_list: Some(poll_list), identity: "worker".into(), ..Default::default() }),
+            ..Default::default()
+        }))).await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !queue.pollers.lock().unwrap().contains_poll("sticky-failover") { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    let registry = matching.queues.as_ref().unwrap();
+    registry.release_domain_failover_polls(key.domain_id).await;
+    assert!(tokio::time::timeout(Duration::from_secs(2), poll).await.unwrap().unwrap().unwrap().into_inner().task_token.is_empty());
+    assert!(!queue.queue.is_stopped());
+    let next = matching.durable_queue(&key.domain_id.to_string(), &sticky, 0).await.unwrap();
+    assert!(Arc::ptr_eq(&queue.queue, &next.queue));
+    registry.shutdown(matching_now()).await.unwrap();
 }
