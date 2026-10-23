@@ -48,4 +48,8 @@ Totals (16 Go subtests): 10 PORTED outcome tests (#2, 7, 8, 10, 11-16). 1 PORTED
 
 ## CI evidence
 
-(filled in after the CI run: run URL, head sha, conclusion)
+- Workflow: `rust-ci.yml`, `-f package=cadence-matching`, dispatched on `matching-task-completer-tests-20261023`
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/40017046208
+- Head sha: 9986487c27fbe23f11e6b78d53c4cc14a65dbe27
+- Conclusion: success (first attempt, no fix cycles)
+- The ignored parity-gap test is skipped by design; it is not counted as passing.
