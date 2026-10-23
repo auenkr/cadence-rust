@@ -20,3 +20,4 @@ Rust: record_call emits persistence_requests_rollup, persistence_latency_rollup,
 Not done: configurable MigrationConfig; persistence_empty_response rollup; rollups of non-persistence defs (cadence_requests_rollup etc.) are outside this change.
 
 ## CI
+rust-ci run https://github.com/auenkr/cadence-rust/actions/runs/40015945604 sha 877bbc44e0c8de47318995909c59fb176b9f474e conclusion success (clippy + workspace tests; try 3 after two fixes: clippy lint, then test expectations).
