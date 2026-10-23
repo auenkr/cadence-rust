@@ -495,7 +495,9 @@ impl TaskDispatcher {
         if !root {
             if let Some(forward) = &self.forward {
                 if let Some(_permit) = forward.add_permits.try_acquire() {
-                    if Box::pin(forward.forward_backlog_task(task, &self.domain_id, &self.domain_id, task_type, 0)).await.is_ok() {
+                    // Go forwards with task.Event.DomainID, which the accepted
+                    // task carries as TaskInfo.DomainID from the wire source domain.
+                    if Box::pin(forward.forward_backlog_task(task, &self.domain_id, &source_domain.to_string(), task_type, 0)).await.is_ok() {
                         return Ok(());
                     }
                 }
@@ -2594,6 +2596,31 @@ mod tests {
         server.abort();
     }
 
+    #[tokio::test]
+    async fn matching_accepted_backlog_second_hop_keeps_source_domain() {
+        // Go ForwardTask on an accepted task: the second hop carries the task's
+        // own DomainID (the wire SourceDomainUUID), while the activity DomainUUID
+        // stays this partition's list domain.
+        let (_directory, _store, _key, root) = fixture(0);
+        let (_stop, stopped) = tokio::sync::watch::channel(false);
+        let sync = Arc::new(SyncMatcher::new(&["dca1".into()], stopped));
+        let (parent, channel, server) = recording_parent().await;
+        let list_domain = Uuid::from_u128(1).to_string();
+        let source_domain = Uuid::from_u128(5).to_string();
+        let dispatcher = TaskDispatcher::new(root.queue.clone(), lazy_history(), list_domain.clone())
+            .with_sync_matcher(sync)
+            .with_forward(remote_forward_state(channel, "/__cadence_sys/tl0/1"));
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData { workflow_id: "child-workflow".into(), schedule_id: 91, ..Default::default() },
+        };
+        // Zero local wait makes the local offer fail at once, forcing the second hop.
+        dispatcher.accept_forwarded_backlog(task, &source_domain, "/__cadence_sys/tl0/2", 1).await.unwrap();
+        let request = parent.add_activity.lock().unwrap().clone().expect("second hop reached the parent");
+        assert_eq!(request.domain_id, list_domain);
+        assert_eq!(request.source_domain_id, source_domain);
+        server.abort();
+    }
     /// Go `ForwardState` pointed at an in-process root dispatcher: the parent
     /// resolves to `Parent::Dispatcher`, whose `accept_forwarded_backlog` offers
     /// to the root's sync matcher, the Rust analog of Go's rootMatcher.Offer.
