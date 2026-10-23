@@ -56,4 +56,9 @@ written in this task.
 
 ## CI
 
-Run: _pending_
+Commit: 5baa5f3f0ab1817ebddb8f3728ff4392b87aa8a9 (tests only; the notes commit that records this is later on the same branch)
+Run: https://github.com/auenkr/cadence-rust/actions/runs/40017390070 (workflow rust-ci.yml, `-f package=cadence-matching`)
+Conclusion: success. Log shows `sync_match_handoff_matches_go_new_internal_task ... ok`,
+`sync_match_invalid_isolation_group_poll_returns_no_task_at_deadline ... ok`,
+`matching_dispatch_non_blocking_poll_with_no_tasks_returns_immediately ... ok`. matching_sync::tests etc.: 567 passed, 0 failed, 10 ignored in the main test binary.
+Push note: first `git push origin HEAD` was rejected with "missing necessary objects"; `git fsck --connectivity-only` was clean and the retry succeeded with no changes.
