@@ -186,7 +186,7 @@ async fn matching_http_tls(
     } else {
         builder.with_no_client_auth()
     };
-    let server = if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
+    let mut server = if !tls.cert_file.is_empty() && !tls.key_file.is_empty() {
         let cert = std::fs::read(&tls.cert_file);
         let key = std::fs::read(&tls.key_file);
         let identity = (|| -> anyhow::Result<_> {
@@ -207,6 +207,7 @@ async fn matching_http_tls(
     if mode == "disabled" {
         return Ok(None);
     }
+    server.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     let config = axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(server));
     Ok(Some(config))
 }
