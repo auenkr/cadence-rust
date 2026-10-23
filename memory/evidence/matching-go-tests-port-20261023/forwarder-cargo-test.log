@@ -1,0 +1,21 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5m 05s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 7 tests
+test matching_dispatch::tests::matching_forward_task_error_is_no_parent_or_task_list_kind ... ok
+test matching_dispatch::tests::matching_forward_task_rate_exceeded_after_two_forwards ... ok
+test matching_forward::tests::matching_forward_config_update_resizes_generation ... ok
+test matching_forward::tests::matching_forward_classifies_service_busy_only ... ok
+test matching_forward::tests::matching_forward_rate_refreshes_on_five_second_boundary ... ok
+test matching_forward::tests::matching_forward_tokens_replace_generation_without_inflation ... ok
+test matching_forward::tests::matching_forward_max_outstanding_concurrency ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 418 filtered out; finished in 0.00s
+

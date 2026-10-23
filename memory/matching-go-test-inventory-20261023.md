@@ -368,7 +368,20 @@ hostinfo, proto/thrift mappers for matching types (`types/mapper/proto/matching_
 
 ## Parity gaps
 
-Filled in after the final run. See the evidence directory for the run record.
+Status as of the matcher/forwarder/liveness pass (2026-10-23):
+
+- No parity gap found yet: no ported test has failed, so none is marked #[ignore].
+- Open question (not a test failure): Go `Liveness` has a daemon with a shutdown callback at TTL
+  (liveness_test.go TestEventLoop_Shutdown). Rust `cadence_common::liveness::Liveness` has no such
+  daemon. Whether registry expiry matches Go needs an audit before those two tests can be ported.
+- Pass evidence: `memory/evidence/matching-go-tests-port-20261023/` (step1-matcher.md, matcher-cargo-test.*,
+  forwarder-cargo-test.*).
+
+Counts for the three files in this pass (per Go test function / suite method):
+- matcher_test.go: 54 functions total; 3 PORTED; 51 MISSING (remote forwarding, MustOffer, private poll helpers).
+- forwarder_test.go: 13 functions total (suite runner + 12 methods); 4 PORTED; 8 MISSING (remote forward, query forward).
+- liveness_test.go: 6 methods; 4 COVERED by the JSON fixture; 2 MISSING (event loop, no Rust daemon).
+- task_gc_test.go: does not exist. `go/service/matching/tasklist/task_gc.go` has no test file.
 
 ## Remaining work (for the orchestrator to schedule)
 
