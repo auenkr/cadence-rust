@@ -3220,6 +3220,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     if self.queues.is_some() {
                         let queue = self.durable_queue(&r.domain_id, &list, crate::matching_config::persistence_task_list_type(r.task_list_type)).await?;
                         queue.pollers.lock().expect("poller history lock").cancel(&r.poller_id);
+                        return Ok(Response::new(m::CancelOutstandingPollResponse {}));
                     }
                     let key = PollKey {
                         domain: r.domain_id,

@@ -644,8 +644,16 @@ async fn matching_rpc_duplicate_poller_id_replaces_entry_without_cancelling_firs
         task_type: 1,
         poller: "dup".into(),
     };
+    let queue = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    let begin = |guard: &PollGuard| crate::matching_dispatch::PollLifecycle {
+        manager: queue.pollers.clone(), id: guard.key.poller.clone(), cancel: Some(guard.cancel.clone()),
+        info: cadence_common::poller::Info { identity: "worker".into(), rate_per_second: 1.0, isolation_group: String::new() },
+        forwarded: false, metric_context: None, metrics: crate::matching_metrics::MatchingMetrics::default(),
+    }.begin();
     let first = matching.register_poll(poll_key());
+    let first_wait = begin(&first);
     let second = matching.register_poll(poll_key());
+    let second_wait = begin(&second);
     // Go poller.Manager.StartPoll overwrites the entry and does not cancel the earlier poll.
     assert!(tokio::time::timeout(Duration::from_millis(50), first.cancel.notified())
         .await
@@ -664,7 +672,11 @@ async fn matching_rpc_duplicate_poller_id_replaces_entry_without_cancelling_firs
         .expect("cancel targets the newest poll with the poller ID");
     // Go EndPoll deletes unconditionally, so finishing the first poll drops the second's entry.
     drop(first);
+    drop(first_wait);
     assert!(matching.polls.lock().unwrap().is_empty());
+    queue.pollers.lock().unwrap().cancel("dup");
+    assert!(tokio::time::timeout(Duration::from_millis(30), second.cancel.notified()).await.is_err());
+    drop(second_wait);
     drop(second);
 }
 
