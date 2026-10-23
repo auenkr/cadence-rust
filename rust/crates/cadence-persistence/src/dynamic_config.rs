@@ -243,6 +243,19 @@ pub fn boolean_domain_id(
     }
 }
 
+/// Go `GetStringProperty` without filters. An unset key is not an error.
+pub fn string(values: &[DynamicConfigValue], default: &str) -> String {
+    match selected(values, None).and_then(|value| value.as_str().map(str::to_owned)) {
+        Some(value) => value,
+        None => {
+            if !values.is_empty() {
+                report_read_error("string", "value was missing or had the wrong type");
+            }
+            default.to_owned()
+        }
+    }
+}
+
 /// Go `MapAllIsolationGroupsResponse`: one non-string rejects the whole list.
 pub fn string_list(values: &[DynamicConfigValue]) -> Vec<String> {
     match selected(values, None)

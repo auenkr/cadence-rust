@@ -249,9 +249,52 @@ impl BlobEncoding {
     }
 }
 
+/// Encoding used for newly written SQL blobs. Go never reads the SQL
+/// `encodingType` setting for task rows: `parser.TaskInfoToBlob` and
+/// `TaskListInfoToBlob` (serialization/parser.go:224,241) encode with the
+/// dynamic property `history.serializationEncoding` (default `thriftrw`),
+/// sampled on every write.
+#[derive(Clone)]
+pub struct EncodingSource(std::sync::Arc<dyn Fn() -> String + Send + Sync>);
+impl EncodingSource {
+    pub fn fixed(encoding: BlobEncoding) -> Self {
+        Self(std::sync::Arc::new(move || encoding.as_str().to_owned()))
+    }
+    pub fn dynamic(source: std::sync::Arc<dyn Fn() -> String + Send + Sync>) -> Self {
+        Self(source)
+    }
+    pub fn current(&self) -> Result<BlobEncoding> {
+        BlobEncoding::parse(&(self.0)())
+    }
+}
+impl std::fmt::Debug for EncodingSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("EncodingSource").finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dynamic_encoding_source_is_sampled_per_write_like_go_parser() {
+        let value = std::sync::Arc::new(std::sync::Mutex::new("thriftrw".to_owned()));
+        let reader = value.clone();
+        let source =
+            EncodingSource::dynamic(std::sync::Arc::new(move || reader.lock().unwrap().clone()));
+        assert_eq!(source.current().unwrap(), BlobEncoding::ThriftRW);
+        *value.lock().unwrap() = "thriftrw_snappy".into();
+        assert_eq!(source.current().unwrap(), BlobEncoding::ThriftRWSnappy);
+        // Go's getEncoder rejects anything else on write.
+        *value.lock().unwrap() = "json".into();
+        assert!(source.current().is_err());
+        assert_eq!(
+            EncodingSource::fixed(BlobEncoding::ThriftRWSnappy)
+                .current()
+                .unwrap(),
+            BlobEncoding::ThriftRWSnappy
+        );
+    }
     fn unhex(value: &str) -> Vec<u8> {
         value
             .as_bytes()

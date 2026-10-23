@@ -133,6 +133,7 @@ pub fn open_configured_default_store(
     persistence: &crate::config::PersistenceConfig,
     active_cluster_name: &str,
     all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
+    serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
 ) -> anyhow::Result<ConfiguredMatchingStores> {
     let name = persistence.default_store.as_str();
     if name.is_empty() {
@@ -193,11 +194,12 @@ pub fn open_configured_default_store(
             if n_shards < 1 {
                 anyhow::bail!("Matching MySQL nShards must be positive, got {n_shards}");
             }
-            let encoding = if sql.encoding_type.is_empty() {
-                BlobEncoding::ThriftRW
-            } else {
-                BlobEncoding::parse(&sql.encoding_type)?
-            };
+            // Go never reads the SQL `encodingType` for task blobs; rows are
+            // encoded with dynamic `history.serializationEncoding` instead.
+            let encoding = BlobEncoding::ThriftRW;
+            let encoding_source = cadence_persistence::matching_blob::EncodingSource::dynamic(
+                serialization_encoding.clone(),
+            );
             let tls = sql.tls.as_ref().map(|tls| MySqlTlsConfig {
                 enabled: tls.enabled,
                 ssl_mode: tls.ssl_mode.clone(),
@@ -230,6 +232,7 @@ pub fn open_configured_default_store(
                 config,
                 active_cluster_name,
             )?;
+            let store = store.with_encoding_source(encoding_source);
             Ok(ConfiguredMatchingStores {
                 task_store: Arc::new(store),
                 domain_metadata_source: Some(Arc::new(metadata)),
@@ -247,11 +250,12 @@ pub fn open_configured_default_store(
             if n_shards < 1 {
                 anyhow::bail!("Matching PostgreSQL nShards must be positive, got {n_shards}");
             }
-            let encoding = if sql.encoding_type.is_empty() {
-                BlobEncoding::ThriftRW
-            } else {
-                BlobEncoding::parse(&sql.encoding_type)?
-            };
+            // Go never reads the SQL `encodingType` for task blobs; rows are
+            // encoded with dynamic `history.serializationEncoding` instead.
+            let encoding = BlobEncoding::ThriftRW;
+            let encoding_source = cadence_persistence::matching_blob::EncodingSource::dynamic(
+                serialization_encoding.clone(),
+            );
             let tls = sql.tls.as_ref().map(|tls| PostgresTlsConfig {
                 enabled: tls.enabled,
                 ssl_mode: tls.ssl_mode.clone(),
@@ -282,6 +286,7 @@ pub fn open_configured_default_store(
                 config,
                 active_cluster_name,
             )?;
+            let store = store.with_encoding_source(encoding_source);
             Ok(ConfiguredMatchingStores {
                 task_store: Arc::new(store),
                 domain_metadata_source: Some(Arc::new(metadata)),

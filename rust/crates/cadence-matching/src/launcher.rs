@@ -1088,11 +1088,21 @@ pub async fn run(
                             false,
                         )
                     });
+                let serialization_encoding_config = state.admin.dynamic_config.clone();
+                let serialization_encoding: std::sync::Arc<dyn Fn() -> String + Send + Sync> =
+                    std::sync::Arc::new(move || {
+                        let overlay = serialization_encoding_config.lock().expect("admin lock");
+                        cadence_persistence::dynamic_config::string(
+                            overlay.property_values("history.serializationEncoding"),
+                            "thriftrw",
+                        )
+                    });
                 let mut stores = tokio::task::spawn_blocking(move || {
                     crate::matching_task_store::open_configured_default_store(
                         &persistence,
                         &cluster_name,
                         all_consistency_delete,
+                        serialization_encoding,
                     )
                 })
                 .await

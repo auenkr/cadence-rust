@@ -28,6 +28,8 @@ use uuid::Uuid;
 const LIST_ROW: i32 = 1;
 const TASK_ROW: i32 = 0;
 const LIST_SENTINEL: i64 = -12345;
+/// Go `initialRangeID` (nosql_task_store.go:44): a new task list starts at 1.
+const INITIAL_RANGE_ID: i64 = 1;
 /// Go's `cassandraDefaultConsLevel`: the retry level after an ALL delete hits
 /// UNAVAILABLE. It is a constant in Go, not the configured `consistency`.
 const FALLBACK_CONSISTENCY: scylla::frame::types::Consistency =
@@ -37,26 +39,55 @@ const SELECT_LIST: &str = "SELECT range_id, task_list FROM tasks WHERE domain_id
 const UPDATE_LIST: &str = "UPDATE tasks SET range_id=?, task_list=?, last_updated_time=? WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=? IF range_id=?";
 const UPDATE_LIST_TTL: &str = "UPDATE tasks USING TTL 86400 SET range_id=?, task_list=?, last_updated_time=? WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=? IF range_id=?";
 const DELETE_LIST: &str = "DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=? IF range_id=?";
+const RANGE_DELETE_TASKS: &str = "DELETE FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_list_type = ? AND type = ? AND task_id > ? AND task_id <= ?";
+const INSERT_TASK_LIST: &str = "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, range_id, task_list, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS";
+const COUNT_TASKS: &str = "SELECT count(1) as count FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_list_type = ? AND type = ? AND task_id > ?";
 const SELECT_TASKS: &str = "SELECT task_id, task, TTL(task) FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=? LIMIT ?";
-fn task_list_lwt_applied(result: QueryResult) -> Result<bool> {
+/// Outcome of a conditional statement. When Cassandra rejects an LWT it returns
+/// the conflicting row's columns and Go reads `range_id` from them
+/// (nosqlplugin/cassandra/tasks.go:243-256).
+struct LwtOutcome {
+    applied: bool,
+    range_id: i64,
+}
+
+fn task_list_lwt(result: QueryResult) -> Result<LwtOutcome> {
     let rows = result
         .into_rows_result()
         .map_err(CassandraMatchingTaskStore::internal)?;
+    let names: Vec<String> = rows
+        .column_specs()
+        .iter()
+        .map(|spec| spec.name().to_owned())
+        .collect();
     let row = rows
         .maybe_first_row::<scylla::value::Row>()
         .map_err(CassandraMatchingTaskStore::internal)?
         .ok_or_else(|| {
             CassandraMatchingTaskStore::internal("Cassandra LWT returned no result row")
         })?;
-    match row.columns.first() {
-        Some(Some(scylla::value::CqlValue::Boolean(applied))) => Ok(*applied),
-        Some(value) => Err(CassandraMatchingTaskStore::internal(format!(
-            "Cassandra LWT returned invalid [applied] column: {value:?}"
-        ))),
-        None => Err(CassandraMatchingTaskStore::internal(
-            "Cassandra LWT result row has no [applied] column",
-        )),
-    }
+    let applied = match row.columns.first() {
+        Some(Some(scylla::value::CqlValue::Boolean(applied))) => *applied,
+        Some(value) => {
+            return Err(CassandraMatchingTaskStore::internal(format!(
+                "Cassandra LWT returned invalid [applied] column: {value:?}"
+            )))
+        }
+        None => {
+            return Err(CassandraMatchingTaskStore::internal(
+                "Cassandra LWT result row has no [applied] column",
+            ))
+        }
+    };
+    let range_id = names
+        .iter()
+        .zip(&row.columns)
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("range_id", Some(scylla::value::CqlValue::BigInt(range_id))) => Some(*range_id),
+            _ => None,
+        })
+        .unwrap_or_default();
+    Ok(LwtOutcome { applied, range_id })
 }
 
 fn is_unavailable(error: &ExecutionError) -> bool {
@@ -113,6 +144,45 @@ impl CassandraMatchingTaskStore {
     }
     fn condition(message: impl Into<String>) -> MatchingTaskStoreError {
         MatchingTaskStoreError::ConditionFailed(message.into())
+    }
+
+    /// Go `executeWithConsistencyAll`: with the dynamic flag set, delete at
+    /// ALL and retry at LOCAL_QUORUM when ALL is unavailable.
+    fn range_delete_tasks(
+        &self,
+        key: &TaskListKey,
+        min_exclusive: i64,
+        max_inclusive: i64,
+    ) -> Result<()> {
+        let session = self.session();
+        let params = (
+            key.domain_id,
+            &key.name,
+            key.task_type,
+            TASK_ROW,
+            min_exclusive,
+            max_inclusive,
+        );
+        if (self.all_consistency_delete)() {
+            let mut all = Statement::new(RANGE_DELETE_TASKS);
+            all.set_consistency(scylla::frame::types::Consistency::All);
+            match self.driver.run(session.query_unpaged(all, params)) {
+                Ok(_) => {}
+                Err(error) if is_unavailable(&error) => {
+                    let mut fallback = Statement::new(RANGE_DELETE_TASKS);
+                    fallback.set_consistency(FALLBACK_CONSISTENCY);
+                    self.driver
+                        .run(session.query_unpaged(fallback, params))
+                        .map_err(Self::internal)?;
+                }
+                Err(error) => return Err(Self::internal(error)),
+            }
+        } else {
+            self.driver
+                .run(session.query_unpaged(RANGE_DELETE_TASKS, params))
+                .map_err(Self::internal)?;
+        }
+        Ok(())
     }
 
     fn task_list_udt(key: &TaskListKey, data: &TaskListData) -> Result<CassandraTaskListUdt> {
@@ -269,6 +339,42 @@ fn task_literal(domain: Uuid, data: &TaskData) -> Result<String> {
     Ok(format!("{{domain_id: {domain}, workflow_id: {}, run_id: {run}, schedule_id: {}, created_time: {}, partition_config: {partition}}}",
         cql_text(&data.workflow_id), data.schedule_id, data.created_nanos.div_euclid(1_000_000)))
 }
+/// Go `templateCreateTaskQuery` / `templateCreateTaskWithTTLQuery`
+/// (cassandra/tasks_cql.go:44-50) with literal values; TTL is appended when
+/// the task carries a positive schedule-to-start timeout.
+fn insert_task_statement(key: &TaskListKey, task_id: i64, data: &TaskData) -> Result<String> {
+    let ttl = task_ttl(data)
+        .map(|ttl| format!(" USING TTL {ttl}"))
+        .unwrap_or_default();
+    Ok(format!(
+        "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES ({}, {}, {}, {}, {}, {}, {}){}",
+        key.domain_id,
+        cql_text(&key.name),
+        key.task_type,
+        TASK_ROW,
+        task_id,
+        task_literal(key.domain_id, data)?,
+        data.created_nanos.div_euclid(1_000_000),
+        ttl
+    ))
+}
+
+/// Go `templateUpdateTaskListRangeIDQuery` (tasks_cql.go:127-135), the
+/// conditional statement that fences the task batch on the lease range.
+fn range_fence_statement(key: &TaskListKey, range: i64, now_nanos: i64) -> String {
+    format!(
+        "UPDATE tasks SET range_id = {}, last_updated_time = {} WHERE domain_id = {} AND task_list_name = {} AND task_list_type = {} AND type = {} AND task_id = {} IF range_id = {}",
+        range,
+        now_nanos.div_euclid(1_000_000),
+        key.domain_id,
+        cql_text(&key.name),
+        key.task_type,
+        LIST_ROW,
+        LIST_SENTINEL,
+        range
+    )
+}
+
 fn task_ttl(data: &TaskData) -> Option<i32> {
     if data.expiry_nanos <= 0 || data.expiry_nanos <= data.created_nanos {
         return None;
@@ -329,19 +435,27 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 let udt = Self::task_list_udt(key, &data)?;
                 let session = self.session();
                 let result = self.driver.run(session.query_unpaged(
-                    "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, range_id, task_list, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS",
-                    (key.domain_id, &key.name, key.task_type, LIST_ROW, LIST_SENTINEL, 1_i64, udt, timestamp(now_nanos)?)))
+                    INSERT_TASK_LIST,
+                    (key.domain_id, &key.name, key.task_type, LIST_ROW, LIST_SENTINEL, INITIAL_RANGE_ID, udt, timestamp(now_nanos)?)))
                     .map_err(Self::internal)?;
-                let applied = task_list_lwt_applied(result)?;
-                if applied {
-                    return Ok(TaskListRecord { range_id: 1, data });
+                let outcome = task_list_lwt(result)?;
+                if outcome.applied {
+                    return Ok(TaskListRecord {
+                        range_id: INITIAL_RANGE_ID,
+                        data,
+                    });
                 }
-                self.get_task_list(key)?
+                // Go (nosql_task_store.go:127-135) does not retry after losing
+                // the IF NOT EXISTS race; it reports a condition failure.
+                return Err(Self::condition(format!(
+                    "leaseTaskList: taskList:{}, taskListType:{}, haveRangeID:{}, gotRangeID:{}",
+                    key.name, key.task_type, INITIAL_RANGE_ID, outcome.range_id
+                )));
             }
             Err(error) => return Err(error),
         };
         if previous_range > 0 && previous_range != current.range_id {
-            return Err(Self::condition(format!("leaseTaskList:renew failed:taskList:{}, taskListType:{}, haveRangeID:0, gotRangeID:{}", key.name, key.task_type, current.range_id)));
+            return Err(Self::condition(format!("leaseTaskList:renew failed: taskList:{}, taskListType:{}, haveRangeID:{}, gotRangeID:{}", key.name, key.task_type, previous_range, current.range_id)));
         }
         let next = current.range_id.wrapping_add(1);
         let mut data = current.data;
@@ -365,10 +479,11 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 ),
             ))
             .map_err(Self::internal)?;
-        if !task_list_lwt_applied(result)? {
+        let outcome = task_list_lwt(result)?;
+        if !outcome.applied {
             return Err(Self::condition(format!(
-                "task list {} lease range changed",
-                key.name
+                "leaseTaskList: taskList:{}, taskListType:{}, haveRangeID:{}, gotRangeID:{}",
+                key.name, key.task_type, next, outcome.range_id
             )));
         }
         data.kind = kind;
@@ -438,12 +553,13 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 ))
                 .map_err(Self::internal)?
         };
-        if task_list_lwt_applied(result)? {
+        let outcome = task_list_lwt(result)?;
+        if outcome.applied {
             Ok(())
         } else {
             Err(Self::condition(format!(
-                "task list {} range changed",
-                key.name
+                "Failed to update task list. name: {}, type: {}, rangeID: {}, columns: (range_id={})",
+                key.name, key.task_type, range, outcome.range_id
             )))
         }
     }
@@ -468,31 +584,27 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
             // its TTL is computed from that same time, even when re-adding a task.
             let mut data = task.data.clone();
             data.created_nanos = now_nanos;
-            let ttl = task_ttl(&data)
-                .map(|ttl| format!(" USING TTL {ttl}"))
-                .unwrap_or_default();
-            batch.append_statement(Statement::new(format!(
-                "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES ({}, {}, {}, {}, {}, {}{})",
-                key.domain_id, cql_text(&key.name), key.task_type, TASK_ROW, task.task_id,
-                task_literal(key.domain_id, &data)?, data.created_nanos.div_euclid(1_000_000)
-            ) + &ttl));
+            batch.append_statement(Statement::new(insert_task_statement(
+                key,
+                task.task_id,
+                &data,
+            )?));
             inserted += 1;
         }
-        batch.append_statement(Statement::new(format!(
-            "UPDATE tasks SET range_id={}, last_updated_time={} WHERE domain_id={} AND task_list_name={} AND task_list_type={} AND type={} AND task_id={} IF range_id={}",
-            range, now_nanos.div_euclid(1_000_000), key.domain_id, cql_text(&key.name), key.task_type, LIST_ROW, LIST_SENTINEL, range)));
+        batch.append_statement(Statement::new(range_fence_statement(key, range, now_nanos)));
         let values = vec![(); inserted + 1];
         let session = self.session();
         let result = self
             .driver
             .run(session.batch(&batch, values))
             .map_err(Self::internal)?;
-        if task_list_lwt_applied(result)? {
+        let outcome = task_list_lwt(result)?;
+        if outcome.applied {
             Ok(())
         } else {
             Err(Self::condition(format!(
-                "task list {} lease range changed",
-                key.name
+                "Failed to insert tasks. name: {}, type: {}, rangeID: {}, columns: (range_id={})",
+                key.name, key.task_type, range, outcome.range_id
             )))
         }
     }
@@ -546,7 +658,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
     fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> Result<i64> {
         let session = self.session();
         let result = self.driver.run(session.query_unpaged(
-            "SELECT count(1) FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>?",
+            COUNT_TASKS,
             (key.domain_id, &key.name, key.task_type, TASK_ROW, ack_level))).map_err(Self::internal)?;
         result
             .into_rows_result()
@@ -558,11 +670,10 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
     }
 
     fn complete_task(&self, key: &TaskListKey, task_id: i64) -> Result<()> {
-        let session = self.session();
-        self.driver.run(session.query_unpaged(
-            "DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=?",
-            (key.domain_id, &key.name, key.task_type, TASK_ROW, task_id))).map_err(Self::internal)?;
-        Ok(())
+        // Go CompleteTask issues the same range delete as CompleteTasksLessThan
+        // with exclusive min `taskID-1` and inclusive max `taskID`
+        // (nosql_task_store.go:420-440), so it honors the ALL-consistency flag.
+        self.range_delete_tasks(key, task_id.wrapping_sub(1), task_id)
     }
 
     fn complete_tasks_less_than(
@@ -571,44 +682,12 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         inclusive_task_id: i64,
         _limit: i64,
     ) -> Result<usize> {
-        let session = self.session();
-        let count = self.driver.run(session.query_unpaged(
-            "SELECT count(1) FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=?",
-            (key.domain_id, &key.name, key.task_type, TASK_ROW, 0_i64, inclusive_task_id))).map_err(Self::internal)?
-            .into_rows_result().map_err(Self::internal)?
-            .maybe_first_row::<(i64,)>().map_err(Self::internal)?
-            .map(|(count,)| usize::try_from(count).map_err(Self::internal))
-            .ok_or_else(|| Self::internal("Cassandra count returned no row"))?;
-        let count = count?;
-        const DELETE: &str = "DELETE FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id>? AND task_id<=?";
-        let params = (
-            key.domain_id,
-            &key.name,
-            key.task_type,
-            TASK_ROW,
-            0_i64,
-            inclusive_task_id,
-        );
-        if (self.all_consistency_delete)() {
-            let mut all = Statement::new(DELETE);
-            all.set_consistency(scylla::frame::types::Consistency::All);
-            match self.driver.run(session.query_unpaged(all, params)) {
-                Ok(_) => {}
-                Err(error) if is_unavailable(&error) => {
-                    let mut fallback = Statement::new(DELETE);
-                    fallback.set_consistency(FALLBACK_CONSISTENCY);
-                    self.driver
-                        .run(session.query_unpaged(fallback, params))
-                        .map_err(Self::internal)?;
-                }
-                Err(error) => return Err(Self::internal(error)),
-            }
-        } else {
-            self.driver
-                .run(session.query_unpaged(DELETE, params))
-                .map_err(Self::internal)?;
-        }
-        Ok(count)
+        // Go (tasks.go RangeDeleteTasks) deletes the whole range without a
+        // COUNT query and reports `persistence.UnknownNumRowsAffected` (-1),
+        // which task_gc.go treats as "fewer than a full batch": a single
+        // delete drains everything. Zero is the usize equivalent.
+        self.range_delete_tasks(key, 0, inclusive_task_id)?;
+        Ok(0)
     }
 
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> Result<()> {
@@ -643,16 +722,115 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 .run(session.query_unpaged(DELETE_LIST, params))
                 .map_err(Self::internal)?
         };
-        if task_list_lwt_applied(result)? {
+        let outcome = task_list_lwt(result)?;
+        if outcome.applied {
             Ok(())
         } else {
-            Err(MatchingTaskStoreError::DeleteCount(0))
+            Err(Self::condition(format!(
+                "Failed to delete task list. name: {}, type: {}, rangeID: {}, columns: (range_id={})",
+                key.name, key.task_type, range, outcome.range_id
+            )))
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    const GO_UDT: &str = "{domain_id: ?, name: ?, type: ?, ack_level: ?, kind: ?, last_updated: ?, adaptive_partition_config: ? }";
+
+    /// Statements bound with a single UDT parameter must equal Go's CQL with
+    /// the inline UDT template (tasks_cql.go:25-33) replaced by `?`.
+    #[test]
+    fn cassandra_cql_matches_go_tasks_cql() {
+        use crate::matching_task_store::go_sql_pin::{assert_in_go_ci, strip};
+        let go = include_str!(
+            "../../../../go/common/persistence/nosql/nosqlplugin/cassandra/tasks_cql.go"
+        );
+        for statement in [
+            SELECT_LIST,
+            DELETE_LIST,
+            RANGE_DELETE_TASKS,
+            COUNT_TASKS,
+        ] {
+            assert_in_go_ci(go, statement);
+        }
+        // templateGetTasksQuery adds only an alias; the Rust reader appends the
+        // page limit that Go passes as a gocql page size.
+        assert_in_go_ci(
+            go,
+            &SELECT_TASKS
+                .replace("TTL(task)", "TTL(task) AS ttl")
+                .replace(" LIMIT ?", ""),
+        );
+        // templateInsertTaskListQuery / templateUpdateTaskListQuery with the
+        // UDT literal replaced by one bound UDT parameter.
+        let go_stripped = strip(go).to_ascii_lowercase();
+        let udt = strip(GO_UDT).to_ascii_lowercase();
+        for statement in [INSERT_TASK_LIST, UPDATE_LIST] {
+            let wanted = strip(statement).to_ascii_lowercase();
+            // Expand the single `task_list`-position `?` back into Go's UDT.
+            let expanded = if statement == INSERT_TASK_LIST {
+                wanted.replacen("?,?,?,?,?,?,?,?)", &format!("?,?,?,?,?,?,{udt},?)"), 1)
+            } else {
+                wanted.replacen("task_list=?", &format!("task_list={udt}"), 1)
+            };
+            assert!(go_stripped.contains(&expanded), "{statement}");
+        }
+        // Part 2 of the TTL update: Go binds the TTL, Rust inlines 86400.
+        assert!(go_stripped.contains(
+            &strip(&UPDATE_LIST_TTL.replace("USING TTL 86400", "USING TTL ?").replacen(
+                "task_list=?",
+                &format!("task_list={}", GO_UDT),
+                1
+            ))
+            .to_ascii_lowercase()
+        ));
+    }
+
+    #[test]
+    fn cassandra_task_statements_have_go_shape() {
+        use crate::matching_task_store::go_sql_pin::assert_in_go_ci;
+        let go = include_str!(
+            "../../../../go/common/persistence/nosql/nosqlplugin/cassandra/tasks_cql.go"
+        );
+        let key = TaskListKey {
+            domain_id: Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888),
+            name: "tl'x".into(),
+            task_type: 1,
+        };
+        let run = Uuid::from_u128(7);
+        let plain = TaskData {
+            workflow_id: "wf".into(),
+            run_id: Some(run.as_bytes().to_vec()),
+            schedule_id: 9,
+            created_nanos: 1_700_000_000_123_456_789,
+            expiry_nanos: crate::matching_blob::GO_ZERO_TIME_NANOS,
+            partition_config: Some([("k".to_string(), "v".to_string())].into()),
+        };
+        let statement = insert_task_statement(&key, 42, &plain).unwrap();
+        assert_eq!(
+            statement,
+            "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES (11112222-3333-4444-5555-666677778888, 'tl''x', 1, 0, 42, {domain_id: 11112222-3333-4444-5555-666677778888, workflow_id: 'wf', run_id: 00000000-0000-0000-0000-000000000007, schedule_id: 9, created_time: 1700000000123, partition_config: {'k': 'v'}}, 1700000000123)"
+        );
+        // Column list and UDT field order are Go's templateTaskType.
+        assert_in_go_ci(go, "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES(?, ?, ?, ?, ?, {domain_id: ?, workflow_id: ?, run_id: ?, schedule_id: ?, created_time: ?, partition_config: ? }, ?)");
+        // Positive timeout appends Go's TTL clause.
+        let with_ttl = TaskData {
+            expiry_nanos: plain.created_nanos + 30_000_000_000,
+            ..plain.clone()
+        };
+        assert!(insert_task_statement(&key, 42, &with_ttl)
+            .unwrap()
+            .ends_with(" USING TTL 30"));
+        assert_in_go_ci(go, "USING TTL ?");
+        // Lease fence batch member.
+        assert_eq!(
+            range_fence_statement(&key, 5, 1_700_000_000_123_456_789),
+            "UPDATE tasks SET range_id = 5, last_updated_time = 1700000000123 WHERE domain_id = 11112222-3333-4444-5555-666677778888 AND task_list_name = 'tl''x' AND task_list_type = 1 AND type = 1 AND task_id = -12345 IF range_id = 5"
+        );
+        assert_in_go_ci(go, "UPDATE tasks SET range_id = ?, last_updated_time = ? WHERE domain_id = ? and task_list_name = ? and task_list_type = ? and type = ? and task_id = ? IF range_id = ?");
+    }
+
     #[test]
     fn delete_fallback_consistency_is_go_constant_local_quorum() {
         assert_eq!(

@@ -448,14 +448,43 @@ impl Drop for ConnectionLease {
     }
 }
 
+// Statements below mirror go/common/persistence/sql/sqlplugin/mysql/task.go
+// (consts at lines 32-104); `matching_mysql_sql_matches_go_task_go` pins them.
+const SELECT_TASK_LIST: &str = "SELECT range_id, data, data_encoding FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?";
+const LOCK_TASK_LIST: &str = "SELECT range_id FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ? FOR UPDATE";
+const INSERT_TASK_LIST: &str = "INSERT INTO task_lists(shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES (?, ?, ?, ?, ?, ?, ?)";
+const UPDATE_TASK_LIST: &str = "UPDATE task_lists SET range_id = ?, data = ?, data_encoding = ? WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?";
+const DELETE_TASK_LIST: &str = "DELETE FROM task_lists WHERE shard_id=? AND domain_id=? AND name=? AND task_type=? AND range_id=?";
+const INSERT_TASK: &str = "INSERT INTO tasks(domain_id, task_list_name, task_type, task_id, data, data_encoding) VALUES(?, ?, ?, ?, ?, ?)";
+const SELECT_TASKS: &str = "SELECT task_id, data, data_encoding FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id > ? AND task_id <= ? ORDER BY task_id LIMIT ?";
+const COUNT_TASKS: &str = "SELECT count(1) as count FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id > ?";
+const DELETE_TASK: &str =
+    "DELETE FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id = ?";
+const RANGE_DELETE_TASKS: &str = "DELETE FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id <= ? ORDER BY domain_id,task_list_name,task_type,task_id LIMIT ?";
+
 pub struct MySqlTaskStore {
     pools: Vec<Arc<SyncConnectionPool>>,
     n_shards: usize,
     encoding: BlobEncoding,
+    encoding_source: Option<crate::matching_blob::EncodingSource>,
     isolation: IsolationLevel,
 }
 
 impl MySqlTaskStore {
+    /// Encode new rows with Go's dynamic `history.serializationEncoding`
+    /// instead of the (Go-ignored) SQL `encodingType` setting.
+    pub fn with_encoding_source(mut self, source: crate::matching_blob::EncodingSource) -> Self {
+        self.encoding_source = Some(source);
+        self
+    }
+
+    fn write_encoding(&self) -> Result<BlobEncoding> {
+        match &self.encoding_source {
+            Some(source) => Ok(source.current()?),
+            None => Ok(self.encoding),
+        }
+    }
+
     fn pool(&self, key: &TaskListKey) -> &Arc<SyncConnectionPool> {
         let index = mysql_database_index(self.database_shard(key) as usize, self.pools.len());
         &self.pools[index]
@@ -505,6 +534,7 @@ impl MySqlTaskStore {
             pools,
             n_shards: config.n_shards,
             encoding: config.encoding,
+            encoding_source: None,
             isolation: configured_isolation(&config.connect_attributes)?,
         };
         store.validate_schema()?;
@@ -564,11 +594,9 @@ impl MySqlTaskStore {
     }
 
     fn database_shard(&self, key: &TaskListKey) -> i32 {
-        // Go hashes the canonical UUID string plus underscore plus task-list
-        // name. Task rows have no shard_id column; this value only chooses the
+        // Task rows have no shard_id column; this value only chooses the
         // configured physical DB and is stored in task_lists.shard_id.
-        let input = format!("{}_{}", key.domain_id, key.name);
-        (farmhash::hash32(input.as_bytes()) % self.n_shards as u32) as i32
+        crate::matching_task_store::go_db_shard_id(&key.domain_id, &key.name, self.n_shards)
     }
 
     fn validate_schema(&self) -> Result<()> {
@@ -627,7 +655,7 @@ impl MySqlTaskStore {
         let discard = connection.discard.clone();
         connection
             .exec_first(
-                "SELECT range_id, data, data_encoding FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?",
+                SELECT_TASK_LIST,
                 (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))
@@ -663,7 +691,7 @@ impl MySqlTaskStore {
     ) -> Result<()> {
         let range: Option<i64> = transaction
             .exec_first(
-                "SELECT range_id FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ? FOR UPDATE",
+                LOCK_TASK_LIST,
                 (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, discard))?;
@@ -679,9 +707,10 @@ impl MySqlTaskStore {
     }
 
     fn encode_task_list(&self, data: &TaskListData) -> Result<(Vec<u8>, &'static str)> {
+        let encoding = self.write_encoding()?;
         Ok((
-            self.encoding.encode(&blob::encode_task_list(data))?,
-            self.encoding.as_str(),
+            encoding.encode(&blob::encode_task_list(data))?,
+            encoding.as_str(),
         ))
     }
 }
@@ -735,8 +764,8 @@ impl MatchingTaskStore for MySqlTaskStore {
                 // backend error, not a stale-range condition failure.
                 connection
                     .exec_drop(
-                        "INSERT INTO task_lists (shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES (?, ?, ?, ?, 0, ?, ?)",
-                        (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, bytes, encoding),
+                        INSERT_TASK_LIST,
+                        (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, 0_i64, bytes, encoding),
                     )
                     .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
                 TaskListRecord { range_id: 0, data }
@@ -763,7 +792,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let (bytes, encoding) = self.encode_task_list(&current.data)?;
         transaction
             .exec_drop(
-                "UPDATE task_lists SET range_id = ?, data = ?, data_encoding = ? WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?",
+                UPDATE_TASK_LIST,
                 (current.range_id, bytes, encoding, shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
@@ -809,7 +838,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let (bytes, encoding) = self.encode_task_list(&data)?;
         transaction
             .exec_drop(
-                "UPDATE task_lists SET range_id = ?, data = ?, data_encoding = ? WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ?",
+                UPDATE_TASK_LIST,
                 (range, bytes, encoding, shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
@@ -833,7 +862,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         &self,
         key: &TaskListKey,
         range: i64,
-        _now_nanos: i64,
+        now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> Result<()> {
         let shard_id = self.database_shard(key);
@@ -843,12 +872,18 @@ impl MatchingTaskStore for MySqlTaskStore {
             .start_transaction(TxOpts::default().set_isolation_level(Some(self.isolation)))
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         discard.store(true, Ordering::Release);
+        // Go encodes every row in the request before opening the transaction;
+        // an unsupported encoding therefore fails before any statement runs.
+        let encoding = self.write_encoding()?;
         for (domain, task) in tasks {
-            let bytes = self.encoding.encode(&blob::encode_task(&task.data))?;
+            // Go stamps CreatedTimestamp with the CreateTasks request time.
+            let mut data = task.data.clone();
+            data.created_nanos = now_nanos;
+            let bytes = encoding.encode(&blob::encode_task(&data))?;
             transaction
                 .exec_drop(
-                    "INSERT INTO tasks (domain_id, task_list_name, task_type, task_id, data, data_encoding) VALUES (?, ?, ?, ?, ?, ?)",
-                    (domain.as_bytes().as_slice(), &key.name, key.task_type, task.task_id, bytes, self.encoding.as_str()),
+                    INSERT_TASK,
+                    (domain.as_bytes().as_slice(), &key.name, key.task_type, task.task_id, bytes, encoding.as_str()),
                 )
                 .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         }
@@ -871,7 +906,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let discard = connection.discard.clone();
         let rows: Vec<(i64, Vec<u8>, String)> = connection
             .exec(
-                "SELECT task_id, data, data_encoding FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id > ? AND task_id <= ? ORDER BY task_id LIMIT ?",
+                SELECT_TASKS,
                 (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, read_level, max_read_level, batch_size),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
@@ -891,7 +926,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let discard = connection.discard.clone();
         let size: Option<i64> = connection
             .exec_first(
-                "SELECT COUNT(*) FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id > ?",
+                COUNT_TASKS,
                 (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, ack_level),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
@@ -906,7 +941,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let discard = connection.discard.clone();
         connection
             .exec_drop(
-                "DELETE FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id = ?",
+                DELETE_TASK,
                 (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, task_id),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))
@@ -925,7 +960,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let discard = connection.discard.clone();
         connection
             .exec_drop(
-                "DELETE FROM tasks WHERE domain_id = ? AND task_list_name = ? AND task_type = ? AND task_id <= ? ORDER BY domain_id, task_list_name, task_type, task_id LIMIT ?",
+                RANGE_DELETE_TASKS,
                 (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, inclusive_task_id, limit),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
@@ -941,7 +976,7 @@ impl MatchingTaskStore for MySqlTaskStore {
         let discard = connection.discard.clone();
         connection
             .exec_drop(
-                "DELETE FROM task_lists WHERE shard_id = ? AND domain_id = ? AND name = ? AND task_type = ? AND range_id = ?",
+                DELETE_TASK_LIST,
                 (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, range),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
@@ -1605,6 +1640,44 @@ mod tests {
             .0;
         assert!(tasks.contains("PRIMARY KEY (domain_id, task_list_name, task_type, task_id)"));
         assert!(!tasks.contains("shard_id"));
+    }
+
+    #[test]
+    fn matching_mysql_sql_matches_go_task_go() {
+        use crate::matching_task_store::go_sql_pin::{assert_in_go, assert_named};
+        let go = include_str!("../../../../go/common/persistence/sql/sqlplugin/mysql/task.go");
+        // Positional statements: verbatim in Go (task.go:62-104).
+        for statement in [
+            SELECT_TASK_LIST,
+            LOCK_TASK_LIST,
+            DELETE_TASK_LIST,
+            SELECT_TASKS,
+            COUNT_TASKS,
+            DELETE_TASK,
+            RANGE_DELETE_TASKS,
+        ] {
+            assert_in_go(go, statement);
+        }
+        // Named statements (task.go:32-47, 89-91); Go binds struct fields in
+        // declaration order, which is the positional order used here.
+        assert_named(
+            go,
+            "INTO task_lists(shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES (:shard_id, :domain_id, :name, :task_type, :range_id, :data, :data_encoding)",
+            INSERT_TASK_LIST.trim_start_matches("INSERT "),
+            false,
+        );
+        assert_named(
+            go,
+            "tasks(domain_id, task_list_name, task_type, task_id, data, data_encoding) VALUES(:domain_id, :task_list_name, :task_type, :task_id, :data, :data_encoding)",
+            INSERT_TASK.trim_start_matches("INSERT INTO "),
+            false,
+        );
+        assert_named(
+            go,
+            "UPDATE task_lists SET range_id = :range_id, data = :data, data_encoding = :data_encoding WHERE shard_id = :shard_id AND domain_id = :domain_id AND name = :name AND task_type = :task_type",
+            UPDATE_TASK_LIST,
+            false,
+        );
     }
 
     #[test]

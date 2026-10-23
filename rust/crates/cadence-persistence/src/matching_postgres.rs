@@ -276,9 +276,38 @@ pub struct PostgresTaskStore {
     n_shards: usize,
     use_multiple_databases: bool,
     encoding: BlobEncoding,
+    encoding_source: Option<crate::matching_blob::EncodingSource>,
 }
 
+// Statements mirror go/common/persistence/sql/sqlplugin/postgres/task.go
+// (consts at lines 32-104); `matching_postgres_sql_matches_go_task_go` pins them.
+const SELECT_TASK_LIST: &str = "SELECT range_id, data, data_encoding FROM task_lists WHERE shard_id = $1 AND domain_id = $2 AND name = $3 AND task_type = $4";
+const LOCK_TASK_LIST: &str = "SELECT range_id FROM task_lists WHERE shard_id = $1 AND domain_id = $2 AND name = $3 AND task_type = $4 FOR UPDATE";
+const INSERT_TASK_LIST: &str = "INSERT INTO task_lists(shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES ($1, $2, $3, $4, $5, $6, $7)";
+const UPDATE_TASK_LIST: &str = "UPDATE task_lists SET range_id = $1, data = $2, data_encoding = $3 WHERE shard_id = $4 AND domain_id = $5 AND name = $6 AND task_type = $7";
+const DELETE_TASK_LIST: &str = "DELETE FROM task_lists WHERE shard_id=$1 AND domain_id=$2 AND name=$3 AND task_type=$4 AND range_id=$5";
+const INSERT_TASK: &str = "INSERT INTO tasks(domain_id, task_list_name, task_type, task_id, data, data_encoding) VALUES($1, $2, $3, $4, $5, $6)";
+const SELECT_TASKS: &str = "SELECT task_id, data, data_encoding FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id > $4 AND task_id <= $5 ORDER BY task_id LIMIT $6";
+const COUNT_TASKS: &str = "SELECT count(1) as count FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id > $4";
+const DELETE_TASK: &str =
+    "DELETE FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id = $4";
+const RANGE_DELETE_TASKS: &str = "DELETE FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id IN (SELECT task_id FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id <= $4 ORDER BY domain_id,task_list_name,task_type,task_id LIMIT $5 )";
+
 impl PostgresTaskStore {
+    /// Encode new rows with Go's dynamic `history.serializationEncoding`
+    /// instead of the (Go-ignored) SQL `encodingType` setting.
+    pub fn with_encoding_source(mut self, source: crate::matching_blob::EncodingSource) -> Self {
+        self.encoding_source = Some(source);
+        self
+    }
+
+    fn write_encoding(&self) -> Result<BlobEncoding> {
+        match &self.encoding_source {
+            Some(source) => Ok(source.current()?),
+            None => Ok(self.encoding),
+        }
+    }
+
     pub fn connect(config: PostgresTaskStoreConfig) -> Result<Self> {
         validate_shard_config(&config)?;
         if config.n_shards > u32::MAX as usize {
@@ -312,6 +341,7 @@ impl PostgresTaskStore {
             n_shards: config.n_shards,
             use_multiple_databases: config.use_multiple_databases,
             encoding: config.encoding,
+            encoding_source: None,
         })
     }
 
@@ -339,8 +369,7 @@ impl PostgresTaskStore {
     }
 
     fn shard_id(&self, key: &TaskListKey) -> i32 {
-        let input = format!("{}_{}", key.domain_id, key.name);
-        (farmhash::hash32(input.as_bytes()) % self.n_shards as u32) as i32
+        crate::matching_task_store::go_db_shard_id(&key.domain_id, &key.name, self.n_shards)
     }
 
     fn read_task_list_row(
@@ -357,7 +386,7 @@ impl PostgresTaskStore {
             &task_type,
         ];
         match client.query_opt(
-            "SELECT range_id, data, data_encoding FROM task_lists WHERE shard_id=$1 AND domain_id=$2 AND name=$3 AND task_type=$4",
+            SELECT_TASK_LIST,
             params,
         ) {
             Ok(row) => row
@@ -388,7 +417,8 @@ impl PostgresTaskStore {
 
     fn encode_task_list(&self, data: &TaskListData) -> Result<(Vec<u8>, &'static str)> {
         let bytes = blob::encode_task_list(data);
-        Ok((self.encoding.encode(&bytes)?, self.encoding.as_str()))
+        let encoding = self.write_encoding()?;
+        Ok((encoding.encode(&bytes)?, encoding.as_str()))
     }
 
     fn lock_and_check(
@@ -407,7 +437,7 @@ impl PostgresTaskStore {
         ];
         let actual: Option<i64> = transaction
             .query_opt(
-                "SELECT range_id FROM task_lists WHERE shard_id=$1 AND domain_id=$2 AND name=$3 AND task_type=$4 FOR UPDATE",
+                LOCK_TASK_LIST,
                 params,
             )
             .map_err(normalize_postgres_error)?
@@ -463,12 +493,13 @@ impl MatchingTaskStore for PostgresTaskStore {
                     &key.domain_id.as_bytes().as_slice(),
                     &key.name,
                     &task_type,
+                    &0_i64,
                     &bytes,
                     &encoding,
                 ];
                 client
                     .execute(
-                        "INSERT INTO task_lists (shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES ($1,$2,$3,$4,0,$5,$6)",
+                        INSERT_TASK_LIST,
                         params,
                     )
                     .map_err(|error| {
@@ -497,7 +528,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         ];
         let affected = transaction
             .execute(
-                "UPDATE task_lists SET range_id=$1,data=$2,data_encoding=$3 WHERE shard_id=$4 AND domain_id=$5 AND name=$6 AND task_type=$7",
+                UPDATE_TASK_LIST,
                 params,
             )
             .map_err(normalize_postgres_error)?;
@@ -542,7 +573,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         ];
         let affected = transaction
             .execute(
-                "UPDATE task_lists SET range_id=$1,data=$2,data_encoding=$3 WHERE shard_id=$4 AND domain_id=$5 AND name=$6 AND task_type=$7",
+                UPDATE_TASK_LIST,
                 params,
             )
             .map_err(normalize_postgres_error)?;
@@ -565,11 +596,12 @@ impl MatchingTaskStore for PostgresTaskStore {
         let task_type = postgres_task_type(key)?;
         let mut client = self.pool(key).checkout()?;
         let mut transaction = client.transaction().map_err(normalize_postgres_error)?;
+        let write_encoding = self.write_encoding()?;
         for (domain, task) in tasks {
             let mut data = task.data.clone();
             data.created_nanos = now_nanos;
-            let bytes = self.encoding.encode(&blob::encode_task(&data))?;
-            let encoding = self.encoding.as_str();
+            let bytes = write_encoding.encode(&blob::encode_task(&data))?;
+            let encoding = write_encoding.as_str();
             let params: &[&(dyn ToSql + Sync)] = &[
                 &domain.as_bytes().as_slice(),
                 &key.name,
@@ -580,7 +612,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             ];
             transaction
                 .execute(
-                    "INSERT INTO tasks (domain_id, task_list_name, task_type, task_id, data, data_encoding) VALUES ($1,$2,$3,$4,$5,$6)",
+                    INSERT_TASK,
                     params,
                 )
                 .map_err(normalize_postgres_error)?;
@@ -608,7 +640,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         ];
         let rows = client
             .query(
-                "SELECT task_id,data,data_encoding FROM tasks WHERE domain_id=$1 AND task_list_name=$2 AND task_type=$3 AND task_id>$4 AND task_id<=$5 ORDER BY task_id LIMIT $6",
+                SELECT_TASKS,
                 params,
             )
             .map_err(|error| {
@@ -640,7 +672,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         ];
         client
             .query_one(
-                "SELECT count(1) FROM tasks WHERE domain_id=$1 AND task_list_name=$2 AND task_type=$3 AND task_id>$4",
+                COUNT_TASKS,
                 params,
             )
             .and_then(|row| row.try_get(0))
@@ -661,7 +693,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         ];
         client
             .execute(
-                "DELETE FROM tasks WHERE domain_id=$1 AND task_list_name=$2 AND task_type=$3 AND task_id=$4",
+                DELETE_TASK,
                 params,
             )
             .map(|_| ())
@@ -691,7 +723,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         ];
         let affected = client
             .execute(
-                "DELETE FROM tasks WHERE domain_id=$1 AND task_list_name=$2 AND task_type=$3 AND task_id IN (SELECT task_id FROM tasks WHERE domain_id=$1 AND task_list_name=$2 AND task_type=$3 AND task_id<=$4 ORDER BY domain_id,task_list_name,task_type,task_id LIMIT $5)",
+                RANGE_DELETE_TASKS,
                 params,
             )
             .map_err(|error| {
@@ -717,7 +749,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         ];
         let affected = client
             .execute(
-                "DELETE FROM task_lists WHERE shard_id=$1 AND domain_id=$2 AND name=$3 AND task_type=$4 AND range_id=$5",
+                DELETE_TASK_LIST,
                 params,
             )
             .map_err(|error| {
@@ -1337,6 +1369,41 @@ mod tests {
         assert!(validate_shard_config(&single_database).is_ok());
         assert_eq!(database_index(3, false), 0);
         assert_eq!(database_index(3, true), 3);
+    }
+
+    #[test]
+    fn matching_postgres_sql_matches_go_task_go() {
+        use crate::matching_task_store::go_sql_pin::{assert_in_go, assert_named};
+        let go = include_str!("../../../../go/common/persistence/sql/sqlplugin/postgres/task.go");
+        for statement in [
+            SELECT_TASK_LIST,
+            LOCK_TASK_LIST,
+            DELETE_TASK_LIST,
+            SELECT_TASKS,
+            COUNT_TASKS,
+            DELETE_TASK,
+            RANGE_DELETE_TASKS,
+        ] {
+            assert_in_go(go, statement);
+        }
+        assert_named(
+            go,
+            "INTO task_lists(shard_id, domain_id, name, task_type, range_id, data, data_encoding) VALUES (:shard_id, :domain_id, :name, :task_type, :range_id, :data, :data_encoding)",
+            INSERT_TASK_LIST.trim_start_matches("INSERT "),
+            true,
+        );
+        assert_named(
+            go,
+            "tasks(domain_id, task_list_name, task_type, task_id, data, data_encoding) VALUES(:domain_id, :task_list_name, :task_type, :task_id, :data, :data_encoding)",
+            INSERT_TASK.trim_start_matches("INSERT INTO "),
+            true,
+        );
+        assert_named(
+            go,
+            "UPDATE task_lists SET range_id = :range_id, data = :data, data_encoding = :data_encoding WHERE shard_id = :shard_id AND domain_id = :domain_id AND name = :name AND task_type = :task_type",
+            UPDATE_TASK_LIST,
+            true,
+        );
     }
 
     #[test]
