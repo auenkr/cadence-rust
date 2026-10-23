@@ -1,0 +1,4 @@
+PROBE BODY FAILED: Error: Rust Matching did not report assigned shard restart-tasks-e1d7e9a5-f2f1-4d45-aec5-8dec3a581190 READY
+    at /mnt/storage/service/github/wt/gatefinal2/tests/matching-service-compat.cjs:128:11
+Error: Rust Matching did not report assigned shard restart-tasks-e1d7e9a5-f2f1-4d45-aec5-8dec3a581190 READY
+    at /mnt/storage/service/github/wt/gatefinal2/tests/matching-service-compat.cjs:128:11

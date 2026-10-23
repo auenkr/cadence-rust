@@ -1,0 +1,53 @@
+{
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goMatchingStarted": false,
+  "rustServices": [
+    "matching"
+  ],
+  "goServices": [
+    "frontend",
+    "history",
+    "worker"
+  ],
+  "rustProductionBinary": "/tmp/gatefinal2/bin/cadence-matching",
+  "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+  "historyTransport": "grpc",
+  "matchingTransport": "grpc",
+  "rustDynamicConfigFile": "/tmp/gatefinal2/l6/rust-dynamic-config.yaml",
+  "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+  "acceptanceEligible": false,
+  "persistence": null,
+  "shardDistributor": {
+    "fixture": "go/tests/shard-distributor-interoperability (pinned shard-manager handlers, in-memory store)",
+    "address": "127.0.0.1:53939",
+    "control": "http://127.0.0.1:36591",
+    "namespace": "matching",
+    "onboardingPercentage": 100,
+    "real": false,
+    "etcdImage": null
+  },
+  "serverCommand": [
+    "/tmp/gatefinal2/build/cadence-server",
+    "--config",
+    "/tmp/gatefinal2/l6/config",
+    "--zone",
+    "sqlite",
+    "start",
+    "--auto-setup",
+    "--services",
+    "frontend,history,worker"
+  ],
+  "artifactsDirectory": "/tmp/gatefinal2/l6",
+  "shardDistributorFixture": {
+    "address": "127.0.0.1:53939",
+    "control_address": "127.0.0.1:36591",
+    "namespace": "matching"
+  },
+  "probeExitCode": 0,
+  "goServicesPid": 1498770,
+  "goServicesAliveAfterProbe": true,
+  "matchingExporter": null,
+  "matchingExporterAddress": null,
+  "runExitCode": 0,
+  "failure": null
+}

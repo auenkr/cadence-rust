@@ -1,0 +1,10 @@
+ 02:12:12 up 14 days, 15:39,  1 user,  load average: 1.79, 4.75, 4.25
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       4.2Gi       553Mi       361Mi       3.6Gi       3.5Gi
+Swap:           11Gi       2.4Gi       9.1Gi
+Go baseline artifacts: /tmp/gatefinal2/l6
+Selected evidence copied to /mnt/storage/service/github/wt/gatefinal2/memory/evidence/matching-gate-final2-20261023/6-sd-fixture/evidence: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-after-failure-recovery.log', 'rust-server-logs/rust-server-before-restart.log', 'rust-server-logs/rust-server-secondary.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_sqlite.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Traceback (most recent call last):
+  File "/mnt/storage/service/github/wt/gatefinal2/tests/run-go-service-baseline.py", line 1060, in <module>
+    raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+RuntimeError: Go baseline probe failed; see /tmp/gatefinal2/l6/probe.log
