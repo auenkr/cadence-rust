@@ -3053,7 +3053,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                             ));
                         }
                     }
-                    let kind_is_normal = matches!(task_list.kind, 0 | 1);
+                    // Go `ToTaskListKind` maps INVALID and unknown values to nil, which
+                    // `GetKind()` reads as Normal; only STICKY (2) and EPHEMERAL (3) reject.
+                    let kind_is_normal = !matches!(task_list.kind, 2 | 3);
                     if !kind_is_normal {
                         return Err(Status::invalid_argument(
                             "Only normal tasklist's partition config can be updated.",
@@ -3179,7 +3181,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                     if task_list.name.is_empty() {
                         return Err(Status::invalid_argument("TaskList is not set."));
                     }
-                    if !matches!(task_list.kind, 0 | 1) {
+                    // Same Go `ToTaskListKind` mapping as UpdateTaskListPartitionConfig.
+                    if matches!(task_list.kind, 2 | 3) {
                         return Err(Status::invalid_argument(
                             "Only normal tasklist's partition config can be updated.",
                         ));
