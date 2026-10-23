@@ -1985,7 +1985,9 @@ mod tests {
         let domain = uuid::Uuid::from_u128(1).to_string();
         state.forward_backlog_task(task.clone(), &domain, 0, 0).await.unwrap();
         assert!(matches!(state.forward_backlog_task(task.clone(), &domain, 1, 0).await, Err(ForwardError::SlowDown)));
-        assert!(matches!(state.forward_backlog_task(task.clone(), &domain, 0, 0).await, Err(ForwardError::SlowDown)), "remote busy consumes the same rate budget as success");
+        let mut limited = state.clone();
+        limited.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 0), now()));
+        assert!(matches!(limited.forward_backlog_task(task.clone(), &domain, 0, 0).await, Err(ForwardError::SlowDown)), "zero forwarding rate rejects before issuing an RPC");
         assert!(matches!(state.forward_backlog_task(task, &domain, 0, 1).await, Err(ForwardError::TaskListKind)));
         let task = AllocatedTask { task_id: 2, data: Default::default() };
         let mut root = state.clone();
