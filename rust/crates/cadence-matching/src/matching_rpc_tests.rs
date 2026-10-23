@@ -1156,6 +1156,83 @@ async fn matching_rpc_sql_semaphore_matches_go_unsupported_backend_error() {
     );
 }
 
+fn semaphore_request(domain: &str, name: &str, bucket: i32, owner: &str) -> Request<m::AcquireSemaphoreRequest> {
+    Request::new(m::AcquireSemaphoreRequest {
+        domain_id: domain.into(),
+        semaphore_name: name.into(),
+        bucket,
+        owner_id: owner.into(),
+    })
+}
+
+// Go `ParseRequestOwner` wraps the decode error in a BadRequestError, and the text is what callers see.
+#[tokio::test]
+async fn matching_rpc_semaphore_owner_errors_match_go_text() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    let missing_prefix = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, "x"))
+        .await
+        .unwrap_err();
+    assert_eq!(missing_prefix.code(), tonic::Code::InvalidArgument);
+    assert_eq!(missing_prefix.message(), r#"invalid owner id: owner_id "x" has no length prefix"#);
+    let non_canonical = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, "01:w:r:1"))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        non_canonical.message(),
+        r#"invalid owner id: owner_id "01:w:r:1" has a non-canonical length prefix "01""#
+    );
+    // Go decodes the owner before it validates the bucket, so a bad owner wins over a bad name.
+    let owner_first = MatchingApi::acquire_semaphore(&matching, semaphore_request("", "", -1, "x"))
+        .await
+        .unwrap_err();
+    assert!(owner_first.message().starts_with("invalid owner id: "));
+}
+
+// Go `NewIdentifier` runs after the owner decode and before any domain or ring lookup.
+#[tokio::test]
+async fn matching_rpc_semaphore_identifier_errors_match_go_text() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    let cases = [
+        (semaphore_request("", "sem", 0, "1:w:r:1"), "domainID is required"),
+        (semaphore_request(&domain, "", 0, "1:w:r:1"), "semaphoreName is required"),
+        (semaphore_request(&domain, "sem", -1, "1:w:r:1"), "bucket must not be negative, got -1"),
+    ];
+    for (request, message) in cases {
+        let error = MatchingApi::acquire_semaphore(&matching, request).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(error.message(), message);
+    }
+}
+
+// Go `ErrSemaphoreDisabled` is a BadRequestError with this exact text.
+#[tokio::test]
+async fn matching_rpc_semaphore_disabled_message_matches_go() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    let error = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, "1:w:r:1"))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    assert_eq!(error.message(), "distributed semaphore is not enabled for this domain");
+}
+
+// Go `errIfSemaphoreOwnershipLost` answers "not known" as the owner once the engine is shutting down.
+#[ignore = "parity gap: Rust ownership check has no shutdown branch; Go rejects with SemaphoreNotOwnedByHostError owned-by \"not known\" while shutting down. go/service/matching/handler/engine.go:1675"]
+#[tokio::test]
+async fn matching_rpc_semaphore_rejects_new_buckets_while_shutting_down() {
+    panic!("parity gap: Membership has no shutdown state to model Go isShuttingDown");
+}
+
+// Go `AcquireSemaphore` turns any engine error after the caller's context ends, cancel or deadline, into InternalServiceError.
+#[ignore = "parity gap: Rust maps only deadline-expired errors to InternalServiceError; cancellation is not observed. go/service/matching/handler/handler.go:550"]
+#[tokio::test]
+async fn matching_rpc_semaphore_cancelled_context_is_internal_error() {
+    panic!("parity gap: tonic drops cancelled handler futures, so no Go-equivalent context check exists");
+}
+
 fn scaler_config_value(matching: &Matching, property: &str, json: &[u8]) {
     matching
         .frontend
