@@ -56,4 +56,4 @@ Same order. Rate limit via `check_rpc_quota` (ResourceExhausted, `ServiceBusyErr
 
 - Branch: `matching-semaphore-rpc-20261024`.
 - Command: `gh workflow run rust-ci.yml --ref matching-semaphore-rpc-20261024 -f package=cadence-matching`.
-- CI run: pending. Filled in after the run finishes.
+- CI run: https://github.com/auenkr/cadence-rust/actions/runs/40018160286 (success, clippy-test). Lib tests: 568 passed, 12 ignored; the three new tests passed and the two gap tests are ignored.
