@@ -26,4 +26,5 @@ Branch `matching-configstore-dyncfg-20261023` (from `matching-tls-dyncfg-2026102
 - Not run locally; no live MySQL/Postgres/Cassandra test.
 
 ## CI
-(filled after run)
+Code sha `f35af3c1a72e66a0b02c4a19827ee741d9159c8b`, full workspace `rust-ci.yml` (clippy `-D warnings` + tests): https://github.com/auenkr/cadence-rust/actions/runs/40011645910 — success.
+First run 40011386323 failed clippy (items after test module, type complexity); fixed.
