@@ -2687,6 +2687,47 @@ mod tests {
         // Go TestIsolationRemoteSyncMatchBlocking: isolation group dca1, delayed root poll.
         remote_sync_match_case("dca1", Duration::from_millis(10)).await;
     }
+    #[tokio::test]
+    async fn matching_backlog_offer_prefers_local_poller_before_forwarding() {
+        // Go Offer tries a parked local poller first; the forward and the parent's
+        // add are only the fallback. A child with a local poller must not forward.
+        let (_directory, _store, _key, root) = fixture(0);
+        let (_stop, stopped) = tokio::sync::watch::channel(false);
+        let sync = Arc::new(SyncMatcher::new(&[], stopped));
+        let (parent, channel, server) = recording_parent().await;
+        let domain = Uuid::from_u128(1).to_string();
+        let dispatcher = TaskDispatcher::new(root.queue.clone(), lazy_history(), domain.clone())
+            .with_sync_matcher(sync.clone())
+            .with_forward(remote_forward_state(channel, "/__cadence_sys/tl0/1"));
+        let poller = sync.clone();
+        let parked = tokio::spawn(async move {
+            poller.poll("").await.map(|received| {
+                let workflow = received.task.data.workflow_id.clone();
+                received.finish(Ok(()));
+                workflow
+            })
+        });
+        // Let the local poller park before the offer, as the Go test does.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData {
+                workflow_id: "child-workflow".into(),
+                schedule_id: 91,
+                ..Default::default()
+            },
+        };
+        dispatcher
+            .accept_forwarded_backlog(task, &domain, "/__cadence_sys/tl0/1", 0)
+            .await
+            .unwrap();
+        assert_eq!(parked.await.unwrap().as_deref(), Some("child-workflow"));
+        assert!(
+            parent.add_decision.lock().unwrap().is_none(),
+            "local poller matched, so the parent never received a forwarded add"
+        );
+        server.abort();
+    }
     /// In-process parent that answers every forwarded decision add with ServiceBusy.
     struct BusyParent;
     #[tonic::async_trait]
