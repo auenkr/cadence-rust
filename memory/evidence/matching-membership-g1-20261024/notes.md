@@ -61,3 +61,36 @@ Not done: no unit test was written, because a test against a non-existent seam w
 ## CI
 
 No `rust-ci.yml` run was dispatched for this branch. The only commit is this notes file.
+
+## Implementation (2026-10-24, branch `matching-membership-g1-impl-20261024`)
+
+Status: **G1 closed for the owner-lookup path.** Seam added, test added, CI green.
+
+Change (commit `df89143fb`, `rust/crates/cadence-matching`):
+
+- `matching_membership.rs`: `Membership` holds `refresh: Arc<tokio::sync::Notify>`, a shared signal that stores at
+  most one permit (Go `refreshChan` capacity 1, non-blocking `signalSelf`). `owner()` calls `notify_one()` only on
+  the empty-ring error path, matching Go `Ring.LookupRaw`. `refresh_signal()` hands the Notify to the lifecycle.
+- `matching_membership_lifecycle.rs`: the worker has a new `refresh.notified()` select arm. It runs the same snapshot
+  and `replace_if_addresses_changed` body as the ticker arm, behind the same `MIN_REFRESH` guard. Go's `Refresh()` has
+  the same rate limiter (`hashring.go:292-295`), so this is a mirror and not a new throttle.
+- Test `matching_membership_lifecycle::tests::failed_owner_lookup_asks_provider_to_refresh`
+  (`start_paused`): mirrors Go `TestFailedLookupWillAskProvider`. Start gives 1 fetch. Each failed `owner("a")` on the
+  empty ring gives one more fetch (2, then 3). Paused time means the 2s ticker cannot cause those fetches.
+
+Design choices:
+
+- The signal fires from `owner()`, not from `owns`/`remote_channel`/`check_task_list` directly. Those callers all reach
+  `owner()`, and the empty-ring error is the only path that signals. This matches Go, where every `Lookup` goes through
+  `LookupRaw`.
+- The brief said "immediate" refresh. The arm does not bypass `MIN_REFRESH`. That follows Go's rate limiter. The first
+  refresh after a failed lookup on a never-changed ring is still immediate, because `last_changed` is `None`.
+
+CI:
+
+- Dispatched: `gh workflow run rust-ci.yml --ref matching-membership-g1-impl-20261024 -f package=cadence-matching`
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/40031038533 (head `df89143fb`), **success**
+  (`clippy-test` job green; `cargo test` ran `running 569 tests`: 558 passed, 0 failed, 11 ignored; the new test is `ok`).
+- A push-triggered run on the same SHA (`40031032295`) was cancelled. It was superseded by the dispatch.
+- Not done here: no local cargo run (per instruction). No workspace-wide or mixed Go/Rust gate was run.
+  Other crates were not affected by this change, but that was not run as a separate CI gate.
