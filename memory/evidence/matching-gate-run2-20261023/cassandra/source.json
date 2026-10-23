@@ -1,9 +1,16 @@
 {
   "repository": "/mnt/storage/service/github/wt/gate5",
-  "head": "7b84c01d1b934faa2499078fdb6312ebe7520d14",
+  "head": "a76c6cd65dcfd163665ada97befdf1436a11036d",
   "branch": "matching-gate-run2-20261023",
   "status": [
-    "M tests/__pycache__/matching_evidence.cpython-314.pyc",
-    "?? memory/evidence/matching-gate-run2-20261023/"
+    "M memory/evidence/matching-gate-run2-20261023/cassandra/config-redacted/development.yaml",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/config-redacted/development_cassandra.yaml",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/config-redacted/rust-matching.yaml",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/matching-shutdown.json",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/probe.log",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/results.json",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/rust-server-logs/rust-server-before-restart.log",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/rust-server-logs/rust-server-secondary.log",
+    " M memory/evidence/matching-gate-run2-20261023/cassandra/server.log"
   ]
 }

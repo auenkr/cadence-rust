@@ -23,14 +23,14 @@ persistence:
 ringpop:
   name: cadence
   bootstrapMode: hosts
-  bootstrapHosts: [ "127.0.0.1:49051", "127.0.0.1:40373", "127.0.0.1:51505" ]
+  bootstrapHosts: [ "127.0.0.1:34807", "127.0.0.1:52741", "127.0.0.1:41097" ]
   maxJoinDuration: 30s
 
 services:
   frontend:
     rpc:
-      port: 49051
-      grpcPort: 60419
+      port: 34807
+      grpcPort: 56481
       bindOnLocalHost: true
       grpcMaxMsgSize: 33554432
     metrics:
@@ -38,12 +38,12 @@ services:
         hostPort: "127.0.0.1:8125"
         prefix: "cadence"
     pprof:
-      port: 42591
+      port: 50887
 
   matching:
     rpc:
-      port: 47941
-      grpcPort: 42581
+      port: 40463
+      grpcPort: 55625
       bindOnLocalHost: true
       grpcMaxMsgSize: 33554432
     metrics:
@@ -51,12 +51,12 @@ services:
         hostPort: "127.0.0.1:8125"
         prefix: "cadence"
     pprof:
-      port: 45675
+      port: 49107
 
   history:
     rpc:
-      port: 40373
-      grpcPort: 41737
+      port: 52741
+      grpcPort: 46379
       bindOnLocalHost: true
       grpcMaxMsgSize: 33554432
     metrics:
@@ -64,18 +64,18 @@ services:
         hostPort: "127.0.0.1:8125"
         prefix: "cadence"
     pprof:
-      port: 45541
+      port: 40665
 
   worker:
     rpc:
-      port: 51505
+      port: 41097
       bindOnLocalHost: true
     metrics:
       statsd:
         hostPort: "127.0.0.1:8125"
         prefix: "cadence"
     pprof:
-      port: 53005
+      port: 42291
 
 clusterGroupMetadata:
   failoverVersionIncrement: 10
@@ -86,7 +86,7 @@ clusterGroupMetadata:
       enabled: true
       initialFailoverVersion: 0
       newInitialFailoverVersion: 1 # migrating to this new failover version
-      rpcAddress: "localhost:60419" # this is to let worker service and XDC replicator connected to the frontend service. In cluster setup, localhost will not work
+      rpcAddress: "localhost:56481" # this is to let worker service and XDC replicator connected to the frontend service. In cluster setup, localhost will not work
       rpcTransport: "grpc"
 
 dcRedirectionPolicy:
