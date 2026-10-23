@@ -1,0 +1,6 @@
+PROBE BODY FAILED: Error: Existing SDK against mixed Matching failed: 1; see /mnt/storage/service/gate-runs/gatefinal3/l9/run/rust-matching/go-sdk.log
+    at run (/mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:1383:31)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+Error: Existing SDK against mixed Matching failed: 1; see /mnt/storage/service/gate-runs/gatefinal3/l9/run/rust-matching/go-sdk.log
+    at run (/mnt/storage/service/github/wt/gatefinal3/tests/matching-service-compat.cjs:1383:31)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
