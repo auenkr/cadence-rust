@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
 const { createTaskObserver } = require('./matching-task-observer.cjs');
+const { runProbeScenarios } = require('./matching-probe-scenarios.cjs');
 const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
 const grpc = webRequire('@grpc/grpc-js');
 const loader = webRequire('@grpc/proto-loader');
@@ -1327,6 +1328,26 @@ async function run() {
     };
     fs.writeFileSync(path.join(work, 'backlog-forward.json'), JSON.stringify(backlogForwardEvidence, null, 2) + '\n');
   }
+  // Opt-in scenarios (CADENCE_PROBE_*), see tests/matching-probe-scenarios.cjs.
+  let probeScenarios = 'not requested';
+  if (productionMode && Object.keys(process.env).some(name => name.startsWith('CADENCE_PROBE_') && process.env[name] === '1')) {
+    const directClients = [{ client: directMatchingClient(`127.0.0.1:${rustGrpcPort}`), tchannel: `127.0.0.1:${rustTChannel}` }];
+    if (process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT) {
+      directClients.push({ client: directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`), tchannel: `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}` });
+    }
+    probeScenarios = await runProbeScenarios({
+      grpc, call, directClients, domain, domainId, id, startRequest, work, durableTaskCount,
+      restartRust: async () => {
+        const killedPid = rust.pid;
+        rust.kill('SIGKILL');
+        const killed = await exited;
+        assert.equal(killed.signal, 'SIGKILL', 'Rust Matching did not terminate for the durable restart scenario');
+        rust = startRust('after-durable-restart');
+        await waitForRustReady('after-durable-restart');
+        return { killedPid, restartedPid: rust.pid };
+      },
+    });
+  }
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
@@ -1430,7 +1451,7 @@ async function run() {
         taskList: goMatchingTaskList, taskRowsBeforeGoConsume: Number(pendingRows.stdout) },
     }, null, 2) + '\n');
   }
-  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', backlogForward: backlogForwardEvidence || 'not requested', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', shardDistributor: shardManagerControl ? shardDistributorEvidence : 'not requested', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', backlogForward: backlogForwardEvidence || 'not requested', probeScenarios, processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', shardDistributor: shardManagerControl ? shardDistributorEvidence : 'not requested', peer, domain, execution, attributes }));
   } catch (error) {
     // Keep the probe-body failure visible; the shutdown checks in finally may throw their own error.
     console.error('PROBE BODY FAILED:', error);
