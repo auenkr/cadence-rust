@@ -127,7 +127,9 @@ unique grants, and free-list/reverse-index consistency under real threads.
 
 Targeted semaphore tests: **37 passed, 0 failed, 7 ignored**, exit **0**
 (`semaphore-test.log`, `semaphore-test.exit`). All 23 new runnable cases passed.
-Pending: crate library tests and crate all-targets clippy with warnings denied. Commands use the requested shared target and
+Crate all-targets clippy with `-D warnings`: exit **0** (`clippy.log`,
+`clippy.exit`), no diagnostics.
+Pending: crate library tests. Commands use the requested shared target and
 `cargo-safe` from this worktree's `rust/`, inside tmux session `cadence-rust`.
 Shared target validation is requested explicitly for this task; this is not a
 clean dedicated-target mixed-cluster gate or proof of full service completion.
