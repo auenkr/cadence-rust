@@ -91,15 +91,18 @@ impl MatchingRingpopProvider {
                 listener_addr.ip()
             }
         } else {
-            config
-                .broadcast_address
-                .parse::<IpAddr>()
-                .map_err(|error| {
-                    ProviderError(format!(
-                        "invalid Ringpop broadcastAddress {:?}: {error}",
-                        config.broadcast_address
-                    ))
-                })?
+            // Go: net.ParseIP, then broadcastIP.String() renders an
+            // IPv4-mapped IPv6 address in dotted-quad form.
+            let ip = config.broadcast_address.parse::<IpAddr>().map_err(|_| {
+                ProviderError(format!(
+                    "failed parsing broadcast address {:?}, err: %!w(<nil>)",
+                    config.broadcast_address
+                ))
+            })?;
+            match ip {
+                IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
+                v4 => v4,
+            }
         };
         let address = SocketAddr::new(advertised_ip, listener_addr.port()).to_string();
         let local = Member {
@@ -748,6 +751,36 @@ mod tests {
             1
         );
         assert!(MatchingRingpopProvider::service_members(&members, "cadence-matching").is_empty());
+    }
+
+    #[test]
+    fn broadcast_address_matches_go_parse_ip_and_string_rendering() {
+        let build = |broadcast: &str| {
+            let config = RingpopConfig {
+                name: "cadence".into(),
+                broadcast_address: broadcast.into(),
+                bootstrap_mode: cadence_service_core::config::BootstrapMode::Hosts,
+                bootstrap_hosts: vec!["127.0.0.1:1".into()],
+                ..Default::default()
+            };
+            MatchingRingpopProvider::new(
+                config,
+                "cadence-matching",
+                "0.0.0.0:7935".parse().unwrap(),
+                7835,
+            )
+        };
+        // Go broadcastIP.String() renders IPv4-mapped IPv6 as dotted quad.
+        assert_eq!(
+            build("::ffff:10.1.2.3").unwrap().local_identity(),
+            "10.1.2.3:7935"
+        );
+        assert_eq!(build("fd00::5").unwrap().local_identity(), "[fd00::5]:7935");
+        let error = build("not-an-ip").err().unwrap();
+        assert_eq!(
+            error.0,
+            "failed parsing broadcast address \"not-an-ip\", err: %!w(<nil>)"
+        );
     }
 
     #[test]

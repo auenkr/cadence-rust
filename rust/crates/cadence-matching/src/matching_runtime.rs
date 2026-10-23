@@ -547,12 +547,19 @@ impl MatchingRuntime {
         if self.drained {
             return Ok(());
         }
+        let result = drain_service(&mut self.evict_self, &self.drain_duration, wait).await;
+        // Go closes the engine's shutdown channel (ownership checks answer "not
+        // known", the shard-distributor executor stops) only in handler.Stop,
+        // i.e. after EvictSelf and the drain sleep.
         if let Some(drain) = &self.shard_distributor_drain {
             let _ = drain.send(true);
         }
-        let result = drain_service(&mut self.evict_self, &self.drain_duration, wait).await;
         self.drained = true;
-        result
+        // Go's Service.Stop discards EvictSelf's error and never fails shutdown for it.
+        if let Err(error) = result {
+            eprintln!("evicting Matching from membership failed: {error:#}");
+        }
+        Ok(())
     }
 
     /// Finish shutdown after draining traffic: stop the owner and join
@@ -948,6 +955,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(*selected.lock().unwrap(), Some(Duration::from_millis(137)));
+    }
+
+    #[tokio::test]
+    async fn drain_flag_flips_after_evict_and_sleep_and_evict_errors_are_ignored() {
+        // Go: EvictSelf, sleep(ShutdownDrainDuration), then handler.Stop closes the
+        // engine shutdown channel. EvictSelf's error is discarded.
+        let duration: DrainDuration = Arc::new(|| Duration::from_millis(5));
+        let mut runtime =
+            MatchingRuntime::in_memory(crate::handlers::AppState::default(), duration);
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        runtime.shard_distributor_drain = Some(tx);
+        let evict: EvictSelf = Arc::new(|| Box::pin(async { Err(anyhow::anyhow!("evict failed")) }));
+        let mut runtime = runtime.with_membership_evictor(evict);
+        let during = Arc::new(Mutex::new(None));
+        let observed = during.clone();
+        let rx_during = rx.clone();
+        runtime
+            .drain_with(move |_| {
+                *observed.lock().unwrap() = Some(*rx_during.borrow());
+                std::future::ready(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(*during.lock().unwrap(), Some(false), "not draining during sleep");
+        assert!(*rx.borrow(), "draining once the sleep is over");
     }
 
     #[tokio::test]

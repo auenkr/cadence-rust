@@ -1575,7 +1575,8 @@ pub async fn run(
                 shutdown_errors.push(format!("waiting for shutdown signal: {error:#}"));
             }
             if let Err(error) = withdrawal {
-                shutdown_errors.push(format!("withdrawing Matching membership: {error:#}"));
+                // Go's Service.Stop discards EvictSelf's error.
+                eprintln!("withdrawing Matching membership failed: {error:#}");
             }
             if let Err(error) = shutdown {
                 shutdown_errors.push(format!("stopping Matching runtime: {error:#}"));

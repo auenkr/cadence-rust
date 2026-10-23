@@ -1,0 +1,12 @@
+    Checking cadence-common v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-proto)
+    Checking cadence-api v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-api)
+    Checking cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-thrift)
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-matching)
+    Checking cadence-history v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-history)
+    Checking cadence-frontend v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-frontend)
+    Checking cadence-worker v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-worker)
+    Checking cadence-server v0.1.0 (/mnt/storage/service/github/wt/ringpop/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 48s
