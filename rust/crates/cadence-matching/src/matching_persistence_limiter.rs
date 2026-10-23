@@ -104,6 +104,36 @@ impl std::fmt::Debug for MatchingPersistenceLimiter {
     }
 }
 
+/// `metricRollupName` of the `persistence_errors_*_per_domain` defs
+/// (go/common/metrics/defs.go:3360-3371).
+fn persistence_error_rollup_name(per_domain_name: &str) -> Option<&'static str> {
+    Some(match per_domain_name {
+        "persistence_errors_condition_failed_per_domain" => "persistence_errors_condition_failed_rollup",
+        "persistence_errors_timeout_per_domain" => "persistence_errors_timeout_rollup",
+        "persistence_errors_busy_per_domain" => "persistence_errors_busy_rollup",
+        "persistence_errors_entity_not_exists_per_domain" => "persistence_errors_entity_not_exists_rollup",
+        "persistence_errors_bad_request_per_domain" => "persistence_errors_bad_request_rollup",
+        "persistence_errors_db_unavailable_per_domain" => "persistence_errors_db_unavailable_rollup",
+        _ => return None,
+    })
+}
+
+tokio::task_local! {
+    /// Go `backoff.retryCountKey` context value: failed attempts so far in the
+    /// enclosing `ThrottleRetry`. Absent context reads as 0 (go/common/backoff/retry.go:39).
+    static PERSISTENCE_RETRY_COUNT: usize;
+}
+
+/// Go `backoff.GetRetryCountFromContext`.
+pub(crate) fn persistence_retry_count() -> usize {
+    PERSISTENCE_RETRY_COUNT.try_with(|count| *count).unwrap_or(0)
+}
+
+/// Go `context.WithValue(ctx, retryCountKey, retryCount)` (retry.go:270).
+pub(crate) async fn with_persistence_retry_count<F: std::future::Future>(count: usize, future: F) -> F::Output {
+    PERSISTENCE_RETRY_COUNT.scope(count, future).await
+}
+
 impl MatchingPersistenceLimiter {
     pub fn new(
         overlay: Arc<Mutex<DynamicConfigOverlay>>,
@@ -260,7 +290,7 @@ impl MatchingPersistenceLimiter {
         let sink = self.metric_sink.read().expect("Matching metrics sink lock");
         let mut tags = std::collections::BTreeMap::from([
             (OPERATION_TAG.to_owned(), operation.to_owned()),
-            (IS_RETRY_TAG.to_owned(), "false".to_owned()),
+            (IS_RETRY_TAG.to_owned(), (persistence_retry_count() > 0).to_string()),
         ]);
         let per_domain = domain.is_some();
         match domain {
@@ -319,6 +349,34 @@ impl MatchingPersistenceLimiter {
             tags: histogram_tags,
             histogram: Some(HistogramSpec::GoDefault1ms100s),
         });
+        if per_domain {
+            // Go metricsScope.{AddCounter,RecordTimer} (scope.go:55-125): the
+            // per-domain defs also emit their `metricRollupName` on the root
+            // scope (no operation/domain/is_retry tags). Default (zero)
+            // MigrationConfig: counters and the latency timer emit; the _ns
+            // rollup histogram is suppressed (config.go:125-126, EmitHistogram
+            // default false).
+            let rollup = |name: &'static str, kind, value| {
+                sink.record(MetricEvent {
+                    name,
+                    kind,
+                    value,
+                    tags: Default::default(),
+                    histogram: None,
+                })
+            };
+            rollup("persistence_requests_rollup", MetricKind::Counter, MetricValue::Count(1));
+            rollup("persistence_latency_rollup", MetricKind::Timer, MetricValue::Duration(elapsed));
+            if let Some(class) = class {
+                let (_, per_domain_name, failure) = class.metric_names();
+                if let Some(name) = persistence_error_rollup_name(per_domain_name) {
+                    rollup(name, MetricKind::Counter, MetricValue::Count(1));
+                }
+                if failure {
+                    rollup("persistence_errors_rollup", MetricKind::Counter, MetricValue::Count(1));
+                }
+            }
+        }
         let host = self.host_name.read().expect("Matching persistence host lock");
         if !host.is_empty() {
             record_persistence_host_latency(sink.as_ref(), &host, elapsed);
@@ -564,8 +622,10 @@ mod metered_task_tests {
         assert!(events
             .iter()
             .any(|event| event.name == "persistence_errors_entity_not_exists_per_domain"));
+        // Rollups are root-scope (untagged) in Go.
         assert!(events
             .iter()
+            .filter(|event| !event.name.ends_with("_rollup"))
             .all(|event| event.tags["domain"] == "_unknown_"
                 && !event.tags.contains_key("task_category")));
     }
@@ -760,5 +820,57 @@ mod metered_task_tests {
             .unwrap();
         assert_eq!(histogram.histogram, Some(HistogramSpec::GoDefault1ms100s));
         assert_eq!(histogram.tags["histogram_scale"], "2");
+    }
+
+    /// Go retry.go:217-270 + metered *_generated.go: is_retry = retryCount > 0,
+    /// where the count is failed attempts so far; no context reads as 0.
+    #[tokio::test]
+    async fn is_retry_tag_follows_go_retry_count_context() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        let d = std::time::Duration::from_millis(1);
+        limiter.record_domain_call("GetDomain", d, None);
+        for count in [0usize, 1, 2] {
+            with_persistence_retry_count(count, async {
+                limiter.record_domain_call("GetDomain", d, None);
+            })
+            .await;
+        }
+        let flags: Vec<String> = sink
+            .events()
+            .iter()
+            .filter(|e| e.name == "persistence_requests")
+            .map(|e| e.tags["is_retry"].clone())
+            .collect();
+        assert_eq!(flags, ["false", "false", "true", "true"]);
+    }
+
+    /// Go scope.go:55-125 with the zero MigrationConfig: per-domain calls also
+    /// emit root-scope rollups; the ns histogram rollup is suppressed.
+    #[test]
+    fn per_domain_task_calls_emit_go_rollups() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        limiter.record_task_call(
+            "GetTasks",
+            Some(uuid::Uuid::nil()),
+            std::time::Duration::from_millis(2),
+            &Err::<(), _>(MatchingTaskStoreError::ConditionFailed("x".into())),
+        );
+        let events = sink.events();
+        let names: Vec<_> = events.iter().filter(|e| e.name.ends_with("_rollup")).map(|e| e.name).collect();
+        assert_eq!(
+            names,
+            ["persistence_requests_rollup", "persistence_latency_rollup", "persistence_errors_condition_failed_rollup"]
+        );
+        assert!(events.iter().filter(|e| e.name.ends_with("_rollup")).all(|e| e.tags.is_empty()));
     }
 }

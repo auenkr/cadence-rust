@@ -49,7 +49,7 @@ async fn retry_write<T, F: std::future::Future<Output = Result<T, WriteError>>>(
     let mut previous = None;
     let mut attempt = 0;
     loop {
-        let error = match operation().await {
+        let error = match crate::matching_persistence_limiter::with_persistence_retry_count(attempt, operation()).await {
             Ok(value) => return Ok(value),
             Err(error) => error,
         };
