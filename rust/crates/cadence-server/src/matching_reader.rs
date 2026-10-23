@@ -270,11 +270,13 @@ struct Inner {
     metric_context: Arc<Mutex<Option<ReaderMetricContext>>>,
     backlog_forward: Arc<Mutex<Option<BacklogForward>>>,
 }
+pub type BacklogForwardResult = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>>;
+pub type BacklogForwardCall = Arc<dyn Fn(AllocatedTask) -> BacklogForwardResult + Send + Sync>;
 #[derive(Clone)]
 pub struct BacklogForward {
     /// Go `fwdrAddReqTokenC`: a token is taken before each forward attempt.
     pub tokens: Arc<crate::matching_forward::RequestTokens>,
-    pub forward: Arc<dyn Fn(AllocatedTask) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>> + Send + Sync>,
+    pub forward: BacklogForwardCall,
     pub local_wait: Arc<dyn Fn() -> Duration + Send + Sync>,
 }
 #[derive(Clone)]
@@ -646,20 +648,11 @@ impl TaskReader {
                                     None => return Attempt::Stopped,
                                 };
                                 let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-                                let forward_started = std::time::Instant::now();
-                                let result = tokio::time::timeout_at(forward_deadline, (forwarder.forward)(dispatched.clone())).await;
+                                let result = tokio::select! {
+                                    result = tokio::time::timeout_at(forward_deadline, (forwarder.forward)(dispatched.clone())) => result,
+                                    _ = dispatch_stop.changed() => return Attempt::Stopped,
+                                };
                                 drop(token);
-                                // Go times only calls that passed parent lookup and the rate limiter.
-                                let timed = !matches!(
-                                    result,
-                                    Ok(Err(crate::matching_forward::ForwardError::NoParent
-                                        | crate::matching_forward::ForwardError::SlowDown
-                                        | crate::matching_forward::ForwardError::TaskListKind
-                                        | crate::matching_forward::ForwardError::InvalidTaskListType))
-                                );
-                                if let (true, Some(metrics)) = (timed, dispatch_metrics.lock().expect("matching reader metrics lock").as_ref()) {
-                                    metrics.metrics.forward_task_latency(&metrics.context, forward_started.elapsed());
-                                }
                                 match result {
                                     Ok(Ok(())) => return Attempt::Forwarded(attempt),
                                     Ok(Err(error)) => {
@@ -1366,6 +1359,77 @@ mod tests {
         let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
         assert_eq!(delivered.data.schedule_id, 22);
         stop(queue, reader).await;
+    }
+
+    // Go TestMustOffer_LocalMatchAfterChildCtxExpired / local-first branch.
+    #[tokio::test]
+    async fn matching_reader_local_head_start_does_not_forward() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = calls.clone();
+        reader.set_backlog_forwarder(BacklogForward {
+            tokens: test_tokens(1),
+            forward: Arc::new(move |_| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+            local_wait: Arc::new(|| Duration::from_secs(60)),
+        });
+        queue.append(&[TaskData::default()], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        stop(queue, reader).await;
+    }
+
+    #[tokio::test]
+    async fn matching_reader_forward_errors_retry_only_after_two_second_child_context() {
+        let (_directory, queue, reader, wake) = configured_fixture(0, 1, Duration::from_secs(10), true);
+        let attempts = Arc::new(Mutex::new(Vec::new()));
+        let observed = attempts.clone();
+        reader.set_backlog_forwarder(BacklogForward {
+            tokens: test_tokens(1),
+            forward: Arc::new(move |_| {
+                observed.lock().unwrap().push(std::time::Instant::now());
+                Box::pin(async { Err(crate::matching_forward::ForwardError::NoParent) })
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData::default()], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while attempts.lock().unwrap().len() < 2 { tokio::time::sleep(Duration::from_millis(5)).await; }
+        }).await.unwrap();
+        {
+            let attempts = attempts.lock().unwrap();
+            assert!(attempts[1].duration_since(attempts[0]) >= Duration::from_secs(2));
+        }
+        assert_eq!(queue.levels().1, 0);
+        stop(queue, reader).await;
+    }
+
+    // Go TestMustOffer_ContextExpiredAfterForwardError: cancellation leaves
+    // the durable task unacknowledged and releases its outstanding token.
+    #[tokio::test]
+    async fn matching_reader_stop_cancels_inflight_forward_without_ack() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let attempted = Arc::new(Notify::new());
+        let observed = attempted.clone();
+        let tokens = test_tokens(1);
+        reader.set_backlog_forwarder(BacklogForward {
+            tokens: tokens.clone(),
+            forward: Arc::new(move |_| {
+                observed.notify_one();
+                Box::pin(std::future::pending())
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData::default()], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), stop(queue.clone(), reader)).await.unwrap();
+        assert_eq!(queue.levels().1, 0);
+        assert!(tokens.try_acquire().is_some());
     }
     async fn wait_read(queue: &DurableTaskQueue, expected: i64) {
         tokio::time::timeout(Duration::from_secs(2), async {

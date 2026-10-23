@@ -1386,6 +1386,14 @@ impl QueueRegistry {
                             ))
                         }
                     };
+                    let forward = forward.map(|state| state.with_task_metrics(
+                        registry.metrics.clone(),
+                        crate::matching_metrics::PollMetricContext {
+                            domain: domain.clone(), task_list: lookup.1.clone(), task_list_kind: i32::from(kind),
+                            task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
+                            poller_isolation_group: String::new(),
+                        },
+                    ));
                     if let Some(forward_state) = forward.clone() {
                         let forward_domain = domain.clone();
                         let forward_task_type = lookup.2;
