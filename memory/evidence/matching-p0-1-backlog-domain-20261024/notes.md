@@ -47,7 +47,9 @@ Verification: GitHub Actions only (no local cargo, per task instruction).
   list domain `Uuid(1)` and source domain `Uuid(5)` via `accept_forwarded_backlog`
   with no poller (local wait zero, so the offer fails immediately) and asserts the
   second-hop `AddActivityTaskRequest` has `domain_id == list` and
-  `source_domain_id == source`. Fails before the fix (source was the list domain).
+  `source_domain_id == source`. Passes on the fixed branch (CI run 40031131240).
+  Pre-fix failure is inferred from the code (the old call sent the list domain as
+  source), not run against the old code.
 
 ## P1-9: `matching.errorInjectionRate` alias in launcher.rs
 
@@ -61,4 +63,5 @@ Verification: GitHub Actions only (no local cargo, per task instruction).
 ## CI
 
 - Workflow: `rust-ci.yml`, `workflow_dispatch` with `package=cadence-matching`.
-- Run: see the final report (run id/URL recorded below once it completes).
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/40031131240 (workflow_dispatch, `package=cadence-matching`, branch `matching-p0-1-backlog-domain-20261024`, head 83cca6f09). Conclusion: success. `cadence-matching` lib tests: 566 passed, 0 failed, 10 ignored; the new test passed.
+- A push-triggered run (40031123970) was cancelled by the concurrency group; the dispatch run is the evidence.
