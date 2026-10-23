@@ -21,11 +21,11 @@ use cadence_persistence::{
     matching_blob::BlobEncoding,
     matching_sqlite::{SqliteTaskStore, TaskListKey},
 };
-use cadence_proto::{api as p, matching as m};
+use cadence_proto::{api as p, history as h, matching as m};
 use cadence_service_core::handlers::AppState;
 use m::matching_api_server::MatchingApi;
 use std::{collections::HashMap, num::NonZeroU32, sync::Arc, sync::atomic::{AtomicUsize, Ordering}, time::Duration};
-use tonic::{Code, Request};
+use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
 
 const START: i64 = 1_730_073_600_000_000_000; // Go startTime: 2024-10-28T00:00:00Z
@@ -74,10 +74,14 @@ fn denied_state(domain_id: Uuid) -> AppState {
 }
 
 fn durable(state: AppState) -> (tempfile::TempDir, Arc<SqliteTaskStore>, Matching) {
+    durable_with_history(state, "http://127.0.0.1:1")
+}
+
+fn durable_with_history(state: AppState, history_url: &str) -> (tempfile::TempDir, Arc<SqliteTaskStore>, Matching) {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(SqliteTaskStore::create(dir.path().join("queue.db"), BlobEncoding::ThriftRW).unwrap());
     let history = MatchingHistoryClient::new(
-        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        tonic::transport::Endpoint::from_shared(history_url.to_string()).unwrap().connect_lazy(),
         Duration::from_secs(1),
         4 * 1024 * 1024,
     );
@@ -221,19 +225,64 @@ async fn go_handler_long_polls_without_deadline_return_context_timeout_not_set()
     assert_eq!(activity.message(), "Context timeout is not set.");
 }
 
+/// Minimal History peer for the delivery path. Go's handler test mocks the engine, so Go never
+/// calls History here; the Rust poll runs the real engine, which must start the claimed task via
+/// `RecordActivityTaskStarted` before it can return a token. Only that RPC is overridden.
+#[derive(Default)]
+struct StartedHistory {
+    starts: Arc<AtomicUsize>,
+}
+#[tonic::async_trait]
+impl h::history_api_server::HistoryApi for StartedHistory {
+    async fn record_activity_task_started(
+        &self,
+        request: Request<h::RecordActivityTaskStartedRequest>,
+    ) -> Result<Response<h::RecordActivityTaskStartedResponse>, Status> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        let r = request.into_inner();
+        Ok(Response::new(h::RecordActivityTaskStartedResponse {
+            scheduled_event: Some(p::HistoryEvent {
+                attributes: Some(p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+                    p::ActivityTaskScheduledEventAttributes { activity_id: r.schedule_id.to_string(), ..Default::default() },
+                )),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+    }
+}
+
+async fn start_history(peer: StartedHistory) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(h::history_api_server::HistoryApiServer::new(peer))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    format!("http://{address}")
+}
+
 // Go TestPollForActivityTask, "Success case": a poll that finds a task returns its token. Go's
-// engine mock returns a fixed token; here the token would come from the task persisted by the add.
+// engine mock returns a fixed token; here the token comes from the task persisted by the add and
+// started through the stub History peer above.
 #[tokio::test]
-#[ignore = "parity gap: after a durable add_activity_task persists one row (store count 1), a 2s poll_for_activity_task returns an empty task_token; Go's success case expects the token. Root cause not isolated; no production change."]
 async fn go_handler_poll_for_activity_task_returns_added_task_token() {
     let domain_id = Uuid::from_u128(9205);
-    let (_dir, _store, matching) = durable(domain_state(domain_id));
+    let history = StartedHistory::default();
+    let starts = history.starts.clone();
+    let url = start_history(history).await;
+    let (_dir, store, matching) = durable_with_history(domain_state(domain_id), &url);
     matching.add_activity_task(activity_add(domain_id)).await.unwrap();
+    assert_eq!(store.get_tasks(&queue_key(domain_id, 1), 0, i64::MAX, 10).unwrap().len(), 1);
     let response = matching
         .poll_for_activity_task(activity_poll(domain_id, Duration::from_secs(2)))
         .await
         .unwrap()
         .into_inner();
+    assert_eq!(starts.load(Ordering::SeqCst), 1, "delivery must start the claimed task on History exactly once");
     assert!(!response.task_token.is_empty(), "the added activity task must be delivered");
 }
 
