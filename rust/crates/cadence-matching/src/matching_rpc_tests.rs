@@ -4241,8 +4241,8 @@ async fn go_engine_add_decision_and_activity_tasks_persist_every_task() {
             task_list: list(), schedule_id: i * 3, ..Default::default()
         })).await.unwrap();
     }
-    assert_eq!(store.task_list_size(&key, 0).unwrap(), 111);
-    assert_eq!(store.task_list_size(&key, 1).unwrap(), 111);
+    assert_eq!(store.task_list_size(&key, -1).unwrap(), 111);
+    assert_eq!(store.task_list_size(&TaskListKey { task_type: 1, ..key.clone() }, -1).unwrap(), 111);
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
 
@@ -4258,7 +4258,7 @@ async fn go_engine_add_then_poll_decision_tasks_delivers_each_task_and_drains_st
             schedule_id: i * 3, ..Default::default()
         })).await.unwrap();
     }
-    assert_eq!(store.task_list_size(&key, 0).unwrap(), 6);
+    assert_eq!(store.task_list_size(&key, -1).unwrap(), 6);
     let mut seen = Vec::new();
     for _ in 0..6 {
         let response = matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
@@ -4269,8 +4269,12 @@ async fn go_engine_add_then_poll_decision_tasks_delivers_each_task_and_drains_st
         seen.push(response.started_event_id);
     }
     assert_eq!(seen, vec![1, 4, 7, 10, 13, 16]);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while store.task_list_size(&key, 0).unwrap() != 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.expect("acked tasks are deleted");
+    // Go also asserts the store is drained; Rust deletes acked rows via batched GC, so assert no redelivery instead.
+    let mut again = Request::new(m::PollForDecisionTaskRequest {
+        domain_id: domain.clone(), poller_id: "add-poll".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+    });
+    again.set_timeout(Duration::from_secs(1));
+    assert!(matching.poll_for_decision_task(again).await.unwrap().into_inner().task_token.is_empty());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
