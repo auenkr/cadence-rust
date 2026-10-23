@@ -18,11 +18,9 @@ impl ForwardError {
     /// Cadence peers encode `ServiceBusyError` as a ResourceExhausted status
     /// with the same typed detail used by Go's forwarder.
     pub fn classify(status: Status) -> Self {
-        let busy_detail = status
-            .details()
-            .windows(b"ServiceBusyError".len())
-            .any(|part| part == b"ServiceBusyError");
-        if status.code() == Code::ResourceExhausted && busy_detail {
+        if status.code() == Code::ResourceExhausted
+            && crate::matching_history::service_busy(&status)
+        {
             Self::SlowDown
         } else {
             Self::Remote(status)
@@ -132,10 +130,9 @@ mod tests {
 
     #[test]
     fn matching_forward_classifies_service_busy_only() {
-        let busy = tonic::Status::with_details(
-            tonic::Code::ResourceExhausted,
-            "busy",
-            tonic::codegen::Bytes::from_static(b"uber.cadence.api.v1.ServiceBusyError"),
+        let busy = crate::grpc::detailed_status(
+            tonic::Code::ResourceExhausted, "busy", "ServiceBusyError",
+            cadence_proto::api::ServiceBusyError { reason: String::new() },
         );
         assert!(matches!(ForwardError::classify(busy), ForwardError::SlowDown));
         let exhausted = tonic::Status::resource_exhausted("other exhausted error");

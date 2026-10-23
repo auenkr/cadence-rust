@@ -1256,6 +1256,33 @@ impl QueueRegistry {
                             &sync_groups,
                             read_stop.subscribe(),
                         ));
+                    let forward_tasks = Arc::new(crate::matching_forward::RequestTokens::new({
+                            let provider = registry.forward_tasks.clone();
+                            let domain = domain.clone();
+                            let name = lookup.1.clone();
+                            let task_type = lookup.2;
+                                Arc::new(move || {
+                                    provider
+                                        .as_ref()
+                                        .map(|p| p(&domain, &name, task_type))
+                                        .unwrap_or(1)
+                                })
+                        }));
+                        let forward_rate = Arc::new(crate::matching_forward::ForwardRate::new(
+                                {
+                            let provider = registry.forward_rate.clone();
+                            let domain = domain.clone();
+                            let name = lookup.1.clone();
+                            let task_type = lookup.2;
+                                    Arc::new(move || {
+                                        provider
+                                            .as_ref()
+                                            .map(|p| p(&domain, &name, task_type))
+                                            .unwrap_or(10)
+                                    })
+                                },
+                                now,
+                            ));
                     let forward = {
                         // Go `forwarder` refuses sticky task lists; only a
                         // real child partition forwards polls to its parent.
@@ -1277,20 +1304,6 @@ impl QueueRegistry {
                                             .map(|provider| provider(&domain, &name, task_type))
                                             .unwrap_or(1)
                                     })
-                            };
-                            let max_outstanding_adds: crate::matching_forward::Count = {
-                                let provider = registry.forward_tasks.clone();
-                                let domain = domain.clone();
-                                let name = lookup.1.clone();
-                                let task_type = lookup.2;
-                                Arc::new(move || provider.as_ref().map(|p| p(&domain, &name, task_type)).unwrap_or(1))
-                            };
-                            let add_rate: crate::matching_forward::Count = {
-                                let provider = registry.forward_rate.clone();
-                                let domain = domain.clone();
-                                let name = lookup.1.clone();
-                                let task_type = lookup.2;
-                                Arc::new(move || provider.as_ref().map(|p| p(&domain, &name, task_type)).unwrap_or(10))
                             };
                             let parent_key = TaskListKey {
                                 domain_id: key.domain_id,
@@ -1355,8 +1368,8 @@ impl QueueRegistry {
                                         >
                                 },
                                 max_outstanding,
-                                max_outstanding_adds,
-                                add_rate,
+                                forward_tasks.clone(),
+                                forward_rate.clone(),
                                 lookup.1.clone(),
                                 {
                                     let provider = registry.local_poll_wait.clone();
@@ -1411,33 +1424,8 @@ impl QueueRegistry {
                         dispatcher = dispatcher.with_forward(forward);
                     }
                     let owner = Arc::new(Owner {
-                        forward_tasks: Arc::new(crate::matching_forward::RequestTokens::new({
-                            let provider = registry.forward_tasks.clone();
-                            let domain = domain.clone();
-                            let name = lookup.1.clone();
-                            let task_type = lookup.2;
-                                Arc::new(move || {
-                                    provider
-                                        .as_ref()
-                                        .map(|p| p(&domain, &name, task_type))
-                                        .unwrap_or(1)
-                                })
-                        })),
-                            forward_rate: Arc::new(crate::matching_forward::ForwardRate::new(
-                                {
-                            let provider = registry.forward_rate.clone();
-                            let domain = domain.clone();
-                            let name = lookup.1.clone();
-                            let task_type = lookup.2;
-                                    Arc::new(move || {
-                                        provider
-                                            .as_ref()
-                                            .map(|p| p(&domain, &name, task_type))
-                                            .unwrap_or(10)
-                                    })
-                                },
-                                now,
-                            )),
+                        forward_tasks,
+                        forward_rate,
                         dispatcher,
                         writer,
                         reader,

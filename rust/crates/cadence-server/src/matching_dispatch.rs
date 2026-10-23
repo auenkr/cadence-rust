@@ -241,19 +241,18 @@ impl ForwardState {
     pub(crate) fn new(
         resolve: impl Fn() -> ParentFuture + Send + Sync + 'static,
         max_outstanding: crate::matching_forward::Count,
-        max_outstanding_adds: crate::matching_forward::Count,
-        add_rate: crate::matching_forward::Count,
+        max_outstanding_adds: Arc<crate::matching_forward::RequestTokens>,
+        add_rate: Arc<crate::matching_forward::ForwardRate>,
         source: String,
         local_wait: crate::matching_forward::Count,
     ) -> Self {
-        let rate_now = now();
         Self {
             resolve: Arc::new(resolve),
             source,
             local_wait,
             permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding)),
-            add_permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding_adds)),
-            add_rate: Arc::new(crate::matching_forward::ForwardRate::new(add_rate, rate_now)),
+            add_permits: max_outstanding_adds,
+            add_rate,
         }
     }
 
@@ -269,6 +268,12 @@ impl ForwardState {
         task_type: i32,
         kind: i16,
     ) -> Result<(), crate::matching_forward::ForwardError> {
+        if kind == 1 {
+            return Err(crate::matching_forward::ForwardError::TaskListKind);
+        }
+        if !matches!(task_type, 0 | 1) {
+            return Err(crate::matching_forward::ForwardError::InvalidTaskListType);
+        }
         // Go `ForwardTask`: the parent name is resolved before the rate limit
         // is charged; the outstanding-add token is taken by the caller.
         let (parent, parent_name) = (self.resolve)().await.ok_or(crate::matching_forward::ForwardError::NoParent)?;
@@ -295,6 +300,7 @@ impl ForwardState {
                         source: 2, forwarded_from, partition_config,
                     });
                     request.set_timeout(Duration::from_secs(2));
+                    matching_yarpc_grpc_metadata(&mut request);
                     client.add_decision_task(request).await.map(|_| ())
                 } else {
                     let mut request = tonic::Request::new(m::AddActivityTaskRequest {
@@ -305,6 +311,7 @@ impl ForwardState {
                         source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
                     });
                     request.set_timeout(Duration::from_secs(2));
+                    matching_yarpc_grpc_metadata(&mut request);
                     client.add_activity_task(request).await.map(|_| ())
                 }
             }
@@ -332,7 +339,7 @@ impl ForwardState {
                 }
             }
             Parent::Dispatcher(dispatcher) => {
-                dispatcher.accept_forwarded_backlog(task, domain_id, &parent_name).await
+                dispatcher.accept_forwarded_backlog(task, domain_id, &parent_name, task_type).await
             }
         };
         result.map_err(crate::matching_forward::ForwardError::classify)
@@ -386,6 +393,7 @@ impl TaskDispatcher {
         task: AllocatedTask,
         source_domain: &str,
         parent_name: &str,
+        task_type: i32,
     ) -> Result<(), Status> {
         let source_domain = uuid::Uuid::parse_str(source_domain)
             .map_err(|_| Status::invalid_argument("DomainUUID is not valid."))?;
@@ -403,12 +411,24 @@ impl TaskDispatcher {
         let group = task.data.partition_config.as_ref()
             .and_then(|config| config.get("isolation-group"))
             .map(String::as_str).unwrap_or_default().to_owned();
-        if matcher.offer(task.data, &group, &source_domain.to_string(), true, local_wait, deadline).await {
-            Ok(())
-        } else {
-            Err(Status::unavailable("remote sync match failed"))
+        if matcher.offer(task.data.clone(), &group, &source_domain.to_string(), true, local_wait, deadline).await {
+            return Ok(());
         }
+        // Library users have no local Matching RPC factory. Preserve the
+        // forwarded Offer chain here too; root backlog waits above until the
+        // caller's two-second context expires, and failed offers never persist.
+        if !root {
+            if let Some(forward) = &self.forward {
+                if let Some(_permit) = forward.add_permits.try_acquire() {
+                    if Box::pin(forward.forward_backlog_task(task, &self.domain_id, task_type, 0)).await.is_ok() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(Status::unavailable("remote sync match failed"))
     }
+
     pub(crate) fn reader_should_reload(&self) -> bool {
         self.reader
             .as_ref()

@@ -187,6 +187,32 @@ impl<T> Rendezvous<T> {
             }
         }
     }
+    // Select the local rendezvous and forward token atomically with respect
+    // to pollers. Dropping a raced offer future alone could forward a task
+    // that another runtime thread has already claimed locally.
+    async fn offer_or_token(
+        &self,
+        item: T,
+        mut stop: watch::Receiver<bool>,
+        tokens: &crate::matching_forward::RequestTokens,
+    ) -> Option<Result<tokio::sync::OwnedSemaphorePermit, ()>> {
+        if *stop.borrow() { return None; }
+        let pending = Arc::new(Pending { item: Mutex::new(Some(item)), accepted: Notify::new() });
+        let _guard = OfferGuard { channel: self, pending: pending.clone() };
+        self.offers.lock().expect("Matching handoff lock").push_back(pending.clone());
+        self.available.notify_one();
+        let acquired = tokio::select! {
+            _ = pending.accepted.notified() => return Some(Err(())),
+            token = tokens.acquire() => token?,
+            _ = stop.changed() => return None,
+        };
+        let mut offers = self.offers.lock().expect("Matching handoff lock");
+        if pending.item.lock().expect("Matching offered task lock").is_none() {
+            return Some(Err(()));
+        }
+        offers.retain(|offer| !Arc::ptr_eq(offer, &pending));
+        Some(Ok(acquired))
+    }
     async fn poll(&self, mut stop: watch::Receiver<bool>) -> Option<T> {
         loop {
             if *stop.borrow() {
@@ -614,15 +640,10 @@ impl TaskReader {
                                 // Go selects between a local poller and an
                                 // outstanding-forward token; once the token is
                                 // taken the forward call itself is not raced.
-                                let token = tokio::select! {
-                                    local = target.offer(dispatched.clone(), dispatch_stop.clone()) => {
-                                        return if local { Attempt::Offered } else { Attempt::Stopped };
-                                    }
-                                    token = forwarder.tokens.acquire() => match token {
-                                        Some(token) => token,
-                                        None => return Attempt::Stopped,
-                                    },
-                                    _ = dispatch_stop.changed() => return Attempt::Stopped,
+                                let token = match target.offer_or_token(dispatched.clone(), dispatch_stop.clone(), &forwarder.tokens).await {
+                                    Some(Ok(token)) => token,
+                                    Some(Err(())) => return Attempt::Offered,
+                                    None => return Attempt::Stopped,
                                 };
                                 let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
                                 let forward_started = std::time::Instant::now();
@@ -732,7 +753,7 @@ impl TaskReader {
                                 }
                                 let queue = dispatch_queue.clone();
                                 let id = task.task_id;
-                                if !matches!(crate::matching_blocking::run(move || queue.complete(id)).await, Ok(Ok(_))) {
+                                if !matches!(crate::matching_blocking::run(move || { queue.complete(id)?; queue.run_garbage_collection(false).map(|_| ()) }).await, Ok(Ok(_))) {
                                     dispatch_queue.stop();
                                     break 'dispatch;
                                 }
