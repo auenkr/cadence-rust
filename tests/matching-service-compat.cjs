@@ -1225,7 +1225,11 @@ async function run() {
     partitionConfig: { version: '999', numReadPartitions: 2, numWritePartitions: 1,
       readPartitions: { 0: {}, 5: { isolationGroups: ['zone-a'] } }, writePartitions: { 0: {} } },
   });
-  const partitionInfo = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
+  // Thrift's DescribeTaskListResponse has no partitionConfig (Go's thrift mapper drops it), so with Go
+  // Frontend -> Matching over Thrift the config is read from Matching's own gRPC API instead.
+  const partitionInfo = process.env.CADENCE_MATCHING_TRANSPORT === 'thrift'
+    ? await call('Matching', 'DescribeTaskList', { domainId, request: { domain, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true } })
+    : await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
   assert.equal(partitionInfo.partitionConfig.version, '1');
   assert.deepEqual(partitionInfo.partitionConfig.readPartitions['0'].isolationGroups, []);
   assert.deepEqual(partitionInfo.partitionConfig.readPartitions['5'].isolationGroups, ['zone-a']);

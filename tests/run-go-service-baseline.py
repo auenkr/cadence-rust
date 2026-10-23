@@ -992,6 +992,7 @@ try:
                         })
                         if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
                             probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
+                    probe_environment['CADENCE_MATCHING_TRANSPORT'] = args.matching_transport
                     if args.cassandra:
                         probe_environment.update({
                             'CADENCE_MATCHING_CASSANDRA_GATE': '1',
