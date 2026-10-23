@@ -87,6 +87,9 @@ pub enum ManagerError {
     Disabled,
     /// `ErrNotReady`: the manager is loading, stopped, or unloaded.
     NotReady,
+    /// `context.DeadlineExceeded`: the caller's deadline passed while waiting
+    /// for startup or before the next grant attempt.
+    Deadline,
     /// `types.EntityNotExistsError`: the semaphore itself is missing.
     NotFound(String),
     /// `types.InternalServiceError`.
@@ -254,8 +257,13 @@ impl Manager {
         self.liveness.is_alive(now_nanos)
     }
 
-    /// Go `Manager.Acquire`: mark alive, require startup, then grant.
-    pub async fn acquire(&self, owner_id: &str) -> Result<AcquireResult, ManagerError> {
+    /// Go `Manager.Acquire`: mark alive, require startup, then grant. `deadline`
+    /// is the caller's own deadline, not the startup scan's.
+    pub async fn acquire(
+        &self,
+        owner_id: &str,
+        deadline: Option<tokio::time::Instant>,
+    ) -> Result<AcquireResult, ManagerError> {
         if owner_id.is_empty() {
             return Err(ManagerError::BadRequest("ownerID is required".into()));
         }
@@ -263,21 +271,31 @@ impl Manager {
         // arrives during a slow scan is not counted idle once it finishes.
         self.liveness.mark_alive(now_nanos());
         // Go `awaitStartup`: callers that find the load in flight wait for it
-        // (bounded by the RPC deadline) instead of failing.
+        // only until their own deadline, instead of failing or outliving it.
         let starting = self.index.lock().expect("semaphore manager lock").state == State::Starting;
         if starting {
             let mut done = self.startup_done.subscribe();
-            let _ = done.wait_for(|finished| *finished).await;
+            let finished = done.wait_for(|finished| *finished);
+            let _ = match deadline {
+                Some(deadline) => tokio::time::timeout_at(deadline, finished)
+                    .await
+                    .map_err(|_| ManagerError::Deadline)?,
+                None => finished.await,
+            };
         }
         if !self.is_running() {
             return Err(ManagerError::NotReady);
         }
-        self.grant(owner_id).await
+        self.grant(owner_id, deadline).await
     }
 
     /// Go `grant`: confirm an existing hold, else draw a free id and settle it
-    /// with a conditional write.
-    async fn grant(&self, owner_id: &str) -> Result<AcquireResult, ManagerError> {
+    /// with a conditional write. Stops retrying once `deadline` has passed.
+    async fn grant(
+        &self,
+        owner_id: &str,
+        deadline: Option<tokio::time::Instant>,
+    ) -> Result<AcquireResult, ManagerError> {
         let existing = self
             .index
             .lock()
@@ -294,6 +312,11 @@ impl Manager {
             }
         }
         for _ in 0..MAX_GRANT_ATTEMPTS {
+            // Go checks ctx before each write: a caller that gave up stops here
+            // instead of letting the write fail as a store timeout.
+            if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+                return Err(ManagerError::Deadline);
+            }
             let Some(token_id) = self.reserve() else {
                 break;
             };
@@ -322,6 +345,15 @@ impl Manager {
                     });
                 }
                 GrantOutcome::SlotTaken => continue,
+                GrantOutcome::Unknown => {
+                    // Like Go's default branch: an outcome we cannot read says
+                    // nothing about the slot, so the id goes back.
+                    self.unreserve(token_id);
+                    return Err(ManagerError::Internal(format!(
+                        "unexpected grant outcome for bucket {}",
+                        self.id.to_log_string()
+                    )));
+                }
                 GrantOutcome::AlreadyHeld(held_token) => {
                     self.unreserve(token_id);
                     if held_token < 1 {
@@ -587,17 +619,17 @@ mod tests {
     async fn matching_semaphore_grants_until_full_then_reports_no_slot() {
         let registry = Registry::new(Arc::new(store()));
         let manager = registry.get_or_create(identifier(0)).await.unwrap();
-        let first = manager.acquire("1:w:r1:1").await.unwrap();
+        let first = manager.acquire("1:w:r1:1", None).await.unwrap();
         assert_eq!(first.outcome, SemaphoreAcquireOutcome::Acquired);
         assert!((1..=2).contains(&first.token_id));
-        let second = manager.acquire("1:w:r2:1").await.unwrap();
+        let second = manager.acquire("1:w:r2:1", None).await.unwrap();
         assert_eq!(second.outcome, SemaphoreAcquireOutcome::Acquired);
         assert_ne!(first.token_id, second.token_id);
-        let full = manager.acquire("1:w:r3:1").await.unwrap();
+        let full = manager.acquire("1:w:r3:1", None).await.unwrap();
         assert_eq!(full.outcome, SemaphoreAcquireOutcome::NoSlot);
         assert_eq!(full.token_id, 0);
         // A re-acquire by a holder returns the same slot.
-        let again = manager.acquire("1:w:r1:1").await.unwrap();
+        let again = manager.acquire("1:w:r1:1", None).await.unwrap();
         assert_eq!(again.token_id, first.token_id);
         assert_eq!(manager.free_count(), 0);
     }
@@ -613,9 +645,9 @@ mod tests {
         let manager = registry.get_or_create(identifier(0)).await.unwrap();
         assert_eq!(manager.free_count(), 1);
         // The persisted holder keeps its slot without a new grant.
-        let held = manager.acquire("1:w:r1:1").await.unwrap();
+        let held = manager.acquire("1:w:r1:1", None).await.unwrap();
         assert_eq!((held.outcome, held.token_id), (SemaphoreAcquireOutcome::Acquired, 2));
-        let other = manager.acquire("1:w:r2:1").await.unwrap();
+        let other = manager.acquire("1:w:r2:1", None).await.unwrap();
         assert_eq!((other.outcome, other.token_id), (SemaphoreAcquireOutcome::Acquired, 1));
     }
 
@@ -624,7 +656,7 @@ mod tests {
         let store = store();
         let registry = Registry::new(Arc::new(store.clone()));
         let manager = registry.get_or_create(identifier(0)).await.unwrap();
-        let granted = manager.acquire("1:w:r1:1").await.unwrap();
+        let granted = manager.acquire("1:w:r1:1", None).await.unwrap();
         // Simulate another host taking the slot behind this cache.
         store.release_semaphore_hold("uuid-d", "sem", 0, "1:w:r1:1");
         store
@@ -632,7 +664,7 @@ mod tests {
             .unwrap();
         // The stale reverse-index entry is dropped and r1 is given the slot
         // that is genuinely free, never the one r9 now holds.
-        let stale = manager.acquire("1:w:r1:1").await.unwrap();
+        let stale = manager.acquire("1:w:r1:1", None).await.unwrap();
         assert_eq!(stale.outcome, SemaphoreAcquireOutcome::Acquired);
         assert_ne!(stale.token_id, granted.token_id);
     }
@@ -661,7 +693,7 @@ mod tests {
         assert!(registry.by_identifier(&identifier(0)).is_none());
         assert!(!manager.is_running());
         // A stopped manager refuses further acquires until rebuilt.
-        assert_eq!(manager.acquire("1:w:r1:1").await, Err(ManagerError::NotReady));
+        assert_eq!(manager.acquire("1:w:r1:1", None).await, Err(ManagerError::NotReady));
     }
 
     // Go: TestAcquireRejectsAnEmptyOwnerID (semaphore/semaphore_manager_test.go:307). A rejected
@@ -671,7 +703,7 @@ mod tests {
         let registry = Registry::new(Arc::new(store()));
         let manager = registry.get_or_create(identifier(0)).await.unwrap();
         assert_eq!(
-            manager.acquire("").await,
+            manager.acquire("", None).await,
             Err(ManagerError::BadRequest("ownerID is required".into()))
         );
         assert_eq!(manager.free_count(), 2);

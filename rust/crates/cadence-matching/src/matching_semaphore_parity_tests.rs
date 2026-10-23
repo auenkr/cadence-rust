@@ -14,6 +14,8 @@ struct ScriptStore {
     read_tokens: Mutex<Vec<i32>>,
     scans: std::sync::atomic::AtomicUsize,
     block_scan: bool,
+    /// Delay before every grant write returns, to let a caller's deadline pass mid-write.
+    write_delay: std::time::Duration,
     scanning: Notify,
     finish_scan: Notify,
 }
@@ -28,6 +30,7 @@ impl ScriptStore {
             read_tokens: Mutex::new(Vec::new()),
             scans: std::sync::atomic::AtomicUsize::new(0),
             block_scan: false,
+            write_delay: std::time::Duration::ZERO,
             scanning: Notify::new(),
             finish_scan: Notify::new(),
         })
@@ -115,6 +118,7 @@ impl SemaphorePersistence for ScriptStore {
     ) -> Result<GrantOutcome, AcquireError> {
         request(domain, name, bucket);
         self.writes.lock().unwrap().push((token, owner.into()));
+        tokio::time::sleep(self.write_delay).await;
         self.grants
             .lock()
             .unwrap()
@@ -274,13 +278,13 @@ async fn matching_semaphore_acquire_before_bucket_usable() {
     let store = ScriptStore::new(free(&[1, 2]), vec![]);
     let manager = new_manager(&store);
     manager.stop();
-    assert_eq!(manager.acquire("a").await, Err(ManagerError::NotReady));
+    assert_eq!(manager.acquire("a", None).await, Err(ManagerError::NotReady));
 
     let store = ScriptStore::new(vec![], vec![]);
     *store.rows.lock().unwrap() = Some(Err(AcquireError::Internal("scan failed".into())));
     let manager = new_manager(&store);
     assert!(manager.start().await.is_err());
-    assert_eq!(manager.acquire("a").await, Err(ManagerError::NotReady));
+    assert_eq!(manager.acquire("a", None).await, Err(ManagerError::NotReady));
 
     let mut store = ScriptStore::new(free(&[1, 2]), vec![]);
     Arc::get_mut(&mut store).unwrap().block_scan = true;
@@ -293,7 +297,7 @@ async fn matching_semaphore_acquire_before_bucket_usable() {
     manager.stop();
     store.finish_scan.notify_one();
     assert_eq!(loading.await.unwrap(), Err(ManagerError::NotReady));
-    assert_eq!(manager.acquire("a").await, Err(ManagerError::NotReady));
+    assert_eq!(manager.acquire("a", None).await, Err(ManagerError::NotReady));
     assert_eq!(manager.free_count(), 0);
 }
 
@@ -323,12 +327,12 @@ async fn matching_semaphore_acquire_passes_through_grant_result() {
     let store = ScriptStore::new(vec![token(1, ""), token(5, "a"), owner("a", 5)], vec![]);
     store.reads.lock().unwrap().push_back(Ok("a".into()));
     let manager = started(&store).await;
-    assert_eq!(manager.acquire("a").await.unwrap(), acquired(5));
+    assert_eq!(manager.acquire("a", None).await.unwrap(), acquired(5));
     assert_eq!(*store.read_tokens.lock().unwrap(), vec![5]);
     store.assert_done();
     let store = ScriptStore::new(vec![token(1, "x"), owner("x", 1)], vec![]);
     let manager = started(&store).await;
-    assert_eq!(manager.acquire("a").await.unwrap(), no_slot());
+    assert_eq!(manager.acquire("a", None).await.unwrap(), no_slot());
     assert!(store.writes.lock().unwrap().is_empty());
 }
 
@@ -338,7 +342,7 @@ async fn matching_semaphore_acquire_surfaces_failed_grant() {
     let store = ScriptStore::new(free(&[1]), vec![Err(write_error())]);
     let manager = started(&store).await;
     assert_eq!(
-        manager.acquire("a").await,
+        manager.acquire("a", None).await,
         Err(ManagerError::Internal("write timed out".into()))
     );
     assert_eq!(manager.free_count(), 1);
@@ -351,7 +355,7 @@ async fn matching_semaphore_acquire_surfaces_failed_grant() {
 async fn matching_semaphore_grant_on_free_slot_records_request_and_hold() {
     let store = ScriptStore::new(free(&[7]), vec![Ok(GrantOutcome::Applied)]);
     let manager = started(&store).await;
-    assert_eq!(manager.grant("a").await.unwrap(), acquired(7));
+    assert_eq!(manager.grant("a", None).await.unwrap(), acquired(7));
     assert_eq!(*store.writes.lock().unwrap(), vec![(7, "a".into())]);
     assert_eq!(manager.free_count(), 0);
     assert_eq!(
@@ -369,7 +373,7 @@ async fn matching_semaphore_grant_retries_different_slot_when_taken() {
         vec![Ok(GrantOutcome::SlotTaken), Ok(GrantOutcome::Applied)],
     );
     let manager = started(&store).await;
-    let result = manager.grant("a").await.unwrap();
+    let result = manager.grant("a", None).await.unwrap();
     let writes = store.writes.lock().unwrap();
     assert_eq!(writes.len(), 2);
     assert_ne!(writes[0].0, writes[1].0);
@@ -394,7 +398,7 @@ async fn matching_semaphore_grant_gives_up_after_max_attempts() {
         (0..3).map(|_| Ok(GrantOutcome::SlotTaken)).collect(),
     );
     let manager = started(&store).await;
-    assert_eq!(manager.grant("a").await.unwrap(), no_slot());
+    assert_eq!(manager.grant("a", None).await.unwrap(), no_slot());
     let writes = store.writes.lock().unwrap();
     assert_eq!(writes.len(), 3);
     assert_eq!(writes.iter().map(|w| w.0).collect::<HashSet<_>>().len(), 3);
@@ -408,7 +412,7 @@ async fn matching_semaphore_write_already_held_returns_reserved_slot() {
     for (held, count) in [(9, 3), (2, 2)] {
         let store = ScriptStore::new(free(&[1, 2, 3]), vec![Ok(GrantOutcome::AlreadyHeld(held))]);
         let manager = started(&store).await;
-        assert_eq!(manager.grant("a").await.unwrap(), acquired(held));
+        assert_eq!(manager.grant("a", None).await.unwrap(), acquired(held));
         assert_eq!(manager.free_count(), count);
         assert_eq!(
             manager.index.lock().unwrap().held,
@@ -429,13 +433,13 @@ async fn matching_semaphore_already_held_without_token_is_internal_error() {
     );
     let manager = started(&store).await;
     assert!(
-        matches!(manager.grant("a").await, Err(ManagerError::Internal(message)) if message.contains("already-held slot without a token"))
+        matches!(manager.grant("a", None).await, Err(ManagerError::Internal(message)) if message.contains("already-held slot without a token"))
     );
     assert_eq!(manager.free_count(), 3);
     assert!(manager.index.lock().unwrap().held.is_empty());
     consistent(&manager);
     assert_eq!(
-        manager.grant("a").await.unwrap().outcome,
+        manager.grant("a", None).await.unwrap().outcome,
         SemaphoreAcquireOutcome::Acquired
     );
     assert_eq!(store.writes.lock().unwrap().len(), 2);
@@ -452,7 +456,7 @@ async fn matching_semaphore_failed_writes_do_not_drain_free_set() {
     let manager = started(&store).await;
     for i in 0..3 {
         assert_eq!(
-            manager.grant(&format!("owner-{i}")).await,
+            manager.grant(&format!("owner-{i}"), None).await,
             Err(ManagerError::Internal("write timed out".into()))
         );
         assert_eq!(manager.free_count(), 5);
@@ -478,7 +482,7 @@ async fn matching_semaphore_stale_reverse_index_free_taken_and_missing() {
         let store = ScriptStore::new(rows, vec![Ok(GrantOutcome::Applied)]);
         store.reads.lock().unwrap().push_back(read);
         let manager = started(&store).await;
-        let result = manager.grant("a").await.unwrap();
+        let result = manager.grant("a", None).await.unwrap();
         assert_eq!(result.outcome, SemaphoreAcquireOutcome::Acquired);
         assert_eq!(manager.free_count(), count);
         assert_eq!(*store.read_tokens.lock().unwrap(), vec![5]);
@@ -502,7 +506,7 @@ async fn matching_semaphore_confirming_read_failure_is_preserved() {
         .push_back(Err(AcquireError::Internal("cassandra unavailable".into())));
     let manager = started(&store).await;
     assert_eq!(
-        manager.grant("a").await,
+        manager.grant("a", None).await,
         Err(ManagerError::Internal("cassandra unavailable".into()))
     );
     assert_eq!(manager.free_count(), 1);
@@ -560,7 +564,7 @@ async fn matching_semaphore_concurrent_grants_are_distinct() {
     for i in 0..20 {
         let manager = manager.clone();
         tasks.push(tokio::spawn(async move {
-            manager.grant(&format!("owner-{i}")).await.unwrap()
+            manager.grant(&format!("owner-{i}"), None).await.unwrap()
         }));
     }
     let mut seen = HashSet::new();
@@ -597,7 +601,7 @@ async fn matching_semaphore_lifecycle_under_concurrent_grants() {
                     }
                     1 => manager.stop(),
                     _ => {
-                        let _ = manager.grant(&format!("owner-{action}")).await;
+                        let _ = manager.grant(&format!("owner-{action}"), None).await;
                     }
                 }
             }));
@@ -620,7 +624,7 @@ async fn matching_semaphore_acquire_refreshes_idle_time() {
     let before = now_nanos();
     // Pin the old mark at half the TTL ago without wall-clock sleeping.
     manager.liveness.mark_alive(before - ttl / 2);
-    assert_eq!(manager.acquire("a").await.unwrap(), no_slot());
+    assert_eq!(manager.acquire("a", None).await.unwrap(), no_slot());
     registry.sweep_idle(before + ttl / 2);
     assert!(registry.by_identifier(&id).is_some());
     registry.sweep_idle(now_nanos() + 2 * ttl);
@@ -663,7 +667,6 @@ fn matching_semaphore_scan_skips_nil_and_unknown_rows() {
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Manager acquire has no deadline/context and waits indefinitely during startup. Go go/service/matching/semaphore/semaphore_manager_test.go:389"]
 async fn matching_semaphore_acquire_honors_deadline_while_starting() {
     let mut store = ScriptStore::new(free(&[1]), vec![]);
     Arc::get_mut(&mut store).unwrap().block_scan = true;
@@ -673,44 +676,44 @@ async fn matching_semaphore_acquire_honors_deadline_while_starting() {
         tokio::spawn(async move { manager.start().await })
     };
     store.scanning.notified().await;
-    // An outer watchdog is not a port of Go's context. It only bounds this
-    // known failing test: acquire itself must return the caller's error.
-    let result =
-        tokio::time::timeout(std::time::Duration::from_millis(20), manager.acquire("a")).await;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(20);
+    // The scan is still blocked, so only the caller's deadline can end this acquire.
+    let result = manager.acquire("a", Some(deadline)).await;
     store.finish_scan.notify_one();
     loading.await.unwrap().unwrap();
-    assert!(
-        result.is_ok(),
-        "acquire never returned a deadline error itself"
-    );
-    panic!("Rust has no deadline error variant");
+    assert_eq!(result, Err(ManagerError::Deadline));
+    assert!(store.writes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-#[ignore = "parity gap: grant has no cancellation/context check between attempts. Go go/service/matching/semaphore/semaphore_manager_test.go:577"]
 async fn matching_semaphore_grant_stops_retrying_at_deadline() {
-    let store = ScriptStore::new(
+    let mut store = ScriptStore::new(
         free(&[1, 2, 3, 4, 5]),
         (0..3).map(|_| Ok(GrantOutcome::SlotTaken)).collect(),
     );
+    // The first write outlasts the deadline and reports the slot taken, so the
+    // second pass through the loop must stop instead of writing again.
+    Arc::get_mut(&mut store).unwrap().write_delay = std::time::Duration::from_millis(40);
     let manager = started(&store).await;
-    // Go cancels context when the first write returns SlotTaken. There is
-    // no Rust context input to cancel; the manager continues all 3 writes.
-    let result = manager.grant("a").await;
-    assert!(
-        result.is_err(),
-        "Go returns context.Canceled instead of NoSlot"
-    );
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(10);
+    let result = manager.grant("a", Some(deadline)).await;
+    assert_eq!(result, Err(ManagerError::Deadline));
     assert_eq!(store.writes.lock().unwrap().len(), 1);
     assert_eq!(manager.free_count(), 4);
 }
 
-#[test]
-#[ignore = "parity gap: GrantOutcome is exhaustive and cannot inject Go Unknown outcome. Go go/service/matching/semaphore/semaphore_manager_test.go:699"]
-fn matching_semaphore_grant_rejects_unknown_write_outcome() {
-    panic!(
-        "Go requires InternalServiceError and unreserve; Rust trait cannot express unknown outcome"
+// TestGrantRejectsAnUnrecognizedWriteOutcome (699).
+#[tokio::test]
+async fn matching_semaphore_grant_rejects_unknown_write_outcome() {
+    let store = ScriptStore::new(free(&[1]), vec![Ok(GrantOutcome::Unknown)]);
+    let manager = started(&store).await;
+    let result = manager.grant("a", None).await;
+    assert!(
+        matches!(&result, Err(ManagerError::Internal(message)) if message.contains("unexpected grant outcome")),
+        "a caller must be able to tell this apart from contention, got {result:?}"
     );
+    assert_eq!(manager.free_count(), 1);
+    store.assert_done();
 }
 
 #[tokio::test]

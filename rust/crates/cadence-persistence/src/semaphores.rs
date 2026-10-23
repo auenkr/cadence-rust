@@ -49,6 +49,9 @@ pub enum GrantOutcome {
     Applied,
     SlotTaken,
     AlreadyHeld(i32),
+    /// Go `SemaphoreGrantUnknown`: an outcome the caller cannot read. The
+    /// bundled stores never return it; the manager still rejects it.
+    Unknown,
 }
 
 /// Errors for semaphore creation, mirroring Go's metadata manager and
