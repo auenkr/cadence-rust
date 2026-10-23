@@ -58,14 +58,17 @@ fn domain_state(domain_id: Uuid) -> AppState {
     state
 }
 
-// Go handler_test: the limiter denies the second call. The domain quota of 1 per second makes the
-// second call deny before the engine is reached; the host quota is generous so only the domain denies.
+// Go handler_test: the limiter denies the second call. A domain quota of 1 per second makes the
+// second call deny before the engine is reached; the host quota is generous so only the domain
+// denies. Add and poll are worker-class RPCs (matching_quota.rs policy), so both classes are set.
 fn denied_state(domain_id: Uuid) -> AppState {
     let state = domain_state(domain_id);
     {
         let mut config = state.admin.dynamic_config.lock().unwrap();
         config.update(false, "matching.rps", vec![quota_config(100, None)]);
         config.update(false, "matching.domainrps", vec![quota_config(1, Some("quota-domain"))]);
+        config.update(false, "matching.workerrps", vec![quota_config(100, None)]);
+        config.update(false, "matching.domainworkerrps", vec![quota_config(1, Some("quota-domain"))]);
     }
     state
 }
@@ -111,6 +114,8 @@ fn activity_add(domain_id: Uuid) -> Request<m::AddActivityTaskRequest> {
         task_list: task_list(),
         workflow_execution: execution(),
         schedule_id: 10,
+        // Without a schedule-to-start timeout the task expires at creation and polls skip it.
+        schedule_to_start_timeout: Some(prost_types::Duration { seconds: 3, nanos: 0 }),
         ..Default::default()
     })
 }
