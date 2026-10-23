@@ -974,7 +974,6 @@ impl Matching {
         domain_id: &str,
         name: &TaskListName,
         task_type: i32,
-        hostname: &str,
     ) -> Result<Vec<p::TaskListPartitionMetadata>, Status> {
         let count = self
             .partition_count
@@ -987,8 +986,11 @@ impl Matching {
             let key = name.partition_name(partition);
             let owner_host_name = self
                 .owner_address_for_task_list(&key)
-                .await?
-                .unwrap_or_else(|| hostname.to_owned());
+                // Go listTaskListPartitions deliberately discards getHostInfo errors.
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             result.push(p::TaskListPartitionMetadata {
                 key,
                 owner_host_name,
@@ -2761,13 +2763,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                 async {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::GetTaskListsByDomain, None, Some(&request.get_ref().domain))?;
                     let r = request.get_ref().clone();
+                    let domain = self
+                        .frontend
+                        .state
+                        .domains
+                        .domain_id(&r.domain)
+                        .map_err(|error| Status::not_found(error.message))?;
                     if let Some(queues) = &self.queues {
-                        let domain = self
-                            .frontend
-                            .state
-                            .domains
-                            .domain_id(&r.domain)
-                            .map_err(|error| Status::not_found(error.message))?;
                         let domain = uuid::Uuid::parse_str(&domain)
                             .map_err(|_| Status::internal("Invalid domain ID."))?;
                         let all_kinds = {
@@ -2790,70 +2792,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                             matching_now(),
                         )));
                     }
-                    // Unlike the UUID-routed methods, this request carries the domain
-                    // name directly, like Go's `GetDomainID(request.GetDomain())`.
-                    let store = self
-                        .frontend
-                        .state
-                        .execution_store(&r.domain)
-                        .map_err(|e| Status::not_found(e.message))?;
-                    let (decisions, activities) = store.task_lists(&r.domain);
-                    let mut decision_task_list_map = std::collections::HashMap::new();
-                    for name in decisions {
-                        let v = p::workflow_api_server::WorkflowApi::describe_task_list(
-                            &self.frontend,
-                            Request::new(p::DescribeTaskListRequest {
-                                domain: r.domain.clone(),
-                                task_list: Some(p::TaskList {
-                                    name: name.clone(),
-                                    ..Default::default()
-                                }),
-                                task_list_type: 0,
-                                include_task_list_status: true,
-                            }),
-                        )
-                        .await?
-                        .into_inner();
-                        decision_task_list_map.insert(
-                            name,
-                            m::DescribeTaskListResponse {
-                                pollers: v.pollers,
-                                task_list_status: v.task_list_status,
-                                partition_config: None,
-                                task_list: v.task_list,
-                            },
-                        );
-                    }
-                    let mut activity_task_list_map = std::collections::HashMap::new();
-                    for name in activities {
-                        let v = p::workflow_api_server::WorkflowApi::describe_task_list(
-                            &self.frontend,
-                            Request::new(p::DescribeTaskListRequest {
-                                domain: r.domain.clone(),
-                                task_list: Some(p::TaskList {
-                                    name: name.clone(),
-                                    ..Default::default()
-                                }),
-                                task_list_type: 1,
-                                include_task_list_status: true,
-                            }),
-                        )
-                        .await?
-                        .into_inner();
-                        activity_task_list_map.insert(
-                            name,
-                            m::DescribeTaskListResponse {
-                                pollers: v.pollers,
-                                task_list_status: v.task_list_status,
-                                partition_config: None,
-                                task_list: v.task_list,
-                            },
-                        );
-                    }
-                    Ok(Response::new(m::GetTaskListsByDomainResponse {
-                        decision_task_list_map,
-                        activity_task_list_map,
-                    }))
+                    // Go enumerates loaded Matching managers, not frontend workflow
+                    // state. Without a registry there are no loaded managers.
+                    Ok(Response::new(m::GetTaskListsByDomainResponse::default()))
                 },
             )
             .await
@@ -2889,19 +2830,15 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .domains
                         .domain_id(&r.domain)
                         .map_err(|e| Status::not_found(e.message))?;
-                    if task_list.name.is_empty() {
-                        return Err(Status::invalid_argument("TaskList is not set."));
-                    }
-                    let name = task_list_name(&task_list.name)?;
-                    // Single process: report this host like Go's `getHostInfo`, but
-                    // enumerate every write partition like Go's `getAllPartitions` (root
-                    // first, then `__cadence|<root>/<i>`).
-                    let hostname = std::env::var("HOSTNAME").unwrap_or_default();
+                    // Go Identifier returns an untyped error, wrapped by handleErr.
+                    let name = TaskListName::parse(&task_list.name).map_err(Status::internal)?;
+                    // Go getAllPartitions returns root first, then numbered write
+                    // partitions, regardless of whether those managers are loaded.
                     let activity_task_list_partitions = self
-                        .task_list_partition_metadata(&domain_id, &name, 1, &hostname)
+                        .task_list_partition_metadata(&domain_id, &name, 1)
                         .await?;
                     let decision_task_list_partitions = self
-                        .task_list_partition_metadata(&domain_id, &name, 0, &hostname)
+                        .task_list_partition_metadata(&domain_id, &name, 0)
                         .await?;
                     Ok(Response::new(m::ListTaskListPartitionsResponse {
                         activity_task_list_partitions,
@@ -3405,21 +3342,21 @@ impl m::matching_api_server::MatchingApi for Matching {
                 async {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::DescribeTaskList, Some(&request.get_ref().domain_id), None)?;
                     let r = request.get_ref().clone();
-                    let mut payload = r
-                        .request
-                        .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
-                    payload.domain = self.domain_name(&r.domain_id)?;
+                    let mut payload = r.request.unwrap_or_default();
                     let task_list = payload.task_list.clone();
                     let task_list_type =
                         crate::matching_config::persistence_task_list_type(payload.task_list_type) + 1;
                     payload.task_list_type = task_list_type;
                     let task_list_name = task_list.clone().map(|t| t.name).unwrap_or_default();
-                    self::task_list_name(&task_list_name)?;
+                    // Go validates the identifier before domain-cache/manager lookup;
+                    // untyped identifier errors become InternalServiceError.
+                    TaskListName::parse(&task_list_name).map_err(Status::internal)?;
+                    payload.domain = self.domain_name(&r.domain_id)?;
                     if self.queues.is_some() {
                         let queue = self
                             .durable_queue(
                                 &r.domain_id,
-                                task_list.as_ref().expect("validated task list"),
+                                &task_list.clone().unwrap_or_default(),
                                 crate::matching_config::persistence_task_list_type(task_list_type),
                             )
                             .await?;
@@ -3509,7 +3446,11 @@ impl m::matching_api_server::MatchingApi for Matching {
                         return Ok(Response::new(m::DescribeTaskListResponse {
                             pollers,
                             task_list_status,
-                            task_list,
+                            task_list: Some(p::TaskList {
+                                name: task_list_name.clone(),
+                                kind: i32::from(queue.queue.task_list_kind()) + 1,
+                                ..Default::default()
+                            }),
                             partition_config,
                         }));
                     }

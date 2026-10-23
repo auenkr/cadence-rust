@@ -3488,3 +3488,441 @@ async fn matching_grpc_listener_registers_meta_health_and_gates_startup() {
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
 }
+
+// Values below are derived from Go poller/manager.go:198-249 and cache/lru.go:
+// identity-keyed MRU history, strict after comparison, five-minute TTL, and
+// outstanding history entries bypassing only the after filter (not TTL).
+#[test]
+fn engine_apis_poller_groups_and_list_info_match_go_boundaries() {
+    use cadence_common::poller::{Info, Manager};
+    let mut manager = Manager::default();
+    let info = |identity: &str, group: &str, rate| Info {
+        identity: identity.into(),
+        isolation_group: group.into(),
+        rate_per_second: rate,
+    };
+    manager.start("one", info("worker", "old-zone", 1.0), 10);
+    manager.start("two", info("worker", "zone-a", 7.5), 20);
+    manager.start("", info("completed", "zone-a", 2.5), 20);
+    manager.start("anonymous", info("", "zone-b", 3.0), 20);
+    manager.start("ungrouped", info("ungrouped", "", 4.0), 30);
+    assert_eq!(
+        manager.count_by_group(30, 20),
+        HashMap::from([("zone-a".into(), 1)])
+    );
+    assert_eq!(
+        manager.count_by_group(30, 19),
+        HashMap::from([("zone-a".into(), 2)])
+    );
+    let listed = manager.list(30);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|v| (v.identity.as_str(), v.rate_per_second, v.last_access_time))
+            .collect::<Vec<_>>(),
+        vec![
+            ("ungrouped", 4.0, 30),
+            ("completed", 2.5, 20),
+            ("worker", 7.5, 20)
+        ]
+    );
+    manager.end("two", 40);
+    assert!(manager.count_by_group(40, 40).is_empty());
+    assert_eq!(
+        manager.count_by_group(40, 39),
+        HashMap::from([("zone-a".into(), 1)])
+    );
+    assert_eq!(manager.list(40)[0].last_access_time, 40);
+    manager.start("live", info("long-poll", "zone-b", 9.0), 40);
+    assert_eq!(
+        manager.count_by_group(300_000_000_040, i64::MAX),
+        HashMap::from([("zone-b".into(), 1)])
+    );
+    assert!(manager.list(300_000_000_041).is_empty());
+}
+
+#[tokio::test]
+async fn engine_apis_partition_order_owners_and_lookup_errors_match_go() {
+    use crate::matching_membership::Membership;
+    use cadence_common::membership::Host;
+    let (_dir, _store, matching, _key) = fixture();
+    let hosts = vec![
+        Host {
+            address: "one:7935".into(),
+            identity: "one".into(),
+            grpc_address: "one:7835".into(),
+        },
+        Host {
+            address: "two:7935".into(),
+            identity: "two".into(),
+            grpc_address: "two:7835".into(),
+        },
+    ];
+    let membership = Membership::new("one", hosts);
+    let matching = matching.with_membership(membership.clone());
+    let set_count = |count| {
+        matching
+            .frontend
+            .state
+            .admin
+            .dynamic_config
+            .lock()
+            .unwrap()
+            .update(
+                false,
+                "matching.numTasklistWritePartitions",
+                vec![quota_config(count, None)],
+            )
+    };
+    let request = |domain: &str, name: &str| {
+        Request::new(m::ListTaskListPartitionsRequest {
+            domain: domain.into(),
+            task_list: Some(p::TaskList {
+                name: name.into(),
+                ..Default::default()
+            }),
+        })
+    };
+    set_count(3);
+    // A child request still enumerates its root, not just loaded partitions.
+    let response = matching
+        .list_task_list_partitions(request("domain", "/__cadence_sys/queue/9"))
+        .await
+        .unwrap()
+        .into_inner();
+    let expected = ["queue", "/__cadence_sys/queue/1", "/__cadence_sys/queue/2"]
+        .into_iter()
+        .map(|key| p::TaskListPartitionMetadata {
+            key: key.into(),
+            owner_host_name: membership.owner(key).unwrap().address,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(response.activity_task_list_partitions, expected);
+    assert_eq!(response.decision_task_list_partitions, expected);
+    // Go engine.go:1192 discards host lookup errors and keeps each key.
+    membership.replace(vec![]);
+    let response = matching
+        .list_task_list_partitions(request("domain", "queue"))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        response
+            .decision_task_list_partitions
+            .iter()
+            .map(|v| (v.key.as_str(), v.owner_host_name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("queue", ""),
+            ("/__cadence_sys/queue/1", ""),
+            ("/__cadence_sys/queue/2", "")
+        ]
+    );
+    for count in [0, -2] {
+        set_count(count);
+        let response = matching
+            .list_task_list_partitions(request("domain", ""))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            response.activity_task_list_partitions,
+            vec![p::TaskListPartitionMetadata::default()]
+        );
+    }
+    assert_eq!(
+        matching
+            .list_task_list_partitions(request("missing", "/__cadence_sys/bad/0"))
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    assert_eq!(
+        matching
+            .list_task_list_partitions(request("domain", "/__cadence_sys/bad/0"))
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::Internal
+    );
+    assert_eq!(
+        matching
+            .list_task_list_partitions(request("domain", "/__cadence_sys/bad/0"))
+            .await
+            .unwrap_err()
+            .message(),
+        "invalid partitioned task list name /__cadence_sys/bad/0"
+    );
+    matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn engine_apis_durable_describe_and_domain_listing_share_go_manager_fields() {
+    use cadence_common::poller::Info;
+    let (_dir, _store, matching, key) = fixture();
+    let normal = p::TaskList {
+        name: "queue".into(),
+        ..Default::default()
+    };
+    let queue = matching
+        .durable_queue(&key.domain_id.to_string(), &normal, 0)
+        .await
+        .unwrap();
+    let config = cadence_persistence::StoredPartitionConfig {
+        version: 123,
+        read_partitions: HashMap::from([(0, vec!["zone-a".into()])]),
+        write_partitions: HashMap::from([(0, vec!["zone-a".into()])]),
+    };
+    queue.partitions.push(&config);
+    {
+        let mut pollers = queue.pollers.lock().unwrap();
+        let now = matching_now();
+        for (id, group, rate) in [
+            ("a", "zone-a", 7.5),
+            ("b", "unconfigured", 2.5),
+            ("c", "", 1.0),
+        ] {
+            pollers.start(
+                id,
+                Info {
+                    identity: id.into(),
+                    isolation_group: group.into(),
+                    rate_per_second: rate,
+                },
+                now,
+            );
+        }
+    }
+    matching
+        .frontend
+        .state
+        .admin
+        .dynamic_config
+        .lock()
+        .unwrap()
+        .update(
+            false,
+            "system.allIsolationGroups",
+            vec![cadence_api::admin::DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    br#"["zone-a","zone-empty"]"#.to_vec(),
+                )),
+                filters: vec![],
+            }],
+        );
+    let describe = |include_task_list_status| {
+        matching.describe_task_list(Request::new(m::DescribeTaskListRequest {
+            domain_id: key.domain_id.to_string(),
+            request: Some(p::DescribeTaskListRequest {
+                task_list: Some(normal.clone()),
+                task_list_type: 1,
+                include_task_list_status,
+                ..Default::default()
+            }),
+        }))
+    };
+    let described = describe(true).await.unwrap().into_inner();
+    assert_eq!(
+        described.task_list.as_ref().unwrap().kind,
+        1,
+        "Go describes the manager's Normal kind even when request kind is unspecified"
+    );
+    assert_eq!(
+        described
+            .pollers
+            .iter()
+            .map(|v| (v.identity.as_str(), v.rate_per_second))
+            .collect::<Vec<_>>(),
+        vec![("c", 1.0), ("b", 2.5), ("a", 7.5)]
+    );
+    let metrics = &described
+        .task_list_status
+        .as_ref()
+        .unwrap()
+        .isolation_group_metrics;
+    assert_eq!(metrics.len(), 2);
+    assert_eq!(metrics["zone-a"].poller_count, 1);
+    assert_eq!(metrics["zone-empty"].poller_count, 0);
+    assert_eq!(metrics["zone-empty"].new_tasks_per_second, 0.0);
+    let without_status = describe(false).await.unwrap().into_inner();
+    assert!(without_status.task_list_status.is_none());
+    let listed = matching
+        .get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+            domain: "domain".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(listed.decision_task_list_map["queue"], without_status);
+    assert_eq!(
+        listed.decision_task_list_map["queue"].partition_config,
+        Some(partition_config_to_proto(config))
+    );
+    assert!(listed.activity_task_list_map.is_empty());
+    assert_eq!(
+        matching
+            .get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+                domain: "missing".into()
+            }))
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    // The Thrift handler delegates to the same durable path and retains maps,
+    // poller order, kind and absent status on the wire. The pinned Thrift
+    // IDL omits partition config (unlike gRPC), as does Go's mapper.
+    use cadence_thrift::value::{Struct, Value};
+    let args = Struct {
+        fields: vec![(
+            1,
+            Value::Struct(Struct {
+                fields: vec![(10, Value::Bytes(b"domain".to_vec()))],
+            }),
+        )],
+    };
+    let (wire, error) = crate::thrift_matching::dispatch(
+        &matching,
+        "MatchingService::GetTaskListsByDomain",
+        &args,
+        std::time::Instant::now() + Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+    assert!(error.is_none());
+    let Some(Value::Struct(response)) = wire.get(0) else {
+        panic!("missing result")
+    };
+    let Some(Value::Map(decisions)) = response.get(10) else {
+        panic!("missing decision map")
+    };
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(decisions[0].0, Value::Bytes(b"queue".to_vec()));
+    let Value::Struct(description) = &decisions[0].1 else {
+        panic!("missing description")
+    };
+    assert!(description.get(20).is_none());
+    assert!(
+        description.get(40).is_none(),
+        "pinned Thrift IDL has no partition config field"
+    );
+    let Some(Value::List(pollers)) = description.get(10) else {
+        panic!("missing pollers")
+    };
+    assert_eq!(pollers.len(), 3);
+    let Value::Struct(first) = &pollers[0] else {
+        panic!("missing poller")
+    };
+    assert_eq!(first.get(20), Some(&Value::Bytes(b"c".to_vec())));
+    assert_eq!(first.get(30), Some(&Value::F64(1.0)));
+    // Durable rows survive unloading, but Go only lists currently loaded managers.
+    matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .unload(key.clone(), queue, matching_now())
+        .await
+        .unwrap();
+    assert!(matching
+        .get_task_lists_by_domain(Request::new(m::GetTaskListsByDomainRequest {
+            domain: "domain".into()
+        }))
+        .await
+        .unwrap()
+        .into_inner()
+        .decision_task_list_map
+        .is_empty());
+    matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn engine_apis_partition_spectator_failure_is_empty_owner_like_go() {
+    let (_dir, _store, matching, _key) = fixture();
+    let router = crate::matching_shard_routing::MatchingShardRouter::new(
+        crate::matching_membership::Membership::new("self", vec![]),
+        Some(Arc::new(FailingShardOwnerLookup)),
+        Arc::new(|| 100),
+        Arc::new(|| false),
+    );
+    let matching = matching.with_shard_router(router);
+    let response = matching
+        .list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
+            domain: "domain".into(),
+            task_list: list(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        response.decision_task_list_partitions,
+        vec![p::TaskListPartitionMetadata {
+            key: "queue".into(),
+            owner_host_name: String::new(),
+        }]
+    );
+    assert_eq!(
+        response.activity_task_list_partitions,
+        response.decision_task_list_partitions
+    );
+}
+
+#[tokio::test]
+async fn engine_apis_describe_identifier_errors_precede_domain_lookup_like_go() {
+    let (_dir, _store, matching, key) = fixture();
+    let error = matching
+        .describe_task_list(Request::new(m::DescribeTaskListRequest {
+            domain_id: Uuid::from_u128(999).to_string(),
+            request: Some(p::DescribeTaskListRequest {
+                task_list: Some(p::TaskList {
+                    name: "/__cadence_sys/bad/0".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert_eq!(
+        error.message(),
+        "invalid partitioned task list name /__cadence_sys/bad/0"
+    );
+    let empty = matching
+        .describe_task_list(Request::new(m::DescribeTaskListRequest {
+            domain_id: key.domain_id.to_string(),
+            request: None,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        empty.task_list,
+        Some(p::TaskList {
+            name: String::new(),
+            kind: 1,
+            ..Default::default()
+        })
+    );
+    assert!(empty.task_list_status.is_none());
+    matching
+        .queues
+        .as_ref()
+        .unwrap()
+        .shutdown(matching_now())
+        .await
+        .unwrap();
+}
