@@ -253,10 +253,11 @@ fn released_feature_at_least(value: &str, major: u64, minor: u64) -> bool {
     segments.is_some_and(|segments| (segments[0] as u64, segments.get(1).copied().unwrap_or_default() as u64) >= (major, minor))
 }
 
-/// Go `waitForQueryResult`: an answered query returns the payload; anything
-/// else is reported as a failed query with the worker's message. A
-/// strong-consistency query additionally requires the worker to support
-/// consistent query, failing with `ClientVersionNotSupportedError` otherwise.
+/// Go `waitForQueryResult`: an answered query returns the payload, a failed
+/// query is reported with the worker's message, and any other completed type
+/// is an internal error. A strong-consistency query additionally requires the
+/// worker to support consistent query, failing with
+/// `ClientVersionNotSupportedError` otherwise.
 pub fn query_outcome(
     outcome: QueryOutcome,
     strong: bool,
@@ -292,13 +293,17 @@ pub fn query_outcome(
             partition_config: None,
         });
     }
-    // Go `QueryFailedError{Message: worker error}`: typed detail, message verbatim.
-    Err(crate::grpc::detailed_status(
-        tonic::Code::InvalidArgument,
-        result.error_message,
-        "QueryFailedError",
-        p::QueryFailedError {},
-    ))
+    if result.result_type == p::QueryResultType::Failed as i32 {
+        // Go `QueryFailedError{Message: worker error}`: typed detail, message verbatim.
+        return Err(crate::grpc::detailed_status(
+            tonic::Code::InvalidArgument,
+            result.error_message,
+            "QueryFailedError",
+            p::QueryFailedError {},
+        ));
+    }
+    // Go `waitForQueryResult` default case: an unknown completed type.
+    Err(Status::internal("unknown query completed type"))
 }
 
 /// Go `forwarder.handleErr`: a parent `ServiceBusyError` becomes

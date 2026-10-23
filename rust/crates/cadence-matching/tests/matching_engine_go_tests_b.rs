@@ -26,6 +26,7 @@ use cadence_matching::{
 use cadence_persistence::{
     matching_blob::BlobEncoding,
     matching_sqlite::{SqliteTaskStore, TaskListKey},
+    StoredPartitionConfig,
 };
 use cadence_proto::{api as p, matching as m};
 use cadence_service_core::handlers::AppState;
@@ -227,7 +228,6 @@ async fn query_workflow_success_returns_worker_answer() {
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Go QueryWorkflow returns the root partition config from the TaskListManager (version 1, read/write {0}); Rust query_outcome always returns partition_config None, and the query path never fills it"]
 async fn query_workflow_success_reports_partition_config() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
@@ -237,6 +237,13 @@ async fn query_workflow_success_reports_partition_config() {
         .get(key(domain_id(), TASK_LIST, 0), 0, now_nanos())
         .await
         .unwrap();
+    // Go's gomock manager reports a root config (version 1, read/write {0}).
+    // Rust does not persist a single-partition config, so seed the cache with it.
+    queue.partitions.push(&StoredPartitionConfig {
+        version: 1,
+        read_partitions: HashMap::from([(0, Vec::new())]),
+        write_partitions: HashMap::from([(0, Vec::new())]),
+    });
     let queries = queue.queries.clone();
     let poller = tokio::spawn(async move {
         let pending = queries.next().await;
@@ -330,7 +337,6 @@ fn wait_for_query_result_query_task_failed() {
 }
 
 #[test]
-#[ignore = "parity gap: Go maps an unknown QueryTaskCompletedType to InternalServiceError \"unknown query completed type\"; Rust query_outcome treats every non-answered result as a failed query and returns InvalidArgument \"Query failed.\""]
 fn wait_for_query_result_unknown_query_result_is_internal_error() {
     let result = p::WorkflowQueryResult {
         result_type: 100,
