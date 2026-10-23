@@ -42,3 +42,5 @@ The `started` instant is taken before `get`, and the liveness clock starts at `r
 ## CI attempt log
 
 - Run `40031735890` on `aadd8f7e7` failed in clippy (`clippy::manual_async_fn` at `matching_scaler_go_tests.rs:1066`, the test helper `periodic`). Test job was skipped. Fixed by making the helper a plain `async fn`. No other diagnostics were reported.
+- Run `40031932527` on `d17e51fac` (`rust-ci.yml`, `package=cadence-matching`): **success**. Clippy exit 0. `cargo test` on cadence-matching: 567 passed, 0 failed, 9 ignored. New tests passed: `matching_scaler::go_tests::matching_adaptive_scaler_lifecycle_start_stop_is_idempotent`, `matching_registry::tests::liveness_idle_pump_unloads_owner_between_ttl_and_one_and_a_half_ttl`.
+- URL: https://github.com/auenkr/cadence-rust/actions/runs/40031932527
