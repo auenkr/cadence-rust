@@ -2,25 +2,27 @@
 
 Go source: `go/service/matching/tasklist/task_list_manager_test.go` (2086 lines, 28 `Test` functions).
 Rust target: `rust/crates/cadence-matching/src/matching_registry.rs` test module (owner lifecycle,
-liveness, idle sweep, QPS, describe) plus existing reader/writer/dispatch tests where they cover the
-same behavior. Rust has no `taskListManagerImpl`; the registry `QueueRegistry` owner is the analogue.
+liveness, idle sweep, QPS, describe), `rust/crates/cadence-matching/src/matching_reader.rs` test module
+(buffer, dispatch, read/ack levels) and existing dispatch/writer tests where they cover the same
+behavior. Rust has no `taskListManagerImpl`; the registry `QueueRegistry` owner is the analogue.
 
 Status legend:
 - PORTED: new Rust test asserts the same behavior as the Go test.
 - PARTIAL: Rust test covers the Go test's core behavior; named sub-cases are listed as not ported.
 - COVERED: an existing Rust test already asserts the Go behavior (no new test added).
 - CANNOT-PORT: no Rust analogue; reason given.
+- NOT-PORTED: behavior not yet asserted in Rust; reason given; follow-up.
 - PENDING: not yet ported (group named).
 - IGNORED: Rust differs from Go; `#[ignore]` with `parity gap:` marker.
 
-Group 1 (branch `matching-tlm-tests-20261023`): Go tests 2, 5, 6, 7, 8, 9.
+## Per-test status
 
 | # | Go test (line) | Rust test | Status |
 |---|---|---|---|
-| 1 | TestDeliverBufferTasks (127) | - | PENDING (group 2) |
+| 1 | TestDeliverBufferTasks (127) | `matching_reader.rs::stop_joins_pump_blocked_on_buffered_task_without_poller` | PARTIAL: cancel case only. The rate-limiter branch (`ReportLimit(0.1)` + token consume) is not ported. |
 | 2 | TestTaskListString (155) | none | CANNOT-PORT: Go `String()` is a debug dump of internal ack/read/range fields. Rust has no equivalent diagnostic formatter and no RPC or log consumer depends on it. |
-| 3 | TestDeliverBufferTasks_NoPollers (164) | - | PENDING (group 2) |
-| 4 | TestReadLevelForAllExpiredTasksInBatch (181) | - | PENDING (group 2) |
+| 3 | TestDeliverBufferTasks_NoPollers (164) | `matching_reader.rs::stop_joins_pump_blocked_on_buffered_task_without_poller` | PORTED |
+| 4 | TestReadLevelForAllExpiredTasksInBatch (181) | `matching_reader.rs::matching_reader_read_level_advances_past_expired_rows_without_ack` | PORTED (Go calls `addTasksToBuffer` directly; Rust drives the same read through the queue and reader pump) |
 | 5 | TestTaskListManagerRegistryNotification (272) | `matching_registry.rs::unload_notifies_registry_once_and_second_unload_is_noop` | PORTED |
 | 6 | TestDescribeTaskList (304) | `matching_registry.rs::describe_by_domain_lists_loaded_root_without_config_or_pollers` | PARTIAL: only the "no status, pollers, or config" case. Not ported: "no status, with config", "with pollers", "with status" (TaskListStatus fields come from `describe_scaled_partition`, a different Rust path), "with status, tasks completed", "with status, pollers and metrics". |
 | 7 | TestQueriesPerSecond (457) | `matching_registry.rs::loaded_owner_reports_zero_qps_before_arrivals` | PARTIAL: zero-QPS case only. "returns QPS from tracker" (42.5) needs a deterministic EMA clock; the Rust tracker is `cadence_common::qps::EmaQpsTracker` with a system clock. |
@@ -30,9 +32,9 @@ Group 1 (branch `matching-tlm-tests-20261023`): Go tests 2, 5, 6, 7, 8, 9.
 | 11 | TestMisconfiguredZoneDoesNotBlock (671) | - | PENDING (group 3) |
 | 12 | TestGetIsolationGroupForTask (709) | - | PENDING (group 3) |
 | 13 | TestTaskWriterShutdown (943) | - | PENDING (group 3) |
-| 14 | TestTaskListManagerGetTaskBatch (974) | - | PENDING (group 2) |
-| 15 | TestTaskListReaderPumpAdvancesAckLevelAfterEmptyReads (1104) | - | PENDING (group 2) |
-| 16 | TestTaskListManagerGetTaskBatch_ReadBatchDone (1196) | - | PENDING (group 2) |
+| 14 | TestTaskListManagerGetTaskBatch (974) | `matching_reader.rs::matching_reader_prefetch_backpressure_and_stop_preserve_unacked_rows` (indirect) | PARTIAL: Go calls `taskReader.getTaskBatch(readLevel, maxReadLevel)` directly. Rust has no batch function with that signature; the batch read is fused into the queue pump. The 1200-task sub-assertions (range/batch sizing) are not ported. |
+| 15 | TestTaskListReaderPumpAdvancesAckLevelAfterEmptyReads (1104) | - | NOT-PORTED: ack advancement over 15 empty leased ranges (`renewLeaseWithRetry`) and the post-advance write offset. Needs a lease-renewal-without-write harness; follow-up. |
+| 16 | TestTaskListManagerGetTaskBatch_ReadBatchDone (1196) | - | NOT-PORTED: depends on `getTaskBatch` `isReadBatchDone` return value, which has no Rust analogue (see row 14). |
 | 17 | TestTaskExpiryAndCompletion (1241) | - | PENDING (group 3) |
 | 18 | TestTaskListManagerImpl_HasPollerAfter (1343) | - | PENDING (group 3) |
 | 19 | TestRefreshTaskListPartitionConfig (1380) | - | PENDING (group 4) |
@@ -49,6 +51,6 @@ Group 1 (branch `matching-tlm-tests-20261023`): Go tests 2, 5, 6, 7, 8, 9.
 ## CI runs
 
 Each group is pushed to `matching-tlm-tests-20261023` and run with `rust-ci.yml`, `package=cadence-matching`.
-Run URLs, sha and conclusions are recorded below as they complete.
 
-- Group 1: pending
+- Group 1 (Go 2, 5, 6, 7, 8, 9): commit `be8d3127f`, run https://github.com/auenkr/cadence-rust/actions/runs/40010474303, conclusion success. The five new tests in `matching_registry.rs` ran and passed: `unload_notifies_registry_once_and_second_unload_is_noop`, `idle_check_unloads_only_after_full_ttl_without_activity`, `loaded_owner_reports_zero_qps_before_arrivals`, `describe_by_domain_lists_loaded_root_without_config_or_pollers`, `append_after_writer_stop_fails_without_persisting`. Crate result: 495 passed, 0 failed, 9 ignored.
+- Group 2 (Go 1, 3, 4, 14, 15, 16): pending
