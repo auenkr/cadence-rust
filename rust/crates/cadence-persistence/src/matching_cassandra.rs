@@ -462,7 +462,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 .map(|ttl| format!(" USING TTL {ttl}"))
                 .unwrap_or_default();
             batch.append_statement(Statement::new(format!(
-                "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES ({}, {}, {}, {}, {}, {}{})",
+                "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES ({}, {}, {}, {}, {}, {}, {})",
                 key.domain_id, cql_text(&key.name), key.task_type, TASK_ROW, task.task_id,
                 task_literal(key.domain_id, &data)?, data.created_nanos.div_euclid(1_000_000)
             ) + &ttl));

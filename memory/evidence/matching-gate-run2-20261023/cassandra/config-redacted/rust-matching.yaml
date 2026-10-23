@@ -22,7 +22,7 @@ persistence:
 ringpop:
   name: cadence
   bootstrapMode: hosts
-  bootstrapHosts: ["127.0.0.1:34807", "127.0.0.1:52741", "127.0.0.1:41097", "127.0.0.1:59367", "127.0.0.1:57801"]
+  bootstrapHosts: ["127.0.0.1:35451", "127.0.0.1:48981", "127.0.0.1:42353", "127.0.0.1:53469", "127.0.0.1:43019"]
   maxJoinDuration: 30s
 
 services:

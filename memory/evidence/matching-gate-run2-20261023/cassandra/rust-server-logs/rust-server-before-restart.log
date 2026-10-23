@@ -1,17 +1,10 @@
 starting matching (api v1-thrift)
 cadence-server running on 0.0.0.0:0: matching
-Cadence internal matching gRPC listening on 127.0.0.1:33101
-Cadence internal matching Thrift/TChannel listening on 127.0.0.1:59367
+Cadence internal matching gRPC listening on 127.0.0.1:32933
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:53469
 dynamic config integer read failed (value was missing or had the wrong type); using default
-dynamic config float read failed (value was missing or invalid); using default
-dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
-Matching task list lost ownership during shutdown: task list appointy:6ad25445-e9bb-4dde-af94-854f93d1485c range changed
-Matching task list lost ownership during shutdown: task list cadence-scheduler range changed
-Matching task list lost ownership during shutdown: task list appointy:d2b6f717-2f9e-4f65-8255-2ec89962bd4b range changed
-Matching task list lost ownership during shutdown: task list diagnostics-wf-tasklist range changed
-Matching task list lost ownership during shutdown: task list cadence-sys-failoverManager-tasklist range changed
-Matching task list lost ownership during shutdown: task list appointy:39915437-1fa5-4b0c-a548-682d285cc1d2 range changed
-Matching task list lost ownership during shutdown: task list diagnostics-wf-tasklist range changed
-Matching task list lost ownership during shutdown: task list appointy:336d26a1-d7e4-4e11-9bd0-be2f7276ab45 range changed
-Matching task list lost ownership during shutdown: task list cadence-sys-processor-parent-close-policy range changed
+Matching task list lost ownership during shutdown: task list domain-deprecation-tasklist range changed
+Matching task list lost ownership during shutdown: task list domain-deprecation-tasklist range changed
+dynamic config integer read failed (value was not found); using default
+flushing Matching metrics failed: Connection refused (os error 111)
 shutting down
