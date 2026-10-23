@@ -43,3 +43,4 @@ Go Matching never calls them at runtime. Non-test callers are only `go/service/w
 ## CI
 (see below)
 - Run https://github.com/auenkr/cadence-rust/actions/runs/40015106530, commit d40c20e94b6b8058da4570a815e94bbfefcd80e6, clippy+test (cadence-persistence): success
+- Recording branch: run https://github.com/auenkr/cadence-rust/actions/runs/40016550275, commit 96673b35a8096f5b1c89bb56ce0c0c1e9047b803, full workspace clippy+test (rust-ci.yml workflow_dispatch): success (first attempt 40016331197 failed clippy large_err, fixed by boxing ExecutionError).
