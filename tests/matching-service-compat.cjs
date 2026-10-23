@@ -1241,6 +1241,92 @@ async function run() {
   assert.deepEqual(partitionInfo.partitionConfig.readPartitions['0'].isolationGroups, []);
   assert.deepEqual(partitionInfo.partitionConfig.readPartitions['5'].isolationGroups, ['zone-a']);
   assert.deepEqual(partitionInfo.partitionConfig.writePartitions['0'].isolationGroups, []);
+  // Backlog forward-to-parent (Go matcher.go Offer forwarding at 216-236 and 373-427, forwarder.go ForwardTask
+  // at 117 and ForwardPoll at 211). A task persisted in a child partition's backlog reaches the root poller
+  // when nothing polls the child, and a poll on the child with no local task is forwarded to the root backlog.
+  // Only the root is polled in the first delivery, and only the child in the second.
+  let backlogForwardEvidence;
+  if (productionMode && process.env.CADENCE_MATCHING_BACKLOG_FORWARD === '1') {
+    const forwardPrimary = directMatchingClient(process.argv[4]);
+    const forwardSecondary = failureRecoveryMode ? directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`) : null;
+    const forwardRpc = (client, method, request) => {
+      const metadata = new grpc.Metadata();
+      metadata.set('rpc-service', 'cadence-matching');
+      metadata.set('rpc-encoding', 'proto');
+      metadata.set('rpc-caller', 'cadence-backlog-forward-probe');
+      return new Promise((resolve, reject) => client[method](request, metadata, { deadline: Date.now() + 20000 },
+        (error, response) => error ? reject(error) : resolve(response)));
+    };
+    // With two Rust nodes each partition has one owner, and the non-owner answers a typed ABORTED.
+    const matchingOwnerCall = async (method, request) => {
+      try { return await forwardRpc(forwardPrimary, method, request); } catch (error) {
+        if (error.code !== grpc.status.ABORTED || !forwardSecondary) throw error;
+        return forwardRpc(forwardSecondary, method, request);
+      }
+    };
+    const scheduleBacklogActivity = async (label, activityId) => {
+      const workflowId = `fwd-${label}-${id}`;
+      const decisionList = { name: `fwd-decision-${label}-${id}` };
+      const started = await call('WorkflowAPI', 'StartWorkflowExecution', {
+        ...startRequest, workflowId, taskList: decisionList, requestId: randomUUID(),
+      });
+      const decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: decisionList, identity: `fwd-${label}-scheduler` });
+      // The scheduled activity names a list nobody polls. Matching is then fed the same schedule id directly,
+      // as the isolation scenario does, so the add is what places the task on the partition under test.
+      await call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: decision.taskToken, decisions: [{ scheduleActivityTaskDecisionAttributes: {
+        activityId, activityType: { name: 'Echo' }, taskList: { name: `fwd-unpolled-${label}-${id}` },
+        scheduleToCloseTimeout: { seconds: '60' }, scheduleToStartTimeout: { seconds: '60' }, startToCloseTimeout: { seconds: '30' },
+      } }] });
+      const scheduleDeadline = Date.now() + 10000;
+      for (;;) {
+        const history = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId, runId: started.runId } });
+        const scheduled = history.history.events.find(event => event.activityTaskScheduledEventAttributes);
+        if (scheduled) return { workflowId, runId: started.runId, scheduleId: scheduled.eventId };
+        if (Date.now() > scheduleDeadline) throw new Error(`backlog forward ${label} activity not scheduled`);
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    };
+    const waitForBacklogRows = async (name, label) => {
+      const deadline = Date.now() + 15000;
+      for (;;) {
+        const rows = durableTaskCount(domainId, name, 1, undefined);
+        assert.equal(rows.status, 0, `could not count ${label} backlog rows: ${rows.stderr}`);
+        const count = Number(rows.stdout.trim());
+        if (count >= 1) return count;
+        if (Date.now() > deadline) throw new Error(`${label} backlog task was not persisted under ${name}`);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    };
+    const backlogRoot = { name: `backlog-forward-${id}` };
+    const backlogChild = { name: `/__cadence_sys/backlog-forward-${id}/1` };
+    const childActivity = await scheduleBacklogActivity('child', 'forwarded-from-child');
+    await matchingOwnerCall('UpdateTaskListPartitionConfig', {
+      domainId, taskList: backlogRoot, taskListType: 'TASK_LIST_TYPE_ACTIVITY',
+      partitionConfig: { version: '999', numReadPartitions: 2, numWritePartitions: 2,
+        readPartitions: { 0: {}, 1: {} }, writePartitions: { 0: {}, 1: {} } },
+    });
+    // The child gets the task with no poller on either partition, so it has to persist in the child backlog.
+    await matchingOwnerCall('AddActivityTask', { domainId, sourceDomainId: domainId, workflowExecution: { workflowId: childActivity.workflowId, runId: childActivity.runId }, taskList: backlogChild, scheduleId: childActivity.scheduleId });
+    const childBacklogRows = await waitForBacklogRows(backlogChild.name, 'child partition');
+    const rootPoll = matchingOwnerCall('PollForActivityTask', { domainId, pollerId: randomUUID(), request: { taskList: backlogRoot, identity: 'backlog-forward-root-poller' } })
+      .catch(error => { throw new Error(`root poll did not receive the forwarded child backlog task: ${error.message}`); });
+    const fromChild = await rootPoll;
+    assert.equal(fromChild.activityId, 'forwarded-from-child', 'root poller must receive the child backlog task');
+    await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: fromChild.taskToken, result: payload('forwarded-from-child-ok') });
+    // Reverse path: the root backlog is drained by a poll that only the child receives (Go ForwardPoll).
+    const parentActivity = await scheduleBacklogActivity('parent', 'forwarded-from-parent');
+    await matchingOwnerCall('AddActivityTask', { domainId, sourceDomainId: domainId, workflowExecution: { workflowId: parentActivity.workflowId, runId: parentActivity.runId }, taskList: backlogRoot, scheduleId: parentActivity.scheduleId });
+    const rootBacklogRows = await waitForBacklogRows(backlogRoot.name, 'root partition');
+    const fromParent = await matchingOwnerCall('PollForActivityTask', { domainId, pollerId: randomUUID(), request: { taskList: backlogChild, identity: 'backlog-forward-child-poller' } });
+    assert.equal(fromParent.activityId, 'forwarded-from-parent', 'child poller must receive the root backlog task');
+    await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: fromParent.taskToken, result: payload('forwarded-from-parent-ok') });
+    backlogForwardEvidence = {
+      rootPartition: backlogRoot.name, childPartition: backlogChild.name, numReadPartitions: 2, numWritePartitions: 2,
+      childToRoot: { workflowId: childActivity.workflowId, activityId: fromChild.activityId, childBacklogRowsBeforeRootPoll: childBacklogRows, rootPollOnly: true },
+      parentToChild: { workflowId: parentActivity.workflowId, activityId: fromParent.activityId, rootBacklogRowsBeforeChildPoll: rootBacklogRows, childPollOnly: true },
+    };
+    fs.writeFileSync(path.join(work, 'backlog-forward.json'), JSON.stringify(backlogForwardEvidence, null, 2) + '\n');
+  }
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6] }, encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(work, 'go-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   if (sdk.status !== 0) throw new Error(`Existing SDK against mixed Matching failed: ${sdk.error || sdk.status}; see ${work}/go-sdk.log`);
@@ -1344,7 +1430,7 @@ async function run() {
         taskList: goMatchingTaskList, taskRowsBeforeGoConsume: Number(pendingRows.stdout) },
     }, null, 2) + '\n');
   }
-  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', shardDistributor: shardManagerControl ? shardDistributorEvidence : 'not requested', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', backlogForward: backlogForwardEvidence || 'not requested', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', shardDistributor: shardManagerControl ? shardDistributorEvidence : 'not requested', peer, domain, execution, attributes }));
   } catch (error) {
     // Keep the probe-body failure visible; the shutdown checks in finally may throw their own error.
     console.error('PROBE BODY FAILED:', error);

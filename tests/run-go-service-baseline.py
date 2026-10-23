@@ -59,6 +59,7 @@ parser.add_argument('--real-shard-distributor', action='store_true', help='like 
 parser.add_argument('--etcd-image', default=os.environ.get('CADENCE_ETCD_IMAGE', 'quay.io/coreos/etcd:v3.5.5'), help='etcd image for --real-shard-distributor')
 parser.add_argument('--matching-failure-recovery', action='store_true', help='run a two-instance production Matching failure/recovery probe')
 parser.add_argument('--matching-idle-check-seconds', type=int, help='override the Matching idle-task-list check interval in seconds')
+parser.add_argument('--matching-backlog-forward', action='store_true', help='probe backlog forward-to-parent on a two-partition native config: a child backlog task reaches a root-only poller, and a root backlog task reaches a child-only poller (requires --rust-services matching)')
 parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
@@ -328,6 +329,8 @@ if args.build_only and args.dry_run:
     parser.error('--build-only and --dry-run are exclusive')
 if args.matching_failure_recovery and not production_matching:
     parser.error('--matching-failure-recovery requires --rust-services matching')
+if args.matching_backlog_forward and not production_matching:
+    parser.error('--matching-backlog-forward requires --rust-services matching')
 if args.matching_idle_check_seconds is not None and (args.matching_idle_check_seconds < 1 or not production_matching):
     parser.error('--matching-idle-check-seconds must be positive and requires --rust-services matching')
 if production_matching and args.matching_delivery:
@@ -993,6 +996,8 @@ try:
                         if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
                             probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
                     probe_environment['CADENCE_MATCHING_TRANSPORT'] = args.matching_transport
+                    if args.matching_backlog_forward:
+                        probe_environment['CADENCE_MATCHING_BACKLOG_FORWARD'] = '1'
                     if args.cassandra:
                         probe_environment.update({
                             'CADENCE_MATCHING_CASSANDRA_GATE': '1',
@@ -1014,7 +1019,7 @@ try:
                             'CADENCE_MATCHING_FAILURE_RECOVERY': '1',
                         })
                 result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart else (600 if args.matching_delivery or args.rust_matching else 120)))
+                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart or args.matching_backlog_forward else (600 if args.matching_delivery or args.rust_matching else 120)))
                 if udp_capture:
                     udp_stop.set()
                     udp_thread.join(timeout=2)
