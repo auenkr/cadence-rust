@@ -1412,6 +1412,55 @@ mod tests {
     }
 
 
+    /// Go TestRateLimitErrorsFromTasklistDispatch: a throttled dispatch is
+    /// retried (counted as a buffer throttle) and the task is neither
+    /// dropped nor acked. Go injects `dispatchTask`; Rust has no hook, so a
+    /// zero-rate limiter produces the same throttled outcome (`wait_until`).
+    #[tokio::test]
+    async fn matching_reader_retries_throttled_dispatch_without_acking() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        reader.stop();
+        reader.wait_stopped().await;
+        let clock: crate::matching_limiter::Clock = Arc::new(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as i64
+        });
+        let limiter = Arc::new(TaskListLimiter::new(
+            clock,
+            0.0,
+            crate::matching_limiter::TASK_DISPATCH_RPS_TTL_NANOS,
+            0,
+            Arc::new(|| 1),
+        ));
+        let reader = TaskReader::with_isolation(
+            queue.clone(),
+            wake.clone(),
+            ReaderConfig::default(),
+            Arc::new(|| true),
+            limiter,
+            IsolationConfig::default(),
+        );
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        reader.with_metric_context(
+            crate::matching_metrics::MatchingMetrics::new(sink.clone()),
+            crate::matching_metrics::PollMetricContext {
+                domain: "reader-domain".into(), task_list: "reader".into(),
+                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+            },
+        );
+        queue.append(&[TaskData { schedule_id: 3, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !sink.events().iter().any(|event| event.name == crate::matching_metrics::BUFFER_THROTTLE_COUNT) {
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        assert_eq!(queue.levels().1, 0, "throttled task must not be acked");
+        stop(queue, reader).await;
+    }
+
     #[tokio::test]
     async fn matching_reader_forwards_backlog_and_completes_durable_row() {
         let (_directory, queue, reader, wake) = fixture(0, 1);
