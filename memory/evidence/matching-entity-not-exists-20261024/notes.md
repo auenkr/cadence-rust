@@ -117,4 +117,8 @@ path is unchanged. Fixing it is a Frontend task.
 
 ### CI evidence
 
-Pending. See the run URL below once recorded.
+| Run | Commit | Result |
+|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/40033588757 | `06f9b0fa5` | **Success** (`clippy-test`, `gh run watch --exit-status` exit 0). `cadence-matching` lib tests: **572 passed, 0 failed, 12 ignored**, same as the untrimmed branch. `domain_not_found_status_carries_entity_not_exists_detail` and `matching_rpc_semaphore_domain_not_found_matches_go` are `ok` |
+
+Re-run: `gh workflow run rust-ci.yml --ref matching-entity-not-exists-trim-20261024 -f package=cadence-matching`.
