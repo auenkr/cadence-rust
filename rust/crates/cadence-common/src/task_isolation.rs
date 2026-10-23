@@ -195,4 +195,80 @@ mod tests {
         assert_eq!(policy(Ok(false), true, true, Some(&wrong_partition), 0, 0).select_with_cause().2, Some("partition_change"));
         assert_eq!(policy(Ok(false), true, true, Some(&[]), 100, 60).select_with_cause().2, Some("expired"));
     }
+
+    /// Go TestGetIsolationGroupForTask: all 16 table cases, mapped onto the
+    /// pure policy. Go resolves the inputs from its manager (known groups,
+    /// drain state, recent pollers, partition read config); here each case
+    /// states the resolved inputs.
+    #[test]
+    fn go_get_isolation_group_for_task_table() {
+        const MS: i64 = 1_000_000;
+        const SEC: i64 = 1_000_000_000;
+        struct Case {
+            name: &'static str,
+            group: &'static str,
+            duration: i64,
+            latency: i64,
+            available: &'static [&'static str],
+            pollers: &'static [&'static str],
+            drained: &'static [&'static str],
+            state_error: bool,
+            disabled: bool,
+            partition: Option<&'static [&'static str]>,
+            expected: (&'static str, i64),
+        }
+        let abc: &[&str] = &["a", "b", "c"];
+        let base = Case {
+            name: "",
+            group: "a",
+            duration: 0,
+            latency: 0,
+            available: abc,
+            pollers: &[],
+            drained: &[],
+            state_error: false,
+            disabled: false,
+            partition: None,
+            expected: ("", 0),
+        };
+        let cases = [
+            Case { name: "success - recent poller allows group", pollers: &["a"], expected: ("a", 0), ..base },
+            Case { name: "success - with isolation duration", group: "b", duration: SEC, pollers: &["b"], expected: ("b", SEC), ..base },
+            Case { name: "success - low task latency", duration: SEC, latency: 300 * MS, pollers: &["a"], expected: ("a", SEC - 300 * MS), ..base },
+            Case { name: "success - other group drained", pollers: &["a"], drained: &["b"], expected: ("a", 0), ..base },
+            Case { name: "success - right partition", pollers: &["a"], partition: Some(&["a", "b", "c", "d"]), expected: ("a", 0), ..base },
+            Case { name: "leak - no recent pollers", expected: ("", 0), ..base },
+            Case { name: "leak - no matching recent poller", duration: SEC, pollers: &["b"], ..base },
+            Case { name: "leak - unknown group", duration: SEC, available: &["b"], ..base },
+            Case { name: "leak - unknown group even with recent poller", duration: SEC, available: &["b"], pollers: &["a"], ..base },
+            Case { name: "leak - task latency", duration: SEC, latency: SEC, pollers: &["a"], ..base },
+            Case { name: "leak - task latency close to taskIsolationDuration", duration: SEC, latency: SEC - MINIMUM_ISOLATION_NANOS, pollers: &["a"], ..base },
+            Case { name: "leak - group drained", duration: SEC, pollers: &["a"], drained: &["a"], ..base },
+            Case { name: "leak - state error", duration: SEC, pollers: &["a"], state_error: true, ..base },
+            Case { name: "leak - task isolation disabled", duration: SEC, pollers: &["a"], disabled: true, ..base },
+            Case { name: "leak - wrong partition", pollers: &["a"], partition: Some(&["b", "c", "d"]), ..base },
+        ];
+        for case in cases {
+            let partition: Option<Vec<String>> = case
+                .partition
+                .map(|groups| groups.iter().map(|g| g.to_string()).collect());
+            let policy = TaskIsolation {
+                enabled: !case.disabled,
+                sticky: false,
+                group: case.group,
+                known: case.available.contains(&case.group),
+                drained: if case.state_error {
+                    Err(())
+                } else {
+                    Ok(case.drained.contains(&case.group))
+                },
+                recent_poller: case.pollers.contains(&case.group),
+                // Go's default (no update) read config has no group list.
+                partition_groups: Some(partition.as_deref().unwrap_or(&[])),
+                total_duration: case.duration,
+                task_latency: case.latency,
+            };
+            assert_eq!(policy.select(), case.expected, "{}", case.name);
+        }
+    }
 }
