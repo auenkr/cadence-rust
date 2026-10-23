@@ -536,6 +536,22 @@ async function run() {
             && clientIndex + 1 < semaphoreClients.length) return semaphoreAcquire(owner, clientIndex + 1);
         throw error;
       });
+      // Parity gap (Go-side): Go never seeds token rows, and a bucket loads its
+      // free set once at startup. A fresh capacity-1 semaphore therefore returns
+      // NO_SLOT on its first acquire, the same as Go. Use a separate semaphore for
+      // that evidence, then seed the race semaphore before its first acquire so
+      // a row is visible to the bucket that serves the race.
+      const gapSemaphoreName = `durable-gap-${id}`;
+      await call('SemaphoreAPI', 'CreateSemaphore', {
+        domain, semaphoreName: gapSemaphoreName, capacity: 1, bucketCapacity: 1,
+      });
+      const gapRequest = { domainId, semaphoreName: gapSemaphoreName, bucket: 0, ownerId: `${id.length}:${id}:${randomUUID()}:gap` };
+      const gapGrant = await acquireSemaphore(semaphoreClients[0], gapRequest).catch(error => {
+        if (error.code === grpc.status.ABORTED || error.code === grpc.status.UNAVAILABLE) return acquireSemaphore(semaphoreClients[1], gapRequest);
+        throw error;
+      });
+      assert.equal(gapGrant.outcome, 'SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT', 'fresh Cassandra semaphore with no token rows must answer NO_SLOT on its first acquire');
+      cassandraCommand(['seed-semaphore', domainId, semaphoreName], 'semaphore-free-token-seed');
       const owners = [`${id.length}:${id}:${randomUUID()}:1`, `${id.length}:${id}:${randomUUID()}:2`];
       const grants = await Promise.all(owners.map(owner => semaphoreAcquire(owner)));
       const acquired = grants.map((grant, index) => ({ grant, owner: owners[index] }))
@@ -569,6 +585,7 @@ async function run() {
         createdThroughGoFrontend: true, ownerId: semaphoreOwner, tokenId: stored.token_id,
         concurrentGrants: acquired.length, noSlotResponses: unavailable.length,
         persistedHoldBeforeCrash: { ownerId: stored.owner_id, tokenId: stored.token_id },
+        freshSemaphoreFirstAcquire: { semaphoreName: gapSemaphoreName, outcome: gapGrant.outcome },
       };
     }
     const primaryMembershipPeer = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);

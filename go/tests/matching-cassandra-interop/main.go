@@ -67,8 +67,15 @@ func connect() *gocql.Session {
 }
 
 func main() {
-	if len(os.Args) < 2 || (os.Args[1] != "seed" && os.Args[1] != "verify" && os.Args[1] != "observe-task" && os.Args[1] != "wait-empty" && os.Args[1] != "verify-semaphore" && os.Args[1] != "release-semaphore" && os.Args[1] != "verify-semaphore-free") {
-		log.Fatal("usage: go run ./tests/matching-cassandra-interop {seed|verify|observe-task|wait-empty|verify-semaphore|release-semaphore|verify-semaphore-free}")
+	if len(os.Args) < 2 || (os.Args[1] != "seed" && os.Args[1] != "verify" && os.Args[1] != "observe-task" && os.Args[1] != "wait-empty" && os.Args[1] != "verify-semaphore" && os.Args[1] != "release-semaphore" && os.Args[1] != "verify-semaphore-free" && os.Args[1] != "seed-semaphore") {
+		log.Fatal("usage: go run ./tests/matching-cassandra-interop {seed|verify|observe-task|wait-empty|verify-semaphore|release-semaphore|verify-semaphore-free|seed-semaphore}")
+	}
+	if os.Args[1] == "seed-semaphore" {
+		if len(os.Args) != 4 {
+			log.Fatal("semaphore seed expects domain-id semaphore-name")
+		}
+		seedSemaphoreFreeToken(os.Args[2], os.Args[3])
+		return
 	}
 	if os.Args[1] == "observe-task" || os.Args[1] == "wait-empty" {
 		if len(os.Args) != 5 {
@@ -203,6 +210,28 @@ func semaphore(command, domainID, name, ownerID, expectedTokenText string) {
 		log.Fatalf("Cassandra semaphore owner token=%d, want positive token %d for owner %q", token, expectedToken, ownerID)
 	}
 	fmt.Printf("{\"domain_id\":%q,\"semaphore\":%q,\"owner_id\":%q,\"token_id\":%d}\n", domainID, name, owner, token)
+}
+
+// seedSemaphoreFreeToken writes the free row for slot 1 of a fresh capacity-1
+// bucket. Go never seeds token rows (see the parity gap in
+// memory/matching-cassandra-lane-diagnosis-20261024.md), so this is a fixture.
+// It must run before the bucket's first acquire: Go loads the free set once.
+func seedSemaphoreFreeToken(domainID, name string) {
+	domainUUID, err := gocql.ParseUUID(domainID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	session := connect()
+	defer session.Close()
+	applied, err := session.Query("INSERT INTO semaphore_tokens (domain_id,semaphore_name,bucket,type,token_id,owner_id,holder,updated_time) VALUES (?,?,0,?,1,?,?,?) IF NOT EXISTS",
+		domainUUID, name, semaphoreTokenRowType, semaphoreTokenOwnerNone, semaphoreFreeSentinel, time.Now().UTC()).ScanCAS()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !applied {
+		log.Fatalf("free token row for semaphore %q already exists", name)
+	}
+	fmt.Printf("{\"semaphore\":%q,\"seeded_free_token_id\":1}\n", name)
 }
 
 func seed(session *gocql.Session, domainUUID gocql.UUID, domainID, name string) {
