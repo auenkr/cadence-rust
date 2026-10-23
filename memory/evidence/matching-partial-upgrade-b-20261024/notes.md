@@ -23,7 +23,7 @@ Status: old → new. Run URL: see the final line of this file.
 |---|---|---|---|---|
 | 9 | handler_test TestAddActivityTask (167) | `tests/matching_partial_upgrade_b.rs::go_handler_add_activity_task_rate_limited_returns_service_busy` | PARTIAL → PARTIAL | Rate-limit ported (denied add persists nothing). Not ported: success PartitionConfig echo (Go engine mock) and "AddActivityTask failed" → InternalServiceError(engine message) (no engine seam). |
 | 9 | handler_test TestAddDecisionTask (235) | `go_handler_add_decision_task_rate_limited_returns_service_busy` | (same) | Same gaps as above, decision path. |
-| 9 | handler_test TestPollForActivityTask (303) | `go_handler_poll_for_activity_task_rate_limited_returns_service_busy`, `go_handler_long_polls_without_deadline_return_context_timeout_not_set`, `go_handler_poll_for_activity_task_returns_added_task_token` | (same) | Success case ported with a real persisted task instead of an engine mock. Not ported: "PollForActivityTask failed" (no engine seam). |
+| 9 | handler_test TestPollForActivityTask (303) | `go_handler_poll_for_activity_task_rate_limited_returns_service_busy`, `go_handler_long_polls_without_deadline_return_context_timeout_not_set`, `go_handler_poll_for_activity_task_returns_added_task_token` (#[ignore]) | (same) | Success case is an ignored gap: after a durable add persists one row, a 2s poll returns an empty token (root cause not isolated). Not ported: "PollForActivityTask failed" (no engine seam). |
 | 9 | handler_test TestPollForDecisionTask (380) | `go_handler_poll_for_decision_task_rate_limited_returns_service_busy`, `go_handler_long_polls_without_deadline_return_context_timeout_not_set` | (same) | Decision success and engine-failure not ported (as above). |
 | 10 | liveness_test TestEventLoop_Noop (89) | `matching_registry.rs::liveness_event_loop_noop_keeps_marked_owner_loaded` (unchanged) | PARTIAL → PARTIAL | Analogue: Rust drives `sweep_idle`; production has a due-based idle loop, not a ttl/2 ticker. Existing assertions reviewed, no edit. |
 | 11 | liveness_test TestEventLoop_Shutdown (105) | `matching_registry.rs::liveness_event_loop_shutdown_unloads_owner_at_ttl` (strengthened) | PARTIAL → PARTIAL | Added: owner still loaded at TTL−1 ns, unloaded at TTL, later sweep is a no-op (Go CAS once). Ticker lag [TTL,1.5TTL] still unasserted. |
@@ -37,7 +37,7 @@ Status: old → new. Run URL: see the final line of this file.
 
 Totals for the 8 rows: 2 PARTIAL→PORTED (rows 14, 15), 6 remain PARTIAL.
 
-New tests: 15 functions in `tests/matching_partial_upgrade_b.rs` (13 active, 2 `#[ignore]` gap markers). In-file edits: 3 existing tests strengthened (`liveness_event_loop_shutdown_unloads_owner_at_ttl`, `has_poller_after_reports_outstanding_or_finished_pollers`, `matching_semaphore_start_builds_free_and_held_indexes`). No production code changed.
+New tests: 15 functions in `tests/matching_partial_upgrade_b.rs` (12 active, 3 `#[ignore]` gap markers: poller callback, CancelPoll bool, and the activity poll success token). In-file edits: 3 existing tests strengthened (`liveness_event_loop_shutdown_unloads_owner_at_ttl`, `has_poller_after_reports_outstanding_or_finished_pollers`, `matching_semaphore_start_builds_free_and_held_indexes`). No production code changed.
 
 ## Verification
 
