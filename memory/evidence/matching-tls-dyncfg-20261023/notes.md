@@ -154,4 +154,21 @@ are plaintext in both.
 
 ## CI
 
-(filled in after the CI run)
+Code commit tested: `cedeaa27eb9d16412420cc44aa580786503a8b72`.
+
+| Run | Trigger | Conclusion |
+|---|---|---|
+| https://github.com/auenkr/cadence-rust/actions/runs/40010336990 | `workflow_dispatch`, `-f package=cadence-matching` | success |
+| https://github.com/auenkr/cadence-rust/actions/runs/40009824619 | `workflow_dispatch`, no package (full workspace) | success |
+
+Notes on the runs:
+- The first `package=cadence-matching` dispatch (run 40009799831) was cancelled by the workflow
+  concurrency group when the no-package dispatch started. It was re-run after the full run
+  finished, as run 40010336990.
+- The full run's test log lists the three new tests as `ok`:
+  `grpc_tls::tests::lone_client_cert_file_is_not_loaded_like_go`,
+  `grpc_tls::tests::missing_ca_file_fails_tls_load_like_go`,
+  `grpc_tls::tests::ca_files_and_ca_file_are_both_trusted`.
+- Clippy, `cargo test`, and the package-scoped run all report success. The only annotation is
+  GitHub's notice that `ubuntu-latest` migrates on 2026-10-19.
+- Later commits on this branch change only this notes file.
