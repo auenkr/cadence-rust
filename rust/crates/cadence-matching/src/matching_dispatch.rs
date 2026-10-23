@@ -1387,6 +1387,7 @@ mod tests {
     };
     use uuid::Uuid;
     use crate::matching_forward::ForwardError;
+    use crate::matching_sync::SyncMatcher;
     #[test]
     fn matching_forwarded_poll_rebuilds_parent_request() {
         let activity = p::PollForActivityTaskRequest {
@@ -2352,6 +2353,130 @@ mod tests {
         assert_eq!(inner.identity, "id1");
         assert_eq!(inner.task_list.clone().unwrap().name, "tl0");
         assert_eq!(inner.task_list.clone().unwrap().kind, 1);
+        server.abort();
+    }
+
+    /// Go `ForwardState` pointed at an in-process root dispatcher: the parent
+    /// resolves to `Parent::Dispatcher`, whose `accept_forwarded_backlog` offers
+    /// to the root's sync matcher, the Rust analog of Go's rootMatcher.Offer.
+    fn forward_to_root(queue: Arc<DurableTaskQueue>, sync: Arc<SyncMatcher>, source: &str) -> ForwardState {
+        let domain = Uuid::from_u128(1).to_string();
+        ForwardState::new(
+            move || {
+                let (queue, sync, domain) = (queue.clone(), sync.clone(), domain.clone());
+                Box::pin(async move {
+                    let root = TaskDispatcher::new(queue, lazy_history(), domain).with_sync_matcher(sync);
+                    Some((Parent::Dispatcher(Box::new(root)), "tl0".into()))
+                })
+            },
+            Arc::new(|| 1),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            source.into(),
+            Arc::new(|| 0),
+        )
+    }
+    fn lazy_history() -> MatchingHistoryClient {
+        MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            Duration::from_secs(1),
+            32 * 1024 * 1024,
+        )
+    }
+    /// Go testRemoteSyncMatch: a root poller takes the forwarded task. The
+    /// child's own local offer is not a Rust matcher step, so this starts at the forward.
+    async fn remote_sync_match_case(isolation_group: &str, poller_delay: Duration) {
+        let (_directory, _store, _key, root) = fixture(0);
+        let (_stop, stopped) = tokio::sync::watch::channel(false);
+        let sync = Arc::new(SyncMatcher::new(&["dca1".into(), "dca2".into()], stopped));
+        let forward = forward_to_root(root.queue.clone(), sync.clone(), "/__cadence_sys/tl0/1");
+        let group = isolation_group.to_owned();
+        let poller = sync.clone();
+        let parked = tokio::spawn(async move {
+            tokio::time::sleep(poller_delay).await;
+            poller.poll(&group).await.map(|received| {
+                let seen = (received.task.data.workflow_id.clone(), received.forwarded);
+                received.finish(Ok(()));
+                seen
+            })
+        });
+        if poller_delay.is_zero() {
+            // Park the root poller before the forward, as Go's test does.
+            for _ in 0..3 {
+                tokio::task::yield_now().await;
+            }
+        }
+        let mut partition_config = std::collections::BTreeMap::new();
+        if !isolation_group.is_empty() {
+            partition_config.insert("isolation-group".to_owned(), isolation_group.to_owned());
+        }
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData {
+                workflow_id: "child-workflow".into(),
+                schedule_id: 91,
+                partition_config: Some(partition_config),
+                ..Default::default()
+            },
+        };
+        let domain = Uuid::from_u128(1).to_string();
+        assert!(
+            forward.forward_backlog_task(task, &domain, 0, 0).await.is_ok(),
+            "forwarded add reports a remote sync match"
+        );
+        let (workflow_id, forwarded) = parked.await.unwrap().expect("root poller received the forwarded task");
+        assert_eq!(workflow_id, "child-workflow");
+        // Go checks req.ForwardedFrom on the wire; the in-process root only sees the transient signal.
+        assert!(forwarded, "root sees the forwarded request signal");
+    }
+    #[tokio::test]
+    async fn matching_remote_sync_match_forwards_to_root_poller() {
+        // Go TestRemoteSyncMatch: the root poller is already waiting.
+        remote_sync_match_case("", Duration::ZERO).await;
+    }
+    #[tokio::test]
+    async fn matching_isolation_remote_sync_match_forwards_to_root_poller() {
+        // Go TestIsolationRemoteSyncMatch: the same forward within isolation group dca1.
+        remote_sync_match_case("dca1", Duration::ZERO).await;
+    }
+    #[tokio::test]
+    async fn matching_remote_sync_match_blocking_waits_for_root_poller() {
+        // Go TestRemoteSyncMatchBlocking: the backlog-style offer blocks until the root polls.
+        remote_sync_match_case("", Duration::from_millis(10)).await;
+    }
+    #[tokio::test]
+    async fn matching_isolation_remote_sync_match_blocking_waits_for_root_poller() {
+        // Go TestIsolationRemoteSyncMatchBlocking: isolation group dca1, delayed root poll.
+        remote_sync_match_case("dca1", Duration::from_millis(10)).await;
+    }
+    /// In-process parent that answers every forwarded decision add with ServiceBusy.
+    struct BusyParent;
+    #[tonic::async_trait]
+    impl m::matching_api_server::MatchingApi for BusyParent {
+        async fn add_decision_task(&self, _request: tonic::Request<m::AddDecisionTaskRequest>) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
+            Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted, "parent busy", "ServiceBusyError", p::ServiceBusyError { reason: String::new() }))
+        }
+    }
+    #[tokio::test]
+    async fn matching_sync_match_failure_reports_busy_without_matching() {
+        // Go TestSyncMatchFailure: the parent answers ServiceBusy to the forwarded
+        // add. Go Offer swallows the error and reports no sync match; Rust returns
+        // SlowDown, which the caller treats as not matched and persists instead.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(m::matching_api_server::MatchingApiServer::new(BusyParent))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+        });
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect().await.unwrap();
+        let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
+        let task = AllocatedTask {
+            task_id: 1,
+            data: TaskData { workflow_id: "child-workflow".into(), schedule_id: 91, ..Default::default() },
+        };
+        let domain = Uuid::from_u128(1).to_string();
+        assert!(matches!(state.forward_backlog_task(task, &domain, 0, 0).await, Err(ForwardError::SlowDown)));
         server.abort();
     }
 
