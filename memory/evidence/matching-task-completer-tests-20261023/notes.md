@@ -41,6 +41,10 @@ Totals (16 Go subtests): 10 PORTED outcome tests (#2, 7, 8, 10, 11-16). 1 PORTED
    logging differs: the Rust reader (`matching_reader.rs:597`) skips logging for "task not
    started", while Go logs any non-not-started completer error. Covered by the ignored test
    `go_young_missing_execution_returns_wait_error`.
+   **RESOLVED (2026-10-24, branch `matching-task-completer-fix-20261024`).** Rust `exhausted()`
+   already passes the `Err` through (`result.and_then(...)`), so it returns the wait-time error,
+   matching Go. The `#[ignore]` was stale; it is removed and the test runs and passes in CI.
+   No production code changed. The reader logging difference (item 1 above) is unchanged.
 2. **Retry policy is not injectable in Rust** (see #1, #3 above). Go's test shrinks the policy to
    3 attempts at 100ms. Rust uses production constants. This is a test-seam gap, not a behavior
    change. The Go attempt-count assertions cannot be ported without a seam, and this task does
@@ -53,3 +57,14 @@ Totals (16 Go subtests): 10 PORTED outcome tests (#2, 7, 8, 10, 11-16). 1 PORTED
 - Head sha: 9986487c27fbe23f11e6b78d53c4cc14a65dbe27
 - Conclusion: success (first attempt, no fix cycles)
 - The ignored parity-gap test is skipped by design; it is not counted as passing.
+
+### Fix run (2026-10-24)
+
+- Branch: `matching-task-completer-fix-20261024` (from `matching-task-completer-tests-20261023` c66bbfc52)
+- Change: removed `#[ignore]` from `go_young_missing_execution_returns_wait_error`.
+- Workflow: `rust-ci.yml`, `-f package=cadence-matching`
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/40017858433
+- Conclusion: success (first attempt, no fix cycles). clippy-test job passed.
+- Evidence: log lines `matching_standby::tests::go_young_missing_execution_returns_wait_error ... ok`
+  and `test result: ok. 572 passed; 0 failed; 10 ignored`. The 10 ignored tests are other
+  deliberately ignored tests in the workspace; this one is no longer among them.
