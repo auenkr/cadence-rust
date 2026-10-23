@@ -1,0 +1,3 @@
+The final-sequence cargo check was waiting on Cargo's shared build-directory lock when the user changed the host build policy. Its process was terminated by SIGTERM; the wrapper was stopped to prevent it from launching subsequent commands under the obsolete cargo-1.lock. No final check result is claimed. The earlier completed check and clippy statuses are under ../initial/ (0 and 101); the stale initial test was intentionally terminated and its shell-recorded exit was 143.
+
+The new policy removes the separate check step. Final validation will use only flock /tmp/cargo.lock, clippy then workspace tests, -j3, after the mixed gate stops and host load/memory permit it.
