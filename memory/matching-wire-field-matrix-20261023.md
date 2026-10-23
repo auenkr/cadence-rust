@@ -50,3 +50,5 @@ Limits of this audit: nested api types (HistoryEvent attributes, Header, Payload
 
 ## CI
 (filled in below)
+- Run 1 (40016376627, sha 4872ad388): failed, clippy `needless_update` in the new test; fixed.
+- Run 2: https://github.com/auenkr/cadence-rust/actions/runs/40016714196, sha 075a9eb6b, conclusion success (clippy + workspace tests).
