@@ -35,6 +35,50 @@ pub fn task_started(
     }
 }
 
+// Keep the young-missing-execution sentinel distinct from task-not-started:
+// Go counts the former, but excludes the latter, after retry exhaustion.
+fn missing_execution_result(age_nanos: i64) -> Result<Option<bool>, Status> {
+    if age_nanos > 86_400_000_000_000 {
+        Ok(Some(true))
+    } else {
+        Err(Status::unavailable(
+            "wait time not reached for workflow EntityNotExistsError",
+        ))
+    }
+}
+
+fn exhausted(
+    result: Result<Option<bool>, Status>,
+    metrics: &crate::matching_metrics::MatchingMetrics,
+    context: &crate::matching_metrics::PollMetricContext,
+) -> Result<bool, Status> {
+    if result.is_err() {
+        metrics.task_list_counter_event(
+            crate::matching_metrics::STANDBY_TASKS_COMPLETION_FAILURE,
+            context,
+        );
+    }
+    result.and_then(|_| Err(Status::unavailable("task not started")))
+}
+
+// Dropping a running checker is Rust's context cancellation (reader shutdown).
+// Go ThrottleRetry returns context.Canceled and counts that as a failure.
+struct CompletionCancellation<'a> {
+    metrics: &'a crate::matching_metrics::MatchingMetrics,
+    context: &'a crate::matching_metrics::PollMetricContext,
+    armed: bool,
+}
+impl Drop for CompletionCancellation<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.metrics.task_list_counter_event(
+                crate::matching_metrics::STANDBY_TASKS_COMPLETION_FAILURE,
+                self.context,
+            );
+        }
+    }
+}
+
 pub fn checker(
     domains: cadence_persistence::InMemoryDomainStore,
     cluster: String,
@@ -53,6 +97,11 @@ pub fn checker(
         let metrics = metrics.clone();
         let metric_context = metric_context.clone();
         Box::pin(async move {
+            let mut cancellation = CompletionCancellation {
+                metrics: &metrics,
+                context: &metric_context,
+                armed: true,
+            };
             let domain = key.domain_id.to_string();
             let policy = ExponentialRetryPolicy::new(Duration::from_secs(1))
                 .with_maximum_interval(Duration::from_secs(10))
@@ -105,7 +154,8 @@ pub fn checker(
                         .await
                     {
                         Ok(state) => {
-                            let started = task_started(key.task_type, task.data.schedule_id, &state)?;
+                            let started =
+                                task_started(key.task_type, task.data.schedule_id, &state)?;
                             let metric = if started {
                                 crate::matching_metrics::STANDBY_TASKS_COMPLETED
                             } else {
@@ -115,16 +165,17 @@ pub fn checker(
                             Ok(started.then_some(true))
                         }
                         Err(error) if crate::matching_history::missing_execution(&error) => {
-                            let completed = super::grpc_matching::matching_now()
-                                .saturating_sub(task.data.created_nanos)
-                                > 86_400_000_000_000;
-                            if completed {
+                            let result = missing_execution_result(
+                                super::grpc_matching::matching_now()
+                                    .saturating_sub(task.data.created_nanos),
+                            );
+                            if matches!(result, Ok(Some(true))) {
                                 metrics.task_list_counter_event(
                                     crate::matching_metrics::STANDBY_TASKS_COMPLETED,
                                     &metric_context,
                                 );
                             }
-                            Ok(completed.then_some(true))
+                            result
                         }
                         Err(error) => Err(error),
                     }?;
@@ -132,16 +183,12 @@ pub fn checker(
                 }
                 .await;
                 if let Ok(Some(completed)) = result {
+                    cancellation.armed = false;
                     return Ok(completed);
                 }
                 let Some(delay) = retrier.next_backoff(&mut rand::thread_rng()) else {
-                    if result.is_err() {
-                        metrics.task_list_counter_event(
-                            crate::matching_metrics::STANDBY_TASKS_COMPLETION_FAILURE,
-                            &metric_context,
-                        );
-                    }
-                    return result.and_then(|_| Err(Status::unavailable("task not started")));
+                    cancellation.armed = false;
+                    return exhausted(result, &metrics, &metric_context);
                 };
                 tokio::time::sleep(delay).await;
             }
@@ -152,6 +199,102 @@ pub fn checker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn standby_cancelled_checker_counts_one_completion_failure() {
+        use crate::matching_metrics::*;
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let check = checker(
+            cadence_persistence::InMemoryDomainStore::default(),
+            "local".into(),
+            crate::matching_history::MatchingHistoryClient::new(
+                tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+                Duration::from_secs(1),
+                32 * 1024 * 1024,
+            ),
+            cadence_persistence::matching_sqlite::TaskListKey {
+                domain_id: uuid::Uuid::from_u128(1),
+                name: "list".into(),
+                task_type: 0,
+            },
+            None,
+            metrics,
+            PollMetricContext {
+                domain: "domain".into(),
+                task_list: "list".into(),
+                task_list_kind: 0,
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
+            },
+        );
+        let mut future = check(cadence_persistence::matching_sqlite::AllocatedTask {
+            task_id: 1,
+            data: cadence_persistence::matching_blob::TaskData::default(),
+        });
+        // Missing domain is retryable; cancel the actual checker during backoff.
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut future)
+            .await
+            .is_err());
+        assert!(sink.events().is_empty());
+        drop(future);
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, STANDBY_TASKS_COMPLETION_FAILURE);
+        assert_eq!(events[0].tags[DOMAIN_TAG], "domain");
+    }
+
+    #[test]
+    fn standby_completion_failure_excludes_not_started_but_counts_young_missing() {
+        use crate::matching_metrics::*;
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let context = PollMetricContext {
+            domain: "domain".into(),
+            task_list: "list".into(),
+            task_list_kind: 0,
+            task_type: "decision_task",
+            poller_isolation_group: String::new(),
+        };
+        assert!(exhausted(Ok(None), &metrics, &context).is_err());
+        assert!(sink.events().is_empty());
+        // Shutdown cancels an in-flight completer; normal completion disarms it.
+        drop(CompletionCancellation {
+            metrics: &metrics,
+            context: &context,
+            armed: false,
+        });
+        assert!(sink.events().is_empty());
+        drop(CompletionCancellation {
+            metrics: &metrics,
+            context: &context,
+            armed: true,
+        });
+        for error in [
+            Status::internal("history failed"),
+            Status::cancelled("cancelled"),
+            Status::deadline_exceeded("deadline"),
+        ] {
+            assert!(exhausted(Err(error), &metrics, &context).is_err());
+        }
+        assert!(exhausted(
+            missing_execution_result(86_400_000_000_000),
+            &metrics,
+            &context
+        )
+        .is_err());
+        assert_eq!(
+            missing_execution_result(86_400_000_000_001).unwrap(),
+            Some(true)
+        );
+        assert_eq!(
+            sink.events()
+                .iter()
+                .filter(|e| e.name == STANDBY_TASKS_COMPLETION_FAILURE)
+                .count(),
+            5
+        );
+    }
+
     fn state() -> h::DescribeWorkflowExecutionResponse {
         h::DescribeWorkflowExecutionResponse {
             workflow_execution_info: Some(p::WorkflowExecutionInfo::default()),

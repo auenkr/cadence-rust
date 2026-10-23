@@ -896,6 +896,25 @@ impl TaskDispatcher {
         expiration: Duration,
         lifecycle: PollLifecycle,
     ) -> Result<m::PollForDecisionTaskResponse, Status> {
+        // Register before polling the forward future so release cannot be lost
+        // during local wait, token acquisition, resolution, or the parent RPC.
+        let released = self.blocked_pollers.notified();
+        tokio::pin!(released);
+        released.as_mut().enable();
+        tokio::select! {
+            biased;
+            _ = &mut released => Ok(m::PollForDecisionTaskResponse::default()),
+            _ = tokio::time::sleep(expiration) => Ok(m::PollForDecisionTaskResponse::default()),
+            result = self.forward_query_poll_inner(poll, expiration, lifecycle) => result,
+        }
+    }
+
+    async fn forward_query_poll_inner(
+        &self,
+        poll: p::PollForDecisionTaskRequest,
+        expiration: Duration,
+        lifecycle: PollLifecycle,
+    ) -> Result<m::PollForDecisionTaskResponse, Status> {
         let deadline = tokio::time::Instant::now() + expiration;
         if let Some(forward) = self.forward.as_ref() {
             let wait = Duration::from_nanos((forward.local_wait)().max(0) as u64);
@@ -2289,6 +2308,101 @@ mod tests {
         assert_eq!(request.forwarded_from, "/__cadence_sys/tl0/1");
         server.abort();
     }
+    fn query_lifecycle() -> PollLifecycle {
+        PollLifecycle {
+            manager: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
+            id: "query-poller".into(), cancel: None,
+            info: cadence_common::poller::Info {
+                identity: "query-worker".into(), rate_per_second: 1.0,
+                isolation_group: String::new(),
+            },
+            forwarded: false, metric_context: None,
+            metrics: crate::matching_metrics::MatchingMetrics::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn matching_standby_query_poll_forwards_to_parent_without_claiming_backlog() {
+        let (parent, channel, server) = recording_parent().await;
+        let (_directory, _store, _key, dispatcher) = fixture(1);
+        let forward = ForwardState::new(
+            move || {
+                let channel = channel.clone();
+                Box::pin(async move { Some((Parent::Remote(channel), "tl0".into())) })
+            },
+            Arc::new(|| 1),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            "/__cadence_sys/tl0/1".into(), Arc::new(|| 0),
+        );
+        let dispatcher = dispatcher.with_forward(forward);
+        let before = dispatcher.queue.levels();
+        let response = dispatcher.forward_query_poll(
+            p::PollForDecisionTaskRequest {
+                identity: "query-worker".into(),
+                task_list: Some(p::TaskList { name: "/__cadence_sys/tl0/1".into(), kind: 1, ..Default::default() }),
+                ..Default::default()
+            }, Duration::from_secs(5), query_lifecycle(),
+        ).await.unwrap();
+        assert_eq!(response.task_token, vec![7]);
+        let request = parent.poll_decision.lock().unwrap().clone().unwrap();
+        assert_eq!(request.poller_id, "query-poller");
+        assert_eq!(request.forwarded_from, "/__cadence_sys/tl0/1");
+        assert_eq!(request.request.unwrap().task_list.unwrap().name, "tl0");
+        assert_eq!(dispatcher.queue.levels(), before);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn matching_standby_query_failover_cancels_each_forward_wait() {
+        for stage in 0..3 {
+            let (_directory, _store, _key, dispatcher) = fixture(0);
+            let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let entered_resolver = entered.clone();
+            let forward = ForwardState::new(
+                move || {
+                    entered_resolver.store(true, Ordering::SeqCst);
+                    Box::pin(std::future::pending())
+                },
+                Arc::new(move || if stage == 1 { 0 } else { 1 }),
+                Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+                Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+                "/__cadence_sys/tl0/1".into(), Arc::new(move || if stage == 0 { 60_000_000_000 } else { 0 }),
+            );
+            let dispatcher = dispatcher.with_forward(forward);
+            let poll = dispatcher.forward_query_poll(
+                p::PollForDecisionTaskRequest::default(), Duration::from_secs(60), query_lifecycle(),
+            );
+            tokio::pin!(poll);
+            assert!(tokio::time::timeout(Duration::from_millis(10), &mut poll).await.is_err());
+            assert_eq!(entered.load(Ordering::SeqCst), stage == 2);
+            dispatcher.release_blocked_pollers();
+            assert!(tokio::time::timeout(Duration::from_secs(1), poll).await.unwrap().unwrap().task_token.is_empty());
+            assert!(!dispatcher.queue.is_stopped());
+            // The overall poll deadline also applies while the resolver waits.
+            assert!(tokio::time::timeout(Duration::from_secs(1), dispatcher.forward_query_poll(
+                p::PollForDecisionTaskRequest::default(), Duration::from_millis(10), query_lifecycle(),
+            )).await.unwrap().unwrap().task_token.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn matching_standby_query_failover_releases_wait_and_refreshes_for_next_poll() {
+        let (_directory, _store, _key, dispatcher) = fixture(0);
+        // Poll the future once to register its cancellation listener, then
+        // release it just as Go DisconnectBlockedPollers does.
+        for _ in 0..2 {
+            let poll = dispatcher.forward_query_poll(
+                p::PollForDecisionTaskRequest::default(), Duration::from_secs(60), query_lifecycle(),
+            );
+            tokio::pin!(poll);
+            assert!(tokio::time::timeout(Duration::from_millis(10), &mut poll).await.is_err());
+            dispatcher.release_blocked_pollers();
+            assert!(tokio::time::timeout(Duration::from_secs(1), &mut poll).await.unwrap().unwrap().task_token.is_empty());
+            assert!(!dispatcher.queue.is_stopped());
+        }
+    }
+
     #[tokio::test]
     async fn matching_forward_poll_for_decision_fields_match_go_forwarder() {
         // Go TestForwardPollForDecision: poller id, domain, identity, parent name
