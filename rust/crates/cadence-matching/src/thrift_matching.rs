@@ -68,9 +68,13 @@ fn named(name: String) -> Value {
     structure(vec![(10, text(name))])
 }
 fn list_out(v: p::TaskList) -> Value {
-    let mut fields = vec![(10, text(v.name)), (30, text(v.base_name))];
+    let mut fields = vec![(10, text(v.name))];
     if v.kind > 0 {
         fields.push((20, Value::I32(v.kind - 1)));
+    }
+    // Go `thrift.FromTaskList` leaves BaseName unset when it is empty.
+    if !v.base_name.is_empty() {
+        fields.push((30, text(v.base_name)));
     }
     structure(fields)
 }
@@ -998,6 +1002,27 @@ mod tests {
             event.opt_i32(30).unwrap(),
             Some(cadence_api::enums::EventType::DecisionTaskScheduled as i32)
         );
+    }
+    #[test]
+    fn matching_thrift_task_list_omits_empty_base_name_like_go_mapper() {
+        let Value::Struct(plain) = list_out(p::TaskList {
+            name: "tl".into(),
+            kind: 2,
+            ..Default::default()
+        }) else {
+            panic!("task list is not a struct")
+        };
+        assert!(plain.get(30).is_none());
+        assert_eq!(plain.opt_i32(20).unwrap(), Some(1));
+        let Value::Struct(partition) = list_out(p::TaskList {
+            name: "/__cadence_sys/tl/1".into(),
+            base_name: "tl".into(),
+            kind: 1,
+        }) else {
+            panic!("task list is not a struct")
+        };
+        assert!(partition.get(30).is_some());
+        assert_eq!(partition.opt_i32(20).unwrap(), Some(0));
     }
     #[test]
     fn matching_thrift_exceptions_fill_required_fields_like_go_mapper() {
