@@ -39,11 +39,11 @@ async fn matching_long_polls_with_nearly_expired_deadline_return_internal_like_g
     decision.metadata_mut().insert("grpc-timeout", "5m".parse().unwrap());
     let error = matching.poll_for_decision_task(decision).await.unwrap_err();
     assert_eq!(error.code(), tonic::Code::InvalidArgument); // missing request precedes, as before
-    assert!(crate::grpc_matching::check_poll_context(Some(std::time::Instant::now())).is_err());
-    let status = crate::grpc_matching::check_poll_context(Some(std::time::Instant::now())).unwrap_err();
+    assert!(crate::grpc_matching::check_poll_context(Some(tokio::time::Instant::now())).is_err());
+    let status = crate::grpc_matching::check_poll_context(Some(tokio::time::Instant::now())).unwrap_err();
     assert_eq!(status.code(), tonic::Code::Internal);
     assert_eq!(status.message(), "context deadline exceeded");
-    assert!(crate::grpc_matching::check_poll_context(Some(std::time::Instant::now() + std::time::Duration::from_secs(1))).is_ok());
+    assert!(crate::grpc_matching::check_poll_context(Some(tokio::time::Instant::now() + std::time::Duration::from_secs(1))).is_ok());
 }
 
 #[tokio::test]

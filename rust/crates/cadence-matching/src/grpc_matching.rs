@@ -115,9 +115,9 @@ const ISOLATION_GROUP_KEY: &str = "isolation-group";
 /// Go `common.IsValidContext` (contextExpireThreshold = 10ms): a poll whose
 /// remaining deadline is below the threshold fails with the raw
 /// `context.DeadlineExceeded`, which `handleErr` turns into InternalServiceError.
-pub(crate) fn check_poll_context(deadline: Option<std::time::Instant>) -> Result<(), Status> {
+pub(crate) fn check_poll_context(deadline: Option<tokio::time::Instant>) -> Result<(), Status> {
     match deadline {
-        Some(deadline) if deadline.saturating_duration_since(std::time::Instant::now()) < std::time::Duration::from_millis(10) => {
+        Some(deadline) if deadline.saturating_duration_since(tokio::time::Instant::now()) < std::time::Duration::from_millis(10) => {
             Err(Status::internal("context deadline exceeded"))
         }
         _ => Ok(()),
