@@ -504,6 +504,33 @@ impl MatchingMetrics {
         Self(Arc::new(HistogramTagSink(sink)))
     }
 
+    pub(crate) fn membership_view(&self, host: &str, identifier: u32) {
+        self.0.record(MetricEvent {
+            name: "hashring_view_identifier",
+            kind: MetricKind::Gauge,
+            value: MetricValue::Number(f64::from(identifier)),
+            histogram: None,
+            tags: BTreeMap::from([
+                ("operation".into(), "Hashring".into()),
+                ("service".into(), "cadence-matching".into()),
+                (
+                    "host".into(),
+                    if host.is_empty() { "_unknown_" } else { host }.into(),
+                ),
+            ]),
+        });
+    }
+
+    pub(crate) fn resolver_host_not_found(&self) {
+        self.0.record(MetricEvent {
+            name: "ring_resolver_error",
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            histogram: None,
+            tags: BTreeMap::from([("operation".into(), "ResolverHostNotFound".into())]),
+        });
+    }
+
     pub(crate) fn routing_path(&self, path: &str) {
         self.0.record(MetricEvent {
             name: "shard_distributor_resolver_lookups",
