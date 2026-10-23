@@ -14,13 +14,13 @@ const UNLIMITED_RPS: i64 = i32::MAX as i64;
 const REFRESH_NANOS: i64 = 5_000_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum RpcClass {
+pub enum RpcClass {
     User,
     Worker,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum MatchingRpc {
+pub enum MatchingRpc {
     AddActivityTask,
     AddDecisionTask,
     PollForActivityTask,
@@ -37,16 +37,16 @@ pub(crate) enum MatchingRpc {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct QuotaRejection {
+pub struct QuotaRejection {
     pub method: MatchingRpc,
     pub class: RpcClass,
     pub domain: Option<String>,
 }
 
-pub(crate) type QuotaMetricSink = Arc<dyn Fn(QuotaRejection) + Send + Sync>;
+pub type QuotaMetricSink = Arc<dyn Fn(QuotaRejection) + Send + Sync>;
 
 impl MatchingRpc {
-    pub(crate) fn policy(self) -> (RpcClass, bool) {
+    pub fn policy(self) -> (RpcClass, bool) {
         use MatchingRpc::*;
         match self {
             AddActivityTask | AddDecisionTask | PollForActivityTask | PollForDecisionTask => {
@@ -129,7 +129,7 @@ type RejectedCounts = HashMap<(MatchingRpc, RpcClass, Option<String>), u64>;
 
 /// Per-Matching-process user and worker admission policy. Domain buckets are
 /// cached for the process lifetime, matching Go `quotas.Collection`.
-pub(crate) struct MatchingRpcQuota {
+pub struct MatchingRpcQuota {
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
     clock: Clock,
     state: Mutex<State>,
@@ -158,7 +158,7 @@ fn host_default(class: RpcClass) -> i64 {
 }
 
 impl MatchingRpcQuota {
-    pub(crate) fn with_metric_sink(
+    pub fn with_metric_sink(
         overlay: Arc<Mutex<DynamicConfigOverlay>>,
         metric_sink: QuotaMetricSink,
     ) -> Self {
@@ -201,7 +201,7 @@ impl MatchingRpcQuota {
         }
     }
 
-    pub(crate) fn set_metric_sink(&self, metric_sink: QuotaMetricSink) {
+    pub fn set_metric_sink(&self, metric_sink: QuotaMetricSink) {
         *self.metric_sink.lock().expect("Matching quota metric sink lock") = metric_sink;
     }
 
@@ -252,7 +252,7 @@ impl MatchingRpcQuota {
 
     /// Consume quota for a request. `reject` mirrors Go call sites: false for
     /// control RPCs that call Allow but deliberately accept over-limit calls.
-    pub(crate) fn allow(&self, method: MatchingRpc, domain: Option<&str>) -> bool {
+    pub fn allow(&self, method: MatchingRpc, domain: Option<&str>) -> bool {
         let (class, reject) = method.policy();
         let now = (self.clock)();
         let domain_bucket = domain.map(|name| {

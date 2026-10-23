@@ -2,8 +2,8 @@
 //! Run through tests/run-shard-distributor-go-interop.sh after validation is
 //! authorized; it is source-only during the current review lane.
 use cadence_proto::sharddistributor as sd;
-use cadence_server::{
-    config::{ShardDistributorMatchingConfig, ShardDistributorNamespaceConfig},
+use cadence_service_core::config::{ShardDistributorMatchingConfig, ShardDistributorNamespaceConfig};
+use cadence_matching::{
     matching_shard_distributor::{
         BoxFuture, ShardDistributorExecutor, ShardProcessor, ShardProcessorFactory, ShardReport,
         TonicExecutorRpc, TonicSpectator,

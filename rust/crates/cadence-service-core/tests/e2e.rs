@@ -5,7 +5,7 @@
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use cadence_server::handlers::{router, AppState};
+use cadence_service_core::handlers::{router, AppState};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

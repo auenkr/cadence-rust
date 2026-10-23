@@ -4,6 +4,11 @@ members = [
     "crates/cadence-api",
     "crates/cadence-common",
     "crates/cadence-persistence",
+    "crates/cadence-service-core",
+    "crates/cadence-matching",
+    "crates/cadence-history",
+    "crates/cadence-frontend",
+    "crates/cadence-worker",
     "crates/cadence-server",
     "crates/cadence-thrift",
     "crates/cadence-proto",
@@ -17,3 +22,9 @@ repository = "https://github.com/auenkr/cadence-rust"
 [patch.crates-io]
 mysql_async = { path = "vendor/mysql_async-0.37.1" }
 scylla = { path = "vendor/scylla-1.9.0" }
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"

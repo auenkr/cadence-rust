@@ -395,6 +395,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadence-frontend"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cadence-service-core",
+]
+
+[[package]]
+name = "cadence-history"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cadence-service-core",
+]
+
+[[package]]
+name = "cadence-matching"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
+ "axum-server",
+ "base64",
+ "cadence-api",
+ "cadence-common",
+ "cadence-persistence",
+ "cadence-proto",
+ "cadence-service-core",
+ "cadence-thrift",
+ "clap",
+ "crc32c",
+ "crc32fast",
+ "hickory-resolver",
+ "hyper-util",
+ "if-addrs",
+ "libc",
+ "prost",
+ "prost-types",
+ "rand 0.8.8",
+ "rcgen",
+ "rusqlite",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "tonic",
+ "tonic-reflection",
+ "tower 0.5.3",
+ "uuid",
+]
+
+[[package]]
 name = "cadence-persistence"
 version = "0.1.0"
 dependencies = [
@@ -448,6 +508,51 @@ dependencies = [
  "base64",
  "cadence-api",
  "cadence-common",
+ "cadence-matching",
+ "cadence-persistence",
+ "cadence-proto",
+ "cadence-service-core",
+ "cadence-thrift",
+ "clap",
+ "crc32c",
+ "crc32fast",
+ "hickory-resolver",
+ "hyper-util",
+ "if-addrs",
+ "libc",
+ "prost",
+ "prost-types",
+ "rand 0.8.8",
+ "rcgen",
+ "rusqlite",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "tonic",
+ "tonic-reflection",
+ "tower 0.5.3",
+ "uuid",
+]
+
+[[package]]
+name = "cadence-service-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
+ "axum-server",
+ "base64",
+ "cadence-api",
+ "cadence-common",
  "cadence-persistence",
  "cadence-proto",
  "cadence-thrift",
@@ -486,6 +591,14 @@ version = "0.1.0"
 dependencies = [
  "cadence-api",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "cadence-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cadence-service-core",
 ]
 
 [[package]]

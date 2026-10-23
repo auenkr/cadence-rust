@@ -136,7 +136,7 @@ impl AppState {
 
 /// Go domain registration uses the current cluster when replication fields
 /// are omitted. Local domains belong to exactly that cluster.
-pub(crate) fn domain_replication(
+pub fn domain_replication(
     state: &AppState,
     req: &RegisterDomainRequest,
 ) -> Result<cadence_api::types::DomainReplicationConfiguration, BadRequestError> {
@@ -177,7 +177,7 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn note_poller(
+pub fn note_poller(
     state: &AppState,
     domain: &str,
     task_list: &str,
@@ -209,15 +209,15 @@ struct ErrorBody {
     message: String,
 }
 
-pub(crate) fn error_response(kind: &'static str, status: StatusCode, message: String) -> Response {
+pub fn error_response(kind: &'static str, status: StatusCode, message: String) -> Response {
     (status, Json(ErrorBody { kind, message })).into_response()
 }
 
-pub(crate) fn bad_request(e: BadRequestError) -> Response {
+pub fn bad_request(e: BadRequestError) -> Response {
     error_response("BadRequestError", StatusCode::BAD_REQUEST, e.message)
 }
 
-pub(crate) fn entity_not_exists(e: EntityNotExistsError) -> Response {
+pub fn entity_not_exists(e: EntityNotExistsError) -> Response {
     error_response("EntityNotExistsError", StatusCode::NOT_FOUND, e.message)
 }
 
@@ -497,7 +497,7 @@ async fn deprecate_domain(
 // Workflows
 // ---------------------------------------------------------------------------
 
-pub(crate) async fn require_domain(state: &AppState, domain: &str) -> Option<Response> {
+pub async fn require_domain(state: &AppState, domain: &str) -> Option<Response> {
     if domain.is_empty() {
         return Some(bad_request(validation::err_domain_not_set()));
     }
@@ -1645,7 +1645,7 @@ async fn delete_domain(
 /// Small error for shared describe-task-list logic, keeping strict
 /// `result_large_err` clippy clean at every call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DescribeTaskListError {
+pub enum DescribeTaskListError {
     TaskListNotSet,
     DomainGone,
 }
@@ -2040,7 +2040,7 @@ async fn update_schedule(
     }
 }
 
-pub(crate) fn describe_task_list_response(
+pub fn describe_task_list_response(
     state: &AppState,
     executions: &cadence_persistence::InMemoryExecutionStore,
     req: &cadence_api::tasks::DescribeTaskListRequest,
@@ -2232,7 +2232,7 @@ async fn list_task_list_partitions(
         .into_response()
 }
 
-pub(crate) fn search_attributes() -> cadence_api::tasks::GetSearchAttributesResponse {
+pub fn search_attributes() -> cadence_api::tasks::GetSearchAttributesResponse {
     cadence_api::tasks::GetSearchAttributesResponse {
         keys: Some(cadence_api::search_attributes::default_indexed_keys()),
     }

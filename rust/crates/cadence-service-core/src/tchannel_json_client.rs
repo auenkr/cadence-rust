@@ -29,7 +29,7 @@ pub struct JsonResponse {
 /// Raw reply for a native TChannel Thrift call. `body` is the strict Thrift
 /// reply struct payload; it is deliberately not JSON-decoded here.
 #[derive(Debug)]
-pub(crate) struct ThriftResponse {
+pub struct ThriftResponse {
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
     pub application_error: bool,
@@ -197,7 +197,7 @@ fn parse_response_frames(frames: Vec<(u8, u32, Vec<u8>)>) -> Result<(bool, [Vec<
 /// strict Thrift bytes in the third call argument and binary YARPC metadata
 /// in the second call argument; no JSON serialization or newline framing is
 /// applied.
-pub(crate) async fn call_thrift(
+pub async fn call_thrift(
     addr: &str,
     service: &str,
     method: &str,

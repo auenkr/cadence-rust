@@ -49,7 +49,7 @@ impl RingpopHandler {
         }
     }
 
-    pub(crate) fn call(
+    pub fn call(
         &self,
         method: String,
         headers: Option<HashMap<String, String>>,

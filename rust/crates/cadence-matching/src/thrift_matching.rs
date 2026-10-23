@@ -863,10 +863,7 @@ async fn http_handler_with_procedures(
 
 /// Persistence drivers enable rustls' aws-lc-rs backend next to the ring
 /// backend selected here, so rustls cannot pick a process default itself.
-pub fn install_tls_crypto_provider() {
-    // Err means a provider is already installed, which is fine.
-    let _ = rustls::crypto::ring::default_provider().install_default();
-}
+pub use cadence_service_core::grpc_tls::install_tls_crypto_provider;
 
 #[cfg(test)]
 mod tests {

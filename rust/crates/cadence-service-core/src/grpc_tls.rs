@@ -30,7 +30,7 @@ pub fn server_tls(tls: &TlsConfig) -> anyhow::Result<Option<ServerTlsConfig>> {
     if !tls.enabled {
         return Ok(None);
     }
-    crate::thrift_matching::install_tls_crypto_provider();
+    install_tls_crypto_provider();
     // Go reads the CA files while building the config, so a missing file fails startup.
     let ca_certs = ca_certs(tls)?;
     let (cert_pem, key_pem) = read_identity(tls)?;
@@ -63,7 +63,7 @@ pub fn client_tls(tls: &TlsConfig) -> anyhow::Result<Option<ClientTls>> {
     if !tls.enabled {
         return Ok(None);
     }
-    crate::thrift_matching::install_tls_crypto_provider();
+    install_tls_crypto_provider();
     let provider = provider();
     let ca_certs = ca_certs(tls)?;
     let builder = ClientConfig::builder_with_provider(provider.clone())
@@ -404,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn mutual_tls_admits_only_clients_signed_by_the_configured_ca() {
-        crate::thrift_matching::install_tls_crypto_provider();
+        install_tls_crypto_provider();
         let dir = tempfile::tempdir().unwrap();
         let ca = new_ca();
         let other = new_ca();
@@ -443,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn host_verification_checks_chain_and_server_name() {
-        crate::thrift_matching::install_tls_crypto_provider();
+        install_tls_crypto_provider();
         let dir = tempfile::tempdir().unwrap();
         let ca = new_ca();
         let other = new_ca();
@@ -478,4 +478,9 @@ mod tests {
             Ok(())
         );
     }
+}
+
+pub fn install_tls_crypto_provider() {
+    // Err means a provider is already installed, which is fine.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }

@@ -4,7 +4,7 @@ use cadence_persistence::{
     matching_sqlite::{SqliteTaskStore, TaskListKey},
 };
 use cadence_proto::{api as p, matching as m};
-use cadence_server::{
+use cadence_matching::{
     grpc_matching::Matching,
     matching_history::{start_error_kind, MatchingHistoryClient, StartErrorKind},
     matching_registry::QueueRegistry,
@@ -80,7 +80,7 @@ async fn matching_delivery_go_history() {
         client.clone(),
         NonZeroU32::new(100000).unwrap(),
     );
-    let state = cadence_server::handlers::AppState::default();
+    let state = cadence_service_core::handlers::AppState::default();
     if !fixture.isolation_groups.is_empty() {
         let blob = |value: serde_json::Value| Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
         let mut config = state.admin.dynamic_config.lock().unwrap();

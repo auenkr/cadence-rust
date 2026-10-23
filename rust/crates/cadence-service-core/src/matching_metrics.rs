@@ -233,7 +233,7 @@ pub const TASK_CATEGORY_TAG: &str = "task_category";
 /// shared host/cluster persistence limiter. Go records the request before the
 /// rate-limited wrapper and classifies its ServiceBusyError as a persistence
 /// busy failure; a domain tag selects the per-domain metric family.
-pub(crate) fn record_persistence_qps_rejection(
+pub fn record_persistence_qps_rejection(
     sink: &dyn MetricSink,
     operation: &'static str,
     domain: Option<&str>,
@@ -504,7 +504,7 @@ impl MatchingMetrics {
         Self(Arc::new(HistogramTagSink(sink)))
     }
 
-    pub(crate) fn membership_view(&self, host: &str, identifier: u32) {
+    pub fn membership_view(&self, host: &str, identifier: u32) {
         self.0.record(MetricEvent {
             name: "hashring_view_identifier",
             kind: MetricKind::Gauge,
@@ -521,7 +521,7 @@ impl MatchingMetrics {
         });
     }
 
-    pub(crate) fn resolver_host_not_found(&self) {
+    pub fn resolver_host_not_found(&self) {
         self.0.record(MetricEvent {
             name: "ring_resolver_error",
             kind: MetricKind::Counter,
@@ -531,7 +531,7 @@ impl MatchingMetrics {
         });
     }
 
-    pub(crate) fn routing_path(&self, path: &str) {
+    pub fn routing_path(&self, path: &str) {
         self.0.record(MetricEvent {
             name: "shard_distributor_resolver_lookups",
             kind: MetricKind::Counter,
@@ -544,7 +544,7 @@ impl MatchingMetrics {
         });
     }
 
-    pub(crate) fn onboarding_percentage(&self, percentage: i64) {
+    pub fn onboarding_percentage(&self, percentage: i64) {
         self.0.record(MetricEvent {
             name: "percentage_onboarded_to_shard_manager",
             kind: MetricKind::Gauge,
@@ -554,7 +554,7 @@ impl MatchingMetrics {
         });
     }
 
-    pub(crate) fn quota_rejection(&self, rejection: crate::matching_quota::QuotaRejection) {
+    pub fn quota_rejection(&self, rejection: crate::matching_quota::QuotaRejection) {
         let mut tags = BTreeMap::new();
         tags.insert("operation".to_owned(), format!("{:?}", rejection.method));
         tags.insert(
@@ -1081,7 +1081,7 @@ impl MatchingMetrics {
         self.task_list_counter(LEASE_FAILURES, context, BTreeMap::new());
     }
 
-    pub(crate) fn scaler_update_counter(&self, context: &PollMetricContext, failed: bool) {
+    pub fn scaler_update_counter(&self, context: &PollMetricContext, failed: bool) {
         self.0.record(MetricEvent {
             name: if failed {
                 "cadence_errors"
