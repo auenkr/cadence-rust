@@ -73,4 +73,6 @@ Resolution: renamed to `sync_match_invalid_isolation_group_poll_falls_back_to_de
 
 ## Clippy result
 
-CLIPPY_RESULT_PLACEHOLDER
+`cargo clippy -p cadence-matching --all-targets -- -D warnings`: exit 0, no warnings (`rust-clippy.log`, `rust-clippy.exit`).
+
+Test log: `rust-lib-tests.log` / `rust-lib-tests.exit` (exit 0).
