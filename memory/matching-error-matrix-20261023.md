@@ -26,4 +26,4 @@ Go `handleErr` (context.go:83): typed errors pass through; anything else becomes
 Mismatches found: 1 (poll near-expired context), fixed with unit test `matching_long_polls_with_nearly_expired_deadline_return_internal_like_go`.
 Not covered (not verified): per-line Thrift exception field comparison; domain-deprecated handling beyond DomainNotActive.
 
-CI run: (filled below)
+CI run: https://github.com/auenkr/cadence-rust/actions/runs/40016290764 sha 42e47c578 conclusion success (first attempt 40016051781 failed: Instant type mismatch, fixed).
