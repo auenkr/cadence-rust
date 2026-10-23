@@ -54,6 +54,10 @@ All appended to `rust/crates/cadence-matching/src/matching_rpc_tests.rs` (helper
 | `matching_rpc_sticky_partition_query_without_parked_poller_never_forwards` | `engine.go:562`/`:1033` pass; `matcher.go:805-806` nil forwarder; `context.go:137` | Recent but unparked sticky poller: query returns `Internal` at the deadline; root poller never finishes |
 | `matching_rpc_sticky_partition_query_without_any_sticky_poller_fails_fast` | `engine.go:1033-1034`, `engine.go:129` | No sticky poller: `Unavailable` with the Go message; root poller never finishes |
 
+CI history on this branch:
+- Run `40036528096` (head `da2ce09c3`): clippy passed; Test failed on `matching_rpc_sticky_partition_query_reaches_only_the_sticky_poller` (`Elapsed`). Cause: a delivered query makes the poll fetch mutable state from history (`grpc_matching.rs:1765-1775`); the fixture used the unreachable peer `127.0.0.1:1`, so the poll outlived the 5 s test timeout. Fixed in the next commit by using `start_fake_history` + `fixture_with_history`, as `matching_rpc_delivers_query_to_decision_poller` does. The other two new tests passed in that run.
+- Run `40036908869` (head `729d4ab81`): **success** (clippy `-D warnings` and `cargo test -p cadence-matching` green, all three new sticky tests included). https://github.com/auenkr/cadence-rust/actions/runs/40036908869
+
 Mixed Go/Rust evidence: not run here. The Go side of these cases is code-read only. A Go-cluster probe would need the `sticky` query path through `tests/matching-service-compat.cjs`, which is out of scope for this check.
 
 ## Method and limits
