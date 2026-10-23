@@ -26,6 +26,7 @@ use cadence_matching::{
 use cadence_persistence::{
     matching_blob::BlobEncoding,
     matching_sqlite::{SqliteTaskStore, TaskListKey},
+    StoredPartitionConfig,
 };
 use cadence_proto::{api as p, matching as m};
 use cadence_service_core::handlers::AppState;
@@ -231,22 +232,18 @@ async fn query_workflow_success_reports_partition_config() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     let durable = durable(state);
-    // Go's gomock manager reports a stored root config (version 1, read/write {0});
-    // Rust returns the stored config and nothing when none is stored, so store one.
-    durable
-        .matching
-        .update_task_list_partition_config(update_request(
-            TASK_LIST,
-            0,
-            Some(root_partition_config(1)),
-        ))
-        .await
-        .unwrap();
     let queue = durable
         .queues
         .get(key(domain_id(), TASK_LIST, 0), 0, now_nanos())
         .await
         .unwrap();
+    // Go's gomock manager reports a root config (version 1, read/write {0}).
+    // Rust does not persist a single-partition config, so seed the cache with it.
+    queue.partitions.push(&StoredPartitionConfig {
+        version: 1,
+        read_partitions: HashMap::from([(0, Vec::new())]),
+        write_partitions: HashMap::from([(0, Vec::new())]),
+    });
     let queries = queue.queries.clone();
     let poller = tokio::spawn(async move {
         let pending = queries.next().await;
