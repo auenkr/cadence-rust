@@ -1,0 +1,20 @@
+[
+  "/mnt/storage/service/cargo-target-final/debug/cadence-matching",
+  "start",
+  "--config",
+  "/mnt/storage/service/gate-runs/backlog-mysql-single/run/rust-matching.yaml",
+  "--root",
+  "/mnt/storage/service/gate-runs/backlog-mysql-single/run",
+  "--services",
+  "matching",
+  "--port",
+  "0",
+  "--history-grpc-port",
+  "39579",
+  "--matching-grpc-port",
+  "52205",
+  "--matching-tchannel-port",
+  "44317",
+  "--data-dir",
+  "/mnt/storage/service/gate-runs/backlog-mysql-single/run/rust-matching-data"
+]
