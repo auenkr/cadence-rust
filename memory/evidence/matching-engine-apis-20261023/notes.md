@@ -138,3 +138,8 @@ cargo-safe rebuilt its sources after the shared cache changed workspaces.
 Clippy and full crate tests remain queued; their results will be appended before
 handoff. The lock wait included other worktrees' builds and a mixed-cluster gate;
 this task never bypassed that lock or ran Cargo alongside the gate.
+
+2026-10-24 00:40 IST checkpoint: all five focused tests passed; no source changes
+since 87860c557. Required all-target Clippy remains queued on /tmp/cargo.lock;
+full crate test is chained after its success. Other worktrees' serialized builds
+and mixed-cluster gates account for the wait. Periodic checks use >=60s intervals.
