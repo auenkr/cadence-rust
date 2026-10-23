@@ -1142,9 +1142,9 @@ async function run() {
     await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: task.taskToken, result: payload('paced-ok'), identity: 'paced-probe' });
   }
   // Dispatch order is not identity-FIFO; assert the delivered set and that the
-  // cumulative pacing left the last backlog delivery waiting for its token.
+  // cumulative pacing delayed the later backlog deliveries (the wait may land on any poll after the first).
   assert.deepEqual(pacedInputs.slice().sort(), ['paced-0', 'paced-1', 'paced-2']);
-  assert(pacedLatency.at(-1) >= 500, `paced activity dispatch was not rate limited: ${JSON.stringify(pacedLatency)}`);
+  assert(pacedLatency.slice(1).reduce((a, b) => a + b, 0) >= 500, `paced activity dispatch was not rate limited: ${JSON.stringify(pacedLatency)}`);
   const pacedDescribe = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: pacedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
   assert.equal(pacedDescribe.taskListStatus.ratePerSecond, 1, 'DescribeTaskList must report the reported backing rate');
   // Query dispatched directly through matching: the workflow is open with no

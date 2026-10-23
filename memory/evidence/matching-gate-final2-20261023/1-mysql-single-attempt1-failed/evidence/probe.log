@@ -1,0 +1,20 @@
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: paced activity dispatch was not rate limited: [86,1776,149]
+    at run (/mnt/storage/service/github/wt/gatefinal2/tests/matching-service-compat.cjs:1147:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: paced activity dispatch was not rate limited: [86,1776,149]
+    at run (/mnt/storage/service/github/wt/gatefinal2/tests/matching-service-compat.cjs:1147:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
