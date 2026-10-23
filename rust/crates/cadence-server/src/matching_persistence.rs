@@ -47,11 +47,11 @@ struct RateLimitedTaskStore {
 }
 
 impl RateLimitedTaskStore {
-    fn permit(&self, operation: &'static str) -> TaskResult<()> {
+    fn permit(&self, operation: &'static str, domain_id: Option<Uuid>) -> TaskResult<()> {
         if self.limiter.allow() {
             Ok(())
         } else {
-            self.limiter.record_rejection(operation, None, Some(operation));
+            self.limiter.record_task_rejection(operation, domain_id);
             Err(MatchingTaskStoreError::Backend {
                 kind: cadence_persistence::matching_task_store::BackendErrorKind::Throttled,
                 message: REJECTED.into(),
@@ -62,8 +62,12 @@ impl RateLimitedTaskStore {
 
 impl MatchingTaskStore for RateLimitedTaskStore {
     fn get_task_list(&self, key: &TaskListKey) -> TaskResult<TaskListRecord> {
-        self.permit("GetTaskList")?;
-        self.store.get_task_list(key)
+        self.permit("GetTaskList", None)?;
+        let started = std::time::Instant::now();
+        let result = self.store.get_task_list(key);
+        self.limiter
+            .record_task_call("GetTaskList", None, started.elapsed(), &result);
+        result
     }
     fn lease(
         &self,
@@ -72,8 +76,16 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         previous_range: i64,
         now_nanos: i64,
     ) -> TaskResult<TaskListRecord> {
-        self.permit("LeaseTaskList")?;
-        self.store.lease(key, kind, previous_range, now_nanos)
+        self.permit("LeaseTaskList", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self.store.lease(key, kind, previous_range, now_nanos);
+        self.limiter.record_task_call(
+            "LeaseTaskList",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
+        result
     }
     fn update_task_list(
         &self,
@@ -82,8 +94,16 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         data: TaskListData,
         now_nanos: i64,
     ) -> TaskResult<()> {
-        self.permit("UpdateTaskList")?;
-        self.store.update_task_list(key, range, data, now_nanos)
+        self.permit("UpdateTaskList", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self.store.update_task_list(key, range, data, now_nanos);
+        self.limiter.record_task_call(
+            "UpdateTaskList",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
+        result
     }
     fn create_tasks_with_domains(
         &self,
@@ -92,9 +112,18 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         now_nanos: i64,
         tasks: &[(Uuid, &AllocatedTask)],
     ) -> TaskResult<()> {
-        self.permit("CreateTask")?;
-        self.store
-            .create_tasks_with_domains(key, range, now_nanos, tasks)
+        self.permit("CreateTask", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self
+            .store
+            .create_tasks_with_domains(key, range, now_nanos, tasks);
+        self.limiter.record_task_call(
+            "CreateTask",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
+        result
     }
     fn get_tasks(
         &self,
@@ -103,17 +132,38 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         max_read_level: i64,
         batch_size: i64,
     ) -> TaskResult<Vec<AllocatedTask>> {
-        self.permit("GetTasks")?;
-        self.store
-            .get_tasks(key, read_level, max_read_level, batch_size)
+        self.permit("GetTasks", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self
+            .store
+            .get_tasks(key, read_level, max_read_level, batch_size);
+        self.limiter
+            .record_task_call("GetTasks", Some(key.domain_id), started.elapsed(), &result);
+        result
     }
     fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> TaskResult<i64> {
-        self.permit("GetTaskListSize")?;
-        self.store.task_list_size(key, ack_level)
+        self.permit("GetTaskListSize", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self.store.task_list_size(key, ack_level);
+        self.limiter.record_task_call(
+            "GetTaskListSize",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
+        result
     }
     fn complete_task(&self, key: &TaskListKey, task_id: i64) -> TaskResult<()> {
-        self.permit("CompleteTask")?;
-        self.store.complete_task(key, task_id)
+        self.permit("CompleteTask", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self.store.complete_task(key, task_id);
+        self.limiter.record_task_call(
+            "CompleteTask",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
+        result
     }
     fn complete_tasks_less_than(
         &self,
@@ -121,13 +171,30 @@ impl MatchingTaskStore for RateLimitedTaskStore {
         inclusive_task_id: i64,
         limit: i64,
     ) -> TaskResult<usize> {
-        self.permit("CompleteTasksLessThan")?;
-        self.store
-            .complete_tasks_less_than(key, inclusive_task_id, limit)
+        self.permit("CompleteTasksLessThan", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self
+            .store
+            .complete_tasks_less_than(key, inclusive_task_id, limit);
+        self.limiter.record_task_call(
+            "CompleteTasksLessThan",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
+        result
     }
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> TaskResult<()> {
-        self.permit("DeleteTaskList")?;
-        self.store.delete_task_list(key, range)
+        self.permit("DeleteTaskList", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self.store.delete_task_list(key, range);
+        self.limiter.record_task_call(
+            "DeleteTaskList",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
+        result
     }
 }
 
@@ -137,11 +204,16 @@ struct RateLimitedDomainSource {
 }
 
 impl RateLimitedDomainSource {
-    fn permit(&self, operation: &'static str, domain: Option<&str>) -> Result<(), DomainMetadataSourceError> {
+    fn permit(
+        &self,
+        operation: &'static str,
+        domain: Option<&str>,
+    ) -> Result<(), DomainMetadataSourceError> {
         if self.limiter.allow() {
             Ok(())
         } else {
-            self.limiter.record_rejection(operation, domain, Some(operation));
+            self.limiter
+                .record_rejection(operation, domain, Some(operation));
             Err(DomainMetadataSourceError::transient(REJECTED))
         }
     }
@@ -190,15 +262,21 @@ impl RateLimitedSemaphoreStore {
         if self.limiter.allow() {
             Ok(())
         } else {
-            self.limiter.record_rejection(operation, Some(domain_id), None);
+            self.limiter
+                .record_rejection(operation, Some(domain_id), None);
             Err(AcquireError::Throttled(REJECTED.into()))
         }
     }
-    fn permit_create(&self, operation: &'static str, domain_id: &str) -> Result<(), SemaphoreError> {
+    fn permit_create(
+        &self,
+        operation: &'static str,
+        domain_id: &str,
+    ) -> Result<(), SemaphoreError> {
         if self.limiter.allow() {
             Ok(())
         } else {
-            self.limiter.record_rejection(operation, Some(domain_id), None);
+            self.limiter
+                .record_rejection(operation, Some(domain_id), None);
             Err(SemaphoreError::Throttled(REJECTED.into()))
         }
     }

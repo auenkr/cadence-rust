@@ -326,6 +326,7 @@ impl MetricSink for M3MetricSink {
             }),
             (MetricKind::Histogram, MetricValue::Duration(value)) => {
                 let bounds = match event.histogram {
+                    Some(HistogramSpec::GoDefault1ms100s) => default_exponential_bounds(),
                     Some(HistogramSpec::GoLow1ms100s) | None => low_1ms100s_bounds(),
                     Some(HistogramSpec::GoMid1To16k) => low_1ms100s_bounds(),
                 };
@@ -349,7 +350,7 @@ impl MetricSink for M3MetricSink {
                     timestamp,
                     tags,
                     bucket: Some((
-                    format!("{index:04}"),
+                        format!("{index:04}"),
                         format!("{}-{}", duration_string(lower), duration_string(upper)),
                     )),
                 });
@@ -693,7 +694,10 @@ impl CompactWriter {
             self.bytes.push(kind);
             self.i16(id);
         }
-        *self.last_field_ids.last_mut().expect("inside compact struct") = id;
+        *self
+            .last_field_ids
+            .last_mut()
+            .expect("inside compact struct") = id;
     }
     fn list_begin(&mut self, element_kind: u8, size: usize) {
         if size <= 14 {
@@ -965,4 +969,10 @@ mod tests {
             .windows(b"scope.two".len())
             .any(|part| part == b"scope.two"));
     }
+}
+
+fn default_exponential_bounds() -> Vec<u64> {
+    std::iter::once(0)
+        .chain((0..=80).map(|index| (1_000_000.0 * 2_f64.powf(index as f64 / 4.0)) as u64))
+        .collect()
 }

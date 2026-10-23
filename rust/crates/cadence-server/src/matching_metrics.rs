@@ -26,6 +26,8 @@ pub enum MetricValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HistogramSpec {
+    /// Go persistence latency: full resolution, scale 2.
+    GoDefault1ms100s,
     /// Go `common/metrics.Low1ms100s`: 1 ms to 100 s intent, scale 1,
     /// with the same 40 sampled exponential buckets (plus sentinel bounds).
     GoLow1ms100s,
@@ -40,6 +42,33 @@ pub struct MetricEvent {
     pub value: MetricValue,
     pub tags: BTreeMap<String, String>,
     pub histogram: Option<HistogramSpec>,
+}
+
+/// Go's exponential histogram metadata is part of the series identity, not
+/// exporter configuration. Apply it before the sink so every backend agrees.
+struct HistogramTagSink(Arc<dyn MetricSink>);
+impl MetricSink for HistogramTagSink {
+    fn record(&self, mut event: MetricEvent) {
+        if let Some(spec) = event.histogram {
+            let (start, end, scale) = match spec {
+                HistogramSpec::GoDefault1ms100s => ("1ms", "17m28.576s", "2"),
+                HistogramSpec::GoLow1ms100s => ("1ms", "17m28.576s", "1"),
+                HistogramSpec::GoMid1To16k => ("8", "524288", "2"),
+            };
+            for (key, value) in [
+                ("histogram_start", start),
+                ("histogram_end", end),
+                ("histogram_scale", scale),
+            ] {
+                event.tags.insert(key.to_owned(), value.to_owned());
+            }
+        }
+        self.0.record(event);
+    }
+
+    fn flush(&self) -> std::io::Result<()> {
+        self.0.flush()
+    }
 }
 
 pub trait MetricSink: Send + Sync + 'static {
@@ -85,11 +114,11 @@ pub const TASKLIST_MANAGERS: &str = "tasklist_managers";
 pub const CADENCE_LATENCY_PER_TASK_LIST: &str = "cadence_latency_per_tl";
 pub const CADENCE_LATENCY_PER_TASK_LIST_NS: &str = "cadence_latency_per_tl_ns";
 pub const DOMAIN_TAG: &str = "domain";
-pub const TASK_LIST_TAG: &str = "task_list";
+pub const TASK_LIST_TAG: &str = "tasklist";
 pub const GO_TASK_LIST_TAG: &str = "tasklist";
 pub const TASK_LIST_TYPE_TAG: &str = "tasklistType";
 pub const MATCHING_HOST_TAG: &str = "matching_host";
-pub const SEMAPHORE_NAME_TAG: &str = "semaphore_name";
+pub const SEMAPHORE_NAME_TAG: &str = "semaphore";
 pub const CALLER_TAG: &str = "caller";
 pub const TRANSPORT_TAG: &str = "transport";
 pub const POLL_SUCCESS: &str = "poll_success_per_tl";
@@ -115,7 +144,8 @@ pub const TASK_LIST_READ_WRITE_PARTITION_MISMATCH: &str = "tasklist_read_write_p
 pub const TASK_LIST_POLLER_PARTITION_MISMATCH: &str = "tasklist_poller_partition_mismatch";
 pub const STANDBY_TASKS_COMPLETED: &str = "standby_cluster_tasks_completed_per_tl";
 pub const STANDBY_TASKS_NOT_STARTED: &str = "standby_cluster_tasks_not_started_per_tl";
-pub const STANDBY_TASKS_COMPLETION_FAILURE: &str = "standby_cluster_tasks_completion_failure_per_tl";
+pub const STANDBY_TASKS_COMPLETION_FAILURE: &str =
+    "standby_cluster_tasks_completion_failure_per_tl";
 pub const RESPOND_QUERY_TASK_FAILED: &str = "respond_query_failed_per_tl";
 pub const CONDITION_FAILED_ERRORS: &str = "condition_failed_errors_per_tl";
 pub const SYNC_MATCH_LATENCY: &str = "syncmatch_latency_per_tl";
@@ -191,10 +221,10 @@ pub const POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY_NS: &str =
 pub const ISOLATION_GROUP_TAG: &str = "isolation_group";
 pub const POLLER_ISOLATION_GROUP_TAG: &str = "poller_isolation_group";
 pub const PERSISTENCE_REQUESTS: &str = "persistence_requests";
-pub const PERSISTENCE_FAILURES: &str = "persistence_failures";
+pub const PERSISTENCE_FAILURES: &str = "persistence_errors";
 pub const PERSISTENCE_ERRORS_BUSY: &str = "persistence_errors_busy";
 pub const PERSISTENCE_REQUESTS_PER_DOMAIN: &str = "persistence_requests_per_domain";
-pub const PERSISTENCE_FAILURES_PER_DOMAIN: &str = "persistence_failures_per_domain";
+pub const PERSISTENCE_FAILURES_PER_DOMAIN: &str = "persistence_errors_per_domain";
 pub const PERSISTENCE_ERRORS_BUSY_PER_DOMAIN: &str = "persistence_errors_busy_per_domain";
 pub const MATCHING_PERSISTENCE_QPS_REJECTIONS: &str = "matching_persistence_qps_rejections";
 pub const TASK_CATEGORY_TAG: &str = "task_category";
@@ -211,7 +241,15 @@ pub(crate) fn record_persistence_qps_rejection(
 ) {
     let mut tags = BTreeMap::new();
     tags.insert(OPERATION_TAG.to_owned(), operation.to_owned());
-    tags.insert("persistence_scope".to_owned(), if go_metered_operation.is_some() { "go" } else { "semaphore" }.to_owned());
+    tags.insert(
+        "persistence_scope".to_owned(),
+        if go_metered_operation.is_some() {
+            "go"
+        } else {
+            "semaphore"
+        }
+        .to_owned(),
+    );
     if let Some(domain) = domain {
         tags.insert(DOMAIN_TAG.to_owned(), go_sanitize_metric_value(domain));
     }
@@ -226,14 +264,25 @@ pub(crate) fn record_persistence_qps_rejection(
         let per_domain = domain.is_some();
         let mut go_tags = BTreeMap::new();
         go_tags.insert(OPERATION_TAG.to_owned(), go_operation.to_owned());
-        go_tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".to_owned());
+        go_tags.insert(IS_RETRY_TAG.to_owned(), "false".to_owned());
+        if domain.is_none() {
+            go_tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".to_owned());
+        }
         if let Some(domain) = domain {
             go_tags.insert(DOMAIN_TAG.to_owned(), go_sanitize_metric_value(domain));
         }
         let counters = if per_domain {
-            [PERSISTENCE_REQUESTS_PER_DOMAIN, PERSISTENCE_ERRORS_BUSY_PER_DOMAIN, PERSISTENCE_FAILURES_PER_DOMAIN]
+            [
+                PERSISTENCE_REQUESTS_PER_DOMAIN,
+                PERSISTENCE_ERRORS_BUSY_PER_DOMAIN,
+                PERSISTENCE_FAILURES_PER_DOMAIN,
+            ]
         } else {
-            [PERSISTENCE_REQUESTS, PERSISTENCE_ERRORS_BUSY, PERSISTENCE_FAILURES]
+            [
+                PERSISTENCE_REQUESTS,
+                PERSISTENCE_ERRORS_BUSY,
+                PERSISTENCE_FAILURES,
+            ]
         };
         for name in counters {
             sink.record(MetricEvent {
@@ -259,10 +308,22 @@ mod persistence_qps_metric_tests {
         assert_eq!(events.len(), 4);
         assert_eq!(events[0].name, MATCHING_PERSISTENCE_QPS_REJECTIONS);
         assert_eq!(events[0].tags["persistence_scope"], "go");
-        assert!(events.iter().any(|event| event.name == PERSISTENCE_REQUESTS));
-        assert!(events.iter().any(|event| event.name == PERSISTENCE_ERRORS_BUSY));
-        assert!(events.iter().any(|event| event.name == PERSISTENCE_FAILURES));
-        assert!(events.iter().filter(|event| event.name == MATCHING_PERSISTENCE_QPS_REJECTIONS).count() == 1);
+        assert!(events
+            .iter()
+            .any(|event| event.name == PERSISTENCE_REQUESTS));
+        assert!(events
+            .iter()
+            .any(|event| event.name == PERSISTENCE_ERRORS_BUSY));
+        assert!(events
+            .iter()
+            .any(|event| event.name == PERSISTENCE_FAILURES));
+        assert!(
+            events
+                .iter()
+                .filter(|event| event.name == MATCHING_PERSISTENCE_QPS_REJECTIONS)
+                .count()
+                == 1
+        );
     }
 
     #[test]
@@ -294,6 +355,7 @@ pub struct InboundMetricContext {
 
 tokio::task_local! {
     static INBOUND_METRIC_CONTEXT: InboundMetricContext;
+    static REQUEST_METRIC_TAGS: BTreeMap<String, String>;
 }
 
 fn go_sanitize_metric_value(value: &str) -> String {
@@ -439,7 +501,57 @@ impl Default for MatchingMetrics {
 
 impl MatchingMetrics {
     pub fn new(sink: Arc<dyn MetricSink>) -> Self {
-        Self(sink)
+        Self(Arc::new(HistogramTagSink(sink)))
+    }
+
+    pub(crate) fn membership_view(&self, host: &str, identifier: u32) {
+        self.0.record(MetricEvent {
+            name: "hashring_view_identifier",
+            kind: MetricKind::Gauge,
+            value: MetricValue::Number(f64::from(identifier)),
+            histogram: None,
+            tags: BTreeMap::from([
+                ("operation".into(), "Hashring".into()),
+                ("service".into(), "cadence-matching".into()),
+                (
+                    "host".into(),
+                    if host.is_empty() { "_unknown_" } else { host }.into(),
+                ),
+            ]),
+        });
+    }
+
+    pub(crate) fn resolver_host_not_found(&self) {
+        self.0.record(MetricEvent {
+            name: "ring_resolver_error",
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            histogram: None,
+            tags: BTreeMap::from([("operation".into(), "ResolverHostNotFound".into())]),
+        });
+    }
+
+    pub(crate) fn routing_path(&self, path: &str) {
+        self.0.record(MetricEvent {
+            name: "shard_distributor_resolver_lookups",
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            histogram: None,
+            tags: BTreeMap::from([
+                ("operation".into(), "ShardDistributorResolver".into()),
+                ("routing_path".into(), path.into()),
+            ]),
+        });
+    }
+
+    pub(crate) fn onboarding_percentage(&self, percentage: i64) {
+        self.0.record(MetricEvent {
+            name: "percentage_onboarded_to_shard_manager",
+            kind: MetricKind::Gauge,
+            value: MetricValue::Number(percentage as f64),
+            histogram: None,
+            tags: BTreeMap::from([("operation".into(), "ShardManagerOnboarding".into())]),
+        });
     }
 
     pub(crate) fn quota_rejection(&self, rejection: crate::matching_quota::QuotaRejection) {
@@ -562,23 +674,7 @@ impl MatchingMetrics {
         context: &PollMetricContext,
         extra: BTreeMap<String, String>,
     ) {
-        let list = match context.task_list_kind {
-            1 => "__sticky__",
-            2 => "__ephemeral__",
-            0 if !context.task_list.is_empty() => context.task_list.as_str(),
-            _ => "_unknown_",
-        };
-        let mut tags = BTreeMap::from([
-            (
-                DOMAIN_TAG.to_owned(),
-                if context.domain.is_empty() {
-                    "_unknown_".to_owned()
-                } else {
-                    context.domain.clone()
-                },
-            ),
-            (TASK_LIST_TAG.to_owned(), go_sanitize_metric_value(list)),
-        ]);
+        let mut tags = self.task_list_metric_tags(name, context);
         tags.extend(extra);
         self.0.record(MetricEvent {
             name,
@@ -620,7 +716,10 @@ impl MatchingMetrics {
             TASK_ISOLATION_LEAK,
             context,
             BTreeMap::from([
-                (ISOLATION_GROUP_TAG.to_owned(), go_sanitize_metric_value(group)),
+                (
+                    ISOLATION_GROUP_TAG.to_owned(),
+                    go_sanitize_metric_value(group),
+                ),
                 ("leak_cause".to_owned(), cause.to_owned()),
             ]),
         );
@@ -635,7 +734,10 @@ impl MatchingMetrics {
         version: Option<i64>,
     ) {
         let mut tags = self.task_list_tags(context);
-        tags.insert("tasklist_root_partition".to_owned(), go_sanitize_metric_value(root));
+        tags.insert(
+            "tasklist_root_partition".to_owned(),
+            go_sanitize_metric_value(root),
+        );
         for (name, value) in [
             (TASK_LIST_PARTITION_CONFIG_NUM_READ, read as f64),
             (TASK_LIST_PARTITION_CONFIG_NUM_WRITE, write as f64),
@@ -678,7 +780,10 @@ impl MatchingMetrics {
         }
         if poller_mismatch {
             let mut tags = tags;
-            tags.insert("isolation_enabled".to_owned(), isolation_enabled.to_string());
+            tags.insert(
+                "isolation_enabled".to_owned(),
+                isolation_enabled.to_string(),
+            );
             self.0.record(MetricEvent {
                 name: TASK_LIST_POLLER_PARTITION_MISMATCH,
                 kind: MetricKind::Gauge,
@@ -754,27 +859,11 @@ impl MatchingMetrics {
     }
 
     pub fn task_list_gauge(&self, name: &'static str, context: &PollMetricContext, value: f64) {
-        let list = match context.task_list_kind {
-            1 => "__sticky__",
-            2 => "__ephemeral__",
-            0 if !context.task_list.is_empty() => context.task_list.as_str(),
-            _ => "_unknown_",
-        };
         self.0.record(MetricEvent {
             name,
             kind: MetricKind::Gauge,
             value: MetricValue::Number(value),
-            tags: BTreeMap::from([
-                (
-                    DOMAIN_TAG.to_owned(),
-                    if context.domain.is_empty() {
-                        "_unknown_".to_owned()
-                    } else {
-                        context.domain.clone()
-                    },
-                ),
-                (TASK_LIST_TAG.to_owned(), go_sanitize_metric_value(list)),
-            ]),
+            tags: self.task_list_metric_tags(name, context),
             histogram: None,
         });
     }
@@ -813,7 +902,7 @@ impl MatchingMetrics {
                 name,
                 kind,
                 value: MetricValue::Duration(elapsed),
-                tags: self.task_list_tags(context),
+                tags: self.task_list_metric_tags(name, context),
                 histogram,
             });
         }
@@ -916,7 +1005,7 @@ impl MatchingMetrics {
                 name,
                 kind,
                 value: MetricValue::Duration(elapsed),
-                tags: self.task_list_tags(context),
+                tags: self.task_list_metric_tags(name, context),
                 histogram,
             });
         }
@@ -992,6 +1081,20 @@ impl MatchingMetrics {
         self.task_list_counter(LEASE_FAILURES, context, BTreeMap::new());
     }
 
+    pub(crate) fn scaler_update_counter(&self, context: &PollMetricContext, failed: bool) {
+        self.0.record(MetricEvent {
+            name: if failed {
+                "cadence_errors"
+            } else {
+                "cadence_requests"
+            },
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            tags: self.scaler_tags(context),
+            histogram: None,
+        });
+    }
+
     pub fn scaler_tick(
         &self,
         context: &PollMetricContext,
@@ -1015,7 +1118,7 @@ impl MatchingMetrics {
                 name,
                 kind: MetricKind::Gauge,
                 value: MetricValue::Number(value),
-                tags: self.task_list_tags(context),
+                tags: self.scaler_tags(context),
                 histogram: None,
             });
         }
@@ -1092,7 +1195,7 @@ impl MatchingMetrics {
                 name,
                 kind,
                 value: MetricValue::Duration(elapsed),
-                tags: self.task_list_tags(context),
+                tags: self.task_list_metric_tags(name, context),
                 histogram,
             });
         }
@@ -1106,6 +1209,16 @@ impl MatchingMetrics {
             _ => "_unknown_",
         };
         BTreeMap::from([
+            (OPERATION_TAG.to_owned(), "TaskListMgr".to_owned()),
+            (
+                TASK_LIST_TYPE_TAG.to_owned(),
+                match context.task_type {
+                    "activity_task" | "activity" => "activity",
+                    "decision_task" | "decision" => "decision",
+                    _ => "_unknown_",
+                }
+                .to_owned(),
+            ),
             (
                 DOMAIN_TAG.to_owned(),
                 if context.domain.is_empty() {
@@ -1118,12 +1231,73 @@ impl MatchingMetrics {
         ])
     }
 
+    fn scaler_tags(&self, context: &PollMetricContext) -> BTreeMap<String, String> {
+        let mut tags = self.task_list_tags(context);
+        tags.insert(OPERATION_TAG.to_owned(), "adaptivescaler".to_owned());
+        tags
+    }
+
+    fn task_list_metric_tags(
+        &self,
+        name: &str,
+        context: &PollMetricContext,
+    ) -> BTreeMap<String, String> {
+        if matches!(
+            name,
+            FORWARDED_PER_TASK_LIST
+                | LOCAL_TO_LOCAL_MATCH
+                | LOCAL_TO_REMOTE_MATCH
+                | REMOTE_TO_LOCAL_MATCH
+                | REMOTE_TO_REMOTE_MATCH
+                | ISOLATION_TASK_MATCH
+                | ISOLATION_SUCCESS
+                | POLL_DECISION_ALREADY_STARTED
+                | POLL_ACTIVITY_ALREADY_STARTED
+                | RESPOND_QUERY_TASK_FAILED
+        ) {
+            if let Ok(tags) = REQUEST_METRIC_TAGS.try_with(Clone::clone) {
+                return tags;
+            }
+            let method = if name == RESPOND_QUERY_TASK_FAILED {
+                "RespondQueryTaskCompleted"
+            } else if context.task_type == "activity_task" {
+                "PollForActivityTask"
+            } else {
+                "PollForDecisionTask"
+            };
+            return Self::request_tags(
+                method,
+                Some(&context.domain),
+                Some((&context.task_list, Some(context.task_list_kind))),
+                None,
+            );
+        }
+        let mut tags = self.task_list_tags(context);
+        if matches!(
+            name,
+            PARTITION_UPSCALE
+                | PARTITION_DOWNSCALE
+                | PARTITION_DRAINED
+                | ISOLATION_REBALANCE
+                | ISOLATION_GROUP_STARTED_POLLING
+                | ISOLATION_GROUP_STOPPED_POLLING
+                | ISOLATION_GROUP_UPSCALE
+                | ISOLATION_GROUP_DOWNSCALE
+                | ISOLATION_GROUP_PARTITIONS
+                | PARTITION_UPSCALE_THRESHOLD
+                | PARTITION_DOWNSCALE_THRESHOLD
+        ) {
+            tags.insert(OPERATION_TAG.to_owned(), "adaptivescaler".to_owned());
+        }
+        tags
+    }
+
     fn task_list_tags_with(
         &self,
         context: &PollMetricContext,
         extra: BTreeMap<String, String>,
     ) -> BTreeMap<String, String> {
-        let mut tags = self.task_list_tags(context);
+        let mut tags = self.scaler_tags(context);
         tags.extend(extra);
         tags
     }
@@ -1266,11 +1440,7 @@ impl MatchingMetrics {
 
     /// Go `AsyncMatchForwardTaskThrottleErrorPerTasklist`.
     pub fn async_forward_throttled(&self, context: &PollMetricContext) {
-        self.task_list_counter(
-            ASYNC_FORWARD_TASK_THROTTLE_ERRORS,
-            context,
-            BTreeMap::new(),
-        );
+        self.task_list_counter(ASYNC_FORWARD_TASK_THROTTLE_ERRORS, context, BTreeMap::new());
     }
 
     /// Go `CadenceErrSemaphoreContextTimeoutCounter` on the request scope.
@@ -1322,7 +1492,7 @@ impl MatchingMetrics {
             start: std::time::Instant::now(),
             finished: false,
         };
-        let result = future.await;
+        let result = REQUEST_METRIC_TAGS.scope(timer.tags.clone(), future).await;
         if let Err(ref error) = result {
             let metric = error.matching_error_metric();
             if metric != CADENCE_FAILURES_PER_TASK_LIST {
@@ -1767,11 +1937,7 @@ mod matcher_metric_tests {
     #[test]
     fn semaphore_context_timeout_counts_on_request_scope() {
         let sink = Arc::new(RecordingMetricSink::default());
-        MatchingMetrics::new(sink.clone()).semaphore_context_timeout(
-            Some("domain-a"),
-            "sem",
-            None,
-        );
+        MatchingMetrics::new(sink.clone()).semaphore_context_timeout(Some("domain-a"), "sem", None);
         let events = sink.events();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, "cadence_errors_semaphore_context_timeout");
@@ -1783,5 +1949,105 @@ mod matcher_metric_tests {
     #[test]
     fn respond_query_failed_uses_go_name() {
         assert_eq!(RESPOND_QUERY_TASK_FAILED, "respond_query_failed_per_tl");
+    }
+}
+
+#[cfg(test)]
+mod go_scope_parity_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn engine_counter_inherits_rpc_scope_instead_of_manager_tags() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let context = PollMetricContext {
+            domain: "payments".into(),
+            task_list: "queue/a".into(),
+            task_list_kind: 0,
+            task_type: "decision_task",
+            poller_isolation_group: String::new(),
+        };
+        metrics
+            .matching_request::<_, (), &'static str>(
+                "QueryWorkflow",
+                Some("payments"),
+                Some(("queue/a", Some(0))),
+                Some(InboundMetricContext {
+                    caller: Some("frontend".into()),
+                    transport: Some("grpc".into()),
+                }),
+                async {
+                    metrics.forwarded_per_task_list(&context);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+        let events = sink.events();
+        let forwarded = events
+            .iter()
+            .find(|event| event.name == "forwarded_per_tl")
+            .unwrap();
+        assert_eq!(forwarded.tags["operation"], "QueryWorkflow");
+        assert_eq!(forwarded.tags["caller"], "frontend");
+        assert_eq!(forwarded.tags["tasklist"], "queue_a");
+        assert!(!forwarded.tags.contains_key("tasklistType"));
+    }
+
+    #[test]
+    fn manager_scaler_and_histogram_dimensions_match_go() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let context = PollMetricContext {
+            domain: "payments".into(),
+            task_list: "queue/a".into(),
+            task_list_kind: 0,
+            task_type: "activity_task",
+            poller_isolation_group: String::new(),
+        };
+        metrics.poller_count(&context, 2);
+        metrics.partition_scale_change(&context, true);
+        metrics.async_match_local(&context, Some(3), Duration::from_millis(1));
+        let events = sink.events();
+        assert_eq!(events[0].name, "poller_count_per_tl");
+        assert_eq!(
+            events[0].tags,
+            BTreeMap::from([
+                ("operation".into(), "TaskListMgr".into()),
+                ("domain".into(), "payments".into()),
+                ("tasklist".into(), "queue_a".into()),
+                ("tasklistType".into(), "activity".into()),
+            ])
+        );
+        assert_eq!(events[1].tags["operation"], "adaptivescaler");
+        for event in events
+            .iter()
+            .filter(|event| event.kind == MetricKind::Histogram)
+        {
+            assert_eq!(
+                event.tags["histogram_scale"],
+                if event.name.ends_with("_counts") {
+                    "2"
+                } else {
+                    "1"
+                }
+            );
+            assert_eq!(
+                event.tags["histogram_end"],
+                if event.name.ends_with("_counts") {
+                    "524288"
+                } else {
+                    "17m28.576s"
+                }
+            );
+        }
+        let tags = MatchingMetrics::request_tags(
+            "AcquireSemaphore",
+            Some("payments"),
+            Some(("lock/a", Some(0))),
+            None,
+        );
+        assert_eq!(tags["semaphore"], "lock_a");
+        assert!(!tags.contains_key("semaphore_name"));
     }
 }

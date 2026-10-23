@@ -543,6 +543,12 @@ impl Scaler {
         self.telemetry = Some((metrics, context));
         self
     }
+    pub(crate) fn record_update_counter(&self, failed: bool) {
+        if let Some((metrics, context)) = &self.telemetry {
+            metrics.scaler_update_counter(context, failed);
+        }
+    }
+
     /// One Go `run()` tick over already-collected metrics. Returns the new
     /// read/write maps when anything changed. A metrics-collection failure is
     /// the caller's cue to reset, like Go's error branch.

@@ -14,6 +14,8 @@ const HOST_QPS_DEFAULT: i64 = 3000;
 const GLOBAL_QPS_DEFAULT: i64 = 0;
 const REFRESH_NANOS: i64 = 5_000_000_000;
 
+type DomainNameResolver = Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>;
+
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,6 +42,7 @@ pub struct MatchingPersistenceLimiter {
     enabled: bool,
     rejected: AtomicU64,
     metric_sink: RwLock<Arc<dyn crate::matching_metrics::MetricSink>>,
+    domain_name: RwLock<DomainNameResolver>,
 }
 
 impl std::fmt::Debug for MatchingPersistenceLimiter {
@@ -81,12 +84,16 @@ impl MatchingPersistenceLimiter {
             enabled,
             rejected: AtomicU64::new(0),
             metric_sink: RwLock::new(Arc::new(crate::matching_metrics::NoopMetricSink)),
+            domain_name: RwLock::new(Arc::new(|_| None)),
         })
     }
 
     /// Attach the configured production sink before Matching listeners start.
     pub fn with_metric_sink(&self, sink: Arc<dyn crate::matching_metrics::MetricSink>) {
-        *self.metric_sink.write().expect("Matching metrics sink lock") = sink;
+        *self
+            .metric_sink
+            .write()
+            .expect("Matching metrics sink lock") = sink;
     }
 
     pub(crate) fn record_rejection(
@@ -102,6 +109,176 @@ impl MatchingPersistenceLimiter {
             domain,
             go_metered_operation,
         );
+    }
+
+    pub fn with_domain_cache(
+        &self,
+        cache: &Arc<crate::matching_domain_cache::MatchingDomainCache>,
+    ) {
+        let cache = Arc::downgrade(cache);
+        *self
+            .domain_name
+            .write()
+            .expect("Matching metric domain resolver lock") = Arc::new(move |id| {
+            cache
+                .upgrade()
+                .and_then(|cache| cache.cached_domain_name(&id.to_string()))
+        });
+    }
+
+    pub(crate) fn record_task_rejection(
+        &self,
+        operation: &'static str,
+        domain_id: Option<uuid::Uuid>,
+    ) {
+        let domain = domain_id.map(|id| {
+            (self
+                .domain_name
+                .read()
+                .expect("Matching metric domain resolver lock"))(id)
+            .unwrap_or_else(|| "_unknown_".into())
+        });
+        self.record_rejection(operation, domain.as_deref(), Some(operation));
+    }
+
+    pub(crate) fn record_task_call<T>(
+        &self,
+        operation: &'static str,
+        domain_id: Option<uuid::Uuid>,
+        elapsed: std::time::Duration,
+        result: &cadence_persistence::matching_task_store::Result<T>,
+    ) {
+        use crate::matching_metrics::*;
+        use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
+        let sink = self.metric_sink.read().expect("Matching metrics sink lock");
+        let mut tags = std::collections::BTreeMap::from([
+            (OPERATION_TAG.to_owned(), operation.to_owned()),
+            (IS_RETRY_TAG.to_owned(), "false".to_owned()),
+        ]);
+        if let Some(id) = domain_id {
+            let domain = (self
+                .domain_name
+                .read()
+                .expect("Matching metric domain resolver lock"))(id);
+            tags.insert(
+                DOMAIN_TAG.to_owned(),
+                domain.unwrap_or_else(|| "_unknown_".into()),
+            );
+        } else {
+            tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".into());
+        }
+        let per_domain = domain_id.is_some();
+        let record = |name, kind, value, histogram| {
+            sink.record(MetricEvent {
+                name,
+                kind,
+                value,
+                tags: tags.clone(),
+                histogram,
+            })
+        };
+        record(
+            if per_domain {
+                PERSISTENCE_REQUESTS_PER_DOMAIN
+            } else {
+                PERSISTENCE_REQUESTS
+            },
+            MetricKind::Counter,
+            MetricValue::Count(1),
+            None,
+        );
+        record(
+            if per_domain {
+                "persistence_latency_per_domain"
+            } else {
+                "persistence_latency"
+            },
+            MetricKind::Timer,
+            MetricValue::Duration(elapsed),
+            None,
+        );
+        let mut histogram_tags = tags.clone();
+        for (key, value) in [
+            ("histogram_start", "1ms"),
+            ("histogram_end", "17m28.576s"),
+            ("histogram_scale", "2"),
+        ] {
+            histogram_tags.insert(key.to_owned(), value.to_owned());
+        }
+        sink.record(MetricEvent {
+            name: if per_domain {
+                "persistence_latency_per_domain_ns"
+            } else {
+                "persistence_latency_ns"
+            },
+            kind: MetricKind::Histogram,
+            value: MetricValue::Duration(elapsed),
+            tags: histogram_tags,
+            histogram: Some(HistogramSpec::GoDefault1ms100s),
+        });
+        if let Err(error) = result {
+            let (name, failure) = match error {
+                MatchingTaskStoreError::ConditionFailed(_) => (
+                    if per_domain {
+                        "persistence_errors_condition_failed_per_domain"
+                    } else {
+                        "persistence_errors_condition_failed"
+                    },
+                    false,
+                ),
+                MatchingTaskStoreError::NotFound => (
+                    if per_domain {
+                        "persistence_errors_entity_not_exists_per_domain"
+                    } else {
+                        "persistence_errors_entity_not_exists"
+                    },
+                    false,
+                ),
+                MatchingTaskStoreError::Backend {
+                    kind: BackendErrorKind::Timeout,
+                    ..
+                } => (
+                    if per_domain {
+                        "persistence_errors_timeout_per_domain"
+                    } else {
+                        "persistence_errors_timeout"
+                    },
+                    true,
+                ),
+                MatchingTaskStoreError::Backend {
+                    kind: BackendErrorKind::Throttled,
+                    ..
+                } => (
+                    if per_domain {
+                        PERSISTENCE_ERRORS_BUSY_PER_DOMAIN
+                    } else {
+                        PERSISTENCE_ERRORS_BUSY
+                    },
+                    true,
+                ),
+                _ => (
+                    if per_domain {
+                        PERSISTENCE_FAILURES_PER_DOMAIN
+                    } else {
+                        PERSISTENCE_FAILURES
+                    },
+                    false,
+                ),
+            };
+            record(name, MetricKind::Counter, MetricValue::Count(1), None);
+            if failure {
+                record(
+                    if per_domain {
+                        PERSISTENCE_FAILURES_PER_DOMAIN
+                    } else {
+                        PERSISTENCE_FAILURES
+                    },
+                    MetricKind::Counter,
+                    MetricValue::Count(1),
+                    None,
+                );
+            }
+        }
     }
 
     /// Consume one backend-operation permit without waiting, as Go's
@@ -272,5 +449,82 @@ mod tests {
         set(&overlay, "matching.persistenceMaxQPS", 1);
         assert!(limiter.allow());
         assert_eq!(limiter.rejected(), 0);
+    }
+}
+
+#[cfg(test)]
+mod metered_task_tests {
+    use super::*;
+    use crate::matching_metrics::*;
+    use cadence_persistence::matching_task_store::MatchingTaskStoreError;
+
+    #[test]
+    fn task_domain_family_omits_task_category_and_preserves_unknown_domain() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        limiter.record_task_call(
+            "GetTasks",
+            Some(uuid::Uuid::nil()),
+            std::time::Duration::ZERO,
+            &Err::<(), _>(MatchingTaskStoreError::NotFound),
+        );
+        let events = sink.events();
+        assert!(events
+            .iter()
+            .any(|event| event.name == "persistence_requests_per_domain"));
+        assert!(events
+            .iter()
+            .any(|event| event.name == "persistence_errors_entity_not_exists_per_domain"));
+        assert!(events
+            .iter()
+            .all(|event| event.tags["domain"] == "_unknown_"
+                && !event.tags.contains_key("task_category")));
+    }
+
+    #[test]
+    fn success_and_condition_failure_use_go_names_and_tags() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        limiter.record_task_call(
+            "GetTasks",
+            None,
+            std::time::Duration::from_millis(3),
+            &Ok::<_, MatchingTaskStoreError>(()),
+        );
+        limiter.record_task_call(
+            "UpdateTaskList",
+            None,
+            std::time::Duration::from_millis(1),
+            &Err::<(), _>(MatchingTaskStoreError::ConditionFailed("lease".into())),
+        );
+        let events = sink.events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_requests")
+                .count(),
+            2
+        );
+        assert!(events
+            .iter()
+            .any(|e| e.name == "persistence_errors_condition_failed"));
+        assert!(!events.iter().any(|e| e.name == "persistence_errors"));
+        assert!(events
+            .iter()
+            .all(|e| e.tags["is_retry"] == "false" && e.tags["task_category"] == "none"));
+        let histogram = events
+            .iter()
+            .find(|e| e.name == "persistence_latency_ns")
+            .unwrap();
+        assert_eq!(histogram.histogram, Some(HistogramSpec::GoDefault1ms100s));
+        assert_eq!(histogram.tags["histogram_scale"], "2");
     }
 }

@@ -417,6 +417,18 @@ impl MetricSink for PrometheusMetricSink {
                 },
             )),
             MetricKind::Histogram => match event.histogram {
+                Some(HistogramSpec::GoDefault1ms100s) => {
+                    let bounds: Vec<u64> = std::iter::once(0)
+                        .chain(
+                            (0..=80)
+                                .map(|index| (1_000_000.0 * 2_f64.powf(index as f64 / 4.0)) as u64),
+                        )
+                        .collect();
+                    Aggregate::Histogram(HistogramAggregate::new(
+                        bounds.iter().map(|n| *n as f64 / 1_000_000_000.0).collect(),
+                        Some(bounds),
+                    ))
+                }
                 Some(HistogramSpec::GoLow1ms100s) => Aggregate::Histogram(HistogramAggregate::new(
                     go_low_1ms100s_bucket_bounds_seconds(),
                     Some(go_low_1ms100s_bucket_bounds_nanos()),

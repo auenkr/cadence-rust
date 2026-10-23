@@ -14,6 +14,7 @@ pub struct Membership {
     changed: tokio::sync::watch::Sender<u64>,
     /// Go's Matching outbound TLS, taken from Matching's own `rpc.tls`.
     peer_tls: Option<crate::grpc_tls::ClientTls>,
+    metrics: Arc<RwLock<crate::matching_metrics::MatchingMetrics>>,
 }
 impl Membership {
     pub fn new(identity: impl Into<Arc<str>>, hosts: Vec<Host>) -> Self {
@@ -23,8 +24,34 @@ impl Membership {
             channels: Arc::default(),
             changed: tokio::sync::watch::channel(0).0,
             peer_tls: None,
+            metrics: Arc::new(RwLock::new(
+                crate::matching_metrics::MatchingMetrics::default(),
+            )),
         }
     }
+    pub fn with_metrics(self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
+        *self
+            .metrics
+            .write()
+            .expect("Matching membership metrics lock") =
+            crate::matching_metrics::MatchingMetrics::new(sink);
+        self
+    }
+
+    pub(crate) fn record_routing_path(&self, path: &str) {
+        self.metrics
+            .read()
+            .expect("Matching membership metrics lock")
+            .routing_path(path);
+    }
+
+    pub(crate) fn record_onboarding(&self, percentage: i64) {
+        self.metrics
+            .read()
+            .expect("Matching membership metrics lock")
+            .onboarding_percentage(percentage);
+    }
+
     #[must_use]
     pub fn with_peer_tls(mut self, peer_tls: Option<crate::grpc_tls::ClientTls>) -> Self {
         self.peer_tls = peer_tls;
@@ -58,7 +85,20 @@ impl Membership {
             old != new
         };
         if changed {
+            // Go Ring.emitHashIdentifier sorts placement addresses descending,
+            // including a trailing newline, and trims FarmHash32 modulo 1000.
+            let mut addresses: Vec<_> = hosts.iter().map(|host| host.address.as_str()).collect();
+            addresses.sort_unstable_by(|a, b| b.cmp(a));
+            let mut view = addresses.join("\n");
+            if !addresses.is_empty() {
+                view.push('\n');
+            }
+            let identifier = cadence_common::membership::fingerprint32(view.as_bytes()) % 1000;
             self.replace(hosts);
+            self.metrics
+                .read()
+                .expect("Matching membership metrics lock")
+                .membership_view(&self.identity, identifier);
         }
         changed
     }
@@ -85,13 +125,21 @@ impl Membership {
             .collect()
     }
     pub(crate) fn owner_by_address(&self, address: &str) -> Option<Host> {
-        self.ring
+        let host = self
+            .ring
             .read()
             .expect("Matching membership lock")
             .hosts()
             .iter()
             .find(|host| host.address.as_str() == address)
-            .cloned()
+            .cloned();
+        if host.is_none() {
+            self.metrics
+                .read()
+                .expect("Matching membership metrics lock")
+                .resolver_host_not_found();
+        }
+        host
     }
     pub(crate) fn hosts(&self) -> Vec<Host> {
         self.ring
@@ -284,5 +332,50 @@ mod tests {
             membership.owner("queue").unwrap_err().message(),
             "Not enough hosts to serve the request"
         );
+    }
+}
+
+#[cfg(test)]
+mod metric_parity_tests {
+    use super::*;
+    use crate::matching_metrics::{MetricKind, MetricValue, RecordingMetricSink};
+
+    #[test]
+    fn changed_ring_view_uses_go_gauge_scope_once() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let membership = Membership::new("local", vec![]).with_metrics(sink.clone());
+        let hosts = vec![Host {
+            address: "peer:7935".into(),
+            identity: "peer".into(),
+            grpc_address: "peer:7835".into(),
+        }];
+        assert!(membership.replace_if_addresses_changed(hosts.clone()));
+        assert!(!membership.replace_if_addresses_changed(hosts));
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, "hashring_view_identifier");
+        assert_eq!(events[0].kind, MetricKind::Gauge);
+        assert_eq!(
+            events[0].tags,
+            std::collections::BTreeMap::from([
+                ("operation".into(), "Hashring".into()),
+                ("service".into(), "cadence-matching".into()),
+                ("host".into(), "local".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn missing_address_uses_go_resolver_scope() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let membership = Membership::new("local", vec![]).with_metrics(sink.clone());
+        assert!(membership.owner_by_address("absent").is_none());
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, "ring_resolver_error");
+        assert_eq!(events[0].kind, MetricKind::Counter);
+        assert_eq!(events[0].value, MetricValue::Count(1));
+        assert_eq!(events[0].tags.len(), 1);
+        assert_eq!(events[0].tags["operation"], "ResolverHostNotFound");
     }
 }

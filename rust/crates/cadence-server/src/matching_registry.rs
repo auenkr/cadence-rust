@@ -1818,8 +1818,9 @@ impl QueueRegistry {
             &metrics,
             |_| None,
         ) {
-            Some((read_partitions, write_partitions)) => self
-                .update_partition_config(
+            Some((read_partitions, write_partitions)) => {
+                scaler.record_update_counter(false);
+                let result = self.update_partition_config(
                     root.clone(),
                     handle,
                     cadence_persistence::StoredPartitionConfig {
@@ -1829,8 +1830,12 @@ impl QueueRegistry {
                     },
                     now,
                 )
-                .await
-                .map(|_| true),
+                .await;
+                if result.is_err() {
+                    scaler.record_update_counter(true);
+                }
+                result.map(|_| true)
+            },
             None => Ok(true),
         }
     }

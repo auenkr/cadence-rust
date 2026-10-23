@@ -2138,6 +2138,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                         // group when it has one.
                         if !forwarded {
                             report_arrival(&queue, &data);
+                            self.metrics.task_list_gauge(
+                                crate::matching_metrics::ESTIMATED_ADD_TASK_QPS,
+                                &crate::matching_metrics::PollMetricContext {
+                                    domain: domain.clone(), task_list: list.name.clone(),
+                                    task_list_kind: list.kind, task_type: "decision_task",
+                                    poller_isolation_group: String::new(),
+                                }, queue.qps.qps());
                         }
                         // Go `trySyncMatch`: a non-forwarded add spends at most 200ms
                         // keeping 1s of tailroom, while a forwarded add trusts the incoming
@@ -2345,6 +2352,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                         let forwarded = !r.forwarded_from.is_empty();
                         if !forwarded {
                             report_arrival(&queue, &data);
+                            self.metrics.task_list_gauge(
+                                crate::matching_metrics::ESTIMATED_ADD_TASK_QPS,
+                                &crate::matching_metrics::PollMetricContext {
+                                    domain: domain.clone(), task_list: list.name.clone(),
+                                    task_list_kind: list.kind, task_type: "activity_task",
+                                    poller_isolation_group: String::new(),
+                                }, queue.qps.qps());
                         }
                         let deadline = if forwarded {
                             parent_deadline.unwrap_or_else(|| {
