@@ -365,7 +365,7 @@ async fn go_dispatch_task_active_offer_without_error_reaches_poller() {
     add.set_timeout(Duration::from_secs(8));
     durable.matching.add_decision_task(add).await.unwrap();
     let response = poll.await.unwrap().unwrap().into_inner();
-    assert!(!response.task_token.is_empty());
+    assert!(!response.task_token.is_empty(), "poll returned {response:?}");
 }
 
 // ---------------------------------------------------------------------------
