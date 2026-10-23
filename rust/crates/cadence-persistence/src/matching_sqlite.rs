@@ -698,6 +698,109 @@ mod tests {
             2
         );
     }
+    fn ids(tasks: Vec<AllocatedTask>) -> Vec<i64> {
+        tasks.into_iter().map(|t| t.task_id).collect()
+    }
+
+    /// Go persistence-tests TestGetTasksWithNoMaxReadLevel (:170): paging by
+    /// (read_level, max] with batch sizes 1, 2, 5 returns ascending IDs.
+    #[test]
+    fn go_suite_get_tasks_paging_is_ascending_and_exclusive() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteTaskStore::create(dir.path().join("a.db"), BlobEncoding::ThriftRW).unwrap();
+        let key = key("page");
+        store.lease(&key, 0, 0, 10).unwrap();
+        // Inserted out of order; reads must still be ascending.
+        store.create_tasks(&key, 1, &[task(13), task(11), task(15), task(12), task(14)]).unwrap();
+        assert_eq!(ids(store.get_tasks(&key, -1, i64::MAX, 1).unwrap()), vec![11]);
+        assert_eq!(ids(store.get_tasks(&key, 11, i64::MAX, 2).unwrap()), vec![12, 13]);
+        assert_eq!(ids(store.get_tasks(&key, 13, i64::MAX, 5).unwrap()), vec![14, 15]);
+    }
+
+    /// Go TestGetTaskListSize (:143): size counts task_id > ack level.
+    #[test]
+    fn go_suite_task_list_size_counts_above_ack_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteTaskStore::create(dir.path().join("b.db"), BlobEncoding::ThriftRW).unwrap();
+        let key = key("size");
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
+        store.lease(&key, 0, 0, 10).unwrap();
+        store.create_tasks(&key, 1, &[task(7)]).unwrap();
+        assert_eq!(store.task_list_size(&key, 7).unwrap(), 0);
+        assert_eq!(store.task_list_size(&key, 6).unwrap(), 1);
+    }
+
+    /// Go TestCompleteTasksLessThan (:260): inclusive bound; each call removes
+    /// at most `limit` of the lowest eligible rows.
+    #[test]
+    fn go_suite_complete_tasks_less_than_limits_delete_lowest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteTaskStore::create(dir.path().join("c.db"), BlobEncoding::ThriftRW).unwrap();
+        let key = key("range");
+        store.lease(&key, 0, 0, 10).unwrap();
+        let all: Vec<_> = (1..=6).map(|i| task(i * 10)).collect();
+        store.create_tasks(&key, 1, &all).unwrap();
+        assert_eq!(store.complete_tasks_less_than(&key, 60, 1).unwrap(), 1);
+        assert_eq!(ids(store.get_tasks(&key, 0, 100, 10).unwrap()), vec![20, 30, 40, 50, 60]);
+        assert_eq!(store.complete_tasks_less_than(&key, 60, 2).unwrap(), 2);
+        assert_eq!(ids(store.get_tasks(&key, 0, 100, 10).unwrap()), vec![40, 50, 60]);
+        assert_eq!(store.complete_tasks_less_than(&key, 60, 10).unwrap(), 3);
+        assert!(store.get_tasks(&key, 0, 100, 10).unwrap().is_empty());
+    }
+
+    /// Go TestLeaseAndUpdateTaskList (:333): successive leases bump the range,
+    /// a stale non-zero range fails, and update with a wrong range is a
+    /// ConditionFailed error while the right range persists partition config.
+    #[test]
+    fn go_suite_lease_and_update_task_list_range_conditions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteTaskStore::create(dir.path().join("d.db"), BlobEncoding::ThriftRW).unwrap();
+        let key = key("aaaaaaa");
+        let first = store.lease(&key, 0, 0, 10).unwrap();
+        assert_eq!((first.range_id, first.data.ack_level), (1, 0));
+        assert!(first.data.adaptive_partition_config.is_none());
+        let second = store.lease(&key, 0, 0, 20).unwrap();
+        assert_eq!(second.range_id, 2);
+        assert!(matches!(store.lease(&key, 0, 1, 30), Err(StorageError::ConditionFailed(_))));
+        store.update_task_list(&key, 2, second.data.clone(), 40).unwrap();
+        assert_eq!(store.get_task_list(&key).unwrap().range_id, 2);
+        assert!(matches!(
+            store.update_task_list(&key, 3, second.data, 50),
+            Err(StorageError::ConditionFailed(_))
+        ));
+    }
+
+    /// Go TestLeaseAndUpdateTaskListSticky/Ephemeral (:433, :467): the leased
+    /// kind is returned and updating at the leased range succeeds. Update
+    /// sets a 24h expiry for sticky (1) and ephemeral (2), 0 for normal.
+    #[test]
+    fn go_suite_sticky_and_ephemeral_kinds_lease_and_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteTaskStore::create(dir.path().join("e.db"), BlobEncoding::ThriftRW).unwrap();
+        for (kind, expiry) in [(1_i16, 86_400_000_000_100_i64), (2, 86_400_000_000_100), (0, 0)] {
+            let key = key(&format!("kind-{kind}"));
+            let leased = store.lease(&key, kind, 0, 10).unwrap();
+            assert_eq!((leased.range_id, leased.data.kind), (1, kind));
+            store.update_task_list(&key, 1, leased.data, 100).unwrap();
+            assert_eq!(store.get_task_list(&key).unwrap().data.expiry_nanos, expiry);
+        }
+    }
+
+    /// Go TestCompleteDecisionTask (:219): completing every returned task by
+    /// ID empties the list; completing again is a no-op.
+    #[test]
+    fn go_suite_complete_task_removes_each_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteTaskStore::create(dir.path().join("f.db"), BlobEncoding::ThriftRW).unwrap();
+        let key = key("complete");
+        store.lease(&key, 0, 0, 10).unwrap();
+        store.create_tasks(&key, 1, &[task(1), task(2), task(3)]).unwrap();
+        for t in store.get_tasks(&key, 0, 100, 5).unwrap() {
+            store.complete_task(&key, t.task_id).unwrap();
+        }
+        assert!(store.get_tasks(&key, 0, 100, 5).unwrap().is_empty());
+    }
+
     #[test]
     fn matching_sqlite_namespaces_and_task_types_are_isolated() {
         let directory = tempfile::tempdir().unwrap();
