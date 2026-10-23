@@ -59,6 +59,8 @@ parser.add_argument('--real-shard-distributor', action='store_true', help='like 
 parser.add_argument('--etcd-image', default=os.environ.get('CADENCE_ETCD_IMAGE', 'quay.io/coreos/etcd:v3.5.5'), help='etcd image for --real-shard-distributor')
 parser.add_argument('--matching-failure-recovery', action='store_true', help='run a two-instance production Matching failure/recovery probe')
 parser.add_argument('--matching-idle-check-seconds', type=int, help='override the Matching idle-task-list check interval in seconds')
+parser.add_argument('--matching-configstore', action='store_true', help='Rust Matching uses dynamicconfig.client: configstore; before the probe a Go helper (go/tests/configstore-seed) writes the dynamic-config row into the Go MySQL cluster_config table, and the probe checks a seeded matching.longPollExpirationInterval is applied (requires --mysql)')
+parser.add_argument('--configstore-seed-binary', type=Path, help='prebuilt go/tests/configstore-seed binary')
 parser.add_argument('--matching-backlog-forward', action='store_true', help='probe backlog forward-to-parent on a two-partition native config: a child backlog task reaches a root-only poller, and a root backlog task reaches a child-only poller (requires --rust-services matching)')
 parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
 args = parser.parse_args()
@@ -719,6 +721,12 @@ if production_matching:
     # isolation settings written above are the ones Rust actually loads.
     rust_text = rust_text.replace('filepath: "config/dynamicconfig/development.yaml"',
         'filepath: ' + json.dumps(str(rust_dynamic_config)))
+    if args.matching_configstore:
+        if not args.mysql:
+            parser.error('--matching-configstore requires --mysql')
+        if rust_text.count('  client: filebased') != 1:
+            raise RuntimeError('could not switch Rust dynamicconfig.client to configstore')
+        rust_text = rust_text.replace('  client: filebased', '  client: configstore')
     rust_config.write_text(rust_text)
     (work / 'rust-matching-command.json').write_text(json.dumps([
         str(rust_matching_binary), 'start', '--config', str(rust_config), '--root', str(work),
@@ -998,6 +1006,27 @@ try:
                     probe_environment['CADENCE_MATCHING_TRANSPORT'] = args.matching_transport
                     if args.matching_backlog_forward:
                         probe_environment['CADENCE_MATCHING_BACKLOG_FORWARD'] = '1'
+                    if args.matching_configstore:
+                        seed_values = {
+                            'matching.longPollExpirationInterval': '"2s"',
+                            'matching.enableStandbyTaskCompletion': 'true',
+                            'matching.enableClientAutoConfig': 'true',
+                            'system.enableTasklistIsolation': 'true',
+                            'system.allIsolationGroups': '["zone-a","zone-b"]',
+                            'system.enableGRPCOutbound': str(args.history_transport == 'grpc').lower(),
+                        }
+                        seed_binary = args.configstore_seed_binary or (work / 'configstore-seed')
+                        if not args.configstore_seed_binary:
+                            subprocess.run(['nice', 'ionice', '-c3', 'go', 'build', '-o', str(seed_binary), './tests/configstore-seed'],
+                                cwd=root / 'go', env={**os.environ, 'GOFLAGS': '-p=2', 'GOMAXPROCS': '2'}, check=True)
+                        seed = subprocess.run([str(seed_binary), f'{mysql_user}:{mysql_password}@{mysql_addr}', mysql_database,
+                            json.dumps({k: json.loads(v) for k, v in seed_values.items()})],
+                            capture_output=True, text=True)
+                        (work / 'configstore-seed.log').write_text(seed.stdout + seed.stderr)
+                        if seed.returncode != 0:
+                            raise RuntimeError(f'configstore seed failed: {seed.stderr}')
+                        results['configstoreSeed'] = {'values': seed_values, 'output': seed.stdout.strip()}
+                        probe_environment['CADENCE_MATCHING_CONFIGSTORE_POLL_MS'] = '2000'
                     if args.cassandra:
                         probe_environment.update({
                             'CADENCE_MATCHING_CASSANDRA_GATE': '1',

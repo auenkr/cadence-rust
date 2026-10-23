@@ -1,0 +1,20 @@
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: configstore long-poll expiry not applied: empty poll took 9006ms, expected about 2000ms
+    at run (/mnt/storage/service/github/wt/gatefinal2/tests/matching-service-compat.cjs:1159:5)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: configstore long-poll expiry not applied: empty poll took 9006ms, expected about 2000ms
+    at run (/mnt/storage/service/github/wt/gatefinal2/tests/matching-service-compat.cjs:1159:5)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}

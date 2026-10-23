@@ -493,6 +493,7 @@ async function run() {
   let secondaryRust;
   let semaphoreEvidence;
   let semaphoreAcquire;
+  let configstoreEvidence;
   let semaphoreOwner;
   try {
     await waitForRustReady('before-restart');
@@ -1147,6 +1148,18 @@ async function run() {
   assert(pacedLatency.slice(1).reduce((a, b) => a + b, 0) >= 500, `paced activity dispatch was not rate limited: ${JSON.stringify(pacedLatency)}`);
   const pacedDescribe = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: pacedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
   assert.equal(pacedDescribe.taskListStatus.ratePerSecond, 1, 'DescribeTaskList must report the reported backing rate');
+  if (process.env.CADENCE_MATCHING_CONFIGSTORE_POLL_MS) {
+    // configstore lane: matching.longPollExpirationInterval was seeded into Go's cluster_config row
+    // (2s); the default is 60s, so an empty direct poll with a 10s deadline only returns early
+    // (an empty response, not DEADLINE_EXCEEDED) if the Rust configstore client applied the row.
+    const expected = Number(process.env.CADENCE_MATCHING_CONFIGSTORE_POLL_MS);
+    const begin = Date.now();
+    const emptyPoll = await directDecisionPoll(directMatchingClient(`127.0.0.1:${rustGrpcPort}`), domainId, `configstore-empty-${id}`, 'configstore');
+    const elapsed = Date.now() - begin;
+    assert(elapsed >= expected - 500 && elapsed <= expected + 4000, `configstore long-poll expiry not applied: empty poll took ${elapsed}ms, expected about ${expected}ms`);
+    assert(!emptyPoll.taskToken || emptyPoll.taskToken.length === 0, 'configstore empty poll returned a task');
+    configstoreEvidence = { seededLongPollExpiryMs: expected, emptyPollElapsedMs: elapsed };
+  }
   // Query dispatched directly through matching: the workflow is open with no
   // pending decision, so Go History routes the query to Rust Matching, which
   // offers it to a waiting decision poller on the same long poll.
@@ -1430,7 +1443,7 @@ async function run() {
         taskList: goMatchingTaskList, taskRowsBeforeGoConsume: Number(pendingRows.stdout) },
     }, null, 2) + '\n');
   }
-  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', backlogForward: backlogForwardEvidence || 'not requested', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', shardDistributor: shardManagerControl ? shardDistributorEvidence : 'not requested', peer, domain, execution, attributes }));
+  console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', backlogForward: backlogForwardEvidence || 'not requested', configstore: configstoreEvidence || 'not requested', processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', shardDistributor: shardManagerControl ? shardDistributorEvidence : 'not requested', peer, domain, execution, attributes }));
   } catch (error) {
     // Keep the probe-body failure visible; the shutdown checks in finally may throw their own error.
     console.error('PROBE BODY FAILED:', error);
