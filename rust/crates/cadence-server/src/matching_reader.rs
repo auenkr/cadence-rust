@@ -506,7 +506,22 @@ impl TaskReader {
                                     break;
                                 }
                                 Ok(false) => (),
-                                Err(_) => {
+                                Err(error) => {
+                                    // Go taskReader counts and logs any completer error
+                                    // except the retryable "task not started".
+                                    if error.message() != "task not started" {
+                                        if let Some(reader_metrics) = dispatch_metrics
+                                            .lock()
+                                            .expect("matching reader metrics lock")
+                                            .as_ref()
+                                        {
+                                            reader_metrics.metrics.task_list_counter_event(
+                                                crate::matching_metrics::BUFFER_UNKNOWN_DISPATCH_ERROR,
+                                                &reader_metrics.context,
+                                            );
+                                        }
+                                        eprintln!("Matching unknown buffered task dispatch error: {error}");
+                                    }
                                     tokio::task::yield_now().await;
                                     continue;
                                 }
@@ -811,6 +826,10 @@ impl TaskReader {
     }
     pub async fn poll(&self) -> Option<AllocatedTask> {
         self.inner.matcher.poll(self.inner.stop.subscribe()).await
+    }
+    /// Go counts invalid groups only when the isolation matcher is enabled.
+    pub(crate) fn isolation_enabled(&self) -> bool {
+        !self.inner.isolated.is_empty()
     }
     pub(crate) fn has_isolation_group(&self, group: &str) -> bool {
         self.inner.isolated.contains_key(group)
@@ -1121,6 +1140,83 @@ mod tests {
             crate::matching_metrics::MetricValue::Number(1.0)
         );
         stop(queue, reader).await;
+    }
+    #[tokio::test]
+    async fn matching_reader_counts_unknown_dispatch_errors_but_not_not_started() {
+        let (_directory, queue, initial, wake) = fixture(0, 3);
+        initial.stop();
+        initial.wait_stopped().await;
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let calls = Arc::new(AtomicI64::new(0));
+        let check: DispatchCheck = {
+            let calls = calls.clone();
+            Arc::new(move |_| {
+                let calls = calls.clone();
+                Box::pin(async move {
+                    match calls.fetch_add(1, Ordering::SeqCst) {
+                        0 => Err(tonic::Status::unavailable("task not started")),
+                        1 => Err(tonic::Status::internal("boom")),
+                        _ => Ok(false),
+                    }
+                })
+            })
+        };
+        let reader = TaskReader::with_dispatch_check_metrics(
+            queue.clone(),
+            wake.clone(),
+            ReaderConfig::default(),
+            Arc::new(|| true),
+            Arc::new(TaskListLimiter::with_defaults()),
+            IsolationConfig::default(),
+            Some(check),
+            Some((
+                crate::matching_metrics::MatchingMetrics::new(sink.clone()),
+                crate::matching_metrics::PollMetricContext {
+                    domain: "d".into(),
+                    task_list: "tl".into(),
+                    task_list_kind: 0,
+                    task_type: "decision_task",
+                    poller_isolation_group: String::new(),
+                },
+            )),
+        );
+        queue.append(&[TaskData::default()], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while calls.load(Ordering::SeqCst) < 3 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let count = sink
+            .events()
+            .iter()
+            .filter(|event| event.name == crate::matching_metrics::BUFFER_UNKNOWN_DISPATCH_ERROR)
+            .count();
+        assert_eq!(count, 1);
+        stop(queue, reader).await;
+    }
+    #[tokio::test]
+    async fn matching_reader_isolation_enabled_only_with_groups() {
+        let (_directory, queue, reader, wake) = fixture(0, 3);
+        assert!(!reader.isolation_enabled());
+        reader.stop();
+        reader.wait_stopped().await;
+        let grouped = TaskReader::with_isolation(
+            queue.clone(),
+            wake,
+            ReaderConfig::default(),
+            Arc::new(|| true),
+            Arc::new(TaskListLimiter::with_defaults()),
+            IsolationConfig {
+                groups: vec!["a".into()],
+                ..Default::default()
+            },
+        );
+        assert!(grouped.isolation_enabled());
+        assert!(grouped.has_isolation_group("a") && !grouped.has_isolation_group("z"));
+        stop(queue, grouped).await;
     }
     async fn wait_read(queue: &DurableTaskQueue, expected: i64) {
         tokio::time::timeout(Duration::from_secs(2), async {

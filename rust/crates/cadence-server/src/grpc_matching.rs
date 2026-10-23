@@ -1761,8 +1761,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                     } else {
                         // Go standby getTask polls only queryTaskC, never the
                         // durable backlog or forwarded workflow tasks.
-                        tokio::time::sleep(expiration).await;
-                        Ok(m::PollForDecisionTaskResponse::default())
+                        // The query poll is forwarded to the parent (PollForQuery).
+                        queue.dispatcher.forward_query_poll(payload, expiration, lifecycle).await
                     }
                 }=>
                     result.map(|mut response| {
@@ -2608,6 +2608,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 Some(permit) => {
                                     permits.push(permit);
                                     let forwarded_from = list.name.clone();
+                                    let forwarded_from_name = forwarded_from.clone();
                                     let forward_context =
                                         crate::matching_metrics::PollMetricContext {
                                             domain: payload.domain.clone(),
@@ -2640,6 +2641,14 @@ impl m::matching_api_server::MatchingApi for Matching {
                                             &forward_context,
                                             forward_started.elapsed(),
                                         );
+                                        // Go forwarder.handleErr maps a parent ServiceBusy to
+                                        // ErrForwarderSlowDown: keep waiting for a local poller.
+                                        if result.as_ref().err().is_some_and(crate::matching_query::query_forward_slow_down) {
+                                            permits.pop();
+                                            force_local = true;
+                                            list.name = forwarded_from_name;
+                                            continue;
+                                        }
                                         return result;
                                     }
                                     in_process_forward_metrics.push((
