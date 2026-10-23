@@ -1018,7 +1018,6 @@ mod tests {
             name: "/__cadence_sys/tl/1".into(),
             base_name: "tl".into(),
             kind: 1,
-            ..Default::default()
         }) else {
             panic!("task list is not a struct")
         };
