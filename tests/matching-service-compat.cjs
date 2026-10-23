@@ -217,6 +217,7 @@ async function sdRestartScenario(label, domain, id) {
 // launcher's read-only "assign" op), waits until that executor reports the shard READY and then sends
 // the task list's RPCs to that executor's gRPC port.
 const realShardOwnerPorts = new Map();
+const ringOwnedTaskLists = new Set();
 const realOwnerClients = new Map();
 async function registerShardWithRealManager(shardName) {
   managedShardNames.add(shardName);
@@ -233,7 +234,7 @@ async function registerShardWithRealManager(shardName) {
         const status = reports[shardName]?.Status ?? reports[shardName]?.status;
         const port = String((current.Metadata || current.metadata || {}).grpc || '');
         if (port && (status === 1 || status === 'READY' || status === 'ready' || status === 'ShardStatusREADY')) {
-          realShardOwnerPorts.set(shardName, port);
+          if (!ringOwnedTaskLists.has(shardName)) realShardOwnerPorts.set(shardName, port);
           return;
         }
         lastProblem = `owner ${ownerId} status ${status}`;
@@ -264,6 +265,16 @@ function call(service, method, request) {
       await registerShardWithGoManager(taskListName);
       try { return await callRpc(service, method, request); } catch (error) {
         if (attempt >= 8 || !/not owned by this host/.test(error.message)) throw error;
+        // Go excludes short-lived task lists from the shard distributor (errIfShardOwnershipLost), so for
+        // them the hash-ring owner named in the typed error is the one to follow.
+        const ringOwner = /OwnedBy: ([^,\s]+)/.exec(error.message)?.[1];
+        const ownerPort = ringOwner && ringOwner !== 'not' ? ringOwner.split(':').at(-1) : undefined;
+        if (ownerPort) {
+          const stats = (await shardManagerCommand({ op: 'stats' })) || {};
+          const owner = Object.values(stats).find(e => String((e.Metadata || e.metadata || {}).tchannel) === ownerPort);
+          const grpcPort = owner && String((owner.Metadata || owner.metadata || {}).grpc);
+          if (grpcPort) { ringOwnedTaskLists.add(taskListName); realShardOwnerPorts.set(taskListName, grpcPort); }
+        }
         await new Promise(resolve => setTimeout(resolve, 300));
       }
     }
