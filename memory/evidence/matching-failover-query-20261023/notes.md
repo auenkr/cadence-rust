@@ -38,4 +38,8 @@ Go does define `matching.errorInjectionRate`. This is not an alias for persisten
 
 Focused command: `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe test -p cadence-matching --lib standby` exited **0**, 10 passed, 0 failed (`focused.log`, `focused.exit`). Executed against source commit `016462f42` (full SHA in `focused-source-commit.txt`; source hashes in `focused-source-sha256.txt`).
 
-Pending: final crate tests and clippy. All cargo commands run from the worktree `rust/` directory through cargo-safe with the user-requested shared target, in tmux session `cadence-rust`. No mixed-cluster gate is claimed by this change. This is unit and local RPC-server evidence, not a full service parity or deployment claim.
+Final crate test: `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe test -p cadence-matching` exited **0** on 2026-10-24 (Asia/Kolkata). Library: 448 passed, 0 failed, 3 ignored; main/doc tests: 0; two Go-dependent integration tests ignored. `test.log` and `test.exit` record the run. The seven new regressions all passed, including active forwarding and preserving local History delivery. Final code is `fb380b574` (full SHA in `source-commit.txt`, hashes in `source-sha256.txt`; hashes rechecked after the run).
+
+The ignored library tests are the existing activity source-domain parity gap and two Go TChannel oracle tests. Integration ignores are Go History delivery and Go shard-distributor interoperability. They were not enabled or claimed as evidence here.
+
+Pending: final clippy. All cargo commands run from the worktree `rust/` directory through cargo-safe with the user-requested shared target, in tmux session `cadence-rust`. No mixed-cluster gate is claimed by this change. This is unit and local RPC-server evidence, not a full service parity or deployment claim.
