@@ -14,3 +14,6 @@ Result: every Go effect is already ported and tested. No code change.
 | Sticky queue cleanup | none in the callback | none | n/a |
 
 Not a gap: Go's errShutdown for a stopped manager is only logged; Rust's registry.get reloads a stopped owner instead, which is an equivalent outcome (poll set empty).
+
+## Validation (base ddd0d59b6, run from rust/)
+check exit 0, clippy -D warnings exit 0, test --no-fail-fast exit 0: 396 passed, 0 failed, 2 ignored. Logs and .exit files alongside. (First attempt exit 101 was a wrong cwd, rerun from rust/.)
