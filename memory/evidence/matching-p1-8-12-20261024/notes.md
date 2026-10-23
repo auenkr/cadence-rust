@@ -17,18 +17,18 @@ Still open: a live two-node comparison of `owner_host_name` for the same members
 
 ## P1-12: matcher_test port. ONE case added
 
-Go `testRemoteSyncMatch` and `TestSyncMatchFailure` were checked against the Rust tests in `matching_dispatch.rs:2626-2719`.
+Go `testRemoteSyncMatch` and `TestSyncMatchFailure` were checked against the Rust tests in `matching_dispatch.rs:2626-2770`.
 
-What was already covered: the four remote-sync forward tests (`matching_dispatch.rs:2670-2689`) and the decision-add wire fields (`matching_dispatch.rs:2291-2320`, which asserts `forwarded_from` and list name).
+What was already covered: the four remote-sync forward tests (`matching_dispatch.rs:2670-2689` (unchanged)) and the decision-add wire fields (`matching_dispatch.rs:2291-2320`, which asserts `forwarded_from` and list name).
 
-Gap found: the map says Go's local-offer-then-forward step is not asserted. In Go `taskMatcherImpl.Offer` (`go/service/matching/tasklist/matcher.go:150-250`), a parked local poller takes the task before any forward. Rust does the same in `accept_forwarded_backlog` (`matching_dispatch.rs:466-503`, local `offer` at `:488`, forward at `:498`), but no test checked that the parent is skipped.
+Gap found: the map says Go's local-offer-then-forward step is not asserted. In Go `taskMatcherImpl.Offer` (`go/service/matching/tasklist/matcher.go:150-250`), a parked local poller takes the task before any forward. Rust does the same in `accept_forwarded_backlog` (`matching_dispatch.rs:466-503`, local `offer` at `:489`, forward at `:498`), but no test checked that the parent is skipped.
 
 Change: added `matching_backlog_offer_prefers_local_poller_before_forwarding` (`matching_dispatch.rs:2691`, after `matching_isolation_remote_sync_match_blocking_waits_for_root_poller`). A child with a parked local poller gets the task locally, and the recording parent receives no add. About 45 lines, test only, no production change.
 
 `TestSyncMatchFailure` (SKIPPED, behavior matches at the caller):
 - Go: `Offer` swallows any forward error and returns `(false, nil)` (`matcher.go:222-240`).
-- Rust internal: `forward_backlog_task` returns `Err(ForwardError::SlowDown)` (`matching_dispatch.rs:348`), and the existing test pins that (`matching_dispatch.rs:2698-2719`).
-- Rust wire caller: maps every forward error to "not matched" with `.ok()` (`grpc_matching.rs:1559-1566`), so the persisted outcome matches Go.
+- Rust internal: `forward_backlog_task` returns `Err(ForwardError::SlowDown)` (`matching_dispatch.rs:348`), and the existing test pins that (`matching_dispatch.rs:2740`, `matching_sync_match_failure_reports_busy_without_matching`).
+- Rust wire caller: maps every forward error to "not matched" with `.ok()` (`grpc_matching.rs:1568`), so the persisted outcome matches Go.
 - The divergence is only the internal error type, so no production change was made.
 
 Other PARTIAL rows in the remote family (`matcher_test` 11 PARTIAL in the test map) are not ported here. Next block to port: `TestQueryRemoteSyncMatch` / `TestQueryRemoteSyncMatchError` (`go/service/matching/tasklist/matcher_test.go:317`, `:368`).
