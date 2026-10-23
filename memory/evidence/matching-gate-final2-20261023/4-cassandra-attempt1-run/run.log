@@ -1,0 +1,13 @@
+ 01:58:52 up 14 days, 15:26,  1 user,  load average: 0.59, 1.73, 3.72
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       5.0Gi       534Mi       371Mi       2.8Gi       2.7Gi
+Swap:           11Gi       3.0Gi       8.5Gi
+ 01:58:52 up 14 days, 15:26,  1 user,  load average: 0.59, 1.73, 3.72
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       5.0Gi       531Mi       371Mi       2.8Gi       2.7Gi
+Swap:           11Gi       3.0Gi       8.5Gi
+Go baseline artifacts: /tmp/gatefinal2/l4/run
+Traceback (most recent call last):
+  File "/mnt/storage/service/github/wt/gatefinal2/tests/run-go-service-baseline.py", line 1060, in <module>
+    raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+RuntimeError: Go baseline probe failed; see /tmp/gatefinal2/l4/run/probe.log

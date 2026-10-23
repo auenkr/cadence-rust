@@ -1,0 +1,14 @@
+ 02:01:46 up 14 days, 15:29,  1 user,  load average: 0.86, 1.37, 3.23
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       4.9Gi       1.3Gi       372Mi       2.1Gi       2.8Gi
+Swap:           11Gi       3.1Gi       8.5Gi
+ 02:01:46 up 14 days, 15:29,  1 user,  load average: 0.86, 1.37, 3.23
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       4.9Gi       1.3Gi       372Mi       2.1Gi       2.8Gi
+Swap:           11Gi       3.1Gi       8.5Gi
+Go baseline artifacts: /tmp/gatefinal2/l4/run
+Selected evidence copied to /mnt/storage/service/github/wt/gatefinal2/memory/evidence/matching-gate-final2-20261023/4-cassandra/evidence: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-before-restart.log', 'rust-server-logs/rust-server-secondary.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_cassandra.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Traceback (most recent call last):
+  File "/mnt/storage/service/github/wt/gatefinal2/tests/run-go-service-baseline.py", line 1060, in <module>
+    raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+RuntimeError: Go baseline probe failed; see /tmp/gatefinal2/l4/run/probe.log

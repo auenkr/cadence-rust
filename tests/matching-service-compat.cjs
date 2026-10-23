@@ -539,7 +539,7 @@ async function run() {
       const acquired = grants.map((grant, index) => ({ grant, owner: owners[index] }))
         .filter(({ grant }) => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_ACQUIRED');
       const unavailable = grants.filter(grant => grant.outcome === 'SEMAPHORE_ACQUIRE_OUTCOME_NO_SLOT');
-      assert.equal(acquired.length, 1, 'Cassandra semaphore capacity one must grant exactly one concurrent owner');
+      assert.equal(acquired.length, 1, `Cassandra semaphore capacity one must grant exactly one concurrent owner; grants=${JSON.stringify(grants)}`);
       assert.equal(unavailable.length, 1, 'Cassandra semaphore capacity one must reject the competing owner');
       const expectedToken = Number(acquired[0].grant.tokenId);
       const stored = cassandraCommand(['verify-semaphore', domainId, semaphoreName, acquired[0].owner, String(expectedToken)], 'semaphore-before-recovery');
