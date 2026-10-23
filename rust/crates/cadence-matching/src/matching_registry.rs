@@ -3135,6 +3135,44 @@ mod tests {
         registry.sweep_idle(base + 2 * TTL, false).await.unwrap();
         assert!(adding.queue.is_stopped());
     }
+    // Go: TestRefreshTaskListPartitionConfig (task_list_manager_test.go:1380), cases "refresh from
+    // request" and "ignore older version". A pushed config replaces the cached one only when its
+    // version is newer. The database-refresh and failed-refresh cases are not ported (see inventory).
+    #[tokio::test]
+    async fn refresh_partition_config_from_request_ignores_older_versions() {
+        use cadence_persistence::StoredPartitionConfig;
+        let partitions = |version: i64, count: i32| StoredPartitionConfig {
+            version,
+            read_partitions: (0..count).map(|id| (id, Vec::new())).collect(),
+            write_partitions: (0..count).map(|id| (id, Vec::new())).collect(),
+        };
+        let (_dir, _store, registry, key) = fixture();
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        registry
+            .refresh_partition_config(key.clone(), handle.clone(), Some(partitions(2, 3)))
+            .await
+            .unwrap();
+        let cached = handle.partitions.get().unwrap();
+        assert_eq!((cached.version, cached.read_partitions.len()), (2, 3));
+
+        registry
+            .refresh_partition_config(key.clone(), handle.clone(), Some(partitions(3, 2)))
+            .await
+            .unwrap();
+        registry
+            .refresh_partition_config(key.clone(), handle.clone(), Some(partitions(2, 3)))
+            .await
+            .unwrap();
+        let cached = handle.partitions.get().unwrap();
+        assert_eq!(
+            (
+                cached.version,
+                cached.read_partitions.len(),
+                cached.write_partitions.len()
+            ),
+            (3, 2, 2)
+        );
+    }
     // Go: TestTaskListManagerImpl_HasPollerAfter (task_list_manager_test.go:1343). An outstanding
     // poller counts, and so does one that finished after the query time; Go's zero time.Time{}
     // is before every poll, which i64::MIN mirrors here.

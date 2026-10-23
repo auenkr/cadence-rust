@@ -37,12 +37,12 @@ Status legend:
 | 16 | TestTaskListManagerGetTaskBatch_ReadBatchDone (1196) | - | NOT-PORTED: depends on `getTaskBatch` `isReadBatchDone` return value, which has no Rust analogue (see row 14). |
 | 17 | TestTaskExpiryAndCompletion (1241) | `matching_reader.rs::matching_reader_dispatch_expiry_distinguishes_active_and_passive_heads` (indirect) | NOT-PORTED: the Go test asserts task-GC row counts under two thresholds (`MaxTaskDeleteBatchSize=2`, `MaxTimeBetweenTaskDeletes=1ns`) after polls. The Rust GC batch and time knobs are not wired to this assertion. Follow-up. |
 | 18 | TestTaskListManagerImpl_HasPollerAfter (1343) | `matching_registry.rs::has_poller_after_reports_outstanding_or_finished_pollers` | PORTED (outstanding and finished-poller sub-cases in one sequenced test) |
-| 19 | TestRefreshTaskListPartitionConfig (1380) | - | PENDING (group 4) |
-| 20 | TestUpdateTaskListPartitionConfig (1498) | - | PENDING (group 4) |
-| 21 | TestRefreshTaskListPartitionConfigConcurrency (1703) | - | PENDING (group 4) |
-| 22 | TestUpdateTaskListPartitionConfigConcurrency (1720) | - | PENDING (group 4) |
-| 23 | TestManagerStart_RootPartition (1739) | - | PENDING (group 4) |
-| 24 | TestManagerStart_NonRootPartition (1777) | - | PENDING (group 4) |
+| 19 | TestRefreshTaskListPartitionConfig (1380) | `matching_registry.rs::refresh_partition_config_from_request_ignores_older_versions` | PARTIAL: "refresh from request" and "ignore older version" are ported. "refresh from database" and "failed to refresh from database" are NOT-PORTED: they need mocked `GetTaskList` results and an injected error. The Rust store is SQLite with no fault hook. Follow-up. |
+| 20 | TestUpdateTaskListPartitionConfig (1498) | `matching_rpc_tests.rs::matching_rpc_native_partition_cache_updates_refreshes_and_recovers` (RPC path, indirect) | NOT-PORTED: the Go cases (no-op, nil pointer, update, version fencing, persistence errors) use mocked `UpdateTaskList` expectations. Needs a Rust update-path harness over SQLite. Follow-up. |
+| 21 | TestRefreshTaskListPartitionConfigConcurrency (1703) | `matching_rpc_tests.rs::matching_rpc_native_partition_concurrent_versions_and_fencing` (indirect) | PARTIAL: concurrent refresh is covered at the RPC level. The Go version pins a per-manager lock order that is not asserted directly. |
+| 22 | TestUpdateTaskListPartitionConfigConcurrency (1720) | `matching_rpc_tests.rs::matching_rpc_native_partition_concurrent_versions_and_fencing` (indirect) | PARTIAL: same as row 21, update side. |
+| 23 | TestManagerStart_RootPartition (1739) | `matching_registry.rs::shard_policy_accepts_local_assignment_and_rechecks_before_publish` (indirect) | PARTIAL: root start is covered by ownership policy rechecks. The Go direct `Start` partition assertions are not ported. |
+| 24 | TestManagerStart_NonRootPartition (1777) | `matching_rpc_tests.rs::matching_rpc_child_partition_add_falls_back_to_local_persist` (indirect) | PARTIAL: child partition add and local-persist fallback are covered at the RPC level. Direct `Start` assertions are not ported. |
 | 25 | TestDispatchTask (1822) | - | PENDING (group 5) |
 | 26 | TestGetNumPartitions (1953) | - | PENDING (group 5) |
 | 27 | TestDisconnectBlockedPollers (1961) | - | PENDING (group 5) |
@@ -54,4 +54,5 @@ Each group is pushed to `matching-tlm-tests-20261023` and run with `rust-ci.yml`
 
 - Group 1 (Go 2, 5, 6, 7, 8, 9): commit `be8d3127f`, run https://github.com/auenkr/cadence-rust/actions/runs/40010474303, conclusion success. The five new tests in `matching_registry.rs` ran and passed: `unload_notifies_registry_once_and_second_unload_is_noop`, `idle_check_unloads_only_after_full_ttl_without_activity`, `loaded_owner_reports_zero_qps_before_arrivals`, `describe_by_domain_lists_loaded_root_without_config_or_pollers`, `append_after_writer_stop_fails_without_persisting`. Crate result: 495 passed, 0 failed, 9 ignored.
 - Group 2 (Go 1, 3, 4, 14, 15, 16): commit `cde29f739`, run https://github.com/auenkr/cadence-rust/actions/runs/40011223704, conclusion success. New reader tests `stop_joins_pump_blocked_on_buffered_task_without_poller` and `matching_reader_read_level_advances_past_expired_rows_without_ack` passed. Go 14, 15, 16 are not fully ported (see rows).
-- Group 3 (Go 10, 11, 12, 13, 17, 18): only Go 18 is a new port (`has_poller_after_reports_outstanding_or_finished_pollers`). Go 10, 12 and 17 are NOT-PORTED with reasons; Go 11 and 13 are PARTIAL. CI: pending
+- Group 3 (Go 10, 11, 12, 13, 17, 18): only Go 18 is a new port (`has_poller_after_reports_outstanding_or_finished_pollers`). Go 10, 12 and 17 are NOT-PORTED with reasons; Go 11 and 13 are PARTIAL. CI: commit `2f6e726cc`, run https://github.com/auenkr/cadence-rust/actions/runs/40011880148, conclusion success (`has_poller_after_reports_outstanding_or_finished_pollers` ok).
+- Group 4 (Go 19 to 24): one new port (`refresh_partition_config_from_request_ignores_older_versions`, covering Go 19's request and older-version cases). Go 20 is NOT-PORTED. Go 21 to 24 are PARTIAL via existing RPC or registry tests. CI: pending
