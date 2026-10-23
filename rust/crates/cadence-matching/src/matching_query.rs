@@ -292,11 +292,13 @@ pub fn query_outcome(
             partition_config: None,
         });
     }
-    Err(Status::invalid_argument(if result.error_message.is_empty() {
-        "Query failed.".to_string()
-    } else {
-        result.error_message
-    }))
+    // Go `QueryFailedError{Message: worker error}`: typed detail, message verbatim.
+    Err(crate::grpc::detailed_status(
+        tonic::Code::InvalidArgument,
+        result.error_message,
+        "QueryFailedError",
+        p::QueryFailedError {},
+    ))
 }
 
 /// Go `forwarder.handleErr`: a parent `ServiceBusyError` becomes

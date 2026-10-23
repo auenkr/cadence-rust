@@ -462,6 +462,16 @@ fn queue_status(error: QueueError) -> Status {
     }
     Status::internal(error.to_string())
 }
+/// Go `errRemoteSyncMatchFailed`: gRPC Unavailable with the typed detail, so
+/// thrift AddDecisionTask/AddActivityTask report RemoteSyncMatchedError.
+pub(crate) fn remote_sync_match_failed() -> Status {
+    crate::grpc::detailed_status_type(
+        tonic::Code::Unavailable,
+        "remote sync match failed",
+        "type.googleapis.com/uber.cadence.shared.v1.RemoteSyncMatchedError".into(),
+        cadence_proto::shared::RemoteSyncMatchedError {},
+    )
+}
 impl TaskDispatcher {
     pub(crate) async fn accept_forwarded_backlog(
         &self,
@@ -472,7 +482,7 @@ impl TaskDispatcher {
     ) -> Result<(), Status> {
         let source_domain = uuid::Uuid::parse_str(source_domain)
             .map_err(|_| Status::invalid_argument("DomainUUID is not valid."))?;
-        let matcher = self.sync_matcher.as_ref().ok_or_else(|| Status::unavailable("remote sync match failed"))?;
+        let matcher = self.sync_matcher.as_ref().ok_or_else(remote_sync_match_failed)?;
         let root = cadence_common::task_list::TaskListName::parse(parent_name)
             .map_err(|_| Status::invalid_argument("TaskList is not valid."))?
             .is_root();
@@ -501,7 +511,7 @@ impl TaskDispatcher {
                 }
             }
         }
-        Err(Status::unavailable("remote sync match failed"))
+        Err(remote_sync_match_failed())
     }
 
     pub(crate) fn reader_should_reload(&self) -> bool {
