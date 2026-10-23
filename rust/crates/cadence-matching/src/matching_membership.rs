@@ -93,7 +93,7 @@ impl Membership {
             if !addresses.is_empty() {
                 view.push('\n');
             }
-            let identifier = cadence_common::membership::fingerprint32(view.as_bytes()) % 1000;
+            let identifier = cadence_common::membership::hash32(view.as_bytes()) % 1000;
             self.replace(hosts);
             self.metrics
                 .read()
@@ -518,11 +518,8 @@ mod go_membership_port_tests {
     }
 
     // Go hashring_test.go TestEmitHashringView. Go's emitHashIdentifier hashes the
-    // descending address list with farm.Hash32, but Rust hashes it with
-    // fingerprint32 (Go Fingerprint32 used by the ring). Ignored until the
-    // identifier path is fixed.
+    // descending address list with farm.Hash32, as does the Rust view identifier.
     #[test]
-    #[ignore = "parity gap: hashring view identifier uses fingerprint32, Go uses farm.Hash32; Go hashring.go:360-396, hashring_test.go:463"]
     fn go_hashring_view_identifier_matches_go_emit_vectors() {
         fn identifier(addresses: &[&str]) -> f64 {
             let sink = Arc::new(RecordingMetricSink::default());

@@ -136,9 +136,11 @@ Total 41.
 - G6 Shard-distributor resolver pass-through surface (Start/Stop/Subscribe/Members/MemberCount/Refresh): no Rust equivalent.
 - G7 `parity gap: hashring view identifier uses fingerprint32, Go uses farm.Hash32; Go hashring.go:360-396, hashring_test.go:463`.
   Go `emitHashIdentifier` calls `farm.Hash32` over the descending address list; Rust `replace_if_addresses_changed` calls
-  `cadence_common::membership::fingerprint32` (Go `Fingerprint32`, which the ring uses). `cadence-persistence` already uses
-  `farmhash::hash32` with Go-verified vectors, so the fix is likely a one-line switch to `farmhash::hash32`. Not changed (no program
-  logic change allowed); the ignored test pins Go's values.
+  `cadence_common::membership::fingerprint32` (Go `Fingerprint32`, which the ring uses). **Fixed** on branch
+  `matching-hashring-view-20261024`: the view identifier now calls the new `cadence_common::membership::hash32`, a thin wrapper over
+  the existing `farmhash::hash32` (Go-verified in cadence-persistence). `cadence-matching` has no direct `farmhash` dependency, so the
+  wrapper avoids a new Cargo edge. The test `go_hashring_view_identifier_matches_go_emit_vectors` is un-ignored (expects 835, 835, 242).
+  CI run: pending, record the run URL and conclusion here after it finishes.
 
 ## CI
 
