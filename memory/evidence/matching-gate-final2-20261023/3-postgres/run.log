@@ -1,0 +1,9 @@
+ 01:56:42 up 14 days, 15:24,  1 user,  load average: 0.98, 2.22, 4.14
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       5.4Gi       338Mi       370Mi       2.7Gi       2.3Gi
+Swap:           11Gi       3.4Gi       8.2Gi
+CREATE DATABASE
+CREATE DATABASE
+Go baseline artifacts: /tmp/gatefinal2/l3/run
+Selected evidence copied to /mnt/storage/service/github/wt/gatefinal2/memory/evidence/matching-gate-final2-20261023/3-postgres/evidence: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'go-sdk.log', 'graceful-drain-sdk.log', 'restart-sdk.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-after-graceful-drain.log', 'rust-server-logs/rust-server-after-restart.log', 'rust-server-logs/rust-server-before-restart.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_postgres.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Preliminary production process probe completed; it is not Matching acceptance evidence: /tmp/gatefinal2/l3/run/results.json
