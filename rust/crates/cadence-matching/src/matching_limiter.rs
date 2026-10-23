@@ -384,4 +384,180 @@ mod tests {
             WaitOutcome::Acquired
         );
     }
+
+    // Go `TestRatelimitBehavior` ports the `current` subcases (Go `clock.Ratelimiter`
+    // through `taskMatcherImpl.ratelimit`). Go sleeps in real time; here the fake
+    // clock is advanced explicitly by the same nominal durations, while real waits
+    // inside `wait_until` are timed with `Instant`.
+    /// Go `TestRatelimitBehavior` granularity: 10 tokens per second, burst 10.
+    const GRANULARITY: Duration = Duration::from_millis(100);
+    /// Go `TestRatelimitBehavior` precision for elapsed-time checks.
+    const PRECISION: Duration = Duration::from_millis(10);
+    const RATE_PER_SECOND: f64 = 10.0;
+
+    fn advance(now: &Arc<AtomicI64>, by: Duration) {
+        now.fetch_add(by.as_nanos() as i64, Ordering::SeqCst);
+    }
+    fn deadline_after(now: &Arc<AtomicI64>, after: Duration) -> i64 {
+        now.load(Ordering::SeqCst) + after.as_nanos() as i64
+    }
+    fn assert_elapsed(expected: Duration, actual: Duration) {
+        assert!(
+            actual.abs_diff(expected) <= PRECISION,
+            "duration should be within {PRECISION:?} of {expected:?}, was {actual:?}"
+        );
+    }
+    /// Go `limiter.Allow()`: takes a token only when one is available right now.
+    async fn allow(limiter: &TaskListLimiter, now: &Arc<AtomicI64>) -> bool {
+        let (_stop, stopped) = watch::channel(false);
+        let deadline = now.load(Ordering::SeqCst);
+        limiter.wait_until(stopped, Some(deadline)).await == WaitOutcome::Acquired
+    }
+    /// Go `for limit.Allow() {}`: drains every token available at the current time.
+    async fn drain(limiter: &TaskListLimiter, now: &Arc<AtomicI64>) {
+        while allow(limiter, now).await {}
+    }
+    async fn available_tokens(limiter: &TaskListLimiter, now: &Arc<AtomicI64>) -> usize {
+        let mut available = 0;
+        while allow(limiter, now).await {
+            available += 1;
+        }
+        available
+    }
+    #[tokio::test]
+    async fn ratelimit_matrix_no_deadline_returns_immediately_if_available() {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = limiter(RATE_PER_SECOND, &now);
+        drain(&limiter, &now).await;
+        advance(&now, GRANULARITY);
+        let (_stop, stopped) = watch::channel(false);
+        let start = Instant::now();
+        assert_eq!(
+            limiter.wait_until(stopped, None).await,
+            WaitOutcome::Acquired
+        );
+        assert_elapsed(Duration::ZERO, start.elapsed());
+        assert_eq!(available_tokens(&limiter, &now).await, 0);
+    }
+    #[tokio::test]
+    async fn ratelimit_matrix_no_deadline_waits_until_available() {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = limiter(RATE_PER_SECOND, &now);
+        drain(&limiter, &now).await;
+        let (_stop, stopped) = watch::channel(false);
+        let start = Instant::now();
+        assert_eq!(
+            limiter.wait_until(stopped, None).await,
+            WaitOutcome::Acquired
+        );
+        assert_elapsed(GRANULARITY, start.elapsed());
+        advance(&now, GRANULARITY);
+        assert_eq!(available_tokens(&limiter, &now).await, 0);
+    }
+    #[tokio::test]
+    async fn ratelimit_matrix_canceling_no_deadline_while_waiting_returns_stopped() {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = limiter(RATE_PER_SECOND, &now);
+        drain(&limiter, &now).await;
+        let (stop, stopped) = watch::channel(false);
+        tokio::spawn(async move {
+            tokio::time::sleep(GRANULARITY / 2).await;
+            stop.send_replace(true);
+        });
+        let start = Instant::now();
+        assert_eq!(limiter.wait_until(stopped, None).await, WaitOutcome::Stopped);
+        assert_elapsed(GRANULARITY / 2, start.elapsed());
+        advance(&now, GRANULARITY / 2);
+        assert_eq!(available_tokens(&limiter, &now).await, 0);
+    }
+    #[tokio::test]
+    async fn ratelimit_matrix_returns_immediately_if_canceled() {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = limiter(RATE_PER_SECOND, &now);
+        drain(&limiter, &now).await;
+        advance(&now, GRANULARITY);
+        let (_stop, stopped) = watch::channel(true);
+        let start = Instant::now();
+        assert_eq!(limiter.wait_until(stopped, None).await, WaitOutcome::Stopped);
+        assert_elapsed(Duration::ZERO, start.elapsed());
+        assert_eq!(available_tokens(&limiter, &now).await, 1);
+    }
+    #[tokio::test]
+    async fn ratelimit_matrix_sufficient_deadline_returns_immediately_if_available() {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = limiter(RATE_PER_SECOND, &now);
+        drain(&limiter, &now).await;
+        advance(&now, GRANULARITY);
+        let (_stop, stopped) = watch::channel(false);
+        let deadline = deadline_after(&now, GRANULARITY * 2);
+        let start = Instant::now();
+        assert_eq!(
+            limiter.wait_until(stopped, Some(deadline)).await,
+            WaitOutcome::Acquired
+        );
+        assert_elapsed(Duration::ZERO, start.elapsed());
+        assert_eq!(available_tokens(&limiter, &now).await, 0);
+    }
+    #[tokio::test]
+    async fn ratelimit_matrix_sufficient_deadline_waits() {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = limiter(RATE_PER_SECOND, &now);
+        drain(&limiter, &now).await;
+        let (_stop, stopped) = watch::channel(false);
+        let deadline = deadline_after(&now, GRANULARITY * 2);
+        let start = Instant::now();
+        assert_eq!(
+            limiter.wait_until(stopped, Some(deadline)).await,
+            WaitOutcome::Acquired
+        );
+        assert_elapsed(GRANULARITY, start.elapsed());
+        advance(&now, GRANULARITY);
+        assert_eq!(available_tokens(&limiter, &now).await, 0);
+    }
+    #[tokio::test]
+    async fn ratelimit_matrix_insufficient_deadline_stops_immediately() {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = limiter(RATE_PER_SECOND, &now);
+        drain(&limiter, &now).await;
+        let (_stop, stopped) = watch::channel(false);
+        let deadline = deadline_after(&now, GRANULARITY / 2);
+        let start = Instant::now();
+        assert_eq!(
+            limiter.wait_until(stopped, Some(deadline)).await,
+            WaitOutcome::Throttled
+        );
+        assert_elapsed(Duration::ZERO, start.elapsed());
+        assert_eq!(available_tokens(&limiter, &now).await, 0);
+    }
+    #[tokio::test]
+    async fn ratelimit_matrix_canceling_while_waiting_with_deadline_stops_and_returns_unused_tokens()
+    {
+        let now = Arc::new(AtomicI64::new(0));
+        let limiter = limiter(RATE_PER_SECOND, &now);
+        drain(&limiter, &now).await;
+        // Sufficient deadline, but canceled after half a token recovers.
+        let deadline = deadline_after(&now, GRANULARITY * 2);
+        let (stop, stopped) = watch::channel(false);
+        tokio::spawn(async move {
+            tokio::time::sleep(GRANULARITY / 2).await;
+            stop.send_replace(true);
+        });
+        let start = Instant::now();
+        assert_eq!(
+            limiter.wait_until(stopped, Some(deadline)).await,
+            WaitOutcome::Stopped
+        );
+        assert_elapsed(GRANULARITY / 2, start.elapsed());
+        // Cancel returns the unused reservation, so only 0.5 tokens are present.
+        advance(&now, GRANULARITY / 2);
+        assert!(
+            !allow(&limiter, &now).await,
+            "does not yet have a full token, only 0.5"
+        );
+        advance(&now, GRANULARITY / 2);
+        assert!(
+            allow(&limiter, &now).await,
+            "0.5 -> 1 tokens recovered shows 0.5 were available after waiting"
+        );
+    }
 }
