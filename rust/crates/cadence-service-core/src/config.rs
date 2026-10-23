@@ -559,7 +559,9 @@ impl PersistenceConfig {
         for store in self.datastores.values_mut() {
             if store.nosql.is_none() {
                 if let Some(mut legacy) = store.cassandra.clone() {
+                    // Go aliases one pointer, so both fields see the plugin name.
                     legacy.plugin_name = "cassandra".into();
+                    store.cassandra = Some(legacy.clone());
                     store.nosql = Some(legacy);
                 }
             }

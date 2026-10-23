@@ -1,0 +1,27 @@
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-proto)
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-matching)
+error: the `Err`-variant returned from this function is very large
+   --> crates/cadence-matching/src/matching_fault_injection.rs:248:76
+    |
+248 | pub async fn inject_client_call<T, F>(operation: &'static str, call: F) -> Result<T, Status>
+    |                                                                            ^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+    |
+    = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#result_large_err
+    = note: `-D clippy::result-large-err` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::result_large_err)]`
+
+error: the `Err`-variant returned from this function is very large
+   --> crates/cadence-matching/src/matching_fault_injection.rs:265:6
+    |
+265 | ) -> Result<T, Status>
+    |      ^^^^^^^^^^^^^^^^^ the `Err`-variant is at least 176 bytes
+    |
+    = help: try reducing the size of `tonic::Status`, for example by boxing large elements or replacing it with `Box<tonic::Status>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#result_large_err
+
+error: could not compile `cadence-matching` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `cadence-matching` (lib test) due to 2 previous errors

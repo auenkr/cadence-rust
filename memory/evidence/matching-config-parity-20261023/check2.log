@@ -1,0 +1,5 @@
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-proto)
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/dyncfg/rust/crates/cadence-matching)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 47.73s
