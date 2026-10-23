@@ -65,6 +65,12 @@ Build rules (RAM is the limit, a cadence-server rustc can use 2-3GB):
 - Check load before starting heavy work: `uptime` load above 6 or `free` available below 2GB means wait.
 - Max 5 subagents, but most should be code-writing or read-only audit work. At most 2 may be waiting on or running cargo at the same time (the lock queues the rest); do not poll in tight loops (sleep >= 60s).
 - Always record the exit code to a file: `cmd > log 2>&1; echo $? > file.exit`.
+Overload guard (observed 2026-10-23: load 12, swap full, 150MB RAM free with 5 agents + cargo + a stray puppeteer Chrome using 1.8GB):
+- Before starting a build, gate or new worker, run `uptime; free -h`. If load > 6 or available RAM < 2GB, wait or pause the least important cargo-using worker.
+- Kill stray processes that are not part of the current task (old puppeteer/chrome, orphan gate processes, stopped gate containers). Always stop gate containers when a gate ends.
+- Workers must commit and push their branch at least every 30 minutes. The orchestrator checks `git log origin/<branch>` and `ps` for each worker every ~30 minutes; a worker with no new commit or process activity for 60 minutes is cancelled and its worktree WIP is committed as unverified.
+- Steering a worker with a message restarts its turn; avoid steering unless needed.
+
 Do not keep running subagents forever. Sometimes agents get stuck and in status it shows working since 16+hr.
 So after assigning Keep checking on subagents weather they are working correctly or not.
 
