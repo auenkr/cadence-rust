@@ -246,7 +246,7 @@ mod tests {
     // Go: TestUpdateTaskListPartitionConfig (task_list_manager_test.go:1498), over a SQLite store.
     #[test]
     fn update_partition_config_cases_match_go_task_list_manager_test() {
-        let parts = |count: i32| -> std::collections::BTreeMap<i32, Vec<String>> {
+        let parts = |count: i32| -> std::collections::HashMap<i32, Vec<String>> {
             (0..count).map(|id| (id, Vec::new())).collect()
         };
         let request = |read: i32, write: i32| StoredPartitionConfig {
@@ -279,8 +279,8 @@ mod tests {
         // "success - nil original config, request of one partition": no-op, nothing persisted.
         let (_d, store, key, queue, cache) = fixture();
         assert!(cache.update(&queue, request(1, 1), 2).unwrap().is_none());
-        assert_eq!(cache.get(), None);
-        assert_eq!(persisted(&store, &key), None);
+        assert!(cache.get().is_none());
+        assert!(persisted(&store, &key).is_none());
 
         // "success - update" then "success - no op" (same partitions) at version 1 -> 2.
         let (_d, store, key, queue, cache) = fixture();
@@ -291,7 +291,10 @@ mod tests {
         let (old, new) = cache.update(&queue, request(3, 1), 4).unwrap().unwrap();
         assert_eq!(old.unwrap().version, 1);
         assert_eq!((new.version, new.read_partitions.len(), new.write_partitions.len()), (2, 3, 1));
-        assert_eq!(persisted(&store, &key), cache.get());
+        assert_eq!(
+            serde_json::to_value(persisted(&store, &key)).unwrap(),
+            serde_json::to_value(cache.get()).unwrap()
+        );
 
         // Invalid config (read < write): rejected before any write, cache unchanged.
         let error = cache.update(&queue, request(1, 3), 5).unwrap_err();
