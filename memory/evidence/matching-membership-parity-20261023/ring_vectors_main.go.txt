@@ -1,0 +1,35 @@
+package main
+
+import (
+	"fmt"
+
+	"github.com/dgryski/go-farm"
+	"github.com/uber/ringpop-go/hashring"
+
+	"github.com/uber/cadence/common/membership"
+)
+
+func main() {
+	hosts := []membership.HostInfo{
+		membership.NewDetailedHostInfo("10.0.0.1:7935", "", nil),
+		membership.NewDetailedHostInfo("10.0.0.2:7935", "", nil),
+		membership.NewDetailedHostInfo("10.0.0.3:7935", "", nil),
+		membership.NewDetailedHostInfo("10.0.0.4:7935", "", nil),
+	}
+	idHosts := []membership.HostInfo{
+		membership.NewDetailedHostInfo("10.0.0.1:7935", "m-a", nil),
+		membership.NewDetailedHostInfo("10.0.0.2:7935", "m-b", nil),
+		membership.NewDetailedHostInfo("10.0.0.3:7935", "m-c", nil),
+	}
+	keys := []string{"tl", "my-task-list", "/__cadence_sys/x/1", "ünï", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "queue", "x", "", "decision-list", "mylist/1"}
+	for _, set := range [][]membership.HostInfo{hosts, idHosts} {
+		r := hashring.New(farm.Fingerprint32, 100)
+		for _, h := range set {
+			r.AddMembers(h)
+		}
+		for _, k := range keys {
+			a, _ := r.Lookup(k); fmt.Printf("%q %d %v %v\n", k, farm.Fingerprint32([]byte(k)), a, r.LookupN(k, 3))
+		}
+		fmt.Println("--")
+	}
+}

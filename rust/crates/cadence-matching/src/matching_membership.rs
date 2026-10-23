@@ -213,7 +213,13 @@ impl Membership {
         Ok((owner, channel))
     }
     pub fn check_task_list(&self, name: &str) -> Result<(), Status> {
-        let owner = self.owner(name)?;
+        // Go errIfShardOwnershipLost wraps the lookup failure.
+        let owner = self.owner(name).map_err(|error| {
+            Status::internal(format!(
+                "failed to lookup task list owner: {}",
+                error.message()
+            ))
+        })?;
         if owner.identity() == self.identity.as_ref() {
             return Ok(());
         }
@@ -238,11 +244,17 @@ impl Membership {
         &self,
         id: &crate::matching_semaphore::Identifier,
     ) -> Result<(), Status> {
-        let owner = self.owner(&id.ring_key())?;
+        let bucket_id = id.to_log_string();
+        // Go errIfSemaphoreOwnershipLost wraps the lookup failure with the bucket id.
+        let owner = self.owner(&id.ring_key()).map_err(|error| {
+            Status::internal(format!(
+                "failed to look up the owner of semaphore bucket {bucket_id}: {}",
+                error.message()
+            ))
+        })?;
         if owner.identity() == self.identity.as_ref() {
             return Ok(());
         }
-        let bucket_id = id.to_log_string();
         Err(crate::grpc::detailed_status_type(tonic::Code::Aborted,
             format!("semaphore bucket is not owned by this host: OwnedBy: {}, Me: {}, BucketID: {bucket_id}", owner.identity(), self.identity),
             "type.googleapis.com/uber.cadence.shared.v1.SemaphoreNotOwnedByHostError".into(),
@@ -328,6 +340,34 @@ mod tests {
         membership.check_task_list("queue").unwrap();
         membership.check_semaphore(&id).unwrap();
         membership.replace(vec![]);
+        assert_eq!(
+            membership.owner("queue").unwrap_err().message(),
+            "Not enough hosts to serve the request"
+        );
+    }
+}
+
+#[cfg(test)]
+mod lookup_error_parity_tests {
+    use super::*;
+
+    #[test]
+    fn empty_ring_ownership_errors_wrap_lookup_failure_like_go_engine() {
+        let membership = Membership::new("self", vec![]);
+        let error = membership.check_task_list("queue").unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert_eq!(
+            error.message(),
+            "failed to lookup task list owner: Not enough hosts to serve the request"
+        );
+        let id = crate::matching_semaphore::Identifier::new("domain", "semaphore", 0).unwrap();
+        let error = membership.check_semaphore(&id).unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert_eq!(
+            error.message(),
+            "failed to look up the owner of semaphore bucket domain/semaphore/0: Not enough hosts to serve the request"
+        );
+        // Raw lookup (Go getHostInfo / Ring.Lookup) stays unwrapped.
         assert_eq!(
             membership.owner("queue").unwrap_err().message(),
             "Not enough hosts to serve the request"

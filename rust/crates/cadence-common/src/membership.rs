@@ -164,6 +164,93 @@ impl Ring {
 }
 
 #[cfg(test)]
+mod golden_tests {
+    use super::*;
+
+    fn host(address: &str, identity: &str) -> Host {
+        Host {
+            address: address.into(),
+            identity: identity.into(),
+            grpc_address: String::new(),
+        }
+    }
+
+    /// Vectors printed by ringpop-go v0.10.0 `hashring.New(farm.Fingerprint32, 100)`
+    /// (see memory/evidence/matching-membership-parity-20261023/ring_vectors*).
+    /// Each row: key, Fingerprint32(key), LookupN(key, 3) addresses.
+    const KEYS: [(&str, u32); 10] = [
+        ("tl", 2507793384),
+        ("my-task-list", 507707209),
+        ("/__cadence_sys/x/1", 3872486596),
+        ("ünï", 2447977061),
+        ("a1b2c3d4-e5f6-7890-abcd-ef1234567890", 1951949788),
+        ("queue", 1180589286),
+        ("x", 215327468),
+        ("", 3696677242),
+        ("decision-list", 452094838),
+        ("mylist/1", 4030192230),
+    ];
+
+    fn check(ring: &Ring, expected: [[u8; 3]; 10]) {
+        for ((key, hash), owners) in KEYS.iter().zip(expected) {
+            assert_eq!(fingerprint32(key.as_bytes()), *hash, "hash of {key:?}");
+            let want: Vec<String> = owners.iter().map(|n| format!("10.0.0.{n}:7935")).collect();
+            let got: Vec<_> = ring
+                .lookup_n(key, 3)
+                .iter()
+                .map(|h| h.address.clone())
+                .collect();
+            assert_eq!(got, want, "LookupN({key:?}, 3)");
+            assert_eq!(ring.lookup(key).unwrap().address, want[0], "Lookup({key:?})");
+        }
+    }
+
+    #[test]
+    fn address_identity_ring_matches_go_hashring_golden_vectors() {
+        let ring = Ring::new((1..=4).rev().map(|n| host(&format!("10.0.0.{n}:7935"), "")));
+        check(
+            &ring,
+            [
+                [1, 3, 2],
+                [2, 3, 4],
+                [4, 3, 2],
+                [1, 2, 4],
+                [4, 2, 1],
+                [2, 3, 1],
+                [2, 1, 3],
+                [1, 2, 3],
+                [4, 3, 2],
+                [2, 3, 4],
+            ],
+        );
+    }
+
+    #[test]
+    fn explicit_identity_ring_uses_hash_separator_like_go_hashring() {
+        let ring = Ring::new([
+            host("10.0.0.3:7935", "m-c"),
+            host("10.0.0.1:7935", "m-a"),
+            host("10.0.0.2:7935", "m-b"),
+        ]);
+        check(
+            &ring,
+            [
+                [2, 3, 1],
+                [1, 2, 3],
+                [3, 1, 2],
+                [1, 3, 2],
+                [3, 1, 2],
+                [1, 3, 2],
+                [3, 1, 2],
+                [2, 3, 1],
+                [2, 1, 3],
+                [3, 1, 2],
+            ],
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
