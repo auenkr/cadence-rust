@@ -445,3 +445,91 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
             .await
     }
 }
+
+#[cfg(test)]
+mod list_domain_metric_tests {
+    use super::*;
+    use crate::matching_metrics::{
+        MetricValue, RecordingMetricSink, PERSISTENCE_EMPTY_RESPONSE,
+        PERSISTENCE_RESPONSE_PAYLOAD_SIZE, PERSISTENCE_RESPONSE_ROW_SIZE,
+    };
+    use std::sync::{atomic::AtomicUsize, Mutex};
+
+    struct EmptyDomainList;
+
+    impl DomainMetadataSource for EmptyDomainList {
+        fn metadata_version(
+            &self,
+            _timeout: std::time::Duration,
+        ) -> Result<i64, DomainMetadataSourceError> {
+            Ok(0)
+        }
+
+        fn list_domains(
+            &self,
+            _page_size: usize,
+            _next_page_token: Option<&[u8]>,
+            _timeout: std::time::Duration,
+        ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+            Ok(DomainMetadataPage {
+                domains: Vec::new(),
+                next_page_token: None,
+            })
+        }
+
+        fn get_domain(
+            &self,
+            _name: Option<&str>,
+            _id: Option<&str>,
+            _timeout: std::time::Duration,
+        ) -> Result<
+            cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+            DomainMetadataSourceError,
+        > {
+            Err(DomainMetadataSourceError::transient("unused"))
+        }
+    }
+
+    #[test]
+    fn empty_list_domains_emits_go_empty_count_and_envelope_payload() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        let source = RateLimitedDomainSource {
+            source: Arc::new(EmptyDomainList),
+            limiter,
+        };
+        assert!(source
+            .list_domains(10, None, std::time::Duration::from_secs(1))
+            .is_ok());
+
+        let events = sink.events();
+        let empty = events
+            .iter()
+            .find(|e| e.name == PERSISTENCE_EMPTY_RESPONSE)
+            .expect("empty-response count");
+        assert_eq!(empty.tags["operation"], "ListDomain");
+        assert_eq!(empty.tags["task_category"], "none");
+        assert!(!empty.tags.contains_key("domain"));
+        assert!(!events.iter().any(|e| e.name == PERSISTENCE_RESPONSE_ROW_SIZE));
+
+        // Go ListDomainsResponse.ByteSize with no domains and no token is Sizeof(32).
+        let payload = events
+            .iter()
+            .find(|e| e.name == PERSISTENCE_RESPONSE_PAYLOAD_SIZE)
+            .expect("payload-size histogram");
+        assert_eq!(payload.value, MetricValue::Count(32));
+        assert_eq!(payload.tags["operation"], "ListDomain");
+        assert_eq!(payload.tags["task_category"], "none");
+
+        let request = events
+            .iter()
+            .find(|e| e.name == "persistence_requests")
+            .expect("overall request counter");
+        assert_eq!(request.tags["operation"], "ListDomain");
+        assert!(!request.tags.contains_key("domain"));
+    }
+}
