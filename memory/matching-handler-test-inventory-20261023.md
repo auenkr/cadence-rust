@@ -22,3 +22,21 @@ Not done: the engine_integration_test.go PARTIAL rows (about 30) were not re-exa
 ## CI
 - rust-ci run 40015060031 (package=cadence-matching), commit on branch matching-handler-tests-20261023:
   success. https://github.com/auenkr/cadence-rust/actions/runs/40015060031
+
+## engine_integration_test.go pass (branch matching-engine-integration-tests-20261023)
+
+INCOMPLETE. Only group 1 (add/add-then-poll) was examined and ported. All other rows remain PARTIAL as in
+matching-go-test-inventory-20261023.md and have NOT been re-examined. engine_test.go (22 tests) was not started.
+
+| Go test | Rust test | Status | CI run |
+|---|---|---|---|
+| TestAddActivityTasks / TestAddDecisionTasks (592,596; 111 adds all persisted) | matching_rpc_tests.rs::go_engine_add_decision_and_activity_tasks_persist_every_task | PORTED | 40016294676 success |
+| TestAddActivityTasksForwarded / TestAddDecisionTasksForwarded (600,604; expects errRemoteSyncMatchFailed, 0 stored) | matching_rpc_forwarded_add_never_persists_and_reports_remote_failure | COVERED (existing) | - |
+| TestAddAndPollDecisionTasks (709) | matching_rpc_tests.rs::go_engine_add_then_poll_decision_tasks_delivers_each_task_and_drains_store | PORTED, PARTIAL: FIFO delivery + no redelivery asserted; Go's `GetTaskCount==0` store-drain and rangeID checks NOT asserted (Rust deletes acked rows via batched GC; trigger not verified) | 40016294676 success |
+| TestAddAndPollActivityTasks (713) | none | NOT PORTED: Go body actually calls the decision path (bug at engine_integration_test.go:714), so the decision port covers it; activity add-then-poll needs a RecordActivityTaskStarted history stub that does not exist in this file | - |
+| TestAddAndPoll*Isolation (717,721) | none | NOT PORTED (also run decision path in Go, :718/:722) | - |
+| TestQueryWorkflow (438) | matching_rpc_delivers_query_to_decision_poller | COVERED (existing) | - |
+| all others (empty poll, expired ctx, sync match, concurrent, range stealing, unload on isolation change, drain backlog, TestOnlyUnloadMatchingInstance, TestAddTaskAfterStartFailure, metric oracles, TestConfigDefaultHostName) | see earlier inventory | NOT RE-EXAMINED, still PARTIAL | - |
+
+Notes for the next pass: `SqliteTaskStore::task_list_size(key, ack_level)` counts task_id > ack_level, so use -1 to count all rows;
+its second argument is not the task type (the key carries it).
