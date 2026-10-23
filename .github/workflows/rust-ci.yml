@@ -52,6 +52,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rust-ci-logs
+          retention-days: 3
           path: |
             rust/clippy.log
             rust/test.log
