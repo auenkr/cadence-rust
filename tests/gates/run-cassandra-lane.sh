@@ -28,6 +28,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 uptime; free -h
 docker run --detach --name "$CONTAINER" --label "cadence-rust-gate-run=$RUN_ID" \
+  --memory 1800m --memory-swap 1800m --cpus 1.5 --pids-limit 2048 \
   --publish "127.0.0.1:${PORT}:9042" --env MAX_HEAP_SIZE=1G --env HEAP_NEWSIZE=256M \
   "$IMAGE" > "$ARTIFACTS/cassandra-container-id.txt" || exit 3
 STARTED=1

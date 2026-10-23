@@ -82,3 +82,8 @@ So after assigning Keep checking on subagents weather they are working correctly
 
 
 Shared build cache caveat (found 2026-10-23): worktrees share one target dir, and cargo can reuse another worktree's workspace-crate artifacts, giving bogus errors or a STALE binary. `/mnt/storage/service/bin/cargo-safe` now touches all workspace sources whenever the workspace changes since the last build (inside the lock), forcing a rebuild of the workspace crates from the current worktree. Evidence for a final pass/fail (gates, final verification) must come from a clean dedicated target dir: `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-final`, one worktree only, and the gate must record the binary's sha256.
+
+Resource protection (user requirement 2026-10-23: workers must not starve the machine's other processes):
+- All heavy work runs inside the capped user slice `cadence-work.slice` (MemoryHigh 4G, MemoryMax 4.5G, swap 1G, CPU 300% = 3 of 4 cores; the rest of the machine keeps at least 1 core and ~3GB). `cargo-safe` does this automatically. Anything else heavy (go build/test, gate harness, python/node probes, rust server binaries started by a gate) must be started with `/mnt/storage/service/bin/work-safe <cmd>`, e.g. `flock /tmp/cargo.lock /mnt/storage/service/bin/work-safe python3 tests/run-go-service-baseline.py ...`.
+- Docker gate containers must always be started with limits: `--memory <=1800m --memory-swap <same> --cpus <=1.5 --pids-limit 2048` (Cassandra also MAX_HEAP_SIZE=1G). One database container at a time.
+- Never run the agents' own tools with high priority; keep `nice -n 10 ionice -c3` for builds. If `uptime` load > 6 or MemAvailable < 2GB, pause new heavy work (cargo-safe already waits).
