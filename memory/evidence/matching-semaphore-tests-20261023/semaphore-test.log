@@ -1,0 +1,58 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/semtests/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/semtests/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/semtests/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/semtests/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/semtests/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/semtests/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/semtests/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 08s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 44 tests
+test matching_semaphore::parity_tests::matching_semaphore_acquire_before_bucket_usable ... ok
+test matching_semaphore::parity_tests::matching_semaphore_acquire_honors_deadline_while_starting ... ignored, parity gap: Manager acquire has no deadline/context and waits indefinitely during startup. Go go/service/matching/semaphore/semaphore_manager_test.go:389
+test matching_semaphore::parity_tests::matching_semaphore_acquire_passes_through_grant_result ... ok
+test matching_semaphore::parity_tests::matching_semaphore_acquire_refreshes_idle_time ... ok
+test matching_semaphore::parity_tests::matching_semaphore_acquire_surfaces_failed_grant ... ok
+test matching_semaphore::parity_tests::matching_semaphore_already_held_without_token_is_internal_error ... ok
+test matching_semaphore::parity_tests::matching_semaphore_concurrent_grants_are_distinct ... ok
+test grpc_matching::durable_tests::matching_semaphore_domain_filter_and_ring_admission_precede_creation ... ok
+test matching_semaphore::parity_tests::matching_semaphore_confirming_read_failure_is_preserved ... ok
+test matching_semaphore::parity_tests::matching_semaphore_drop_stale_hold_only_returns_proven_free_slot ... ok
+test matching_semaphore::parity_tests::matching_semaphore_failed_load_unregisters_and_allows_fresh_retry ... ok
+test matching_semaphore::parity_tests::matching_semaphore_failed_writes_do_not_drain_free_set ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_gives_up_after_max_attempts ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_on_free_slot_records_request_and_hold ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_rejects_unknown_write_outcome ... ignored, parity gap: GrantOutcome is exhaustive and cannot inject Go Unknown outcome. Go go/service/matching/semaphore/semaphore_manager_test.go:699
+test matching_semaphore::parity_tests::matching_semaphore_grant_retries_different_slot_when_taken ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_stops_retrying_at_deadline ... ignored, parity gap: grant has no cancellation/context check between attempts. Go go/service/matching/semaphore/semaphore_manager_test.go:577
+test matching_semaphore::parity_tests::matching_semaphore_late_stop_unregisters_only_itself ... ignored, parity gap: Manager::stop has no registry callback; direct stop does not unregister itself. Go go/service/matching/semaphore/semaphore_manager_test.go:1028
+test matching_semaphore::parity_tests::matching_semaphore_free_set_survives_concurrent_reserve_unreserve ... ok
+test matching_semaphore::parity_tests::matching_semaphore_new_manager_validates_params ... ignored, parity gap: Rust Manager::new clamps invalid TTL and lacks Go parameter validation. Go go/service/matching/semaphore/semaphore_manager_test.go:136
+test matching_semaphore::parity_tests::matching_semaphore_scan_failure_leaves_indexes_untouched ... ok
+test matching_semaphore::parity_tests::matching_semaphore_scan_skips_nil_and_unknown_rows ... ignored, parity gap: SemaphoreRow cannot represent nil/unknown rows; Cassandra rejects unknown row types. Go go/service/matching/semaphore/semaphore_manager_test.go:227
+test matching_semaphore::parity_tests::matching_semaphore_scan_threads_page_tokens ... ignored, parity gap: scan returns Vec without page tokens; cannot assert page threading. Go go/service/matching/semaphore/semaphore_manager_test.go:180
+test matching_semaphore::parity_tests::matching_semaphore_second_start_does_not_wait_for_scan ... ok
+test matching_semaphore::parity_tests::matching_semaphore_second_start_is_noop ... ok
+test matching_semaphore::parity_tests::matching_semaphore_stale_reverse_index_free_taken_and_missing ... ok
+test matching_semaphore::parity_tests::matching_semaphore_lifecycle_under_concurrent_grants ... ok
+test matching_semaphore::parity_tests::matching_semaphore_start_builds_free_and_held_indexes ... ok
+test matching_semaphore::parity_tests::matching_semaphore_start_excludes_owner_claim_even_when_token_is_free ... ok
+test matching_semaphore::parity_tests::matching_semaphore_start_skips_malformed_known_rows ... ok
+test matching_semaphore::parity_tests::matching_semaphore_write_already_held_returns_reserved_slot ... ok
+test matching_semaphore::tests::matching_semaphore_all_managers_is_a_snapshot ... ok
+test matching_semaphore::tests::matching_semaphore_confirm_hold_drops_stale_index_entry ... ok
+test matching_semaphore::tests::matching_semaphore_concurrent_callers_share_one_manager ... ok
+test matching_semaphore::tests::matching_semaphore_grants_until_full_then_reports_no_slot ... ok
+test matching_semaphore::tests::matching_semaphore_identifier_is_usable_as_a_map_key ... ok
+test matching_semaphore::tests::matching_semaphore_identifier_matches_go_validation ... ok
+test matching_semaphore::tests::matching_semaphore_missing_semaphore_is_not_ready_after_scan ... ok
+test matching_semaphore::tests::matching_semaphore_load_rebuilds_index_from_persisted_holds ... ok
+test matching_semaphore::tests::matching_semaphore_registry_register_lookup_and_unregister ... ok
+test matching_semaphore::tests::matching_semaphore_registry_shares_one_manager_per_bucket ... ok
+test matching_semaphore::tests::matching_semaphore_ring_key_separates_buckets ... ok
+test matching_semaphore::tests::matching_semaphore_sweep_unloads_idle_buckets ... ok
+test matching_semaphore::tests::matching_semaphore_unregister_ignores_a_stale_manager ... ok
+
+test result: ok. 37 passed; 0 failed; 7 ignored; 0 measured; 430 filtered out; finished in 0.01s
+

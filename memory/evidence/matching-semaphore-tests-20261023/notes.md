@@ -125,8 +125,32 @@ unique grants, and free-list/reverse-index consistency under real threads.
 
 ## Validation
 
-Pending: targeted semaphore tests, crate library tests, and crate all-targets
-clippy with warnings denied. Commands use the requested shared target and
+Targeted semaphore tests: **37 passed, 0 failed, 7 ignored**, exit **0**
+(`semaphore-test.log`, `semaphore-test.exit`). All 23 new runnable cases passed.
+Crate all-targets clippy with `-D warnings`: exit **0** (`clippy.log`,
+`clippy.exit`), no diagnostics.
+Pending: crate library tests. Commands use the requested shared target and
 `cargo-safe` from this worktree's `rust/`, inside tmux session `cadence-rust`.
 Shared target validation is requested explicitly for this task; this is not a
 clean dedicated-target mixed-cluster gate or proof of full service completion.
+
+Checkpoint (2026-10-23 18:45 UTC / 2026-10-24 00:15 IST): implementation
+commit `3076d7837` is pushed. The targeted semaphore check waited approximately
+34 minutes on the shared lock and is now compiling this worktree's crates.
+All validation exits remain pending at this checkpoint; the tmux runners remain
+active. This checkpoint keeps the required 30-minute commit/push cadence while
+waiting for shared-host validation.
+
+Reproduce from `/mnt/storage/service/github/wt/semtests/rust` (sequentially;
+check `uptime`/`free -h` first and respect the host-wide gate/build exclusion):
+
+```sh
+CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe test -p cadence-matching --lib matching_semaphore > /tmp/st.log 2>&1; echo $? > /tmp/st.exit
+CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe clippy -p cadence-matching --all-targets -- -D warnings > /tmp/st-clippy.log 2>&1; echo $? > /tmp/st-clippy.exit
+CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe test -p cadence-matching --lib '' > /tmp/st-test.log 2>&1; echo $? > /tmp/st-test.exit
+```
+
+The empty final filter runs every library test. The tmux runner checks load <= 6
+and available RAM >= 2 GiB before scheduling each final check. `cargo-safe` owns
+`/tmp/cargo.lock`, the capped slice, `nice`/`ionice`, `-j2`, and workspace cache
+invalidation. Recorded source hashes are in `source-sha256.txt`.
