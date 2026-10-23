@@ -56,4 +56,19 @@ Each group is pushed to `matching-tlm-tests-20261023` and run with `rust-ci.yml`
 - Group 2 (Go 1, 3, 4, 14, 15, 16): commit `cde29f739`, run https://github.com/auenkr/cadence-rust/actions/runs/40011223704, conclusion success. New reader tests `stop_joins_pump_blocked_on_buffered_task_without_poller` and `matching_reader_read_level_advances_past_expired_rows_without_ack` passed. Go 14, 15, 16 are not fully ported (see rows).
 - Group 3 (Go 10, 11, 12, 13, 17, 18): only Go 18 is a new port (`has_poller_after_reports_outstanding_or_finished_pollers`). Go 10, 12 and 17 are NOT-PORTED with reasons; Go 11 and 13 are PARTIAL. CI: commit `2f6e726cc`, run https://github.com/auenkr/cadence-rust/actions/runs/40011880148, conclusion success (`has_poller_after_reports_outstanding_or_finished_pollers` ok).
 - Group 4 (Go 19 to 24): one new port (`refresh_partition_config_from_request_ignores_older_versions`, covering Go 19's request and older-version cases). Go 20 is NOT-PORTED. Go 21 to 24 are PARTIAL via existing RPC or registry tests. CI: commit `0948373d3`, run https://github.com/auenkr/cadence-rust/actions/runs/40012767742 (workflow_dispatch), conclusion success. Run `40012768608` (push) was cancelled by the concurrency group when the manual dispatch raced it; not a test failure.
-- Group 5 (Go 25 to 28): one new port (`release_blocked_pollers_wakes_waiting_decision_poll`, Go 27). Go 25 is NOT-PORTED, Go 26 is CANNOT-PORT, Go 28 is COVERED by existing test. CI: pending
+- Group 5 (Go 25 to 28): one new port (`release_blocked_pollers_wakes_waiting_decision_poll`, Go 27). Go 25 is NOT-PORTED, Go 26 is CANNOT-PORT, Go 28 is COVERED by existing test. CI: commit `c5d80fb9b`, run https://github.com/auenkr/cadence-rust/actions/runs/40013190844 (workflow_dispatch), conclusion success (`release_blocked_pollers_wakes_waiting_decision_poll` ok).
+
+## Final counts (28 Go test functions)
+
+| Status | Count | Go tests |
+|---|---|---|
+| PORTED | 6 | 3, 4, 5, 8, 18, 27 |
+| PARTIAL | 12 | 1, 6, 7, 9, 11, 13, 14, 19, 21, 22, 23, 24 |
+| COVERED (existing test) | 1 | 28 |
+| CANNOT-PORT | 2 | 2, 26 |
+| NOT-PORTED (follow-up) | 7 | 10, 12, 15, 16, 17, 20, 25 |
+| PENDING | 0 | - |
+
+No `#[ignore]` was added: no Rust-versus-Go behavior mismatch was confirmed while porting, and no Rust program logic was changed. Crate test result on the last run is in the group entries above.
+
+Follow-up for NOT-PORTED: Go 12 needs the isolation selection closure in `grpc_matching.rs` to be testable with domain and overlay fixtures. Go 17 needs task-GC thresholds wired to a row-count assertion. Go 20 needs an update-path harness over SQLite. Go 25 needs a dispatch entry point with matcher hooks. Go 10 needs a dispatch-throttle hook. Go 15 and 16 need a lease-renewal harness and a batch-read API.
