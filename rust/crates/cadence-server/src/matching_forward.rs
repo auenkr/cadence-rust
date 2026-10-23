@@ -135,6 +135,11 @@ mod tests {
             cadence_proto::api::ServiceBusyError { reason: String::new() },
         );
         assert!(matches!(ForwardError::classify(busy), ForwardError::SlowDown));
+        let malformed = tonic::Status::with_details(
+            tonic::Code::ResourceExhausted, "busy",
+            tonic::codegen::Bytes::from_static(b"uber.cadence.api.v1.ServiceBusyError"),
+        );
+        assert!(matches!(ForwardError::classify(malformed), ForwardError::Remote(_)));
         let exhausted = tonic::Status::resource_exhausted("other exhausted error");
         assert!(matches!(ForwardError::classify(exhausted), ForwardError::Remote(_)));
     }

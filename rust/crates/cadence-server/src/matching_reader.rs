@@ -299,6 +299,7 @@ enum Attempt {
     Offered,
     Forwarded(u64),
     OfferedAfterForwardFailure(u64),
+    OfferedAfterForwardRetry(u64),
     /// Retry the same head after dispatch throttling.
     Throttled,
     TimedOut,
@@ -644,7 +645,7 @@ impl TaskReader {
                                 // taken the forward call itself is not raced.
                                 let token = match target.offer_or_token(dispatched.clone(), dispatch_stop.clone(), &forwarder.tokens).await {
                                     Some(Ok(token)) => token,
-                                    Some(Err(())) => return Attempt::Offered,
+                                    Some(Err(())) => return Attempt::OfferedAfterForwardRetry(attempt),
                                     None => return Attempt::Stopped,
                                 };
                                 let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
@@ -729,6 +730,12 @@ impl TaskReader {
                                         (dispatch_attempt > 0).then_some(dispatch_attempt),
                                         dispatch_started.elapsed(),
                                     );
+                                }
+                                break;
+                            }
+                            Attempt::OfferedAfterForwardRetry(attempt) => {
+                                if let Some(metrics) = dispatch_metrics.lock().expect("matching reader metrics lock").as_ref() {
+                                    metrics.metrics.async_match_local(&metrics.context, Some(attempt), dispatch_started.elapsed());
                                 }
                                 break;
                             }

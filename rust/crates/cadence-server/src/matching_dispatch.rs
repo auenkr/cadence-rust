@@ -1987,6 +1987,13 @@ mod tests {
         assert!(matches!(state.forward_backlog_task(task.clone(), &domain, 1, 0).await, Err(ForwardError::SlowDown)));
         assert!(matches!(state.forward_backlog_task(task.clone(), &domain, 0, 0).await, Err(ForwardError::SlowDown)), "remote busy consumes the same rate budget as success");
         assert!(matches!(state.forward_backlog_task(task, &domain, 0, 1).await, Err(ForwardError::TaskListKind)));
+        let task = AllocatedTask { task_id: 2, data: Default::default() };
+        let mut root = state.clone();
+        root.source = "queue".into();
+        assert!(matches!(root.forward_backlog_task(task.clone(), &domain, 0, 0).await, Err(ForwardError::NoParent)));
+        let mut invalid = state.clone();
+        invalid.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 1), now()));
+        assert!(matches!(invalid.forward_backlog_task(task, &domain, 2, 0).await, Err(ForwardError::InvalidTaskListType)));
         server.abort();
     }
 
