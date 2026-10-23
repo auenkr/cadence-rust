@@ -80,3 +80,5 @@ Subagent count (behaviour, no fixed number in this file):
 Do not keep running subagents forever. Sometimes agents get stuck and in status it shows working since 16+hr.
 So after assigning Keep checking on subagents weather they are working correctly or not.
 
+
+Shared build cache caveat (found 2026-10-23): worktrees share one target dir, and cargo can reuse another worktree's workspace-crate artifacts, giving bogus errors or a STALE binary. `/mnt/storage/service/bin/cargo-safe` now touches all workspace sources whenever the workspace changes since the last build (inside the lock), forcing a rebuild of the workspace crates from the current worktree. Evidence for a final pass/fail (gates, final verification) must come from a clean dedicated target dir: `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-final`, one worktree only, and the gate must record the binary's sha256.
