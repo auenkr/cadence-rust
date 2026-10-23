@@ -136,9 +136,11 @@ Total 41.
 - G6 Shard-distributor resolver pass-through surface (Start/Stop/Subscribe/Members/MemberCount/Refresh): no Rust equivalent.
 - G7 `parity gap: hashring view identifier uses fingerprint32, Go uses farm.Hash32; Go hashring.go:360-396, hashring_test.go:463`.
   Go `emitHashIdentifier` calls `farm.Hash32` over the descending address list; Rust `replace_if_addresses_changed` calls
-  `cadence_common::membership::fingerprint32` (Go `Fingerprint32`, which the ring uses). `cadence-persistence` already uses
-  `farmhash::hash32` with Go-verified vectors, so the fix is likely a one-line switch to `farmhash::hash32`. Not changed (no program
-  logic change allowed); the ignored test pins Go's values.
+  `cadence_common::membership::fingerprint32` (Go `Fingerprint32`, which the ring uses). **Fixed** on branch
+  `matching-hashring-view-20261024`: the view identifier now calls the new `cadence_common::membership::hash32`, a thin wrapper over
+  the existing `farmhash::hash32` (Go-verified in cadence-persistence). `cadence-matching` has no direct `farmhash` dependency, so the
+  wrapper avoids a new Cargo edge. The test `go_hashring_view_identifier_matches_go_emit_vectors` is un-ignored (expects 835, 835, 242).
+  CI run: pending, record the run URL and conclusion here after it finishes.
 
 ## CI
 
@@ -151,3 +153,11 @@ Total 41.
   `go_subscribers_wake_only_when_placement_addresses_change`, `go_lookup_and_refresh_race_never_observes_missing_owner`.
   `go_hashring_view_identifier_matches_go_emit_vectors` is ignored (G7).
 - Not run: no live multi-node gate (not needed for unit-level membership tests).
+
+## CI result: matching-hashring-view-20261024 (G7 fix)
+
+- Head under test: `c1f2ff9de7e6fecd0a04600f4004aeaf696b9a30` (Use Go farm.Hash32 for hashring view identifier).
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/40031232238 (`gh workflow run rust-ci.yml --ref matching-hashring-view-20261024 -f package=cadence-matching`).
+- Conclusion: **success** (job `clippy-test`: clippy `-D warnings` plus `cargo test` for `cadence-matching`).
+- `go_hashring_view_identifier_matches_go_emit_vectors` (un-ignored, expects 835, 835, 242) **passed**. Gap G7 is closed for these vectors.
+- Open note (not covered by the vectors): `cadence_common::membership::hash32` delegates to `farmhash::hash32`. go-farm's `Hash32` sign-extends bytes for inputs of 0-4 bytes (`int8(s[i])`, `MOVBLSX` in the amd64 build). The Rust crate reads them unsigned. This affects only views shorter than 5 bytes, so it is not reachable with `host:port` addresses. The `fingerprint32` wrapper handles the same quirk; `hash32` does not yet. Needs a Go-verified short-input vector before a fix.

@@ -35,6 +35,12 @@ pub fn fingerprint32(bytes: &[u8]) -> u32 {
     fmix(mur(b, mur(bytes.len() as u32, c)))
 }
 
+/// Go `dgryski/go-farm.Hash32`, used by the Ringpop hashring view identifier
+/// (`emitHashIdentifier`). Delegates to the Go-verified `farmhash::hash32`.
+pub fn hash32(bytes: &[u8]) -> u32 {
+    farmhash::hash32(bytes)
+}
+
 /// Go `dgryski/go-farm.Fingerprint64`, used to select the shard-distributor
 /// onboarding percentage. The stable FarmHash fingerprint matches Go's
 /// `Fingerprint64` implementation (not its platform-dependent `Hash64`).
