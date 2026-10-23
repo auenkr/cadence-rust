@@ -36,6 +36,18 @@ pub(crate) fn detailed_status<M: Message>(
         detail,
     )
 }
+/// Go `types/mapper/proto.fromEntityNotExistsError` packs a domain lookup miss
+/// (`Domain <id or name> does not exist.`) as NotFound with an
+/// `EntityNotExistsError` detail. The domain store sets no cluster fields, so
+/// the detail is empty.
+pub(crate) fn domain_not_found(message: impl Into<String>) -> Status {
+    detailed_status(
+        tonic::Code::NotFound,
+        message,
+        "EntityNotExistsError",
+        p::EntityNotExistsError::default(),
+    )
+}
 /// Go `types/mapper/proto.FromError` packs shared-v1 errors (for example
 /// `RemoteSyncMatchedError`, mapped to `CodeUnavailable`) with their own
 /// proto package URL instead of the api.v1 prefix above.

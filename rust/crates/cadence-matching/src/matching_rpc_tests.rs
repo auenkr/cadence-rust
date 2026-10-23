@@ -1253,8 +1253,38 @@ async fn matching_rpc_semaphore_domain_not_found_matches_go() {
     let error = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, "1:w:r:1"))
         .await
         .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::NotFound);
-    assert_eq!(error.message(), format!("Domain {domain} does not exist."));
+    assert_domain_not_found(error, &domain);
+}
+
+/// Decodes the `google.rpc.Status` details the way Go's yarpc client does.
+#[derive(prost::Message)]
+struct RpcStatusDetails {
+    #[prost(message, repeated, tag = "3")]
+    details: Vec<prost_types::Any>,
+}
+
+/// Asserts Go's NotFound domain-miss shape: the message, plus an empty
+/// `EntityNotExistsError` detail that decodes from its api.v1 type URL.
+fn assert_domain_not_found(status: tonic::Status, domain: &str) {
+    use prost::Message;
+    assert_eq!(status.code(), tonic::Code::NotFound);
+    assert_eq!(status.message(), format!("Domain {domain} does not exist."));
+    let detail = RpcStatusDetails::decode(status.details()).unwrap().details.remove(0);
+    assert_eq!(
+        detail.type_url,
+        "type.googleapis.com/uber.cadence.api.v1.EntityNotExistsError"
+    );
+    assert_eq!(
+        p::EntityNotExistsError::decode(detail.value.as_slice()).unwrap(),
+        p::EntityNotExistsError::default()
+    );
+}
+
+#[test]
+fn domain_not_found_status_carries_entity_not_exists_detail() {
+    let domain = Uuid::from_u128(78).to_string();
+    let status = crate::grpc::domain_not_found(format!("Domain {domain} does not exist."));
+    assert_domain_not_found(status, &domain);
 }
 
 // Go semaphore_manager.go grant checks the caller's context before its first write. An expired

@@ -20,7 +20,7 @@ impl History {
                 name: None,
                 uuid: Some(id.to_owned()),
             })
-            .map_err(|e| Status::not_found(e.message))?
+            .map_err(|e| crate::grpc::domain_not_found(e.message))?
             .domain_info
             .map(|info| info.name)
             .ok_or_else(|| Status::internal("Domain info is missing."))

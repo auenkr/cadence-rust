@@ -546,7 +546,7 @@ impl a::admin_api_server::AdminApi for Admin {
             .state
             .domains
             .domain_id(&r.domain)
-            .map_err(|e| Status::not_found(e.message))?;
+            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
         let task_list = r.task_list.unwrap_or_default();
         let config = r.partition_config.unwrap_or_default();
         let resp = cadence_proto::matching::matching_api_server::MatchingApi::update_task_list_partition_config(

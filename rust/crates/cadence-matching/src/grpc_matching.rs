@@ -1757,7 +1757,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 .state
                 .domains
                 .is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
-                .map_err(|error| Status::not_found(error.message))?;
+                .map_err(|error| crate::grpc::domain_not_found(error.message))?;
             let _standby_wait = (!active).then(|| lifecycle.begin());
             let query_lifecycle = lifecycle.clone();
             return tokio::select! {
@@ -1993,7 +1993,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             return tokio::select! {
                 result=async {
                     let active = self.frontend.state.domains.is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
-                        .map_err(|error| Status::not_found(error.message))?;
+                        .map_err(|error| crate::grpc::domain_not_found(error.message))?;
                     if active {
                         queue.dispatcher.poll_activity_with_poller(payload, expiration, lifecycle).await
                     } else {
@@ -2216,7 +2216,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 &source.to_string(),
                                 &self.frontend.state.current_cluster_name,
                             )
-                            .map_err(|error| Status::not_found(error.message))?;
+                            .map_err(|error| crate::grpc::domain_not_found(error.message))?;
                         if active {
                             let matched = self
                                 .sync_match_chain(ForwardedAdd {
@@ -2276,7 +2276,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .frontend
                         .state
                         .execution_store(&domain)
-                        .map_err(|e| Status::not_found(e.message))?;
+                        .map_err(|e| crate::grpc::domain_not_found(e.message))?;
                     match store.requeue_decision_task(
                         &domain,
                         &execution.workflow_id,
@@ -2431,7 +2431,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 &source.to_string(),
                                 &self.frontend.state.current_cluster_name,
                             )
-                            .map_err(|error| Status::not_found(error.message))?;
+                            .map_err(|error| crate::grpc::domain_not_found(error.message))?;
                         if active {
                             let matched = self
                                 .sync_match_chain(ForwardedAdd {
@@ -2489,7 +2489,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .frontend
                         .state
                         .execution_store(&domain)
-                        .map_err(|e| Status::not_found(e.message))?;
+                        .map_err(|e| crate::grpc::domain_not_found(e.message))?;
                     match store.requeue_activity_task(
                         &domain,
                         &execution.workflow_id,
@@ -2788,7 +2788,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .state
                         .domains
                         .domain_id(&r.domain)
-                        .map_err(|error| Status::not_found(error.message))?;
+                        .map_err(|error| crate::grpc::domain_not_found(error.message))?;
                     if let Some(queues) = &self.queues {
                         let domain = uuid::Uuid::parse_str(&domain)
                             .map_err(|_| Status::internal("Invalid domain ID."))?;
@@ -2849,7 +2849,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .state
                         .domains
                         .domain_id(&r.domain)
-                        .map_err(|e| Status::not_found(e.message))?;
+                        .map_err(|e| crate::grpc::domain_not_found(e.message))?;
                     // Go Identifier returns an untyped error, wrapped by handleErr.
                     let name = TaskListName::parse(&task_list.name).map_err(Status::internal)?;
                     // Go getAllPartitions returns root first, then numbered write
