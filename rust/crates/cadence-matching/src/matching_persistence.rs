@@ -269,6 +269,58 @@ impl RateLimitedDomainSource {
     }
 }
 
+// 64-bit `unsafe.Sizeof` of the Go structs in go/common/persistence/data_manager_interfaces.go.
+const LIST_DOMAINS_RESPONSE_SIZEOF: u64 = 48; // []*GetDomainResponse + []byte
+const GET_DOMAIN_RESPONSE_SIZEOF: u64 = 88;
+const DOMAIN_INFO_SIZEOF: u64 = 80;
+const DOMAIN_CONFIG_SIZEOF: u64 = 120;
+const ASYNC_WORKFLOW_CONFIG_SIZEOF: u64 = 48;
+
+fn string_map_size<'a>(entries: impl Iterator<Item = (&'a String, &'a String)>) -> u64 {
+    entries.map(|(k, v)| (k.len() + v.len()) as u64).sum()
+}
+
+/// Go `GetDomainResponse.ByteSize` (go/common/persistence/metered.go:115) with
+/// `DomainInfo`, `DomainConfig` and `DomainReplicationConfig` `ByteSize`.
+pub(crate) fn get_domain_byte_size(
+    d: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+) -> u64 {
+    let info = DOMAIN_INFO_SIZEOF
+        + (d.info.uuid.len() + d.info.name.len() + d.info.description.len() + d.info.owner_email.len()) as u64
+        + d.info.data.as_ref().map_or(0, |m| string_map_size(m.iter()));
+
+    let mut config = DOMAIN_CONFIG_SIZEOF
+        + (d.configuration.history_archival_uri.len() + d.configuration.visibility_archival_uri.len()) as u64
+        + ASYNC_WORKFLOW_CONFIG_SIZEOF;
+    if let Some(a) = &d.decoded_async_workflow_config {
+        config += (a.predefined_queue_name.len() + a.queue_type.len()) as u64;
+        config += a.queue_config.as_ref().map_or(0, |q| q.data.len() as u64);
+    }
+    for (key, value) in d.decoded_bad_binaries.iter().filter_map(|b| b.binaries.as_ref()).flatten() {
+        config += key.len() as u64;
+        if let Some(v) = value {
+            config += (v.reason.len() + v.operator.len()) as u64;
+        }
+    }
+    // Go adds len(key)+len(value.Name) per group (key == name when decoded).
+    for group in d.decoded_isolation_groups.iter().flat_map(|g| g.isolation_groups.iter()) {
+        config += (group.name.len() * 2) as u64;
+    }
+
+    let replication = d.replication.active_cluster_name.len() as u64
+        + d.replication.clusters.iter().map(|c| c.cluster_name.len() as u64).sum::<u64>();
+    GET_DOMAIN_RESPONSE_SIZEOF + info + config + replication
+}
+
+/// Go `ListDomainsResponse.ByteSize` (go/common/persistence/metered.go:102).
+pub(crate) fn list_domains_byte_size(
+    page: &DomainMetadataPage,
+) -> u64 {
+    LIST_DOMAINS_RESPONSE_SIZEOF
+        + page.next_page_token.as_ref().map_or(0, |t| t.len() as u64)
+        + page.domains.iter().map(get_domain_byte_size).sum::<u64>()
+}
+
 impl DomainMetadataSource for RateLimitedDomainSource {
     fn metadata_version(
         &self,
@@ -293,21 +345,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
             .list_domains(page_size, next_page_token, timeout);
         self.record("ListDomain", started.elapsed(), &result);
         if let Ok(page) = &result {
-            // Go `ListDomainsResponse.ByteSize`: Sizeof (32) + token + domains.
-            let payload = 32
-                + page.next_page_token.as_ref().map_or(0, |t| t.len() as u64)
-                + page
-                    .domains
-                    .iter()
-                    .map(|d| {
-                        // Config and replication sizes are not modeled; the
-                        // info part follows `DomainInfo.ByteSize`.
-                        128 + 36
-                            + (d.info.name.len() + d.info.description.len() + d.info.owner_email.len())
-                                as u64
-                            + d.info.data.iter().flat_map(|m| m.iter()).map(|(k, v)| (k.len() + v.len()) as u64).sum::<u64>()
-                    })
-                    .sum::<u64>();
+            let payload = list_domains_byte_size(&page);
             self.limiter
                 .record_list_response("ListDomain", page.domains.len() as u64, payload);
         }
@@ -516,12 +554,12 @@ mod list_domain_metric_tests {
         assert!(!empty.tags.contains_key("domain"));
         assert!(!events.iter().any(|e| e.name == PERSISTENCE_RESPONSE_ROW_SIZE));
 
-        // Go ListDomainsResponse.ByteSize with no domains and no token is Sizeof(32).
+        // Go ListDomainsResponse.ByteSize with no domains and no token is Sizeof(48) on 64-bit.
         let payload = events
             .iter()
             .find(|e| e.name == PERSISTENCE_RESPONSE_PAYLOAD_SIZE)
             .expect("payload-size histogram");
-        assert_eq!(payload.value, MetricValue::Count(32));
+        assert_eq!(payload.value, MetricValue::Count(48));
         assert_eq!(payload.tags["operation"], "ListDomain");
         assert_eq!(payload.tags["task_category"], "none");
 
@@ -531,5 +569,72 @@ mod list_domain_metric_tests {
             .expect("overall request counter");
         assert_eq!(request.tags["operation"], "ListDomain");
         assert!(!request.tags.contains_key("domain"));
+    }
+
+    /// Mirrors go/common/persistence/metered_test.go "full response" (535):
+    /// 48+3 (token) + 88 (empty GetDomainResponse) + 88+103 (info)
+    /// + (120+3+3 +48+4+4+3 +6) (config=191) + 14 (replication).
+    /// The nil entry in Go's list contributes 0 and has no Rust analog.
+    #[test]
+    fn list_domains_byte_size_matches_go_metered_test_vector() {
+        use cadence_api::types::*;
+        use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
+        let base = || MatchingDomainMetadata {
+            info: DomainInfo::default(),
+            configuration: DomainConfiguration::default(),
+            replication: DomainReplicationConfiguration::default(),
+            is_global_domain: false,
+            archival_bucket: String::new(),
+            status_raw: 0,
+            archival_status_raw: 0,
+            history_archival_status_raw: 0,
+            visibility_archival_status_raw: 0,
+            config_version: 0,
+            notification_version: 0,
+            failover_notification_version: 0,
+            failover_version: 0,
+            previous_failover_version: 0,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 0,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
+        };
+        let empty = base();
+        assert_eq!(get_domain_byte_size(&empty), 88);
+        let mut full = base();
+        full.info = DomainInfo {
+            uuid: "ID".into(),
+            name: "Name".into(),
+            description: "Desc".into(),
+            owner_email: "Email".into(),
+            data: Some([("key".to_owned(), "value".to_owned())].into()),
+            ..Default::default()
+        };
+        full.configuration.history_archival_uri = "URI".into();
+        full.configuration.visibility_archival_uri = "URI".into();
+        full.decoded_isolation_groups = Some(IsolationGroupConfiguration {
+            isolation_groups: vec![IsolationGroupPartition { name: "abc".into(), state: None }],
+        });
+        // Go's map key is the partition name when decoded from thrift, so len(key)+len(Name) = 2*len(name).
+        full.decoded_async_workflow_config = Some(AsyncWorkflowConfiguration {
+            enabled: false,
+            predefined_queue_name: "name".into(),
+            queue_type: "type".into(),
+            queue_config: Some(DataBlob { encoding_type: None, data: vec![1, 2, 3] }),
+        });
+        full.replication.active_cluster_name = "cluster".into();
+        full.replication.clusters = vec![ClusterReplicationConfiguration { cluster_name: "cluster".into() }];
+        assert_eq!(get_domain_byte_size(&full), 88 + 103 + 191 + 14);
+        let page = DomainMetadataPage {
+            domains: vec![empty, full],
+            next_page_token: Some(vec![1, 2, 3]),
+        };
+        assert_eq!(list_domains_byte_size(&page), 535);
     }
 }
