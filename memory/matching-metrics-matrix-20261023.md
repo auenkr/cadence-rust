@@ -36,21 +36,21 @@ Rust rollup/migration configuration remains a gap.
 
 | Go definition / emitted name | Type | Tags | Buckets | Go references | Rust name definition | Status |
 |---|---|---|---|---|---|---|
-| `CadenceRequests` / `cadence_requests` | Counter | scope-specific; see source sites | — | go/service/matching/tasklist/adaptive_scaler.go:209 | — | MISSING |
-| `CadenceFailures` / `cadence_errors` | Counter | scope-specific; see source sites | — | go/service/matching/tasklist/adaptive_scaler.go:213 | — | MISSING |
-| `PersistenceRequests` / `persistence_requests` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:193<br>go/common/persistence/wrappers/metered/base.go:221 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
-| `PersistenceFailures` / `persistence_errors` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:158<br>go/common/persistence/wrappers/metered/base.go:161<br>go/common/persistence/wrappers/metered/base.go:164<br>go/common/persistence/wrappers/metered/base.go:168 | — | MISSING |
-| `PersistenceLatency` / `persistence_latency` | Timer | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:202<br>go/common/persistence/wrappers/metered/base.go:225 | — | MISSING |
-| `PersistenceLatencyHistogram` / `persistence_latency_ns` | Histogram | scope-specific; see source sites | Default1ms100s | go/common/persistence/wrappers/metered/base.go:203<br>go/common/persistence/wrappers/metered/base.go:226<br>go/common/persistence/wrappers/metered/base.go:251 | — | MISSING |
+| `CadenceRequests` / `cadence_requests` | Counter | scope-specific; see source sites | — | go/service/matching/tasklist/adaptive_scaler.go:209 | rust/crates/cadence-server/src/matching_metrics.rs | implemented name; see branch notes and limitations |
+| `CadenceFailures` / `cadence_errors` | Counter | scope-specific; see source sites | — | go/service/matching/tasklist/adaptive_scaler.go:213 | rust/crates/cadence-server/src/matching_metrics.rs | implemented name; see branch notes and limitations |
+| `PersistenceRequests` / `persistence_requests` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:193<br>go/common/persistence/wrappers/metered/base.go:221 | rust/crates/cadence-server/src/matching_metrics.rs<br>rust/crates/cadence-server/src/matching_persistence_limiter.rs | name present; emission/tag audit required |
+| `PersistenceFailures` / `persistence_errors` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:158<br>go/common/persistence/wrappers/metered/base.go:161<br>go/common/persistence/wrappers/metered/base.go:164<br>go/common/persistence/wrappers/metered/base.go:168 | rust/crates/cadence-server/src/matching_metrics.rs<br>rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
+| `PersistenceLatency` / `persistence_latency` | Timer | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:202<br>go/common/persistence/wrappers/metered/base.go:225 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
+| `PersistenceLatencyHistogram` / `persistence_latency_ns` | Histogram | scope-specific; see source sites | Default1ms100s | go/common/persistence/wrappers/metered/base.go:203<br>go/common/persistence/wrappers/metered/base.go:226<br>go/common/persistence/wrappers/metered/base.go:251 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
 | `PersistenceLatencyManualHistogram` / `persistence_latency_histogram` | Histogram | scope-specific; see source sites | PersistenceLatencyBuckets | go/common/persistence/wrappers/metered/base.go:180 | — | MISSING |
 | `PersistenceLatencyHistogramPerHost` / `persistence_latency_histogram_per_host` | Histogram | scope-specific; see source sites | PersistenceLatencyBuckets | go/common/persistence/wrappers/metered/base.go:175 | — | MISSING |
 | `PersistenceErrShardExistsCounter` / `persistence_errors_shard_exists` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:149 | — | MISSING |
 | `PersistenceErrShardOwnershipLostCounter` / `persistence_errors_shard_ownership_lost` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:151 | — | MISSING |
-| `PersistenceErrConditionFailedCounter` / `persistence_errors_condition_failed` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:145 | — | MISSING |
+| `PersistenceErrConditionFailedCounter` / `persistence_errors_condition_failed` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:145 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
 | `PersistenceErrCurrentWorkflowConditionFailedCounter` / `persistence_errors_current_workflow_condition_failed` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:147 | — | MISSING |
-| `PersistenceErrTimeoutCounter` / `persistence_errors_timeout` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:157 | — | MISSING |
+| `PersistenceErrTimeoutCounter` / `persistence_errors_timeout` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:157 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
 | `PersistenceErrBusyCounter` / `persistence_errors_busy` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:160 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
-| `PersistenceErrEntityNotExistsCounter` / `persistence_errors_entity_not_exists` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:153 | — | MISSING |
+| `PersistenceErrEntityNotExistsCounter` / `persistence_errors_entity_not_exists` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:153 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
 | `PersistenceErrExecutionAlreadyStartedCounter` / `persistence_errors_execution_already_started` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:143 | — | MISSING |
 | `PersistenceErrDomainAlreadyExistsCounter` / `persistence_errors_domain_already_exists` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:139 | — | MISSING |
 | `PersistenceErrBadRequestCounter` / `persistence_errors_bad_request` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:141 | — | MISSING |
@@ -59,20 +59,20 @@ Rust rollup/migration configuration remains a gap.
 | `PersistenceEmptyResponseCounter` / `persistence_empty_response` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:303 | — | MISSING |
 | `PersistenceResponseRowSize` / `persistence_response_row_size` | Histogram | scope-specific; see source sites | ResponseRowSizeBuckets | go/common/persistence/wrappers/metered/base.go:305 | — | MISSING |
 | `PersistenceResponsePayloadSize` / `persistence_response_payload_size` | Histogram | scope-specific; see source sites | ResponsePayloadSizeBuckets | go/common/persistence/wrappers/metered/base.go:321 | — | MISSING |
-| `PersistenceRequestsPerDomain` / `persistence_requests_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:191<br>go/common/persistence/wrappers/metered/base.go:241 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
+| `PersistenceRequestsPerDomain` / `persistence_requests_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:191<br>go/common/persistence/wrappers/metered/base.go:241 | rust/crates/cadence-server/src/matching_metrics.rs<br>rust/crates/cadence-server/src/matching_persistence_limiter.rs | name present; emission/tag audit required |
 | `PersistenceRequestsPerShard` / `persistence_requests_per_shard` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:242<br>go/common/persistence/wrappers/metered/base.go:243 | — | MISSING |
-| `PersistenceFailuresPerDomain` / `persistence_errors_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:120<br>go/common/persistence/wrappers/metered/base.go:123<br>go/common/persistence/wrappers/metered/base.go:126<br>go/common/persistence/wrappers/metered/base.go:130 | — | MISSING |
-| `PersistenceLatencyPerDomain` / `persistence_latency_per_domain` | Timer | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:199<br>go/common/persistence/wrappers/metered/base.go:249 | — | MISSING |
-| `PersistenceLatencyPerDomainHistogram` / `persistence_latency_per_domain_ns` | Histogram | scope-specific; see source sites | Default1ms100s | go/common/persistence/wrappers/metered/base.go:200<br>go/common/persistence/wrappers/metered/base.go:250 | — | MISSING |
+| `PersistenceFailuresPerDomain` / `persistence_errors_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:120<br>go/common/persistence/wrappers/metered/base.go:123<br>go/common/persistence/wrappers/metered/base.go:126<br>go/common/persistence/wrappers/metered/base.go:130 | rust/crates/cadence-server/src/matching_metrics.rs | implemented name; see branch notes and limitations |
+| `PersistenceLatencyPerDomain` / `persistence_latency_per_domain` | Timer | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:199<br>go/common/persistence/wrappers/metered/base.go:249 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
+| `PersistenceLatencyPerDomainHistogram` / `persistence_latency_per_domain_ns` | Histogram | scope-specific; see source sites | Default1ms100s | go/common/persistence/wrappers/metered/base.go:200<br>go/common/persistence/wrappers/metered/base.go:250 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
 | `PersistenceLatencyPerShard` / `persistence_latency_per_shard` | Timer | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:252<br>go/common/persistence/wrappers/metered/base.go:255 | — | MISSING |
 | `PersistenceLatencyPerShardHistogram` / `persistence_latency_per_shard_ns` | Histogram | scope-specific; see source sites | Low1ms100s | go/common/persistence/wrappers/metered/base.go:253<br>go/common/persistence/wrappers/metered/base.go:256 | — | MISSING |
 | `PersistenceErrShardExistsCounterPerDomain` / `persistence_errors_shard_exists_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:111 | — | MISSING |
 | `PersistenceErrShardOwnershipLostCounterPerDomain` / `persistence_errors_shard_ownership_lost_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:113 | — | MISSING |
-| `PersistenceErrConditionFailedCounterPerDomain` / `persistence_errors_condition_failed_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:107 | — | MISSING |
+| `PersistenceErrConditionFailedCounterPerDomain` / `persistence_errors_condition_failed_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:107 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
 | `PersistenceErrCurrentWorkflowConditionFailedCounterPerDomain` / `persistence_errors_current_workflow_condition_failed_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:109 | — | MISSING |
-| `PersistenceErrTimeoutCounterPerDomain` / `persistence_errors_timeout_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:119 | — | MISSING |
+| `PersistenceErrTimeoutCounterPerDomain` / `persistence_errors_timeout_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:119 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
 | `PersistenceErrBusyCounterPerDomain` / `persistence_errors_busy_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:122 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
-| `PersistenceErrEntityNotExistsCounterPerDomain` / `persistence_errors_entity_not_exists_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:115 | — | MISSING |
+| `PersistenceErrEntityNotExistsCounterPerDomain` / `persistence_errors_entity_not_exists_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:115 | rust/crates/cadence-server/src/matching_persistence_limiter.rs | implemented name; see branch notes and limitations |
 | `PersistenceErrExecutionAlreadyStartedCounterPerDomain` / `persistence_errors_execution_already_started_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:105 | — | MISSING |
 | `PersistenceErrDomainAlreadyExistsCounterPerDomain` / `persistence_errors_domain_already_exists_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:101 | — | MISSING |
 | `PersistenceErrBadRequestCounterPerDomain` / `persistence_errors_bad_request_per_domain` | Counter | scope-specific; see source sites | — | go/common/persistence/wrappers/metered/base.go:103 | — | MISSING |
@@ -83,7 +83,7 @@ Rust rollup/migration configuration remains a gap.
 | `TaskListPartitionConfigVersionGauge` / `task_list_partition_config_version` | Gauge | scope-specific; see source sites | — | go/service/matching/tasklist/task_list_manager.go:381 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
 | `TaskListPartitionConfigNumReadGauge` / `task_list_partition_config_num_read` | Gauge | scope-specific; see source sites | — | go/service/matching/tasklist/task_list_manager.go:372<br>go/service/matching/tasklist/task_list_manager.go:379 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
 | `TaskListPartitionConfigNumWriteGauge` / `task_list_partition_config_num_write` | Gauge | scope-specific; see source sites | — | go/service/matching/tasklist/task_list_manager.go:373<br>go/service/matching/tasklist/task_list_manager.go:380 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
-| `ShardDistributorResolverLookups` / `shard_distributor_resolver_lookups` | Counter | scope-specific; see source sites | — | go/common/membership/sharddistributorresolver.go:172 | — | MISSING |
+| `ShardDistributorResolverLookups` / `shard_distributor_resolver_lookups` | Counter | scope-specific; see source sites | — | go/common/membership/sharddistributorresolver.go:172 | rust/crates/cadence-server/src/matching_metrics.rs<br>rust/crates/cadence-server/src/matching_shard_routing.rs | implemented name; see branch notes and limitations |
 | `RingResolverError` / `ring_resolver_error` | Counter | scope-specific; see source sites | — | go/common/membership/resolver.go:237 | — | MISSING |
 | `PollSuccessPerTaskListCounter` / `poll_success_per_tl` | Counter | manager: operation=TaskListMgr, domain, tasklist, tasklistType; see exceptions below | — | go/service/matching/tasklist/matcher.go:529<br>go/service/matching/tasklist/matcher.go:550<br>go/service/matching/tasklist/matcher.go:567<br>go/service/matching/tasklist/matcher.go:619<br>go/service/matching/tasklist/matcher.go:640<br>go/service/matching/tasklist/matcher.go:657<br>go/service/matching/tasklist/matcher.go:682<br>go/service/matching/tasklist/matcher.go:701<br>go/service/matching/tasklist/matcher.go:718<br>go/service/matching/tasklist/matcher.go:748<br>go/service/matching/tasklist/matcher.go:767<br>go/service/matching/tasklist/matcher.go:784 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
 | `PollTimeoutPerTaskListCounter` / `poll_timeouts_per_tl` | Counter | manager: operation=TaskListMgr, domain, tasklist, tasklistType; see exceptions below | — | go/service/matching/tasklist/matcher.go:570<br>go/service/matching/tasklist/matcher.go:660 | rust/crates/cadence-server/src/matching_metrics.rs | name present; emission/tag audit required |
@@ -259,7 +259,57 @@ MatchingAcquireSemaphoreScope:               {operation: "AcquireSemaphore"},
 ## Remaining gaps
 
 - Backlog forwarding emissions require the separate backlog behavior work; do not fabricate them on local dispatch.
-- Shared persistence success/latency/error emissions, membership and shard-distributor metric wiring need completion.
-- Handler versus manager scope on engine match counters needs per-path reconciliation.
+- Shared persistence domain/semaphore success/latency/error emissions and membership view/error wiring need completion. Task-store success/typed errors and shard-routing emissions are now wired.
+- Engine counters now inherit task-local RPC tags; background poll completion falls back to the poll RPC scope. Full mixed-cluster metric comparison remains required.
 - Go rollups, migration selection, domain-all timer duplication and optional persistence histograms need implementation.
 - Matrix statuses are conservative: a constant/helper is not proof of an emit site.
+
+## Implemented in this branch
+
+- Canonical keys: `tasklist` and `semaphore`; no aliases emitted.
+- Manager counter/gauge/timer/histogram helpers add `operation=TaskListMgr`
+  and `tasklistType=activity|decision`. Registry manager-count gauge remains
+  operation-only, matching Go's registry scope.
+- Scaler metrics use `operation=adaptivescaler`; update attempts/failures
+  emit `cadence_requests` / `cadence_errors`. AddTask arrival QPS is emitted
+  independently of scaler enablement (non-forwarded requests only).
+- Engine forwarded/match/isolation/already-started/query-response counters
+  inherit the current handler request scope (including caller/transport).
+- Matching duration and integer histograms carry Go metadata tags with
+  scale 1 / 2 respectively. Their existing bucket builders are retained.
+- Task-store calls emit the Go metered request, timer, full-resolution
+  Default1ms100s histogram, and classified error counters. GetTaskList is
+  overall (`task_category=none`); the other task calls are per-domain,
+  without task_category. `is_retry=false` reflects the current adapter boundary;
+  retry context propagation is not implemented. A weak reference to the existing
+  domain cache supplies names using cached snapshots only.
+- Persistence failure names corrected to `persistence_errors` and
+  `persistence_errors_per_domain`. ConditionFailed/NotFound do not also
+  count as generic failures; Timeout/Throttled do.
+- All three exporters support persistence Default1ms100s (scale 2,
+  80 interior boundaries, 0 and final bound).
+- Shard router resolve emits `percentage_onboarded_to_shard_manager`
+  (`operation=ShardManagerOnboarding`) and
+  `shard_distributor_resolver_lookups` (`operation=ShardDistributorResolver`,
+  `routing_path=hash_ring|shard_distributor`) before lookup, including failures.
+  LookupN deliberately does not emit the single-lookup routing counter.
+
+## Unresolved parity dependencies / limitations
+
+This branch is **partial**, not a declaration of Matching metrics completion.
+The ten backlog forwarding series have helpers but no behavior path at the base;
+they must be wired by the backlog-forwarding implementation, not fabricated on
+local handoff. Membership `hashring_view_identifier` (Go UpdateGauge despite
+Counter catalog type) and `ring_resolver_error` still lack emit sites. External
+shard-manager client/executor/spectator metrics are outside the direct Go
+`common/metrics/defs.go` inventory and need a separate upstream-client audit.
+Domain metadata / semaphore metering, persistence retry tagging, row-count and
+payload-size metrics, optional per-host/manual persistence histograms, and
+rollup/migration-config handling remain incomplete. QPS rejections have Go
+request/error counters but still lack latency observations.
+
+## Validation
+
+See memory/evidence/matching-metrics-parity-20261023/validation.md for actual
+command exit codes. Name-present rows above are source inventory findings,
+not blanket parity claims; tests only establish the explicitly asserted paths.

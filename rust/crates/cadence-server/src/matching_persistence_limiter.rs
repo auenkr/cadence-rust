@@ -459,6 +459,33 @@ mod metered_task_tests {
     use cadence_persistence::matching_task_store::MatchingTaskStoreError;
 
     #[test]
+    fn task_domain_family_omits_task_category_and_preserves_unknown_domain() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        limiter.record_task_call(
+            "GetTasks",
+            Some(uuid::Uuid::nil()),
+            std::time::Duration::ZERO,
+            &Err::<(), _>(MatchingTaskStoreError::NotFound),
+        );
+        let events = sink.events();
+        assert!(events
+            .iter()
+            .any(|event| event.name == "persistence_requests_per_domain"));
+        assert!(events
+            .iter()
+            .any(|event| event.name == "persistence_errors_entity_not_exists_per_domain"));
+        assert!(events
+            .iter()
+            .all(|event| event.tags["domain"] == "_unknown_"
+                && !event.tags.contains_key("task_category")));
+    }
+
+    #[test]
     fn success_and_condition_failure_use_go_names_and_tags() {
         let limiter = MatchingPersistenceLimiter::new(
             Arc::new(Mutex::new(DynamicConfigOverlay::default())),

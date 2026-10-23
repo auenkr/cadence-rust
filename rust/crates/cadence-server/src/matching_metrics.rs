@@ -1054,6 +1054,20 @@ impl MatchingMetrics {
         self.task_list_counter(LEASE_FAILURES, context, BTreeMap::new());
     }
 
+    pub(crate) fn scaler_update_counter(&self, context: &PollMetricContext, failed: bool) {
+        self.0.record(MetricEvent {
+            name: if failed {
+                "cadence_errors"
+            } else {
+                "cadence_requests"
+            },
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            tags: self.scaler_tags(context),
+            histogram: None,
+        });
+    }
+
     pub fn scaler_tick(
         &self,
         context: &PollMetricContext,
@@ -1914,6 +1928,44 @@ mod matcher_metric_tests {
 #[cfg(test)]
 mod go_scope_parity_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn engine_counter_inherits_rpc_scope_instead_of_manager_tags() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let context = PollMetricContext {
+            domain: "payments".into(),
+            task_list: "queue/a".into(),
+            task_list_kind: 0,
+            task_type: "decision_task",
+            poller_isolation_group: String::new(),
+        };
+        metrics
+            .matching_request::<_, (), &'static str>(
+                "QueryWorkflow",
+                Some("payments"),
+                Some(("queue/a", Some(0))),
+                Some(InboundMetricContext {
+                    caller: Some("frontend".into()),
+                    transport: Some("grpc".into()),
+                }),
+                async {
+                    metrics.forwarded_per_task_list(&context);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+        let events = sink.events();
+        let forwarded = events
+            .iter()
+            .find(|event| event.name == "forwarded_per_tl")
+            .unwrap();
+        assert_eq!(forwarded.tags["operation"], "QueryWorkflow");
+        assert_eq!(forwarded.tags["caller"], "frontend");
+        assert_eq!(forwarded.tags["tasklist"], "queue_a");
+        assert!(!forwarded.tags.contains_key("tasklistType"));
+    }
 
     #[test]
     fn manager_scaler_and_histogram_dimensions_match_go() {
