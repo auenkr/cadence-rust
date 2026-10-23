@@ -1,0 +1,17 @@
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-matching)
+error[E0599]: no variant, associated function, or constant named `DbUnavailable` found for enum `BackendErrorKind` in the current scope
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:225:35
+    |
+225 |                 BackendErrorKind::DbUnavailable => PersistenceErrorClass::DbUnavailable,
+    |                                   ^^^^^^^^^^^^^ variant, associated function, or constant not found in `BackendErrorKind`
+
+error[E0599]: no variant, associated function, or constant named `BadRequest` found for enum `BackendErrorKind` in the current scope
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:226:35
+    |
+226 |                 BackendErrorKind::BadRequest => PersistenceErrorClass::BadRequest,
+    |                                   ^^^^^^^^^^ variant, associated function, or constant not found in `BackendErrorKind`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `cadence-matching` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `cadence-matching` (lib test) due to 2 previous errors

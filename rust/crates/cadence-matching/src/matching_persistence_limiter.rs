@@ -32,6 +32,54 @@ struct LimiterState {
     snapshot: PersistenceRateSnapshot,
 }
 
+/// Go metered-wrapper error classes (`base.updateErrorMetric`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PersistenceErrorClass {
+    ConditionFailed,
+    NotFound,
+    Timeout,
+    Busy,
+    DbUnavailable,
+    BadRequest,
+    Internal,
+}
+
+impl PersistenceErrorClass {
+    /// (overall counter, per-domain counter, also counts `persistence_errors`).
+    fn metric_names(self) -> (&'static str, &'static str, bool) {
+        use crate::matching_metrics::*;
+        match self {
+            Self::ConditionFailed => (
+                "persistence_errors_condition_failed",
+                "persistence_errors_condition_failed_per_domain",
+                false,
+            ),
+            Self::NotFound => (
+                "persistence_errors_entity_not_exists",
+                "persistence_errors_entity_not_exists_per_domain",
+                false,
+            ),
+            Self::Timeout => (
+                "persistence_errors_timeout",
+                "persistence_errors_timeout_per_domain",
+                true,
+            ),
+            Self::Busy => (PERSISTENCE_ERRORS_BUSY, PERSISTENCE_ERRORS_BUSY_PER_DOMAIN, true),
+            Self::DbUnavailable => (
+                PERSISTENCE_ERRORS_DB_UNAVAILABLE,
+                PERSISTENCE_ERRORS_DB_UNAVAILABLE_PER_DOMAIN,
+                true,
+            ),
+            Self::BadRequest => (
+                PERSISTENCE_ERRORS_BAD_REQUEST,
+                PERSISTENCE_ERRORS_BAD_REQUEST_PER_DOMAIN,
+                false,
+            ),
+            Self::Internal => (PERSISTENCE_FAILURES, PERSISTENCE_FAILURES_PER_DOMAIN, false),
+        }
+    }
+}
+
 /// A per-process limiter shared by all Matching persistence clients using the
 /// configured default datastore. Rejections are counted for observability.
 pub struct MatchingPersistenceLimiter {
@@ -166,26 +214,63 @@ impl MatchingPersistenceLimiter {
         elapsed: std::time::Duration,
         result: &cadence_persistence::matching_task_store::Result<T>,
     ) {
-        use crate::matching_metrics::*;
         use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
+        let class = match result {
+            Ok(_) => None,
+            Err(MatchingTaskStoreError::ConditionFailed(_)) => Some(PersistenceErrorClass::ConditionFailed),
+            Err(MatchingTaskStoreError::NotFound) => Some(PersistenceErrorClass::NotFound),
+            Err(MatchingTaskStoreError::Backend { kind, .. }) => Some(match kind {
+                BackendErrorKind::Timeout => PersistenceErrorClass::Timeout,
+                BackendErrorKind::Throttled => PersistenceErrorClass::Busy,
+                BackendErrorKind::DbUnavailable => PersistenceErrorClass::DbUnavailable,
+                BackendErrorKind::BadRequest => PersistenceErrorClass::BadRequest,
+                _ => PersistenceErrorClass::Internal,
+            }),
+            Err(_) => Some(PersistenceErrorClass::Internal),
+        };
+        let domain = domain_id.map(|id| {
+            (self
+                .domain_name
+                .read()
+                .expect("Matching metric domain resolver lock"))(id)
+            .unwrap_or_else(|| "_unknown_".into())
+        });
+        self.record_call(operation, domain, elapsed, class);
+    }
+
+    /// Go `metered.base.call` for the domain manager (no domain tag on its
+    /// requests, so the overall family with `task_category=none`).
+    pub(crate) fn record_domain_call(
+        &self,
+        operation: &'static str,
+        elapsed: std::time::Duration,
+        class: Option<PersistenceErrorClass>,
+    ) {
+        self.record_call(operation, None, elapsed, class);
+    }
+
+    fn record_call(
+        &self,
+        operation: &'static str,
+        domain: Option<String>,
+        elapsed: std::time::Duration,
+        class: Option<PersistenceErrorClass>,
+    ) {
+        use crate::matching_metrics::*;
         let sink = self.metric_sink.read().expect("Matching metrics sink lock");
         let mut tags = std::collections::BTreeMap::from([
             (OPERATION_TAG.to_owned(), operation.to_owned()),
             (IS_RETRY_TAG.to_owned(), "false".to_owned()),
         ]);
-        if let Some(id) = domain_id {
-            let domain = (self
-                .domain_name
-                .read()
-                .expect("Matching metric domain resolver lock"))(id);
-            tags.insert(
-                DOMAIN_TAG.to_owned(),
-                domain.unwrap_or_else(|| "_unknown_".into()),
-            );
-        } else {
-            tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".into());
+        let per_domain = domain.is_some();
+        match domain {
+            Some(domain) => {
+                tags.insert(DOMAIN_TAG.to_owned(), domain);
+            }
+            None => {
+                tags.insert(TASK_CATEGORY_TAG.to_owned(), "none".into());
+            }
         }
-        let per_domain = domain_id.is_some();
         let record = |name, kind, value, histogram| {
             sink.record(MetricEvent {
                 name,
@@ -245,56 +330,14 @@ impl MatchingPersistenceLimiter {
         {
             record_persistence_manual_latency(sink.as_ref(), operation, elapsed);
         }
-        if let Err(error) = result {
-            let (name, failure) = match error {
-                MatchingTaskStoreError::ConditionFailed(_) => (
-                    if per_domain {
-                        "persistence_errors_condition_failed_per_domain"
-                    } else {
-                        "persistence_errors_condition_failed"
-                    },
-                    false,
-                ),
-                MatchingTaskStoreError::NotFound => (
-                    if per_domain {
-                        "persistence_errors_entity_not_exists_per_domain"
-                    } else {
-                        "persistence_errors_entity_not_exists"
-                    },
-                    false,
-                ),
-                MatchingTaskStoreError::Backend {
-                    kind: BackendErrorKind::Timeout,
-                    ..
-                } => (
-                    if per_domain {
-                        "persistence_errors_timeout_per_domain"
-                    } else {
-                        "persistence_errors_timeout"
-                    },
-                    true,
-                ),
-                MatchingTaskStoreError::Backend {
-                    kind: BackendErrorKind::Throttled,
-                    ..
-                } => (
-                    if per_domain {
-                        PERSISTENCE_ERRORS_BUSY_PER_DOMAIN
-                    } else {
-                        PERSISTENCE_ERRORS_BUSY
-                    },
-                    true,
-                ),
-                _ => (
-                    if per_domain {
-                        PERSISTENCE_FAILURES_PER_DOMAIN
-                    } else {
-                        PERSISTENCE_FAILURES
-                    },
-                    false,
-                ),
-            };
-            record(name, MetricKind::Counter, MetricValue::Count(1), None);
+        if let Some(class) = class {
+            let (name, per_domain_name, failure) = class.metric_names();
+            record(
+                if per_domain { per_domain_name } else { name },
+                MetricKind::Counter,
+                MetricValue::Count(1),
+                None,
+            );
             if failure {
                 record(
                     if per_domain {
@@ -310,10 +353,17 @@ impl MatchingPersistenceLimiter {
         }
     }
 
-    /// Go `emptyMetric` for a successful call that returned no rows.
-    pub(crate) fn record_empty_response(&self, operation: &'static str) {
+    /// Go `emitRowCountMetrics` / `emitPayloadSizeMetrics` for a successful list
+    /// call: empty count or row-size histogram, plus payload bytes.
+    pub(crate) fn record_list_response(&self, operation: &'static str, rows: u64, payload_bytes: u64) {
+        use crate::matching_metrics::*;
         let sink = self.metric_sink.read().expect("Matching metrics sink lock");
-        crate::matching_metrics::record_persistence_empty_response(sink.as_ref(), operation);
+        if rows == 0 {
+            record_persistence_empty_response(sink.as_ref(), operation);
+        } else {
+            record_persistence_response_rows(sink.as_ref(), operation, rows);
+        }
+        record_persistence_response_payload(sink.as_ref(), operation, payload_bytes);
     }
 
     /// Consume one backend-operation permit without waiting, as Go's
@@ -535,7 +585,7 @@ mod metered_task_tests {
             std::time::Duration::from_millis(1),
             &Ok::<_, MatchingTaskStoreError>(()),
         );
-        limiter.record_empty_response("GetTasks");
+        limiter.record_list_response("GetTasks", 0, 24);
         let events = sink.events();
         let empty = events
             .iter()
@@ -550,6 +600,88 @@ mod metered_task_tests {
             .unwrap();
         assert_eq!(host.tags["host"], "matching-host-a");
         assert_eq!(host.tags["operation"], "persistence_operations");
+        assert_eq!(host.histogram, Some(HistogramSpec::GoPersistenceLatency));
+        let payload = events
+            .iter()
+            .find(|e| e.name == "persistence_response_payload_size")
+            .unwrap();
+        assert_eq!(payload.value, crate::matching_metrics::MetricValue::Count(24));
+        assert_eq!(payload.histogram, Some(HistogramSpec::GoResponsePayloadSize));
+        assert!(!events.iter().any(|e| e.name == "persistence_response_row_size"));
+    }
+
+    #[test]
+    fn non_empty_list_emits_row_size_and_db_unavailable_and_bad_request_classes() {
+        use cadence_persistence::matching_task_store::BackendErrorKind;
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        limiter.record_list_response("GetTasks", 5, 700);
+        limiter.record_task_call(
+            "GetTasks",
+            None,
+            std::time::Duration::from_millis(1),
+            &Err::<(), _>(MatchingTaskStoreError::Backend {
+                kind: BackendErrorKind::DbUnavailable,
+                message: "unavailable".into(),
+            }),
+        );
+        limiter.record_task_call(
+            "GetTasks",
+            Some(uuid::Uuid::nil()),
+            std::time::Duration::from_millis(1),
+            &Err::<(), _>(MatchingTaskStoreError::Backend {
+                kind: BackendErrorKind::BadRequest,
+                message: "bad".into(),
+            }),
+        );
+        let events = sink.events();
+        let rows = events
+            .iter()
+            .find(|e| e.name == "persistence_response_row_size")
+            .unwrap();
+        assert_eq!(rows.value, crate::matching_metrics::MetricValue::Count(5));
+        assert_eq!(rows.histogram, Some(HistogramSpec::GoResponseRowSize));
+        assert!(!events.iter().any(|e| e.name == "persistence_empty_response"));
+        assert!(events
+            .iter()
+            .any(|e| e.name == "persistence_errors_db_unavailable"));
+        // DBUnavailable also counts the generic failure; BadRequest does not.
+        assert_eq!(
+            events.iter().filter(|e| e.name == "persistence_errors").count(),
+            1
+        );
+        assert!(events
+            .iter()
+            .any(|e| e.name == "persistence_errors_bad_request_per_domain"));
+    }
+
+    #[test]
+    fn domain_wrapper_calls_use_overall_family_with_task_category_none() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        limiter.record_domain_call(
+            "GetDomain",
+            std::time::Duration::from_millis(2),
+            Some(PersistenceErrorClass::NotFound),
+        );
+        let events = sink.events();
+        let request = events
+            .iter()
+            .find(|e| e.name == "persistence_requests")
+            .unwrap();
+        assert_eq!(request.tags["operation"], "GetDomain");
+        assert_eq!(request.tags["task_category"], "none");
+        assert!(events
+            .iter()
+            .any(|e| e.name == "persistence_errors_entity_not_exists"));
     }
 
     #[test]

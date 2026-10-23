@@ -1,0 +1,44 @@
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-proto)
+    Checking cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/mnt/storage/service/github/wt/metrics3/rust/crates/cadence-matching)
+error[E0308]: mismatched types
+   --> crates/cadence-matching/src/matching_persistence.rs:308:55
+    |
+308 | ...                   + d.info.data.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum::<u64>()
+    |                                                 ^^^^^^
+    |                                                 |
+    |                                                 expected `HashMap<String, String>`, found `(_, _)`
+    |                                                 expected due to this
+    |
+    = note: expected struct `HashMap<std::string::String, std::string::String>`
+                found tuple `(_, _)`
+
+error[E0599]: no variant, associated function, or constant named `DbUnavailable` found for enum `BackendErrorKind` in the current scope
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:225:35
+    |
+225 |                 BackendErrorKind::DbUnavailable => PersistenceErrorClass::DbUnavailable,
+    |                                   ^^^^^^^^^^^^^ variant, associated function, or constant not found in `BackendErrorKind`
+
+error[E0599]: no variant, associated function, or constant named `BadRequest` found for enum `BackendErrorKind` in the current scope
+   --> crates/cadence-matching/src/matching_persistence_limiter.rs:226:35
+    |
+226 |                 BackendErrorKind::BadRequest => PersistenceErrorClass::BadRequest,
+    |                                   ^^^^^^^^^^ variant, associated function, or constant not found in `BackendErrorKind`
+
+error[E0308]: mismatched types
+   --> crates/cadence-matching/src/matching_persistence.rs:308:55
+    |
+308 | ...                   + d.info.data.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum::<u64>()
+    |                                                 ^^^^^^
+    |                                                 |
+    |                                                 expected `HashMap<String, String>`, found `(_, _)`
+    |                                                 expected due to this
+    |
+    = note: expected struct `std::collections::HashMap<std::string::String, std::string::String>`
+                found tuple `(_, _)`
+
+Some errors have detailed explanations: E0308, E0599.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `cadence-matching` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `cadence-matching` (lib test) due to 3 previous errors

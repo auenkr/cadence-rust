@@ -329,6 +329,12 @@ impl MetricSink for M3MetricSink {
                     Some(HistogramSpec::GoDefault1ms100s) => default_exponential_bounds(),
                     Some(HistogramSpec::GoLow1ms100s) | None => low_1ms100s_bounds(),
                     Some(HistogramSpec::GoMid1To16k) => low_1ms100s_bounds(),
+                    Some(HistogramSpec::GoPersistenceLatency) => {
+                        crate::matching_metrics::go_persistence_latency_bounds_nanos()
+                    }
+                    Some(HistogramSpec::GoResponseRowSize | HistogramSpec::GoResponsePayloadSize) => {
+                        return;
+                    }
                 };
                 let index = bounds
                     .iter()
@@ -356,9 +362,15 @@ impl MetricSink for M3MetricSink {
                 });
             }
             (MetricKind::Histogram, MetricValue::Count(value))
-                if event.histogram == Some(HistogramSpec::GoMid1To16k) =>
+                if event.histogram.is_some_and(|spec| {
+                    spec == HistogramSpec::GoMid1To16k
+                        || crate::matching_metrics::go_value_histogram_bounds(spec).is_some()
+                }) =>
             {
-                let bounds = mid_1_to_16k_bounds();
+                let bounds = match event.histogram.and_then(crate::matching_metrics::go_value_histogram_bounds) {
+                    Some(bounds) => bounds,
+                    None => mid_1_to_16k_bounds(),
+                };
                 let index = bounds
                     .iter()
                     .position(|bound| value <= *bound)

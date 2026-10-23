@@ -350,7 +350,7 @@ Evidence: `memory/evidence/matching-metrics-gaps2-20261023/README.md` (commands,
 
 - Name-present rows: all 92 audited against Rust emit sites and production callers (source review). Six poll-match latency rows fixed to manager tags; asyncmatch latency gained its H-scope emit.
 - Persistence rows now implemented: manual latency (opt-in), per-host latency, GetTasks empty-response count.
-- Still MISSING: response row-size and payload-size histograms (need bucket and byte-size contracts), BadRequest and DBUnavailable error classes (no typed Rust class; Cassandra classification not mapped).
+- Gaps 3 (see evidence/matching-metrics-gaps3-20261023): row/payload histograms, BadRequest/DBUnavailable and domain metering implemented; ListDomain ByteSize approximate.
 - N/A for Matching: shard, execution, domain-create error classes and shard-scoped persistence histograms (Go producers unreachable from the Matching task/domain-read path).
 - Not runtime-verified: no mixed-cluster gate was run for these emissions; the audit is source-level plus unit tests through the recording sink.
 - Persistence metering covers task-store calls only. Go's domain and semaphore metered wrappers are not wrapped in Rust for these series.

@@ -437,6 +437,21 @@ impl MetricSink for PrometheusMetricSink {
                     go_mid_1_to_16k_bucket_bounds(),
                     None,
                 )),
+                Some(HistogramSpec::GoPersistenceLatency) => {
+                    let bounds = crate::matching_metrics::go_persistence_latency_bounds_nanos();
+                    Aggregate::Histogram(HistogramAggregate::new(
+                        bounds.iter().map(|n| *n as f64 / 1_000_000_000.0).collect(),
+                        Some(bounds),
+                    ))
+                }
+                Some(spec @ (HistogramSpec::GoResponseRowSize | HistogramSpec::GoResponsePayloadSize)) => {
+                    let bounds = crate::matching_metrics::go_value_histogram_bounds(spec)
+                        .unwrap_or_default();
+                    Aggregate::Histogram(HistogramAggregate::new(
+                        bounds.into_iter().map(|b| b as f64).collect(),
+                        None,
+                    ))
+                }
                 None => Aggregate::Histogram(HistogramAggregate::new(
                     self.inner.timer_buckets_seconds.clone(),
                     None,

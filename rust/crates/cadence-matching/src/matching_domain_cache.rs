@@ -30,6 +30,17 @@ const DOMAIN_CACHE_RETRY_EXPIRATION: Duration = Duration::from_secs(120);
 pub struct DomainMetadataSourceError {
     pub message: String,
     pub retryable: bool,
+    /// Go persistence error type, used only for metered-wrapper counters.
+    pub class: DomainErrorClass,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DomainErrorClass {
+    #[default]
+    Internal,
+    NotFound,
+    BadRequest,
+    DbUnavailable,
 }
 
 impl DomainMetadataSourceError {
@@ -37,13 +48,20 @@ impl DomainMetadataSourceError {
         Self {
             message: message.into(),
             retryable: false,
+            class: DomainErrorClass::Internal,
         }
+    }
+
+    pub fn with_class(mut self, class: DomainErrorClass) -> Self {
+        self.class = class;
+        self
     }
 
     pub fn transient(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             retryable: true,
+            class: DomainErrorClass::Internal,
         }
     }
 }
@@ -101,9 +119,17 @@ fn metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSo
         | MatchingDomainMetadataError::Cassandra(_) => true,
         _ => false,
     };
+    let class = match &error {
+        MatchingDomainMetadataError::NotFound(_) => DomainErrorClass::NotFound,
+        MatchingDomainMetadataError::BothIdAndName
+        | MatchingDomainMetadataError::EmptyIdentity
+        | MatchingDomainMetadataError::InvalidUuid(_) => DomainErrorClass::BadRequest,
+        _ => DomainErrorClass::Internal,
+    };
     DomainMetadataSourceError {
         message: error.to_string(),
         retryable,
+        class,
     }
 }
 
@@ -206,7 +232,14 @@ impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::Cas
         cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(self, name, id)
             .map_err(|error| match error {
                 MatchingDomainMetadataError::NotFound(_) | MatchingDomainMetadataError::BothIdAndName
-                | MatchingDomainMetadataError::EmptyIdentity | MatchingDomainMetadataError::InvalidUuid(_) => DomainMetadataSourceError::permanent(error.to_string()),
+                | MatchingDomainMetadataError::EmptyIdentity | MatchingDomainMetadataError::InvalidUuid(_) => {
+                    let class = if matches!(error, MatchingDomainMetadataError::NotFound(_)) {
+                        DomainErrorClass::NotFound
+                    } else {
+                        DomainErrorClass::BadRequest
+                    };
+                    DomainMetadataSourceError::permanent(error.to_string()).with_class(class)
+                }
                 _ => DomainMetadataSourceError::transient(error.to_string()),
             })
     }

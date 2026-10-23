@@ -33,6 +33,51 @@ pub enum HistogramSpec {
     GoLow1ms100s,
     /// Go `common/metrics.Mid1To16k`, used for integer attempt counts.
     GoMid1To16k,
+    /// Go `PersistenceLatencyBuckets` (explicit duration buckets, 1ms..60s).
+    GoPersistenceLatency,
+    /// Go `ResponseRowSizeBuckets`: 0 then 1..65536 powers of two.
+    GoResponseRowSize,
+    /// Go `ResponsePayloadSizeBuckets`: 0 then 1kB..512MB powers of two.
+    GoResponsePayloadSize,
+}
+
+const GO_PERSISTENCE_LATENCY_BUCKETS_MS: &[u64] = &[
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 17, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 120,
+    150, 170, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1_000, 2_000, 3_000, 4_000, 5_000,
+    6_000, 7_000, 8_000, 9_000, 10_000, 12_000, 15_000, 20_000, 25_000, 30_000, 35_000, 40_000,
+    50_000, 60_000,
+];
+
+/// Go `PersistenceLatencyBuckets` upper bounds in nanoseconds.
+pub fn go_persistence_latency_bounds_nanos() -> Vec<u64> {
+    GO_PERSISTENCE_LATENCY_BUCKETS_MS
+        .iter()
+        .map(|ms| ms * 1_000_000)
+        .collect()
+}
+
+/// Go `ResponseRowSizeBuckets`: explicit 0, then `MustMakeExponentialValueBuckets(1, 2, 17)`.
+pub fn go_response_row_size_bounds() -> Vec<i64> {
+    std::iter::once(0)
+        .chain((0..17).map(|i| 1_i64 << i))
+        .collect()
+}
+
+/// Go `ResponsePayloadSizeBuckets`: explicit 0, then `MustMakeExponentialValueBuckets(1024, 2, 20)`.
+pub fn go_response_payload_size_bounds() -> Vec<i64> {
+    std::iter::once(0)
+        .chain((0..20).map(|i| 1024_i64 << i))
+        .collect()
+}
+
+/// Integer bucket bounds for the value histograms Go declares with fixed
+/// buckets; `None` for duration or exponential specs.
+pub fn go_value_histogram_bounds(spec: HistogramSpec) -> Option<Vec<i64>> {
+    match spec {
+        HistogramSpec::GoResponseRowSize => Some(go_response_row_size_bounds()),
+        HistogramSpec::GoResponsePayloadSize => Some(go_response_payload_size_bounds()),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +96,13 @@ impl MetricSink for HistogramTagSink {
     fn record(&self, mut event: MetricEvent) {
         if let Some(spec) = event.histogram {
             let (start, end, scale) = match spec {
+                // Fixed-bucket tally histograms carry no exponential metadata tags.
+                HistogramSpec::GoPersistenceLatency
+                | HistogramSpec::GoResponseRowSize
+                | HistogramSpec::GoResponsePayloadSize => {
+                    self.0.record(event);
+                    return;
+                }
                 HistogramSpec::GoDefault1ms100s => ("1ms", "17m28.576s", "2"),
                 HistogramSpec::GoLow1ms100s => ("1ms", "17m28.576s", "1"),
                 HistogramSpec::GoMid1To16k => ("8", "524288", "2"),
@@ -331,7 +383,7 @@ pub fn record_persistence_manual_latency(
         kind: MetricKind::Histogram,
         value: MetricValue::Duration(elapsed),
         tags: BTreeMap::from([(OPERATION_TAG.to_owned(), operation.to_owned())]),
-        histogram: None,
+        histogram: Some(HistogramSpec::GoPersistenceLatency),
     });
 }
 
@@ -347,8 +399,62 @@ pub fn record_persistence_host_latency(sink: &dyn MetricSink, host: &str, elapse
             (OPERATION_TAG.to_owned(), GO_PERSISTENCE_PER_HOST_OPERATION.to_owned()),
             (HOST_TAG.to_owned(), host.to_owned()),
         ]),
-        histogram: None,
+        histogram: Some(HistogramSpec::GoPersistenceLatency),
     });
+}
+
+pub const PERSISTENCE_RESPONSE_ROW_SIZE: &str = "persistence_response_row_size";
+pub const PERSISTENCE_RESPONSE_PAYLOAD_SIZE: &str = "persistence_response_payload_size";
+pub const PERSISTENCE_ERRORS_BAD_REQUEST: &str = "persistence_errors_bad_request";
+pub const PERSISTENCE_ERRORS_BAD_REQUEST_PER_DOMAIN: &str =
+    "persistence_errors_bad_request_per_domain";
+pub const PERSISTENCE_ERRORS_DB_UNAVAILABLE: &str = "persistence_errors_db_unavailable";
+pub const PERSISTENCE_ERRORS_DB_UNAVAILABLE_PER_DOMAIN: &str =
+    "persistence_errors_db_unavailable_per_domain";
+
+fn record_persistence_value_histogram(
+    sink: &dyn MetricSink,
+    name: &'static str,
+    operation: &'static str,
+    value: u64,
+    spec: HistogramSpec,
+) {
+    sink.record(MetricEvent {
+        name,
+        kind: MetricKind::Histogram,
+        value: MetricValue::Count(value.min(i64::MAX as u64) as i64),
+        tags: BTreeMap::from([
+            (OPERATION_TAG.to_owned(), operation.to_owned()),
+            (TASK_CATEGORY_TAG.to_owned(), "none".to_owned()),
+        ]),
+        histogram: Some(spec),
+    });
+}
+
+/// Go `base.emitRowCountMetrics` for a non-empty successful list response.
+pub fn record_persistence_response_rows(sink: &dyn MetricSink, operation: &'static str, rows: u64) {
+    record_persistence_value_histogram(
+        sink,
+        PERSISTENCE_RESPONSE_ROW_SIZE,
+        operation,
+        rows,
+        HistogramSpec::GoResponseRowSize,
+    );
+}
+
+/// Go `base.emitPayloadSizeMetrics` (bytes, `ResponsePayloadSizeBuckets`).
+pub fn record_persistence_response_payload(
+    sink: &dyn MetricSink,
+    operation: &'static str,
+    bytes: u64,
+) {
+    record_persistence_value_histogram(
+        sink,
+        PERSISTENCE_RESPONSE_PAYLOAD_SIZE,
+        operation,
+        bytes,
+        HistogramSpec::GoResponsePayloadSize,
+    );
 }
 
 #[cfg(test)]
@@ -2067,6 +2173,7 @@ mod matcher_metric_tests {
         let events = sink.events();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].name, PERSISTENCE_EMPTY_RESPONSE);
+        assert_eq!(events[1].histogram, Some(HistogramSpec::GoPersistenceLatency));
         assert_eq!(
             events[0].tags,
             BTreeMap::from([
@@ -2188,5 +2295,41 @@ mod go_scope_parity_tests {
         );
         assert_eq!(tags["semaphore"], "lock_a");
         assert!(!tags.contains_key("semaphore_name"));
+    }
+}
+
+#[cfg(test)]
+mod persistence_histogram_contract_tests {
+    use super::*;
+
+    #[test]
+    fn go_bucket_contracts_match_defs_go() {
+        let latency = go_persistence_latency_bounds_nanos();
+        assert_eq!(latency.len(), 55);
+        assert_eq!(latency[0], 1_000_000);
+        assert_eq!(latency[10], 12_000_000);
+        assert_eq!(*latency.last().unwrap(), 60_000_000_000);
+        let rows = go_response_row_size_bounds();
+        assert_eq!((rows.len(), rows[0], rows[1], *rows.last().unwrap()), (18, 0, 1, 65_536));
+        let payload = go_response_payload_size_bounds();
+        assert_eq!(
+            (payload.len(), payload[1], *payload.last().unwrap()),
+            (21, 1024, 1024 << 19)
+        );
+    }
+
+    #[test]
+    fn response_size_histograms_use_operation_and_task_category_only() {
+        let sink = RecordingMetricSink::default();
+        record_persistence_response_rows(&sink, "GetTasks", 3);
+        record_persistence_response_payload(&sink, "GetTasks", 4096);
+        let events = sink.events();
+        assert_eq!(events[0].name, PERSISTENCE_RESPONSE_ROW_SIZE);
+        assert_eq!(events[0].value, MetricValue::Count(3));
+        assert_eq!(events[0].histogram, Some(HistogramSpec::GoResponseRowSize));
+        assert_eq!(events[0].tags.len(), 2);
+        assert_eq!(events[1].name, PERSISTENCE_RESPONSE_PAYLOAD_SIZE);
+        assert_eq!(events[1].value, MetricValue::Count(4096));
+        assert_eq!(events[1].tags["task_category"], "none");
     }
 }

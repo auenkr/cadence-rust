@@ -48,6 +48,10 @@ pub enum BackendErrorKind {
     Throttled,
     Internal,
     Permanent,
+    /// Go `persistence.DBUnavailableError` (nosql `IsDBUnavailableError`).
+    DbUnavailable,
+    /// Go `types.BadRequestError`.
+    BadRequest,
 }
 
 impl MatchingTaskStoreError {
@@ -60,7 +64,8 @@ impl MatchingTaskStoreError {
                 | Self::Backend {
                     kind: BackendErrorKind::Timeout
                         | BackendErrorKind::Throttled
-                        | BackendErrorKind::Internal,
+                        | BackendErrorKind::Internal
+                        | BackendErrorKind::DbUnavailable,
                     ..
                 }
         )
