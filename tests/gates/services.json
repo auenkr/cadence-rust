@@ -1,0 +1,25 @@
+{
+  "description": "Per-service launch table for tests/run-go-service-baseline.py. A service named in --rust-services runs its cadence-<service> binary; every other service stays on the original Go server. rustSupported is true only when a gate probe can drive that Rust service end to end; the crates for the other services are not_migrated stubs today.",
+  "services": {
+    "frontend": {
+      "binary": "cadence-frontend",
+      "rustSupported": false,
+      "note": "cadence-frontend is a not_migrated stub; no Rust Frontend gate probe exists"
+    },
+    "history": {
+      "binary": "cadence-history",
+      "rustSupported": false,
+      "note": "cadence-history is a not_migrated stub; no Rust History gate probe exists"
+    },
+    "matching": {
+      "binary": "cadence-matching",
+      "rustSupported": true,
+      "note": "production Ringpop lane driven by tests/matching-service-compat.cjs"
+    },
+    "worker": {
+      "binary": "cadence-worker",
+      "rustSupported": false,
+      "note": "cadence-worker is a not_migrated stub; no Rust Worker gate probe exists"
+    }
+  }
+}

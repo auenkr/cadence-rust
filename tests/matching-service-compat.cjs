@@ -242,7 +242,7 @@ async function run() {
   let testBinary;
   if (productionMode) {
     if (!productionBinary || !rustConfig || !rustTChannel || !rustGrpcPort || !historyGrpcPort || !rustDataDir) throw new Error('production Matching mode requires the Rust binary, config, gRPC/TChannel ports and data directory');
-    if (!fs.existsSync(productionBinary)) throw new Error(`Rust production server binary does not exist: ${productionBinary}`);
+    if (!fs.existsSync(productionBinary)) throw new Error(`Rust cadence-matching binary does not exist: ${productionBinary}`);
   } else {
     if (!reportedTestBinary) throw new Error('CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE must identify the executable reported by Cargo');
     testBinary = path.resolve(reportedTestBinary);

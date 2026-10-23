@@ -2,6 +2,8 @@
 """Boot the original Go services with SQLite and check the shared service probe.
 
 Run in tmux cadence-rust. Default mode is an all-Go baseline.
+--rust-services selects which services run as their Rust cadence-<service>
+binaries; the rest stay on the original Go server (see tests/gates/README.md).
 --matching-delivery checks the Rust Matching RPC/History boundary.
 --rust-matching replaces Go Matching with Rust using test-only Fx discovery.
 --history-transport selects Rust Matching's outbound History transport in the
@@ -15,6 +17,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -30,7 +33,10 @@ parser.add_argument('--matching-delivery', action='store_true', help='run Rust d
 parser.add_argument('--matching-restart', action='store_true', help='restart Rust Matching over the same SQLite queue while Go services stay up')
 parser.add_argument('--binary', type=Path, help='use an already built Go server')
 parser.add_argument('--go-mixed-server-bin', type=Path, help='reuse a Go test binary built with the Rust Matching discovery overlay')
-parser.add_argument('--rust-production-binary', type=Path, help='run an already built Rust server binary with the original Go Ringpop provider (requires production Matching Ringpop assembly)')
+parser.add_argument('--rust-services', help='comma list of services to run as Rust cadence-<service> binaries; others run as original Go. Default: none (all-Go). "matching" selects the production Ringpop lane. Only names with rustSupported=true in tests/gates/services.json are accepted')
+parser.add_argument('--rust-production-binary', type=Path, help='use an already built cadence-matching binary instead of building it with cargo-safe (implies --rust-services matching when --rust-services is omitted)')
+parser.add_argument('--build-only', action='store_true', help='build the selected Go and Rust gate binaries (one cargo-safe build), record them in build-only.json, then exit without starting any service')
+parser.add_argument('--dry-run', action='store_true', help='write the planned config and commands into the artifacts directory, then exit without building or starting any service')
 parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default='grpc',
     help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
 parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'),
@@ -281,23 +287,45 @@ def validate_matching_exporter(exporter, work, repository, expected_domain):
                     'timestampsPreserved': True}
     (work / 'matching-exporter-semantics.json').write_text(json.dumps(semantic, indent=2) + '\n')
     return semantic
-production_matching = args.rust_production_binary is not None
-if args.matching_failure_recovery and not args.rust_production_binary:
-    parser.error('--matching-failure-recovery requires --rust-production-binary')
-if args.matching_idle_check_seconds is not None and (args.matching_idle_check_seconds < 1 or not args.rust_production_binary):
-    parser.error('--matching-idle-check-seconds must be positive and requires --rust-production-binary')
-if production_matching and not (args.rust_matching or args.matching_restart):
-    parser.error('--rust-production-binary requires --rust-matching or --matching-restart')
-if production_matching and args.go_mixed_server_bin:
-    parser.error('--rust-production-binary cannot use the Go test-binary discovery overlay')
-if production_matching and (not args.rust_production_binary.is_file() or not os.access(args.rust_production_binary, os.X_OK)):
+services_table = json.loads((root / 'tests/gates/services.json').read_text())['services']
+go_service_names = sorted(services_table)
+if args.rust_services is None:
+    rust_services = ['matching'] if args.rust_production_binary else []
+elif args.rust_services.strip().lower() in ('', 'none'):
+    rust_services = []
+else:
+    rust_services = [name.strip() for name in args.rust_services.split(',')]
+for name in rust_services:
+    if name not in services_table:
+        parser.error(f'--rust-services: unknown service {name!r}; expected one of {go_service_names}')
+    if not services_table[name]['rustSupported']:
+        parser.error(f'--rust-services {name} is not runnable yet: {services_table[name]["note"]}')
+if len(set(rust_services)) != len(rust_services):
+    parser.error('--rust-services lists a service more than once')
+go_services = [name for name in go_service_names if name not in rust_services]
+production_matching = 'matching' in rust_services
+if args.rust_production_binary and not production_matching:
+    parser.error('--rust-production-binary overrides the Rust matching binary; add matching to --rust-services')
+if args.rust_production_binary and args.rust_production_binary.name != 'cadence-matching':
+    parser.error(f'--rust-production-binary must be the cadence-matching binary, not {args.rust_production_binary.name!r}')
+if args.rust_production_binary and (not args.rust_production_binary.is_file() or not os.access(args.rust_production_binary, os.X_OK)):
     parser.error(f'--rust-production-binary must name an existing executable: {args.rust_production_binary}')
+if args.build_only and args.dry_run:
+    parser.error('--build-only and --dry-run are exclusive')
+if args.matching_failure_recovery and not production_matching:
+    parser.error('--matching-failure-recovery requires --rust-services matching')
+if args.matching_idle_check_seconds is not None and (args.matching_idle_check_seconds < 1 or not production_matching):
+    parser.error('--matching-idle-check-seconds must be positive and requires --rust-services matching')
+if production_matching and args.matching_delivery:
+    parser.error('--matching-delivery is a Go-overlay lane and cannot run with Rust matching in --rust-services')
+if production_matching and args.go_mixed_server_bin:
+    parser.error('Rust matching cannot use the Go test-binary discovery overlay (--go-mixed-server-bin)')
 if args.history_transport != 'grpc' and not production_matching:
-    parser.error('--history-transport applies only with --rust-production-binary')
+    parser.error('--history-transport applies only with --rust-services matching')
 if args.mysql and not production_matching:
-    parser.error('--mysql requires --rust-production-binary')
+    parser.error('--mysql requires --rust-services matching')
 if args.postgres and not production_matching:
-    parser.error('--postgres requires --rust-production-binary')
+    parser.error('--postgres requires --rust-services matching')
 if args.mysql and args.postgres:
     parser.error('--mysql and --postgres select different production databases; choose one')
 postgres_addr = os.environ.get('CADENCE_POSTGRES_ADDR', '127.0.0.1:5432')
@@ -322,24 +350,17 @@ if not mysql_host or not mysql_port.isdigit():
 binary = args.go_mixed_server_bin.resolve() if args.go_mixed_server_bin else (args.binary.resolve() if args.binary else work / 'cadence-server')
 if args.go_mixed_server_bin and not (args.rust_matching or args.matching_restart):
     parser.error('--go-mixed-server-bin requires --rust-matching or --matching-restart')
-if not args.binary and not args.go_mixed_server_bin:
-    with (work / 'build.log').open('w') as output:
-        if production_matching:
-            build = ['go', 'build', '-p', '1', '-ldflags=-s -w', '-o', str(binary), '.']
-        elif args.rust_matching or args.matching_restart:
-            overlay = work / 'overlay.json'
-            overlay.write_text(json.dumps({'Replace': {str(root / 'go/cmd/server/cadence/rust_matching_peer_test.go'): str(root / 'tests/matching-peer-go_test.go')}}))
-            build = ['go', 'test', '-c', '-p', '1', '-ldflags=-s -w', '-overlay', str(overlay), '-o', str(binary), './cadence']
-        else:
-            build = ['go', 'build', '-p', '1', '-ldflags=-s -w', '-o', str(binary), '.']
-        subprocess.run(build, cwd=root / 'go/cmd/server', stdout=output, stderr=subprocess.STDOUT, check=True, timeout=1200)
-matching_test_executable = None
-if args.matching_delivery or ((args.rust_matching or args.matching_restart) and not production_matching):
-    # Compile before booting Go or starting workflow deadlines. The probe's
-    # per-workflow timeout must measure delivery, not linker resource contention.
-    build = subprocess.run(['cargo', 'test', '--manifest-path', str(root / 'rust/Cargo.toml'),
-        '-p', 'cadence-server', '--test', 'matching_delivery', '--no-run', '--message-format=json'],
-        cwd=root, capture_output=True, text=True, timeout=1200)
+# Every cargo call goes through cargo-safe (host-wide lock, job cap, memory cap).
+# The harness makes at most one cargo invocation per gate, before any service starts.
+CARGO_SAFE = os.environ.get('CARGO_SAFE') or shutil.which('cargo-safe') or '/mnt/storage/service/bin/cargo-safe'
+CARGO_TARGET = Path(os.environ.get('CARGO_TARGET_DIR', '/mnt/storage/service/cargo-target-shared'))
+
+
+def cargo_executable(subcommand, extra, target_name, kind):
+    """Run one cargo-safe build for cadence-matching and return the single executable for target_name."""
+    build = subprocess.run([CARGO_SAFE, subcommand, '--manifest-path', str(root / 'rust/Cargo.toml'),
+        '-p', 'cadence-matching', *extra, '--message-format=json'],
+        cwd=root, capture_output=True, text=True, timeout=7200)
     (work / 'rust-build.log').write_text(build.stdout + build.stderr)
     if build.returncode:
         raise subprocess.CalledProcessError(build.returncode, build.args)
@@ -351,19 +372,53 @@ if args.matching_delivery or ((args.rust_matching or args.matching_restart) and 
             continue
         target = message.get('target', {})
         executable = message.get('executable')
-        if (message.get('reason') == 'compiler-artifact' and target.get('name') == 'matching_delivery'
-                and 'test' in target.get('kind', []) and executable):
+        if (message.get('reason') == 'compiler-artifact' and target.get('name') == target_name
+                and kind in target.get('kind', []) and executable):
             artifacts.append(Path(executable).resolve())
     if len(artifacts) != 1:
-        raise RuntimeError(f'Cargo reported {len(artifacts)} matching_delivery test executables; expected exactly one. See {work / "rust-build.log"}')
-    matching_test_executable = artifacts[0]
-    if not matching_test_executable.is_file() or not os.access(matching_test_executable, os.X_OK):
-        raise RuntimeError(f'Cargo-reported matching_delivery test executable is missing or not executable: {matching_test_executable}')
+        raise RuntimeError(f'Cargo reported {len(artifacts)} {target_name} {kind} executables; expected exactly one. See {work / "rust-build.log"}')
+    if not artifacts[0].is_file() or not os.access(artifacts[0], os.X_OK):
+        raise RuntimeError(f'Cargo-reported {target_name} executable is missing or not executable: {artifacts[0]}')
+    return artifacts[0]
+
+
+rust_matching_binary = None
+if production_matching:
+    # Cargo's reported path is authoritative; the shared-target guess is only for --dry-run.
+    rust_matching_binary = args.rust_production_binary.resolve() if args.rust_production_binary else CARGO_TARGET / 'debug' / 'cadence-matching'
+matching_test_executable = None
+legacy_matching_test = args.matching_delivery or ((args.rust_matching or args.matching_restart) and not production_matching)
+if not args.dry_run:
+    if not args.binary and not args.go_mixed_server_bin:
+        with (work / 'build.log').open('w') as output:
+            if production_matching:
+                build = ['go', 'build', '-p', '1', '-ldflags=-s -w', '-o', str(binary), '.']
+            elif args.rust_matching or args.matching_restart:
+                overlay = work / 'overlay.json'
+                overlay.write_text(json.dumps({'Replace': {str(root / 'go/cmd/server/cadence/rust_matching_peer_test.go'): str(root / 'tests/matching-peer-go_test.go')}}))
+                build = ['go', 'test', '-c', '-p', '1', '-ldflags=-s -w', '-overlay', str(overlay), '-o', str(binary), './cadence']
+            else:
+                build = ['go', 'build', '-p', '1', '-ldflags=-s -w', '-o', str(binary), '.']
+            subprocess.run(build, cwd=root / 'go/cmd/server', stdout=output, stderr=subprocess.STDOUT, check=True, timeout=1200)
+    if production_matching and not args.rust_production_binary:
+        # One cargo-safe build of the new per-service binary; no cargo runs during the gate.
+        rust_matching_binary = cargo_executable('build', [], 'cadence-matching', 'bin')
+    if legacy_matching_test:
+        # Compile before booting Go or starting workflow deadlines. The probe's
+        # per-workflow timeout must measure delivery, not linker resource contention.
+        matching_test_executable = cargo_executable('test', ['--test', 'matching_delivery', '--no-run'], 'matching_delivery', 'test')
+    if args.build_only:
+        (work / 'build-only.json').write_text(json.dumps({
+            'goBinary': str(binary), 'rustMatchingBinary': str(rust_matching_binary) if production_matching else None,
+            'rustMatchingTestExecutable': str(matching_test_executable) if matching_test_executable else None,
+            'rustServices': rust_services, 'goServices': go_services, 'cargoSafe': CARGO_SAFE}, indent=2) + '\n')
+        print(f'Gate binaries built; no services started. Record: {work / "build-only.json"}', flush=True)
+        sys.exit(0)
 config = work / 'config'
 config.mkdir(exist_ok=True)
 dynamic_config = work / 'dynamic-config.yaml'
 dynamic_text = (root / 'go/config/dynamicconfig/development.yaml').read_text()
-if args.rust_matching or args.matching_restart:
+if production_matching or args.rust_matching or args.matching_restart:
     dynamic_text += (
         '\nsystem.enableTasklistIsolation:\n'
         '  - value: true\n'
@@ -379,7 +434,7 @@ dynamic_config.write_text(dynamic_text)
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT',
         'FRONTEND_PORT_GRPC', 'MATCHING_PORT_GRPC', 'HISTORY_PORT_GRPC',
         'FRONTEND_PORT_PPROF', 'MATCHING_PORT_PPROF', 'HISTORY_PORT_PPROF', 'WORKER_PORT_PPROF']
-if args.rust_matching or args.matching_restart:
+if production_matching or args.rust_matching or args.matching_restart:
     keys.append('RUST_MATCHING_PORT_GRPC')
 if production_matching:
     keys.append('RUST_MATCHING_PORT')
@@ -399,7 +454,7 @@ text = (root / 'go/config/development.yaml').read_text()
 for key, value in ports.items():
     text = re.sub(r'\$\{' + key + r':\d+\}', value, text)
 text = text.replace('"127.0.0.1:7933", "127.0.0.1:7934", "127.0.0.1:7935"',
-    ', '.join(f'"127.0.0.1:{ports[key]}"' for key in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT' if args.rust_matching or args.matching_restart else 'MATCHING_PORT']))
+    ', '.join(f'"127.0.0.1:{ports[key]}"' for key in ['FRONTEND_PORT', 'HISTORY_PORT', 'WORKER_PORT' if production_matching or args.rust_matching or args.matching_restart else 'MATCHING_PORT']))
 text = text.replace('localhost:7833', f'localhost:{ports["FRONTEND_PORT_GRPC"]}')
 text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(dynamic_config)))
 # Keep archival outputs in this baseline's artifacts directory as well.
@@ -565,13 +620,13 @@ if production_matching:
         'filepath: ' + json.dumps(str(rust_dynamic_config)))
     rust_config.write_text(rust_text)
     (work / 'rust-matching-command.json').write_text(json.dumps([
-        str(args.rust_production_binary.resolve()), 'start', '--config', str(rust_config), '--root', str(work),
+        str(rust_matching_binary), 'start', '--config', str(rust_config), '--root', str(work),
         '--services', 'matching', '--port', '0', '--history-grpc-port', ports['HISTORY_PORT_GRPC'],
         '--matching-grpc-port', ports['RUST_MATCHING_PORT_GRPC'],
         '--matching-tchannel-port', ports['RUST_MATCHING_PORT'],
         '--data-dir', str(work / 'rust-matching-data')], indent=2) + '\n')
 command = [str(binary), '--config', str(config), '--zone', 'mysql' if args.mysql else ('postgres' if args.postgres else 'sqlite'), 'start',
-           '--auto-setup', '--services', 'frontend,history,worker' if production_matching else 'frontend,history,matching,worker']
+           '--auto-setup', '--services', ','.join(go_services)]
 environment = None
 if (args.rust_matching or args.matching_restart) and not production_matching:
     import os
@@ -580,7 +635,9 @@ if (args.rust_matching or args.matching_restart) and not production_matching:
 results = {
     'topology': ('Go Frontend/History/Worker with Rust Matching via production Ringpop' if production_matching else ('Go Frontend/History/Worker with Rust Matching RPC' if args.rust_matching or args.matching_restart else ('Go services with Rust queue/History delivery boundary' if args.matching_delivery else 'all-Go'))),
     'goMatchingStarted': not (production_matching or args.rust_matching or args.matching_restart),
-    'rustProductionBinary': str(args.rust_production_binary.resolve()) if production_matching else None,
+    'rustServices': rust_services,
+    'goServices': go_services,
+    'rustProductionBinary': str(rust_matching_binary) if production_matching else None,
     'ringpopGate': 'original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations' if production_matching else 'test-only static PeerProvider overlay in Rust Matching compatibility mode',
     'historyTransport': args.history_transport if production_matching else None,
     'rustDynamicConfigFile': str(rust_dynamic_config) if production_matching else None,
@@ -598,7 +655,7 @@ def copy_evidence(destination, results):
         config_files += [Path(rust_config), Path(rust_dynamic_config)]
     binaries = {'goBinary': Path(binary)}
     if production_matching:
-        binaries['rustProductionBinary'] = Path(args.rust_production_binary)
+        binaries['rustProductionBinary'] = Path(rust_matching_binary)
     return matching_evidence.copy_evidence(
         destination,
         work=work,
@@ -614,6 +671,16 @@ environment_note = {key: value for key, value in os.environ.items()
 (work / 'command.txt').write_text(
     'env ' + ' '.join(f'{key}={value}' for key, value in sorted(environment_note.items())) + '\n'
     + ' '.join([shlex.quote(part) for part in [sys.executable, *sys.argv]]) + '\n')
+if args.dry_run:
+    (work / 'dry-run.json').write_text(json.dumps({
+        'rustServices': rust_services, 'goServices': go_services,
+        'goBinary': str(binary), 'rustMatchingBinary': str(rust_matching_binary) if production_matching else None,
+        'rustMatchingBinaryIsPlanned': production_matching and not args.rust_production_binary,
+        'serverCommand': command, 'rustCommandRecord': str(work / 'rust-matching-command.json') if production_matching else None,
+        'probe': 'tests/matching-service-compat.cjs' if production_matching or args.rust_matching or args.matching_restart
+                 else ('tests/matching-history-compat.cjs' if args.matching_delivery else 'tests/service-workflow-compat.cjs')}, indent=2) + '\n')
+    print(f'Dry run planned without building or starting services: {work / "dry-run.json"}', flush=True)
+    sys.exit(0)
 exit_code = 0
 failure = None
 try:
@@ -696,7 +763,7 @@ try:
                     probe_environment = {**os.environ, 'CADENCE_MATCHING_DELIVERY_TEST_EXECUTABLE': str(matching_test_executable)}
                 if production_matching:
                     probe_environment = {**os.environ,
-                        'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(args.rust_production_binary.resolve()),
+                        'CADENCE_RUST_MATCHING_PRODUCTION_BINARY': str(rust_matching_binary),
                         'CADENCE_RUST_MATCHING_PRODUCTION_CONFIG': str(rust_config),
                         'CADENCE_RUST_MATCHING_PRODUCTION_TCHANNEL': ports['RUST_MATCHING_PORT'],
                         'CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT': ports['RUST_MATCHING_PORT_GRPC'],
