@@ -138,8 +138,23 @@ pub fn decode_snapshot(row: &ConfigStoreRow) -> Result<Snapshot, String> {
     Ok(blob_from_thrift(&thrift, row.version))
 }
 
+// Go `codec.ThriftRWEncoder` writes this version byte before every ThriftRW
+// payload and rejects blobs that do not start with it.
+const THRIFTRW_PREAMBLE_V0: u8 = 0x59;
+
+/// Go `ThriftRWEncoder.Decode`: validates and strips the version preamble.
+fn strip_thriftrw_preamble(data: &[u8]) -> Result<&[u8], &'static str> {
+    match data.split_first() {
+        None => Err("Missing binary encoding version."),
+        Some((&THRIFTRW_PREAMBLE_V0, payload)) => Ok(payload),
+        Some(_) => Err("Invalid binary encoding version."),
+    }
+}
+
 fn decode_struct(data: &[u8]) -> Result<Struct, String> {
-    read_struct(&mut Reader::new(data))
+    let payload = strip_thriftrw_preamble(data)
+        .map_err(|e| format!("DeserializeBatchEvents encoding: \"thriftrw\", error: {e}"))?;
+    read_struct(&mut Reader::new(payload))
         .map_err(|e| format!("DeserializeBatchEvents encoding: \"thriftrw\", error: {e}"))
 }
 
@@ -251,7 +266,15 @@ mod tests {
 
     type TestValue<'a> = (&'a str, Option<(&'a str, &'a str)>);
 
+    /// Go `ThriftRWEncoder.Encode` output: the 0x59 preamble plus the struct.
     fn encode_blob(entries: &[(&str, &[TestValue])]) -> Vec<u8> {
+        let mut data = vec![THRIFTRW_PREAMBLE_V0];
+        data.extend(encode_struct(entries));
+        data
+    }
+
+    /// The bare struct as written without the Go encoder preamble.
+    fn encode_struct(entries: &[(&str, &[TestValue])]) -> Vec<u8> {
         let mut w = Writer::new();
         w.write_field_begin(TType::I64, 10);
         w.write_i64(7);
@@ -327,6 +350,60 @@ mod tests {
         let snap = decode_snapshot(&row(1, packed, "thriftrw_snappy")).unwrap();
         assert_eq!(snap.entries.unwrap()[0].name, "a");
     }
+
+    fn from_hex(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn go_seeded_blob_with_preamble_decodes() {
+        // Go `SerializeDynamicConfigBlob` output for `{"a.b":"1s"}`, printed by
+        // `SEED_DRY=1 go run ./tests/configstore-seed`.
+        let data = from_hex(
+            "590a000a00000000000000010f00140c000000010b000a00000003612e620f00140c000000010c000a08000a000000010b0014000000042231732200000000",
+        );
+        assert_eq!(data[0], 0x59);
+        let snap = decode_snapshot(&row(1, data, "thriftrw")).unwrap();
+        assert_eq!((snap.version, snap.schema_version), (1, 1));
+        let entries = snap.entries.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "a.b");
+        assert_eq!(entries[0].values.len(), 1);
+        assert!(entries[0].values[0].filters.is_empty());
+        let value = entries[0].values[0].value.as_ref().unwrap();
+        assert_eq!(value.encoding_type, Some(EncodingType::JSON));
+        assert_eq!(value.data, b"\"1s\"");
+    }
+
+    #[test]
+    fn thriftrw_blob_without_preamble_is_rejected_like_go() {
+        let bare = encode_struct(&[("a", &[("1", None)])]);
+        assert_eq!(bare[0], 0x0a); // I64 field header, not the 0x59 preamble
+        let err = decode_snapshot(&row(1, bare, "thriftrw")).unwrap_err();
+        assert_eq!(
+            err,
+            "DeserializeBatchEvents encoding: \"thriftrw\", error: Invalid binary encoding version."
+        );
+        let mut wrong = encode_blob(&[("a", &[("1", None)])]);
+        wrong[0] = THRIFTRW_PREAMBLE_V0 - 1;
+        let err = decode_snapshot(&row(1, wrong, "thriftrw")).unwrap_err();
+        assert!(err.ends_with("Invalid binary encoding version."), "{err}");
+    }
+
+    #[test]
+    fn snappy_blob_without_preamble_is_rejected_like_go() {
+        let bare = encode_struct(&[("a", &[("1", None)])]);
+        let packed = snap::raw::Encoder::new().compress_vec(&bare).unwrap();
+        let err = decode_snapshot(&row(1, packed, "thriftrw_snappy")).unwrap_err();
+        assert!(err.ends_with("Invalid binary encoding version."), "{err}");
+        let packed = snap::raw::Encoder::new().compress_vec(&[]).unwrap();
+        let err = decode_snapshot(&row(1, packed, "thriftrw_snappy")).unwrap_err();
+        assert!(err.ends_with("Missing binary encoding version."), "{err}");
+    }
+
 
     fn client_config(timeout: Duration) -> ClientConfig {
         ClientConfig { fetch_timeout: timeout, ..ClientConfig::go_defaults() }
