@@ -52,5 +52,8 @@ production mechanism that unloads idle owners.
 - Liveness group: `cargo test -p cadence-matching --lib liveness_event_loop -- --include-ignored`,
   2 passed, 0 failed, exit 0 (first run exit 101 was a missing `go/idls` submodule in the worktree,
   fixed with `git submodule update --init go/idls`).
-- Semaphore group: `cargo test -p cadence-matching --lib matching_semaphore_`, result in the
-  `/tmp/sem.log` run record (see the final report).
+- Semaphore group: `cargo test -p cadence-matching --lib matching_semaphore_`, 16 passed, 0 failed, exit 0.
+- Full gate: `cargo test -p cadence-matching`, 445 passed, 0 failed, 5 ignored (pre-existing), exit 0
+  (`/tmp/final-test.log`, `/tmp/final-test.exit` = 0).
+- Clippy gate: `cargo clippy -p cadence-matching --all-targets -- -D warnings` NOT YET RUN to completion.
+  The job is queued on the shared `/tmp/cargo.lock` behind other workers. Record its exit before merge.
