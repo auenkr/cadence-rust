@@ -4146,3 +4146,82 @@ async fn matching_rpc_sync_forward_parent_other_error_does_not_count_throttle_me
     let sink = sync_forward_to_failing_parent(false).await;
     assert!(sink.events().iter().all(|event| event.name != SYNC_FORWARD_TASK_THROTTLE_ERRORS));
 }
+
+// Go handler_test.go: every handler RPC returns ServiceBusyError("Matching host rps exceeded")
+// when the host limiter denies, before touching the engine.
+fn denied_after_first_state(domain_id: Uuid) -> crate::handlers::AppState {
+    let state = crate::handlers::AppState::default();
+    state.domains.create(
+        cadence_api::types::DomainInfo { name: "quota-domain".into(), uuid: domain_id.to_string(), ..Default::default() },
+        Default::default(), Default::default(), false,
+    ).unwrap();
+    {
+        let mut config = state.admin.dynamic_config.lock().unwrap();
+        config.update(false, "matching.rps", vec![quota_config(100, None)]);
+        config.update(false, "matching.domainrps", vec![quota_config(1, Some("quota-domain"))]);
+    }
+    state
+}
+
+fn assert_host_busy(status: tonic::Status) {
+    assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(status.message(), "Matching host rps exceeded");
+    assert!(!status.details().is_empty(), "Go-compatible ServiceBusyError detail is required");
+}
+
+#[tokio::test]
+async fn go_handler_describe_task_list_rate_limited_returns_service_busy() {
+    let domain_id = Uuid::from_u128(9101);
+    let matching = Matching::new(denied_after_first_state(domain_id));
+    let req = || Request::new(m::DescribeTaskListRequest {
+        domain_id: domain_id.to_string(),
+        request: Some(p::DescribeTaskListRequest { task_list: Some(p::TaskList { name: "test-task-list".into(), ..Default::default() }), ..Default::default() }),
+    });
+    let _ = matching.describe_task_list(req()).await;
+    assert_host_busy(matching.describe_task_list(req()).await.unwrap_err());
+}
+
+#[tokio::test]
+async fn go_handler_list_task_list_partitions_rate_limited_returns_service_busy() {
+    let domain_id = Uuid::from_u128(9102);
+    let matching = Matching::new(denied_after_first_state(domain_id));
+    let req = || Request::new(m::ListTaskListPartitionsRequest {
+        domain: "quota-domain".into(),
+        task_list: Some(p::TaskList { name: "test-task-list".into(), ..Default::default() }),
+    });
+    let _ = matching.list_task_list_partitions(req()).await;
+    assert_host_busy(matching.list_task_list_partitions(req()).await.unwrap_err());
+}
+
+#[tokio::test]
+async fn go_handler_update_task_list_partition_config_rate_limited_returns_service_busy() {
+    let domain_id = Uuid::from_u128(9103);
+    let matching = Matching::new(denied_after_first_state(domain_id));
+    let req = || Request::new(m::UpdateTaskListPartitionConfigRequest {
+        domain_id: domain_id.to_string(),
+        task_list: Some(p::TaskList { name: "test-task-list".into(), ..Default::default() }),
+        ..Default::default()
+    });
+    let _ = matching.update_task_list_partition_config(req()).await;
+    assert_host_busy(matching.update_task_list_partition_config(req()).await.unwrap_err());
+}
+
+#[tokio::test]
+async fn go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_normal_kinds() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    let missing = matching.refresh_task_list_partition_config(Request::new(m::RefreshTaskListPartitionConfigRequest {
+        domain_id: domain.clone(), task_list: None, ..Default::default()
+    })).await.unwrap_err();
+    assert_eq!(missing.code(), tonic::Code::InvalidArgument);
+    assert_eq!(missing.message(), "TaskList is not set.");
+    for kind in [2, 3] {
+        let err = matching.refresh_task_list_partition_config(Request::new(m::RefreshTaskListPartitionConfigRequest {
+            domain_id: domain.clone(),
+            task_list: Some(p::TaskList { name: "tl".into(), kind, ..Default::default() }),
+            ..Default::default()
+        })).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert_eq!(err.message(), "Only normal tasklist's partition config can be updated.");
+    }
+}
