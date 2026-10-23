@@ -1,0 +1,267 @@
+{
+  "topology": "two Rust Matching hosts with Go Frontend/History/Worker",
+  "sameRingOwnershipMap": [
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:51267",
+      "secondaryOwner": "127.0.0.1:51267"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    },
+    {
+      "primaryOwner": "127.0.0.1:53271",
+      "secondaryOwner": "127.0.0.1:53271"
+    }
+  ],
+  "idleEviction": {
+    "taskList": "production-idle-bc1e648b-3323-4956-9a75-5d8b44a78642",
+    "releasedWithEmptyResponse": true,
+    "sdkCompletedWorkflow": "production-idle-recovery-bc1e648b-3323-4956-9a75-5d8b44a78642",
+    "completionEvents": 1
+  }
+}

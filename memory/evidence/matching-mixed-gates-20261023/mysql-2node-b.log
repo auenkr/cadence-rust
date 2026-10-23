@@ -1,0 +1,6 @@
+Go baseline artifacts: /mnt/storage/service/github/wt/mixed3/artifacts/mysql-2node-b
+Selected evidence copied to memory/evidence/matching-mixed-gates-20261023/mysql-2node-b: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-before-restart.log', 'rust-server-logs/rust-server-secondary.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_mysql.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Traceback (most recent call last):
+  File "/mnt/storage/service/github/wt/mixed3/tests/run-go-service-baseline.py", line 770, in <module>
+    raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+RuntimeError: Go baseline probe failed; see /mnt/storage/service/github/wt/mixed3/artifacts/mysql-2node-b/probe.log
