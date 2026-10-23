@@ -852,6 +852,181 @@ async fn matching_rpc_durable_describe_tracks_activity_poller_and_queue_status()
     );
 }
 
+/// Matching without durable queues: DescribeTaskList forwards to the frontend
+/// poller history, which is keyed by domain, task list, identity and task type.
+fn non_durable_fixture() -> (Matching, String) {
+    let state = crate::handlers::AppState::default();
+    let domain = Uuid::from_u128(1).to_string();
+    state
+        .domains
+        .create(
+            cadence_api::types::DomainInfo {
+                name: "domain".into(),
+                uuid: domain.clone(),
+                ..Default::default()
+            },
+            Default::default(),
+            Default::default(),
+            false,
+        )
+        .unwrap();
+    (Matching::new(state), domain)
+}
+
+fn non_durable_describe(
+    domain: &str,
+    task_list_type: i32,
+    include_task_list_status: bool,
+) -> Request<m::DescribeTaskListRequest> {
+    Request::new(m::DescribeTaskListRequest {
+        domain_id: domain.into(),
+        request: Some(p::DescribeTaskListRequest {
+            task_list: list(),
+            task_list_type,
+            include_task_list_status,
+            ..Default::default()
+        }),
+    })
+}
+
+#[tokio::test]
+async fn matching_rpc_non_durable_describe_lists_pollers_per_task_list_and_type() {
+    let (matching, domain) = non_durable_fixture();
+    let decision_poll = |identity: &str, task_list: &str| {
+        let mut request = Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain.clone(),
+            request: Some(p::PollForDecisionTaskRequest {
+                task_list: Some(p::TaskList {
+                    name: task_list.into(),
+                    kind: 1,
+                    ..Default::default()
+                }),
+                identity: identity.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        request.set_timeout(Duration::from_secs(1));
+        request
+    };
+    // The same identity polling twice must appear once, like Go's identity-keyed history.
+    for request in [
+        decision_poll("decision-a", "queue"),
+        decision_poll("decision-a", "queue"),
+        decision_poll("decision-other", "other"),
+    ] {
+        assert!(matching.poll_for_decision_task(request).await.unwrap().into_inner().task_token.is_empty());
+    }
+    let mut activity = Request::new(m::PollForActivityTaskRequest {
+        domain_id: domain.clone(),
+        poller_id: "activity-poller".into(),
+        request: Some(p::PollForActivityTaskRequest {
+            task_list: list(),
+            identity: "activity-a".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    activity.set_timeout(Duration::from_secs(1));
+    assert!(matching.poll_for_activity_task(activity).await.unwrap().into_inner().task_token.is_empty());
+
+    let decision = matching
+        .describe_task_list(non_durable_describe(&domain, 1, false))
+        .await
+        .unwrap()
+        .into_inner();
+    let identities: Vec<&str> = decision.pollers.iter().map(|poller| poller.identity.as_str()).collect();
+    assert_eq!(identities, ["decision-a"]);
+    assert_eq!(decision.task_list.unwrap().name, "queue");
+    assert!(decision.task_list_status.is_none());
+    assert!(decision.partition_config.is_none());
+
+    let activity = matching
+        .describe_task_list(non_durable_describe(&domain, 2, true))
+        .await
+        .unwrap()
+        .into_inner();
+    let identities: Vec<&str> = activity.pollers.iter().map(|poller| poller.identity.as_str()).collect();
+    assert_eq!(identities, ["activity-a"]);
+    // Go reports the ack-manager backlog; an untouched list has none.
+    assert_eq!(activity.task_list_status.unwrap().backlog_count_hint, 0);
+}
+
+#[tokio::test]
+#[ignore = "parity gap: non-durable poll history does not store TaskListMetadata.max_tasks_per_second; Go reports it as poller RatePerSecond"]
+async fn matching_rpc_non_durable_describe_reports_poller_rate() {
+    let (matching, domain) = non_durable_fixture();
+    let mut poll = Request::new(m::PollForActivityTaskRequest {
+        domain_id: domain.clone(),
+        poller_id: "activity-poller".into(),
+        request: Some(p::PollForActivityTaskRequest {
+            task_list: list(),
+            identity: "sdk-worker".into(),
+            task_list_metadata: Some(p::TaskListMetadata {
+                max_tasks_per_second: Some(42.0),
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    poll.set_timeout(Duration::from_secs(1));
+    assert!(matching.poll_for_activity_task(poll).await.unwrap().into_inner().task_token.is_empty());
+    let described = matching
+        .describe_task_list(non_durable_describe(&domain, 2, false))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(described.pollers[0].rate_per_second, 42.0);
+}
+
+#[tokio::test]
+#[ignore = "parity gap: non-durable describe does not track isolation groups; Go lists every configured group with its poller count"]
+async fn matching_rpc_non_durable_describe_reports_isolation_group_metrics() {
+    let (matching, domain) = non_durable_fixture();
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "system.allIsolationGroups", vec![cadence_api::admin::DynamicConfigValue {
+        value: Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, br#"["zone-a","zone-b"]"#.to_vec())), filters: vec![],
+    }]);
+    let mut poll = Request::new(m::PollForActivityTaskRequest {
+        domain_id: domain.clone(),
+        poller_id: "activity-poller".into(),
+        isolation_group: "zone-a".into(),
+        request: Some(p::PollForActivityTaskRequest {
+            task_list: list(),
+            identity: "sdk-worker".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    poll.set_timeout(Duration::from_secs(1));
+    assert!(matching.poll_for_activity_task(poll).await.unwrap().into_inner().task_token.is_empty());
+    let status = matching
+        .describe_task_list(non_durable_describe(&domain, 2, true))
+        .await
+        .unwrap()
+        .into_inner()
+        .task_list_status
+        .unwrap();
+    assert_eq!(status.isolation_group_metrics.len(), 2);
+    assert_eq!(status.isolation_group_metrics["zone-a"].poller_count, 1);
+    assert_eq!(status.isolation_group_metrics["zone-b"].poller_count, 0);
+}
+
+#[tokio::test]
+#[ignore = "parity gap: non-durable status has no ack manager, so task_id_block and empty stay unset; Go derives both"]
+async fn matching_rpc_non_durable_describe_reports_task_id_block_and_empty() {
+    let (matching, domain) = non_durable_fixture();
+    let status = matching
+        .describe_task_list(non_durable_describe(&domain, 1, true))
+        .await
+        .unwrap()
+        .into_inner()
+        .task_list_status
+        .unwrap();
+    // Go: an untouched list has ackLevel == maxReadLevel, so Empty is true.
+    assert!(status.empty);
+    assert!(status.task_id_block.is_some());
+}
+
 #[tokio::test]
 async fn matching_rpc_lists_configured_write_partitions() {
     let (_dir, _store, matching, _key) = fixture();
