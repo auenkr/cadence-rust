@@ -129,17 +129,17 @@ Targeted semaphore tests: **37 passed, 0 failed, 7 ignored**, exit **0**
 (`semaphore-test.log`, `semaphore-test.exit`). All 23 new runnable cases passed.
 Crate all-targets clippy with `-D warnings`: exit **0** (`clippy.log`,
 `clippy.exit`), no diagnostics.
-Pending: crate library tests. Commands use the requested shared target and
-`cargo-safe` from this worktree's `rust/`, inside tmux session `cadence-rust`.
-Shared target validation is requested explicitly for this task; this is not a
-clean dedicated-target mixed-cluster gate or proof of full service completion.
+Full crate library tests (`cargo-safe test -p cadence-matching --lib ''`, shared
+target): **464 passed, 0 failed, 10 ignored**, exit **0** (`lib-test.log`,
+`lib-test.exit`). The 10 ignored cases include the 7 semaphore gaps above plus
+pre-existing ignored tests outside this change.
+Commands use the requested shared target and `cargo-safe` from this worktree's
+`rust/`. This is not a clean dedicated-target mixed-cluster gate or proof of full
+service completion.
 
-Checkpoint (2026-10-23 18:45 UTC / 2026-10-24 00:15 IST): implementation
-commit `3076d7837` is pushed. The targeted semaphore check waited approximately
-34 minutes on the shared lock and is now compiling this worktree's crates.
-All validation exits remain pending at this checkpoint; the tmux runners remain
-active. This checkpoint keeps the required 30-minute commit/push cadence while
-waiting for shared-host validation.
+Checkpoint (2026-10-24 ~01:22 IST): implementation commit `3076d7837`, evidence
+commits through `e71515a2b` are pushed. Targeted semaphore tests, all-targets
+clippy, and the full crate library test all exit 0.
 
 Reproduce from `/mnt/storage/service/github/wt/semtests/rust` (sequentially;
 check `uptime`/`free -h` first and respect the host-wide gate/build exclusion):
