@@ -26,4 +26,4 @@ Old re-sorting loop: after the first batch it re-sorted, picked P3 (4 groups, si
 as donor and moved h4 to P1 instead -> differs.
 
 ## CI evidence
-(see below)
+Run https://github.com/auenkr/cadence-rust/actions/runs/40011773659, sha fc6aabb2c7a391e2c40a7cf3894f4489396efa2f, conclusion success (clippy + tests; cadence-matching lib: 538 passed, 0 failed, 10 ignored).
