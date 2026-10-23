@@ -55,5 +55,4 @@ production mechanism that unloads idle owners.
 - Semaphore group: `cargo test -p cadence-matching --lib matching_semaphore_`, 16 passed, 0 failed, exit 0.
 - Full gate: `cargo test -p cadence-matching`, 445 passed, 0 failed, 5 ignored (pre-existing), exit 0
   (`/tmp/final-test.log`, `/tmp/final-test.exit` = 0).
-- Clippy gate: `cargo clippy -p cadence-matching --all-targets -- -D warnings` NOT YET RUN to completion.
-  The job is queued on the shared `/tmp/cargo.lock` behind other workers. Record its exit before merge.
+- Clippy gate: `cargo clippy -p cadence-matching --all-targets -- -D warnings`, exit 0 (`/tmp/final-clippy.exit` = 0).
