@@ -223,12 +223,35 @@ fn blob_from_thrift(blob: &Struct, version: i64) -> Snapshot {
     }
 }
 
+/// SQL plugins (`SelectLatestConfig`): smallest stored (negated) version wins.
+pub fn sqlite_fetch_latest(
+    conn: &rusqlite::Connection,
+    row_type: i32,
+) -> Result<Option<ConfigStoreRow>, String> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT version, data, data_encoding FROM cluster_config WHERE row_type = ? ORDER BY version LIMIT 1",
+        [row_type],
+        |r| {
+            Ok(ConfigStoreRow {
+                version: -r.get::<_, i64>(0)?,
+                data: r.get(1)?,
+                encoding: r.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use cadence_thrift::protocol::{TType, Writer};
 
-    fn encode_blob(entries: &[(&str, &[(&str, Option<(&str, &str)>)])]) -> Vec<u8> {
+    type TestValue<'a> = (&'a str, Option<(&'a str, &'a str)>);
+
+    fn encode_blob(entries: &[(&str, &[TestValue])]) -> Vec<u8> {
         let mut w = Writer::new();
         w.write_field_begin(TType::I64, 10);
         w.write_i64(7);
@@ -363,25 +386,4 @@ mod tests {
         assert_eq!((latest.version, latest.data), (3, vec![1]));
         assert!(sqlite_fetch_latest(&conn, 5).unwrap().is_none());
     }
-}
-
-/// SQL plugins (`SelectLatestConfig`): smallest stored (negated) version wins.
-pub fn sqlite_fetch_latest(
-    conn: &rusqlite::Connection,
-    row_type: i32,
-) -> Result<Option<ConfigStoreRow>, String> {
-    use rusqlite::OptionalExtension;
-    conn.query_row(
-        "SELECT version, data, data_encoding FROM cluster_config WHERE row_type = ? ORDER BY version LIMIT 1",
-        [row_type],
-        |r| {
-            Ok(ConfigStoreRow {
-                version: -r.get::<_, i64>(0)?,
-                data: r.get(1)?,
-                encoding: r.get(2)?,
-            })
-        },
-    )
-    .optional()
-    .map_err(|e| e.to_string())
 }
