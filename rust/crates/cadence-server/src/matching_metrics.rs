@@ -26,6 +26,8 @@ pub enum MetricValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HistogramSpec {
+    /// Go persistence latency: full resolution, scale 2.
+    GoDefault1ms100s,
     /// Go `common/metrics.Low1ms100s`: 1 ms to 100 s intent, scale 1,
     /// with the same 40 sampled exponential buckets (plus sentinel bounds).
     GoLow1ms100s,
@@ -49,10 +51,15 @@ impl MetricSink for HistogramTagSink {
     fn record(&self, mut event: MetricEvent) {
         if let Some(spec) = event.histogram {
             let (start, end, scale) = match spec {
+                HistogramSpec::GoDefault1ms100s => ("1ms", "17m28.576s", "2"),
                 HistogramSpec::GoLow1ms100s => ("1ms", "17m28.576s", "1"),
                 HistogramSpec::GoMid1To16k => ("8", "524288", "2"),
             };
-            for (key, value) in [("histogram_start", start), ("histogram_end", end), ("histogram_scale", scale)] {
+            for (key, value) in [
+                ("histogram_start", start),
+                ("histogram_end", end),
+                ("histogram_scale", scale),
+            ] {
                 event.tags.insert(key.to_owned(), value.to_owned());
             }
         }
@@ -137,7 +144,8 @@ pub const TASK_LIST_READ_WRITE_PARTITION_MISMATCH: &str = "tasklist_read_write_p
 pub const TASK_LIST_POLLER_PARTITION_MISMATCH: &str = "tasklist_poller_partition_mismatch";
 pub const STANDBY_TASKS_COMPLETED: &str = "standby_cluster_tasks_completed_per_tl";
 pub const STANDBY_TASKS_NOT_STARTED: &str = "standby_cluster_tasks_not_started_per_tl";
-pub const STANDBY_TASKS_COMPLETION_FAILURE: &str = "standby_cluster_tasks_completion_failure_per_tl";
+pub const STANDBY_TASKS_COMPLETION_FAILURE: &str =
+    "standby_cluster_tasks_completion_failure_per_tl";
 pub const RESPOND_QUERY_TASK_FAILED: &str = "respond_query_failed_per_tl";
 pub const CONDITION_FAILED_ERRORS: &str = "condition_failed_errors_per_tl";
 pub const SYNC_MATCH_LATENCY: &str = "syncmatch_latency_per_tl";
@@ -233,7 +241,15 @@ pub(crate) fn record_persistence_qps_rejection(
 ) {
     let mut tags = BTreeMap::new();
     tags.insert(OPERATION_TAG.to_owned(), operation.to_owned());
-    tags.insert("persistence_scope".to_owned(), if go_metered_operation.is_some() { "go" } else { "semaphore" }.to_owned());
+    tags.insert(
+        "persistence_scope".to_owned(),
+        if go_metered_operation.is_some() {
+            "go"
+        } else {
+            "semaphore"
+        }
+        .to_owned(),
+    );
     if let Some(domain) = domain {
         tags.insert(DOMAIN_TAG.to_owned(), go_sanitize_metric_value(domain));
     }
@@ -253,9 +269,17 @@ pub(crate) fn record_persistence_qps_rejection(
             go_tags.insert(DOMAIN_TAG.to_owned(), go_sanitize_metric_value(domain));
         }
         let counters = if per_domain {
-            [PERSISTENCE_REQUESTS_PER_DOMAIN, PERSISTENCE_ERRORS_BUSY_PER_DOMAIN, PERSISTENCE_FAILURES_PER_DOMAIN]
+            [
+                PERSISTENCE_REQUESTS_PER_DOMAIN,
+                PERSISTENCE_ERRORS_BUSY_PER_DOMAIN,
+                PERSISTENCE_FAILURES_PER_DOMAIN,
+            ]
         } else {
-            [PERSISTENCE_REQUESTS, PERSISTENCE_ERRORS_BUSY, PERSISTENCE_FAILURES]
+            [
+                PERSISTENCE_REQUESTS,
+                PERSISTENCE_ERRORS_BUSY,
+                PERSISTENCE_FAILURES,
+            ]
         };
         for name in counters {
             sink.record(MetricEvent {
@@ -281,10 +305,22 @@ mod persistence_qps_metric_tests {
         assert_eq!(events.len(), 4);
         assert_eq!(events[0].name, MATCHING_PERSISTENCE_QPS_REJECTIONS);
         assert_eq!(events[0].tags["persistence_scope"], "go");
-        assert!(events.iter().any(|event| event.name == PERSISTENCE_REQUESTS));
-        assert!(events.iter().any(|event| event.name == PERSISTENCE_ERRORS_BUSY));
-        assert!(events.iter().any(|event| event.name == PERSISTENCE_FAILURES));
-        assert!(events.iter().filter(|event| event.name == MATCHING_PERSISTENCE_QPS_REJECTIONS).count() == 1);
+        assert!(events
+            .iter()
+            .any(|event| event.name == PERSISTENCE_REQUESTS));
+        assert!(events
+            .iter()
+            .any(|event| event.name == PERSISTENCE_ERRORS_BUSY));
+        assert!(events
+            .iter()
+            .any(|event| event.name == PERSISTENCE_FAILURES));
+        assert!(
+            events
+                .iter()
+                .filter(|event| event.name == MATCHING_PERSISTENCE_QPS_REJECTIONS)
+                .count()
+                == 1
+        );
     }
 
     #[test]
@@ -464,6 +500,29 @@ impl MatchingMetrics {
         Self(Arc::new(HistogramTagSink(sink)))
     }
 
+    pub(crate) fn routing_path(&self, path: &str) {
+        self.0.record(MetricEvent {
+            name: "shard_distributor_resolver_lookups",
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            histogram: None,
+            tags: BTreeMap::from([
+                ("operation".into(), "ShardDistributorResolver".into()),
+                ("routing_path".into(), path.into()),
+            ]),
+        });
+    }
+
+    pub(crate) fn onboarding_percentage(&self, percentage: i64) {
+        self.0.record(MetricEvent {
+            name: "percentage_onboarded_to_shard_manager",
+            kind: MetricKind::Gauge,
+            value: MetricValue::Number(percentage as f64),
+            histogram: None,
+            tags: BTreeMap::from([("operation".into(), "ShardManagerOnboarding".into())]),
+        });
+    }
+
     pub(crate) fn quota_rejection(&self, rejection: crate::matching_quota::QuotaRejection) {
         let mut tags = BTreeMap::new();
         tags.insert("operation".to_owned(), format!("{:?}", rejection.method));
@@ -626,7 +685,10 @@ impl MatchingMetrics {
             TASK_ISOLATION_LEAK,
             context,
             BTreeMap::from([
-                (ISOLATION_GROUP_TAG.to_owned(), go_sanitize_metric_value(group)),
+                (
+                    ISOLATION_GROUP_TAG.to_owned(),
+                    go_sanitize_metric_value(group),
+                ),
                 ("leak_cause".to_owned(), cause.to_owned()),
             ]),
         );
@@ -641,7 +703,10 @@ impl MatchingMetrics {
         version: Option<i64>,
     ) {
         let mut tags = self.task_list_tags(context);
-        tags.insert("tasklist_root_partition".to_owned(), go_sanitize_metric_value(root));
+        tags.insert(
+            "tasklist_root_partition".to_owned(),
+            go_sanitize_metric_value(root),
+        );
         for (name, value) in [
             (TASK_LIST_PARTITION_CONFIG_NUM_READ, read as f64),
             (TASK_LIST_PARTITION_CONFIG_NUM_WRITE, write as f64),
@@ -684,7 +749,10 @@ impl MatchingMetrics {
         }
         if poller_mismatch {
             let mut tags = tags;
-            tags.insert("isolation_enabled".to_owned(), isolation_enabled.to_string());
+            tags.insert(
+                "isolation_enabled".to_owned(),
+                isolation_enabled.to_string(),
+            );
             self.0.record(MetricEvent {
                 name: TASK_LIST_POLLER_PARTITION_MISMATCH,
                 kind: MetricKind::Gauge,
@@ -1097,11 +1165,15 @@ impl MatchingMetrics {
         };
         BTreeMap::from([
             (OPERATION_TAG.to_owned(), "TaskListMgr".to_owned()),
-            (TASK_LIST_TYPE_TAG.to_owned(), match context.task_type {
-                "activity_task" | "activity" => "activity",
-                "decision_task" | "decision" => "decision",
-                _ => "_unknown_",
-            }.to_owned()),
+            (
+                TASK_LIST_TYPE_TAG.to_owned(),
+                match context.task_type {
+                    "activity_task" | "activity" => "activity",
+                    "decision_task" | "decision" => "decision",
+                    _ => "_unknown_",
+                }
+                .to_owned(),
+            ),
             (
                 DOMAIN_TAG.to_owned(),
                 if context.domain.is_empty() {
@@ -1120,13 +1192,26 @@ impl MatchingMetrics {
         tags
     }
 
-    fn task_list_metric_tags(&self, name: &str, context: &PollMetricContext) -> BTreeMap<String, String> {
+    fn task_list_metric_tags(
+        &self,
+        name: &str,
+        context: &PollMetricContext,
+    ) -> BTreeMap<String, String> {
         let mut tags = self.task_list_tags(context);
-        if matches!(name, PARTITION_UPSCALE | PARTITION_DOWNSCALE | PARTITION_DRAINED
-            | ISOLATION_REBALANCE | ISOLATION_GROUP_STARTED_POLLING
-            | ISOLATION_GROUP_STOPPED_POLLING | ISOLATION_GROUP_UPSCALE
-            | ISOLATION_GROUP_DOWNSCALE | ISOLATION_GROUP_PARTITIONS
-            | PARTITION_UPSCALE_THRESHOLD | PARTITION_DOWNSCALE_THRESHOLD) {
+        if matches!(
+            name,
+            PARTITION_UPSCALE
+                | PARTITION_DOWNSCALE
+                | PARTITION_DRAINED
+                | ISOLATION_REBALANCE
+                | ISOLATION_GROUP_STARTED_POLLING
+                | ISOLATION_GROUP_STOPPED_POLLING
+                | ISOLATION_GROUP_UPSCALE
+                | ISOLATION_GROUP_DOWNSCALE
+                | ISOLATION_GROUP_PARTITIONS
+                | PARTITION_UPSCALE_THRESHOLD
+                | PARTITION_DOWNSCALE_THRESHOLD
+        ) {
             tags.insert(OPERATION_TAG.to_owned(), "adaptivescaler".to_owned());
         }
         tags
@@ -1280,11 +1365,7 @@ impl MatchingMetrics {
 
     /// Go `AsyncMatchForwardTaskThrottleErrorPerTasklist`.
     pub fn async_forward_throttled(&self, context: &PollMetricContext) {
-        self.task_list_counter(
-            ASYNC_FORWARD_TASK_THROTTLE_ERRORS,
-            context,
-            BTreeMap::new(),
-        );
+        self.task_list_counter(ASYNC_FORWARD_TASK_THROTTLE_ERRORS, context, BTreeMap::new());
     }
 
     /// Go `CadenceErrSemaphoreContextTimeoutCounter` on the request scope.
@@ -1781,11 +1862,7 @@ mod matcher_metric_tests {
     #[test]
     fn semaphore_context_timeout_counts_on_request_scope() {
         let sink = Arc::new(RecordingMetricSink::default());
-        MatchingMetrics::new(sink.clone()).semaphore_context_timeout(
-            Some("domain-a"),
-            "sem",
-            None,
-        );
+        MatchingMetrics::new(sink.clone()).semaphore_context_timeout(Some("domain-a"), "sem", None);
         let events = sink.events();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, "cadence_errors_semaphore_context_timeout");
@@ -1797,5 +1874,67 @@ mod matcher_metric_tests {
     #[test]
     fn respond_query_failed_uses_go_name() {
         assert_eq!(RESPOND_QUERY_TASK_FAILED, "respond_query_failed_per_tl");
+    }
+}
+
+#[cfg(test)]
+mod go_scope_parity_tests {
+    use super::*;
+
+    #[test]
+    fn manager_scaler_and_histogram_dimensions_match_go() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let context = PollMetricContext {
+            domain: "payments".into(),
+            task_list: "queue/a".into(),
+            task_list_kind: 0,
+            task_type: "activity_task",
+            poller_isolation_group: String::new(),
+        };
+        metrics.poller_count(&context, 2);
+        metrics.partition_scale_change(&context, true);
+        metrics.async_match_local(&context, Some(3), Duration::from_millis(1));
+        let events = sink.events();
+        assert_eq!(events[0].name, "poller_count_per_tl");
+        assert_eq!(
+            events[0].tags,
+            BTreeMap::from([
+                ("operation".into(), "TaskListMgr".into()),
+                ("domain".into(), "payments".into()),
+                ("tasklist".into(), "queue_a".into()),
+                ("tasklistType".into(), "activity".into()),
+            ])
+        );
+        assert_eq!(events[1].tags["operation"], "adaptivescaler");
+        for event in events
+            .iter()
+            .filter(|event| event.kind == MetricKind::Histogram)
+        {
+            assert_eq!(
+                event.tags["histogram_scale"],
+                if event.name.ends_with("_counts") {
+                    "2"
+                } else {
+                    "1"
+                }
+            );
+            assert_eq!(
+                event.tags["histogram_end"],
+                if event.name.ends_with("_counts") {
+                    "524288"
+                } else {
+                    "17m28.576s"
+                }
+            );
+        }
+        let tags = MatchingMetrics::request_tags(
+            "AcquireSemaphore",
+            Some("payments"),
+            Some(("lock/a", Some(0))),
+            None,
+        );
+        assert_eq!(tags["semaphore"], "lock_a");
+        assert!(!tags.contains_key("semaphore_name"));
     }
 }

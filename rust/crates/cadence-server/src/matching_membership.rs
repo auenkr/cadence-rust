@@ -14,6 +14,7 @@ pub struct Membership {
     changed: tokio::sync::watch::Sender<u64>,
     /// Go's Matching outbound TLS, taken from Matching's own `rpc.tls`.
     peer_tls: Option<crate::grpc_tls::ClientTls>,
+    metrics: Arc<RwLock<crate::matching_metrics::MatchingMetrics>>,
 }
 impl Membership {
     pub fn new(identity: impl Into<Arc<str>>, hosts: Vec<Host>) -> Self {
@@ -23,8 +24,34 @@ impl Membership {
             channels: Arc::default(),
             changed: tokio::sync::watch::channel(0).0,
             peer_tls: None,
+            metrics: Arc::new(RwLock::new(
+                crate::matching_metrics::MatchingMetrics::default(),
+            )),
         }
     }
+    pub fn with_metrics(self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
+        *self
+            .metrics
+            .write()
+            .expect("Matching membership metrics lock") =
+            crate::matching_metrics::MatchingMetrics::new(sink);
+        self
+    }
+
+    pub(crate) fn record_routing_path(&self, path: &str) {
+        self.metrics
+            .read()
+            .expect("Matching membership metrics lock")
+            .routing_path(path);
+    }
+
+    pub(crate) fn record_onboarding(&self, percentage: i64) {
+        self.metrics
+            .read()
+            .expect("Matching membership metrics lock")
+            .onboarding_percentage(percentage);
+    }
+
     #[must_use]
     pub fn with_peer_tls(mut self, peer_tls: Option<crate::grpc_tls::ClientTls>) -> Self {
         self.peer_tls = peer_tls;

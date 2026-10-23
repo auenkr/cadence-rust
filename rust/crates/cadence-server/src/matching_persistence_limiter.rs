@@ -86,7 +86,10 @@ impl MatchingPersistenceLimiter {
 
     /// Attach the configured production sink before Matching listeners start.
     pub fn with_metric_sink(&self, sink: Arc<dyn crate::matching_metrics::MetricSink>) {
-        *self.metric_sink.write().expect("Matching metrics sink lock") = sink;
+        *self
+            .metric_sink
+            .write()
+            .expect("Matching metrics sink lock") = sink;
     }
 
     pub(crate) fn record_rejection(
@@ -102,6 +105,84 @@ impl MatchingPersistenceLimiter {
             domain,
             go_metered_operation,
         );
+    }
+
+    pub(crate) fn record_task_call<T>(
+        &self,
+        operation: &'static str,
+        elapsed: std::time::Duration,
+        result: &cadence_persistence::matching_task_store::Result<T>,
+    ) {
+        use crate::matching_metrics::*;
+        use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
+        let sink = self.metric_sink.read().expect("Matching metrics sink lock");
+        let tags = std::collections::BTreeMap::from([
+            (OPERATION_TAG.to_owned(), operation.to_owned()),
+            (TASK_CATEGORY_TAG.to_owned(), "none".to_owned()),
+            (IS_RETRY_TAG.to_owned(), "false".to_owned()),
+        ]);
+        let record = |name, kind, value, histogram| {
+            sink.record(MetricEvent {
+                name,
+                kind,
+                value,
+                tags: tags.clone(),
+                histogram,
+            })
+        };
+        record(
+            PERSISTENCE_REQUESTS,
+            MetricKind::Counter,
+            MetricValue::Count(1),
+            None,
+        );
+        record(
+            "persistence_latency",
+            MetricKind::Timer,
+            MetricValue::Duration(elapsed),
+            None,
+        );
+        let mut histogram_tags = tags.clone();
+        for (key, value) in [
+            ("histogram_start", "1ms"),
+            ("histogram_end", "17m28.576s"),
+            ("histogram_scale", "2"),
+        ] {
+            histogram_tags.insert(key.to_owned(), value.to_owned());
+        }
+        sink.record(MetricEvent {
+            name: "persistence_latency_ns",
+            kind: MetricKind::Histogram,
+            value: MetricValue::Duration(elapsed),
+            tags: histogram_tags,
+            histogram: Some(HistogramSpec::GoDefault1ms100s),
+        });
+        if let Err(error) = result {
+            let (name, failure) = match error {
+                MatchingTaskStoreError::ConditionFailed(_) => {
+                    ("persistence_errors_condition_failed", false)
+                }
+                MatchingTaskStoreError::NotFound => ("persistence_errors_entity_not_exists", false),
+                MatchingTaskStoreError::Backend {
+                    kind: BackendErrorKind::Timeout,
+                    ..
+                } => ("persistence_errors_timeout", true),
+                MatchingTaskStoreError::Backend {
+                    kind: BackendErrorKind::Throttled,
+                    ..
+                } => (PERSISTENCE_ERRORS_BUSY, true),
+                _ => (PERSISTENCE_FAILURES, false),
+            };
+            record(name, MetricKind::Counter, MetricValue::Count(1), None);
+            if failure {
+                record(
+                    PERSISTENCE_FAILURES,
+                    MetricKind::Counter,
+                    MetricValue::Count(1),
+                    None,
+                );
+            }
+        }
     }
 
     /// Consume one backend-operation permit without waiting, as Go's
@@ -272,5 +353,53 @@ mod tests {
         set(&overlay, "matching.persistenceMaxQPS", 1);
         assert!(limiter.allow());
         assert_eq!(limiter.rejected(), 0);
+    }
+}
+
+#[cfg(test)]
+mod metered_task_tests {
+    use super::*;
+    use crate::matching_metrics::*;
+    use cadence_persistence::matching_task_store::MatchingTaskStoreError;
+
+    #[test]
+    fn success_and_condition_failure_use_go_names_and_tags() {
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        limiter.record_task_call(
+            "GetTasks",
+            std::time::Duration::from_millis(3),
+            &Ok::<_, MatchingTaskStoreError>(()),
+        );
+        limiter.record_task_call(
+            "UpdateTaskList",
+            std::time::Duration::from_millis(1),
+            &Err::<(), _>(MatchingTaskStoreError::ConditionFailed("lease".into())),
+        );
+        let events = sink.events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_requests")
+                .count(),
+            2
+        );
+        assert!(events
+            .iter()
+            .any(|e| e.name == "persistence_errors_condition_failed"));
+        assert!(!events.iter().any(|e| e.name == "persistence_errors"));
+        assert!(events
+            .iter()
+            .all(|e| e.tags["is_retry"] == "false" && e.tags["task_category"] == "none"));
+        let histogram = events
+            .iter()
+            .find(|e| e.name == "persistence_latency_ns")
+            .unwrap();
+        assert_eq!(histogram.histogram, Some(HistogramSpec::GoDefault1ms100s));
+        assert_eq!(histogram.tags["histogram_scale"], "2");
     }
 }

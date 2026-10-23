@@ -176,7 +176,9 @@ impl MatchingShardRouter {
         &self,
         task_list_name: &str,
     ) -> Result<(ResolvedHost, RoutingPath), RoutingError> {
-        let percentage = (self.percentage_onboarded)() as u64;
+        let percentage = (self.percentage_onboarded)();
+        self.ring.record_onboarding(percentage);
+        let percentage = percentage as u64;
         let excluded = task_list_excluded_from_shard_distributor(
             task_list_name,
             percentage,
@@ -186,6 +188,7 @@ impl MatchingShardRouter {
             return self.resolve_from_ring(task_list_name);
         };
 
+        self.ring.record_routing_path("shard_distributor");
         let deadline = Instant::now() + SHARD_DISTRIBUTOR_LOOKUP_TIMEOUT;
         let owner = spectator
             .get_shard_owner(task_list_name.to_owned(), deadline)
@@ -288,6 +291,7 @@ impl MatchingShardRouter {
         &self,
         task_list_name: &str,
     ) -> Result<(ResolvedHost, RoutingPath), RoutingError> {
+        self.ring.record_routing_path("hash_ring");
         let host = self
             .ring
             .owner(task_list_name)
@@ -404,8 +408,8 @@ fn join_host_port(host: &str, port: u16) -> String {
 mod tests {
     use super::*;
     use std::sync::{
-        Mutex,
         atomic::{AtomicI64, AtomicUsize, Ordering},
+        Mutex,
     };
 
     struct FakeSpectator {
@@ -738,5 +742,26 @@ mod tests {
 
         let _ = stop.send(());
         cleanup.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod metric_parity_tests {
+    use super::*;
+    use crate::matching_metrics::RecordingMetricSink;
+
+    #[tokio::test]
+    async fn failed_ring_lookup_still_records_go_routing_dimensions() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let ring = Membership::new("local", vec![]).with_metrics(sink.clone());
+        let router = MatchingShardRouter::new(ring, None, Arc::new(|| 23), Arc::new(|| false));
+        assert!(router.resolve("queue").await.is_err());
+        let events = sink.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name, "percentage_onboarded_to_shard_manager");
+        assert_eq!(events[0].tags["operation"], "ShardManagerOnboarding");
+        assert_eq!(events[1].name, "shard_distributor_resolver_lookups");
+        assert_eq!(events[1].tags["operation"], "ShardDistributorResolver");
+        assert_eq!(events[1].tags["routing_path"], "hash_ring");
     }
 }

@@ -323,6 +323,7 @@ impl MetricSink for StatsdMetricSink {
             }
             (MetricKind::Histogram, MetricValue::Duration(duration)) => {
                 let bounds = match event.histogram {
+                    Some(HistogramSpec::GoDefault1ms100s) => go_default_exponential_bounds(),
                     Some(HistogramSpec::GoLow1ms100s) => go_low_1ms100s_bounds_nanos(),
                     Some(HistogramSpec::GoMid1To16k) => go_low_1ms100s_bounds_nanos(),
                     None => go_default_duration_bounds_nanos(),
@@ -672,4 +673,10 @@ mod tests {
         assert!(lines.contains("scope.queue.cadence_service.cadence-matching:9|g"));
         assert!(lines.contains("scope.latency.cadence_service.cadence-matching.10ms-25ms:2|c"));
     }
+}
+
+fn go_default_exponential_bounds() -> Vec<u64> {
+    std::iter::once(0)
+        .chain((0..=80).map(|index| (1_000_000.0 * 2_f64.powf(index as f64 / 4.0)) as u64))
+        .collect()
 }

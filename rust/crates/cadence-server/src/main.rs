@@ -1058,6 +1058,7 @@ async fn main() -> anyhow::Result<()> {
                     Vec::new(),
                 )
                 .with_peer_tls(matching_peer_tls.clone())
+                .with_metrics(matching_metric_sink.clone().unwrap_or_else(|| std::sync::Arc::new(cadence_server::matching_metrics::NoopMetricSink)))
             });
             let mut matching_membership_lifecycle = matching_ringpop_provider
                 .as_ref()
