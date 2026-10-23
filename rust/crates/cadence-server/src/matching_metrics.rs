@@ -42,6 +42,28 @@ pub struct MetricEvent {
     pub histogram: Option<HistogramSpec>,
 }
 
+/// Go's exponential histogram metadata is part of the series identity, not
+/// exporter configuration. Apply it before the sink so every backend agrees.
+struct HistogramTagSink(Arc<dyn MetricSink>);
+impl MetricSink for HistogramTagSink {
+    fn record(&self, mut event: MetricEvent) {
+        if let Some(spec) = event.histogram {
+            let (start, end, scale) = match spec {
+                HistogramSpec::GoLow1ms100s => ("1ms", "17m28.576s", "1"),
+                HistogramSpec::GoMid1To16k => ("8", "524288", "2"),
+            };
+            for (key, value) in [("histogram_start", start), ("histogram_end", end), ("histogram_scale", scale)] {
+                event.tags.insert(key.to_owned(), value.to_owned());
+            }
+        }
+        self.0.record(event);
+    }
+
+    fn flush(&self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
 pub trait MetricSink: Send + Sync + 'static {
     fn record(&self, event: MetricEvent);
 
@@ -85,11 +107,11 @@ pub const TASKLIST_MANAGERS: &str = "tasklist_managers";
 pub const CADENCE_LATENCY_PER_TASK_LIST: &str = "cadence_latency_per_tl";
 pub const CADENCE_LATENCY_PER_TASK_LIST_NS: &str = "cadence_latency_per_tl_ns";
 pub const DOMAIN_TAG: &str = "domain";
-pub const TASK_LIST_TAG: &str = "task_list";
+pub const TASK_LIST_TAG: &str = "tasklist";
 pub const GO_TASK_LIST_TAG: &str = "tasklist";
 pub const TASK_LIST_TYPE_TAG: &str = "tasklistType";
 pub const MATCHING_HOST_TAG: &str = "matching_host";
-pub const SEMAPHORE_NAME_TAG: &str = "semaphore_name";
+pub const SEMAPHORE_NAME_TAG: &str = "semaphore";
 pub const CALLER_TAG: &str = "caller";
 pub const TRANSPORT_TAG: &str = "transport";
 pub const POLL_SUCCESS: &str = "poll_success_per_tl";
@@ -191,10 +213,10 @@ pub const POLL_LOCAL_MATCH_AFTER_FORWARD_FAILED_LATENCY_NS: &str =
 pub const ISOLATION_GROUP_TAG: &str = "isolation_group";
 pub const POLLER_ISOLATION_GROUP_TAG: &str = "poller_isolation_group";
 pub const PERSISTENCE_REQUESTS: &str = "persistence_requests";
-pub const PERSISTENCE_FAILURES: &str = "persistence_failures";
+pub const PERSISTENCE_FAILURES: &str = "persistence_errors";
 pub const PERSISTENCE_ERRORS_BUSY: &str = "persistence_errors_busy";
 pub const PERSISTENCE_REQUESTS_PER_DOMAIN: &str = "persistence_requests_per_domain";
-pub const PERSISTENCE_FAILURES_PER_DOMAIN: &str = "persistence_failures_per_domain";
+pub const PERSISTENCE_FAILURES_PER_DOMAIN: &str = "persistence_errors_per_domain";
 pub const PERSISTENCE_ERRORS_BUSY_PER_DOMAIN: &str = "persistence_errors_busy_per_domain";
 pub const MATCHING_PERSISTENCE_QPS_REJECTIONS: &str = "matching_persistence_qps_rejections";
 pub const TASK_CATEGORY_TAG: &str = "task_category";
@@ -439,7 +461,7 @@ impl Default for MatchingMetrics {
 
 impl MatchingMetrics {
     pub fn new(sink: Arc<dyn MetricSink>) -> Self {
-        Self(sink)
+        Self(Arc::new(HistogramTagSink(sink)))
     }
 
     pub(crate) fn quota_rejection(&self, rejection: crate::matching_quota::QuotaRejection) {
@@ -562,23 +584,7 @@ impl MatchingMetrics {
         context: &PollMetricContext,
         extra: BTreeMap<String, String>,
     ) {
-        let list = match context.task_list_kind {
-            1 => "__sticky__",
-            2 => "__ephemeral__",
-            0 if !context.task_list.is_empty() => context.task_list.as_str(),
-            _ => "_unknown_",
-        };
-        let mut tags = BTreeMap::from([
-            (
-                DOMAIN_TAG.to_owned(),
-                if context.domain.is_empty() {
-                    "_unknown_".to_owned()
-                } else {
-                    context.domain.clone()
-                },
-            ),
-            (TASK_LIST_TAG.to_owned(), go_sanitize_metric_value(list)),
-        ]);
+        let mut tags = self.task_list_metric_tags(name, context);
         tags.extend(extra);
         self.0.record(MetricEvent {
             name,
@@ -754,27 +760,11 @@ impl MatchingMetrics {
     }
 
     pub fn task_list_gauge(&self, name: &'static str, context: &PollMetricContext, value: f64) {
-        let list = match context.task_list_kind {
-            1 => "__sticky__",
-            2 => "__ephemeral__",
-            0 if !context.task_list.is_empty() => context.task_list.as_str(),
-            _ => "_unknown_",
-        };
         self.0.record(MetricEvent {
             name,
             kind: MetricKind::Gauge,
             value: MetricValue::Number(value),
-            tags: BTreeMap::from([
-                (
-                    DOMAIN_TAG.to_owned(),
-                    if context.domain.is_empty() {
-                        "_unknown_".to_owned()
-                    } else {
-                        context.domain.clone()
-                    },
-                ),
-                (TASK_LIST_TAG.to_owned(), go_sanitize_metric_value(list)),
-            ]),
+            tags: self.task_list_metric_tags(name, context),
             histogram: None,
         });
     }
@@ -813,7 +803,7 @@ impl MatchingMetrics {
                 name,
                 kind,
                 value: MetricValue::Duration(elapsed),
-                tags: self.task_list_tags(context),
+                tags: self.task_list_metric_tags(name, context),
                 histogram,
             });
         }
@@ -916,7 +906,7 @@ impl MatchingMetrics {
                 name,
                 kind,
                 value: MetricValue::Duration(elapsed),
-                tags: self.task_list_tags(context),
+                tags: self.task_list_metric_tags(name, context),
                 histogram,
             });
         }
@@ -1015,7 +1005,7 @@ impl MatchingMetrics {
                 name,
                 kind: MetricKind::Gauge,
                 value: MetricValue::Number(value),
-                tags: self.task_list_tags(context),
+                tags: self.scaler_tags(context),
                 histogram: None,
             });
         }
@@ -1092,7 +1082,7 @@ impl MatchingMetrics {
                 name,
                 kind,
                 value: MetricValue::Duration(elapsed),
-                tags: self.task_list_tags(context),
+                tags: self.task_list_metric_tags(name, context),
                 histogram,
             });
         }
@@ -1106,6 +1096,12 @@ impl MatchingMetrics {
             _ => "_unknown_",
         };
         BTreeMap::from([
+            (OPERATION_TAG.to_owned(), "TaskListMgr".to_owned()),
+            (TASK_LIST_TYPE_TAG.to_owned(), match context.task_type {
+                "activity_task" | "activity" => "activity",
+                "decision_task" | "decision" => "decision",
+                _ => "_unknown_",
+            }.to_owned()),
             (
                 DOMAIN_TAG.to_owned(),
                 if context.domain.is_empty() {
@@ -1118,12 +1114,30 @@ impl MatchingMetrics {
         ])
     }
 
+    fn scaler_tags(&self, context: &PollMetricContext) -> BTreeMap<String, String> {
+        let mut tags = self.task_list_tags(context);
+        tags.insert(OPERATION_TAG.to_owned(), "adaptivescaler".to_owned());
+        tags
+    }
+
+    fn task_list_metric_tags(&self, name: &str, context: &PollMetricContext) -> BTreeMap<String, String> {
+        let mut tags = self.task_list_tags(context);
+        if matches!(name, PARTITION_UPSCALE | PARTITION_DOWNSCALE | PARTITION_DRAINED
+            | ISOLATION_REBALANCE | ISOLATION_GROUP_STARTED_POLLING
+            | ISOLATION_GROUP_STOPPED_POLLING | ISOLATION_GROUP_UPSCALE
+            | ISOLATION_GROUP_DOWNSCALE | ISOLATION_GROUP_PARTITIONS
+            | PARTITION_UPSCALE_THRESHOLD | PARTITION_DOWNSCALE_THRESHOLD) {
+            tags.insert(OPERATION_TAG.to_owned(), "adaptivescaler".to_owned());
+        }
+        tags
+    }
+
     fn task_list_tags_with(
         &self,
         context: &PollMetricContext,
         extra: BTreeMap<String, String>,
     ) -> BTreeMap<String, String> {
-        let mut tags = self.task_list_tags(context);
+        let mut tags = self.scaler_tags(context);
         tags.extend(extra);
         tags
     }
