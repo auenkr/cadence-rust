@@ -1,0 +1,20 @@
+starting matching (api v1-thrift)
+dynamic config float read failed (value was missing or invalid); using default
+cadence-server running on 0.0.0.0:0: matching
+Cadence internal matching gRPC listening on 127.0.0.1:55285
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:40657
+dynamic config integer read failed (value was not found); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config duration read failed (value was missing, had the wrong type, or was invalid); using default
+dynamic config integer read failed (value was not found); using default
+dynamic config integer read failed (value was not found); using default
+flushing Matching metrics failed: Connection refused (os error 111)
+shutting down
