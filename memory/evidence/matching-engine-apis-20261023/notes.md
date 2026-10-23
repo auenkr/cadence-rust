@@ -143,3 +143,12 @@ this task never bypassed that lock or ran Cargo alongside the gate.
 since 87860c557. Required all-target Clippy remains queued on /tmp/cargo.lock;
 full crate test is chained after its success. Other worktrees' serialized builds
 and mixed-cluster gates account for the wait. Periodic checks use >=60s intervals.
+
+2026-10-24 00:52 IST: all-target Clippy passed, exit **0**, with warnings denied:
+
+```sh
+CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-shared /mnt/storage/service/bin/cargo-safe clippy -p cadence-matching --all-targets -- -D warnings > /tmp/ea-clippy.log 2>&1; echo $? > /tmp/ea-clippy.exit
+```
+
+See clippy.log and clippy.exit. Every workspace crate was checked from engineapis.
+The required full `test -p cadence-matching` is now queued on the shared lock.
