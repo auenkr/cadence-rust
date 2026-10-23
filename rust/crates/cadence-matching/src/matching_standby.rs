@@ -507,7 +507,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "parity gap: exhausted() returns \"task not started\" for a young missing execution; Go returns the wait-time error (task_completer.go:133, task_completer_test.go:285-305)"]
     fn go_young_missing_execution_returns_wait_error() {
         use crate::matching_metrics::*;
         let sink = Arc::new(RecordingMetricSink::default());
