@@ -112,6 +112,14 @@ Other scenarios:
 - `--matching-exporter prometheus|statsd|m3`: captures one exporter and validates
   SDK-driven metrics (including a SIGTERM flush for statsd and m3).
 - `--history-transport grpc|tchannel`: Rust Matching's outbound History transport.
+- `--matching-transport grpc|thrift`: transport the original Go Frontend/History/Worker
+  use to call Matching. `thrift` writes `system.enableGRPCOutbound: false` into the
+  Go dynamic config, so Go's direct History and Matching outbounds are TChannel and
+  its client factory picks the Thrift wrappers (`go/common/rpc/params.go`,
+  `outbounds.go`, `go/client/clientfx`). Go-to-Go History calls also move to
+  TChannel. Needs `--rust-services matching`; combine with `--mysql` for the same
+  scenarios as the MySQL lane. Opt-in; default `grpc`. `results.json` records
+  `matchingTransport`.
 
 Results:
 

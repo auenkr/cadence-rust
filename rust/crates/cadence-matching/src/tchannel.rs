@@ -385,6 +385,22 @@ fn response_frames(
         }
     }
 }
+/// yarpc-go transport/tchannel handler.go truncateAppErrDetails: values over
+/// 256 bytes are cut so the result, including the suffix, is 256 bytes.
+fn truncate_error_details(details: &str) -> String {
+    const MAX: usize = 256;
+    const SUFFIX: &str = " (truncated)";
+    if details.len() <= MAX {
+        return details.to_string();
+    }
+    // Go slices bytes; step back to a char boundary so the header stays UTF-8.
+    let mut end = MAX - SUFFIX.len();
+    while !details.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{SUFFIX}", &details[..end])
+}
+
 async fn handle_call(
     writer: SharedWriter,
     id: u32,
@@ -548,13 +564,9 @@ async fn handle_call(
     let mut meta = vec![("$rpc$-service", expected_service.to_string())];
     if let Some((name, details)) = &application_error {
         meta.push(("$rpc$-application-error-name", name.to_string()));
-        let mut end = details.len().min(256);
-        while !details.is_char_boundary(end) {
-            end -= 1;
-        }
         meta.push((
             "$rpc$-application-error-details",
-            details[..end].to_string(),
+            truncate_error_details(details),
         ));
     }
     let mut body = Writer::new();
@@ -785,6 +797,17 @@ mod tests {
             assert!(frames.len() > 2);
             assert_eq!(assemble(frames, kind).unwrap(), args);
         }
+    }
+    #[test]
+    fn application_error_details_truncate_like_yarpc() {
+        assert_eq!(truncate_error_details("short"), "short");
+        let exact = "a".repeat(256);
+        assert_eq!(truncate_error_details(&exact), exact);
+        let cut = truncate_error_details(&"b".repeat(300));
+        assert_eq!(cut.len(), 256);
+        assert!(cut.ends_with("bb (truncated)"));
+        // Multi-byte text never splits a character.
+        assert!(truncate_error_details(&"é".repeat(200)).len() <= 256);
     }
     #[test]
     fn checksum_corruption_is_rejected() {
