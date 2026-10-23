@@ -4919,3 +4919,170 @@ async fn go_engine_add_then_poll_decision_tasks_delivers_each_task_and_drains_st
     assert!(matching.poll_for_decision_task(again).await.unwrap().into_inner().task_token.is_empty());
     matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
 }
+
+/// Go never forwards a sticky query: `newForwarder` is only built when
+/// `isFowardingAllowed` holds, which excludes sticky lists
+/// (`task_list_manager.go:237`, `:891-892`). The nil forwarder yields the
+/// never-ready `noopForwarderTokenC` (`matcher.go:798-800`), so `OfferQuery`
+/// waits on the local queue only. A partitioned sticky name must behave the same.
+fn sticky_partition_list() -> p::TaskList {
+    p::TaskList {
+        name: "/__cadence_sys/queue/1".into(),
+        kind: 2,
+        ..Default::default()
+    }
+}
+
+fn sticky_query_request(
+    domain: String,
+    task_list: p::TaskList,
+    timeout: Duration,
+) -> Request<m::QueryWorkflowRequest> {
+    let mut request = Request::new(m::QueryWorkflowRequest {
+        request: Some(p::QueryWorkflowRequest {
+            domain: "domain".into(),
+            workflow_execution: execution(),
+            query: Some(p::WorkflowQuery {
+                query_type: "ping".into(),
+                query_args: None,
+            }),
+            ..Default::default()
+        }),
+        domain_id: domain,
+        task_list: Some(task_list),
+        forwarded_from: String::new(),
+    });
+    request.set_timeout(timeout);
+    request
+}
+
+fn decision_poll(
+    matching: &Matching,
+    domain: &str,
+    list: p::TaskList,
+    poller: &str,
+    timeout: Duration,
+) -> tokio::task::JoinHandle<Result<tonic::Response<m::PollForDecisionTaskResponse>, tonic::Status>> {
+    let worker = matching.clone();
+    let domain = domain.to_owned();
+    let poller = poller.to_owned();
+    tokio::spawn(async move {
+        let mut request = Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain,
+            poller_id: poller.clone(),
+            request: Some(p::PollForDecisionTaskRequest {
+                task_list: Some(list),
+                identity: poller,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        request.set_timeout(timeout);
+        worker.poll_for_decision_task(request).await
+    })
+}
+
+async fn wait_for_parked_poller(queue: &crate::matching_registry::QueueHandle) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !queue.queries.has_waiters() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+/// Go `OfferQuery` offers to the sticky partition's parked poller first. The
+/// root poller must never see the query, because the sticky list is not forwarded.
+#[tokio::test]
+async fn matching_rpc_sticky_partition_query_reaches_only_the_sticky_poller() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let parent_poll = decision_poll(&matching, &domain, list().unwrap(), "parent-worker", Duration::from_secs(8));
+    let root = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    wait_for_parked_poller(&root).await;
+    let child = sticky_partition_list();
+    let child_queue = matching.durable_queue(&domain, &child, 0).await.unwrap();
+    let sticky_poll = decision_poll(&matching, &domain, child.clone(), "sticky-worker", Duration::from_secs(8));
+    wait_for_parked_poller(&child_queue).await;
+    let query = tokio::spawn({
+        let querier = matching.clone();
+        let request = sticky_query_request(domain.clone(), child, Duration::from_secs(8));
+        async move { querier.query_workflow(request).await }
+    });
+    let delivered = tokio::time::timeout(Duration::from_secs(5), sticky_poll)
+        .await
+        .expect("sticky query should reach the sticky poller")
+        .unwrap()
+        .expect("poll should succeed")
+        .into_inner();
+    assert_eq!(
+        delivered.query.as_ref().map(|q| q.query_type.clone()),
+        Some("ping".to_string())
+    );
+    assert!(
+        !parent_poll.is_finished(),
+        "a sticky query must never reach the parent partition"
+    );
+    query.abort();
+    parent_poll.abort();
+}
+
+/// Go `_stickyPollerUnavailableWindow` passes (the sticky poll is recent) but
+/// nothing is parked, so `OfferQuery` blocks on the local queue until the RPC
+/// context ends. It must not forward to the parent, and the error is the raw
+/// context error that Go's `handleErr` maps to `InternalServiceError`.
+#[tokio::test]
+async fn matching_rpc_sticky_partition_query_without_parked_poller_never_forwards() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let parent_poll = decision_poll(&matching, &domain, list().unwrap(), "parent-worker", Duration::from_secs(8));
+    let root = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    wait_for_parked_poller(&root).await;
+    let child = sticky_partition_list();
+    let recent = decision_poll(&matching, &domain, child.clone(), "sticky-worker", Duration::from_millis(300));
+    recent
+        .await
+        .unwrap()
+        .expect("an expired sticky poll returns an empty response");
+    let error = matching
+        .query_workflow(sticky_query_request(
+            domain.clone(),
+            child,
+            Duration::from_millis(500),
+        ))
+        .await
+        .expect_err("with no parked sticky poller the query must wait locally until its deadline");
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert!(
+        !parent_poll.is_finished(),
+        "a sticky query must never reach the parent partition"
+    );
+    parent_poll.abort();
+}
+
+/// Go `engine.go:562` fails fast with `StickyWorkerUnavailableError` before any
+/// forwarding when no sticky poller is recent, including for a partitioned name.
+#[tokio::test]
+async fn matching_rpc_sticky_partition_query_without_any_sticky_poller_fails_fast() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let parent_poll = decision_poll(&matching, &domain, list().unwrap(), "parent-worker", Duration::from_secs(8));
+    let root = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    wait_for_parked_poller(&root).await;
+    let error = matching
+        .query_workflow(sticky_query_request(
+            domain.clone(),
+            sticky_partition_list(),
+            Duration::from_secs(8),
+        ))
+        .await
+        .expect_err("a sticky list without a recent poller must fail fast");
+    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert!(error.message().contains("sticky worker is unavailable"));
+    assert!(
+        !parent_poll.is_finished(),
+        "a sticky query must never reach the parent partition"
+    );
+    parent_poll.abort();
+}
