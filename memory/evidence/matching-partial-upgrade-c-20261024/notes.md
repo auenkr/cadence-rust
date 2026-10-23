@@ -11,16 +11,20 @@ calls, and the Rust production code it exercises. Compile and pass evidence come
 
 ## Table
 
+CI: rust-ci.yml, package=cadence-matching, run https://github.com/auenkr/cadence-rust/actions/runs/40034591002 on head 3ef3ccc24. Clippy success; `cargo test -p cadence-matching` 606 passed, 13 ignored (lib), plus integration suites all ok. The 7 new tests (below) each show `... ok` in the log.
+
 | # | Map line | Go test (file:line) | Rust test(s) | Old → new | Run |
 |---|---|---|---|---|---|
-| 17 | 202 | semaphore/semaphore_manager_test.go `TestStartSkipsRowsItCannotClassify` (:227) | `matching_semaphore_start_skips_malformed_known_rows` (existing, representable subset); `matching_semaphore_scan_skips_nil_and_unknown_rows` (existing, `#[ignore]`) | PARTIAL → PARTIAL | RUN_URL |
-| 18 | 219 | semaphore/semaphore_manager_test.go `TestALateStopUnregistersOnlyItself` (:1028) | `matching_semaphore_late_stop_leaves_replacement_registered` (new); `matching_semaphore_late_stop_unregisters_only_itself` (existing, `#[ignore]`) | PARTIAL → PARTIAL | RUN_URL |
-| 19 | 228 | tasklist/task_reader_test.go `TestDispatchSingleTaskFromBuffer` (:57) | `matching_reader_dispatch_success_uses_known_or_default_group` (new); retry, stop, and expiry rows stay with existing tests | PARTIAL → PARTIAL | RUN_URL |
-| 20 | 229 | tasklist/task_reader_test.go `TestGetDispatchTimeout` (:244) | `tests/matching_partial_upgrade_c.rs::matching_dispatch_timeout_matches_go_get_dispatch_timeout_table` (new) | PARTIAL → PORTED | RUN_URL |
-| 21 | 230 | tasklist/task_reader_test.go `TestTaskPump` (:303) | `matching_reader_pump_falls_back_to_default_for_unknown_isolation_group` (new) | PARTIAL → PORTED | RUN_URL |
-| 22 | 231 | tasklist/task_reader_test.go `TestGetTasksPumpConditionFailedUnloadsTaskList` (:443) | `ack_condition_failure_unloads_owner_without_stop_signal` (new, `matching_registry.rs` tests); `fatal_owner_wakeup_does_not_wait_for_ack_interval` (existing, uses `queue.stop()`) | PARTIAL → PORTED | RUN_URL |
-| 23 | 232 | tasklist/task_reader_test.go `TestTaskReaderBatchSizeValidation` (:464) | `matching_reader_batch_size_fallback_sizes_group_buffer_like_go` (new) | PARTIAL → PORTED | RUN_URL |
-| 24 | 233 | tasklist/task_list_registry_test.go `TestTaskListRegistry_RegisterLookupAndUnregister` (:30) | `registry_register_lookup_and_unregister_matches_go` (new); gauge transitions in existing `task_list_manager_gauge_tracks_registry_lifecycle_not_get_calls` | PARTIAL → PORTED | RUN_URL |
+| 17 | 202 | semaphore/semaphore_manager_test.go `TestStartSkipsRowsItCannotClassify` (:227) | `matching_semaphore_start_skips_malformed_known_rows` (existing, representable subset); `matching_semaphore_scan_skips_nil_and_unknown_rows` (existing, `#[ignore]`) | PARTIAL → PARTIAL | https://github.com/auenkr/cadence-rust/actions/runs/40034591002 (head 3ef3ccc24, success) |
+| 18 | 219 | semaphore/semaphore_manager_test.go `TestALateStopUnregistersOnlyItself` (:1028) | `matching_semaphore_late_stop_leaves_replacement_registered` (new); `matching_semaphore_late_stop_unregisters_only_itself` (existing, `#[ignore]`) | PARTIAL → PARTIAL | https://github.com/auenkr/cadence-rust/actions/runs/40034591002 (head 3ef3ccc24, success) |
+| 19 | 228 | tasklist/task_reader_test.go `TestDispatchSingleTaskFromBuffer` (:57) | `matching_reader_dispatch_success_uses_known_or_default_group` (new); retry, stop, and expiry rows stay with existing tests | PARTIAL → PARTIAL | https://github.com/auenkr/cadence-rust/actions/runs/40034591002 (head 3ef3ccc24, success) |
+| 20 | 229 | tasklist/task_reader_test.go `TestGetDispatchTimeout` (:244) | `tests/matching_partial_upgrade_c.rs::matching_dispatch_timeout_matches_go_get_dispatch_timeout_table` (new) | PARTIAL → PORTED | https://github.com/auenkr/cadence-rust/actions/runs/40034591002 (head 3ef3ccc24, success) |
+| 21 | 230 | tasklist/task_reader_test.go `TestTaskPump` (:303) | `matching_reader_pump_falls_back_to_default_for_unknown_isolation_group` (new) | PARTIAL → PORTED | https://github.com/auenkr/cadence-rust/actions/runs/40034591002 (head 3ef3ccc24, success) |
+| 22 | 231 | tasklist/task_reader_test.go `TestGetTasksPumpConditionFailedUnloadsTaskList` (:443) | `ack_condition_failure_unloads_owner_without_stop_signal` (new, `matching_registry.rs` tests); `fatal_owner_wakeup_does_not_wait_for_ack_interval` (existing, uses `queue.stop()`) | PARTIAL → PORTED | https://github.com/auenkr/cadence-rust/actions/runs/40034591002 (head 3ef3ccc24, success) |
+| 23 | 232 | tasklist/task_reader_test.go `TestTaskReaderBatchSizeValidation` (:464) | `matching_reader_batch_size_fallback_sizes_group_buffer_like_go` (new) | PARTIAL → PORTED | https://github.com/auenkr/cadence-rust/actions/runs/40034591002 (head 3ef3ccc24, success) |
+| 24 | 233 | tasklist/task_list_registry_test.go `TestTaskListRegistry_RegisterLookupAndUnregister` (:30) | `registry_register_lookup_and_unregister_matches_go` (new); gauge transitions in existing `task_list_manager_gauge_tracks_registry_lifecycle_not_get_calls` | PARTIAL → PORTED | https://github.com/auenkr/cadence-rust/actions/runs/40034591002 (head 3ef3ccc24, success) |
+
+Counts: 8 rows (17–24). Old: 8 PARTIAL. New: 5 PORTED (20–24), 3 PARTIAL (17, 18, 19). New tests: 7. New ignores: 0.
 
 ## Notes per row
 
@@ -37,7 +41,11 @@ calls, and the Rust production code it exercises. Compile and pass evidence come
   the retry rows are `matching_reader_retries_throttled_dispatch_without_acking` and
   `matching_reader_counts_unknown_dispatch_errors_but_not_not_started`, and the stop row is
   `stop_joins_pump_blocked_on_buffered_task_without_poller`. Go's "already expired at dispatch" row
-  is not reachable from the Rust pump, because expired rows are dropped at read time. Left PARTIAL.
+  calls `dispatchSingleTaskFromBuffer` directly. Go's own pump also drops already-expired rows in
+  `addSingleTaskToBuffer` (`task_reader.go:364`), so that row is a Go unit-only path, not a Rust gap.
+  The reachable case (expiry while buffered behind a head) is
+  `matching_reader_drops_row_that_expired_behind_dispatch_head`. Left PARTIAL because Rust has no
+  single-attempt seam to mirror the table as one test.
 - **20.** Go calls `getDispatchTimeout` on the private reader. Rust calls
   `cadence_common::task_isolation::dispatch_timeout` with `buffers = isolated.len() + 1`, the same
   production arithmetic. The test passes the Go table with `buffers = 5`.
