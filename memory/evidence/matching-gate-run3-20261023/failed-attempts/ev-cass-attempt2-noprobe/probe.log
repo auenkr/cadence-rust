@@ -1,0 +1,6 @@
+PROBE BODY FAILED: Error: production Matching mode requires a configured persistence probe target
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:936:137)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+Error: production Matching mode requires a configured persistence probe target
+    at run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:936:137)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

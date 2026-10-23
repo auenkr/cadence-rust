@@ -84,13 +84,20 @@ async function shardManagerCommand(command) {
 async function registerShardWithGoManager(shardName, force = false) {
   if (!shardManagerControl) return;
   const next = shardAssignmentLock.then(async () => {
+    if (realShardDistributor) return registerShardWithRealManager(shardName);
     const wasManaged = managedShardNames.has(shardName);
     managedShardNames.add(shardName);
     const deadline = Date.now() + 30000;
     let executorId, heartbeat;
     while (Date.now() < deadline) {
       const stats = await shardManagerCommand({ op: 'stats' });
-      const entries = Object.entries(stats || {}).sort((a, b) =>
+      // The probe talks to the primary Rust node's gRPC port, so shards go to the executor that
+      // registered that port (alternating onto the secondary would reload task lists mid-scenario).
+      const primaryGrpc = String(process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT || '');
+      const allEntries = Object.entries(stats || {});
+      const primaryEntries = allEntries.filter(([, e]) => String((e.Metadata || e.metadata || {}).grpc) === primaryGrpc
+        && Date.now() - (Date.parse(e.LastHeartbeat || e.lastHeartbeat || '') || 0) < 10000);
+      const entries = (primaryEntries.length ? primaryEntries : allEntries).sort((a, b) =>
         (Date.parse(b[1].LastHeartbeat || b[1].lastHeartbeat || '') || 0)
           - (Date.parse(a[1].LastHeartbeat || a[1].lastHeartbeat || '') || 0));
       if (entries.length) {
@@ -206,10 +213,72 @@ async function sdRestartScenario(label, domain, id) {
   assert(info.taskListStatus, 'DescribeTaskList through restarted shard-distributor returned no status');
   shardDistributorEvidence.push({ check: 'shard-distributor-restart', label, taskList: taskList.name });
 }
+// Real shard-distributor: the leader loop picks the owner, so the probe asks GetShardOwner (through the
+// launcher's read-only "assign" op), waits until that executor reports the shard READY and then sends
+// the task list's RPCs to that executor's gRPC port.
+const realShardOwnerPorts = new Map();
+const ringOwnedTaskLists = new Set();
+const realOwnerClients = new Map();
+async function registerShardWithRealManager(shardName) {
+  managedShardNames.add(shardName);
+  const deadline = Date.now() + 45000;
+  let lastProblem = 'no executor heartbeat';
+  while (Date.now() < deadline) {
+    try {
+      const owners = await shardManagerCommand({ op: 'assign', shards: [shardName] });
+      const ownerId = owners?.[shardName];
+      const stats = (await shardManagerCommand({ op: 'stats' })) || {};
+      const current = ownerId && stats[ownerId];
+      if (current) {
+        const reports = current.ReportedShards || current.reportedShards || {};
+        const status = reports[shardName]?.Status ?? reports[shardName]?.status;
+        const port = String((current.Metadata || current.metadata || {}).grpc || '');
+        if (port && (status === 1 || status === 'READY' || status === 'ready' || status === 'ShardStatusREADY')) {
+          if (!ringOwnedTaskLists.has(shardName)) realShardOwnerPorts.set(shardName, port);
+          return;
+        }
+        lastProblem = `owner ${ownerId} status ${status}`;
+      } else lastProblem = `owner ${ownerId} not in executor stats`;
+    } catch (error) { lastProblem = error.message; }
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  throw new Error(`real shard-distributor did not give ${shardName} a READY owner (${lastProblem})`);
+}
+function clientsForTaskList(taskListName) {
+  const port = realShardDistributor && taskListName ? realShardOwnerPorts.get(taskListName) : undefined;
+  if (!port) return clients;
+  if (!realOwnerClients.has(port)) {
+    const owned = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](`127.0.0.1:${port}`, grpc.credentials.createInsecure())]));
+    owned.Matching = new schema.matching.v1.MatchingAPI(`127.0.0.1:${port}`, grpc.credentials.createInsecure());
+    realOwnerClients.set(port, owned);
+  }
+  return realOwnerClients.get(port);
+}
 function call(service, method, request) {
   const taskListName = request.taskList?.name || request.request?.taskList?.name;
-  if (taskListName) return registerShardWithGoManager(taskListName).then(() => callRpc(service, method, request));
-  return callRpc(service, method, request);
+  if (!taskListName) return callRpc(service, method, request);
+  if (!realShardDistributor) return registerShardWithGoManager(taskListName).then(() => callRpc(service, method, request));
+  // The real leader loop may move a shard between executors at any time; a non-owner answers a typed
+  // ABORTED before doing any work, so the call is re-resolved to the new owner and sent again.
+  return (async () => {
+    for (let attempt = 0; ; attempt++) {
+      await registerShardWithGoManager(taskListName);
+      try { return await callRpc(service, method, request); } catch (error) {
+        if (attempt >= 8 || !/not owned by this host/.test(error.message)) throw error;
+        // Go excludes short-lived task lists from the shard distributor (errIfShardOwnershipLost), so for
+        // them the hash-ring owner named in the typed error is the one to follow.
+        const ringOwner = /OwnedBy: ([^,\s]+)/.exec(error.message)?.[1];
+        const ownerPort = ringOwner && ringOwner !== 'not' ? ringOwner.split(':').at(-1) : undefined;
+        if (ownerPort) {
+          const stats = (await shardManagerCommand({ op: 'stats' })) || {};
+          const owner = Object.values(stats).find(e => String((e.Metadata || e.metadata || {}).tchannel) === ownerPort);
+          const grpcPort = owner && String((owner.Metadata || owner.metadata || {}).grpc);
+          if (grpcPort) { ringOwnedTaskLists.add(taskListName); realShardOwnerPorts.set(taskListName, grpcPort); }
+        }
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+  })();
 }
 function callRpc(service, method, request) {
   const taskListName = request.taskList?.name || request.request?.taskList?.name;
@@ -217,7 +286,7 @@ function callRpc(service, method, request) {
   metadata.set('rpc-service', service === 'Matching' ? 'cadence-matching' : 'cadence-frontend');
   metadata.set('rpc-encoding', 'proto');
   metadata.set('rpc-caller', 'cadence-service-compat');
-  return new Promise((resolve, reject) => clients[service][method](request, metadata,
+  return new Promise((resolve, reject) => (service === 'Matching' ? clientsForTaskList(taskListName) : clients)[service][method](request, metadata,
     { deadline: Date.now() + 20000 }, (error, response) => {
       if (error) {
         error.message = `${service}.${method} failed${taskListName ? ` for task list ${taskListName}` : ''}: ${error.message}`;
@@ -292,7 +361,14 @@ const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskLis
 async function run() {
   const id = process.env.CADENCE_MATCHING_TEST_ID || randomUUID();
   const domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
-  await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+  // Go's worker registers cadence-system at startup; two concurrent SQL domain registrations race on
+  // domain_metadata's notification_version and the loser fails before writing anything, so retry.
+  for (let attempt = 0; ; attempt++) {
+    try { await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } }); break; } catch (error) {
+      if (attempt >= 5 || !/Failed to update domain metadata/.test(error.message)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
   const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
   let pageTokenDomain, domainPages = 0;
   if (cassandraGate) {
@@ -430,17 +506,19 @@ async function run() {
       throw new Error('two-instance failure recovery requires secondary Matching ports');
     }
     secondaryRust = startSecondaryRust();
+    let lastConvergenceError = '';
     const convergenceDeadline = Date.now() + 30000;
     while (Date.now() < convergenceDeadline) {
       if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) throw new Error(`secondary Rust Matching exited; see ${work}/rust-server-secondary.log`);
       try {
         await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-ready-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
         break;
-      } catch (_) {
+      } catch (error) {
+        lastConvergenceError = error.message;
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
-    if (Date.now() >= convergenceDeadline) throw new Error('second Rust Matching instance did not join the original Ringpop cluster');
+    if (Date.now() >= convergenceDeadline) throw new Error(`second Rust Matching instance did not join the original Ringpop cluster; last error: ${lastConvergenceError}`);
     if (cassandraGate) {
       const semaphoreName = `durable-${id}`;
       const createdSemaphore = await call('SemaphoreAPI', 'CreateSemaphore', {
@@ -520,11 +598,13 @@ async function run() {
     'both Rust Matching members must expose the same Ringpop ownership map, including keys owned by each host');
     const idleList = { name: `production-idle-${id}` };
     const pendingIdlePoll = call('WorkerAPI', 'PollForDecisionTask', { domain, taskList: idleList, identity: 'production-idle-probe' });
+    let idlePollSettled = 'pending';
+    pendingIdlePoll.then(() => { idlePollSettled = 'resolved'; }, error => { idlePollSettled = `rejected: ${error.message}`; });
     const idleDeadline = Date.now() + 10000;
     for (;;) {
       const info = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: idleList, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
       if (info.pollers.some(poller => poller.identity === 'production-idle-probe')) break;
-      if (Date.now() > idleDeadline) throw new Error('production idle probe poll was not registered');
+      if (Date.now() > idleDeadline) throw new Error(`production idle probe poll was not registered (poll ${idlePollSettled}; describe ${JSON.stringify(info).slice(0, 400)}; sd ${JSON.stringify(await shardManagerCommand({ op: 'stats' })).slice(0, 1500)})`);
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     const evictionDeadline = Date.now() + 30000;
@@ -855,6 +935,8 @@ async function run() {
     restartState.watermark = await awaitPersistedTask(restartTaskList, 0);
     const beforePid = rust.pid;
     const sdBeforeKill = await sdAssertHeartbeat('before-sigkill');
+    // Only the SIGKILLed primary's executor may expire; the secondary Rust node keeps heartbeating.
+    const sdKilledIds = (await sdFreshExecutors()).filter(([, e]) => String((e.Metadata || e.metadata || {}).grpc) === String(process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT)).map(([id]) => id);
     const sdKilledAt = Date.now();
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -863,7 +945,7 @@ async function run() {
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
     if (sdBeforeKill) {
-      await sdAssertExecutorExpired('after-sigkill', sdBeforeKill.executors, sdKilledAt);
+      await sdAssertExecutorExpired('after-sigkill', sdKilledIds.length ? sdKilledIds : sdBeforeKill.executors, sdKilledAt);
       await sdAssertHeartbeat('after-sigkill-restart', { excludeIds: [] });
       await sdReassign('after-sigkill-restart', restartTaskList);
     }
@@ -933,7 +1015,7 @@ async function run() {
     const drainID = `graceful-drain-${id}`, drainTaskList = `graceful-drain-tasks-${id}`;
     const drainRequest = { ...startRequest, workflowId: drainID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: drainTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     const drainStarted = await call('WorkflowAPI', 'StartWorkflowExecution', drainRequest);
-    if (!process.env.CADENCE_MATCHING_SQLITE_DB && !process.env.CADENCE_MATCHING_MYSQL && !process.env.CADENCE_MATCHING_POSTGRES) throw new Error('production Matching mode requires a configured persistence probe target');
+    if (!cassandraGate && !process.env.CADENCE_MATCHING_SQLITE_DB && !process.env.CADENCE_MATCHING_MYSQL && !process.env.CADENCE_MATCHING_POSTGRES) throw new Error('production Matching mode requires a configured persistence probe target');
     const queued = await taskObserver.observe(domainId, drainTaskList, 20, 'task-before-graceful-drain');
     assert(queued.queued_rows > 0, 'Go History did not persist the graceful-drain decision task');
     const drainMembershipPeer = directMatchingClient('127.0.0.1:' + rustGrpcPort);
@@ -1150,7 +1232,11 @@ async function run() {
     partitionConfig: { version: '999', numReadPartitions: 2, numWritePartitions: 1,
       readPartitions: { 0: {}, 5: { isolationGroups: ['zone-a'] } }, writePartitions: { 0: {} } },
   });
-  const partitionInfo = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
+  // Thrift's DescribeTaskListResponse has no partitionConfig (Go's thrift mapper drops it), so with Go
+  // Frontend -> Matching over Thrift the config is read from Matching's own gRPC API instead.
+  const partitionInfo = process.env.CADENCE_MATCHING_TRANSPORT === 'thrift'
+    ? await call('Matching', 'DescribeTaskList', { domainId, request: { domain, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true } })
+    : await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
   assert.equal(partitionInfo.partitionConfig.version, '1');
   assert.deepEqual(partitionInfo.partitionConfig.readPartitions['0'].isolationGroups, []);
   assert.deepEqual(partitionInfo.partitionConfig.readPartitions['5'].isolationGroups, ['zone-a']);

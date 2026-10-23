@@ -818,6 +818,9 @@ def stop_etcd():
 
 def build_real_sd():
     """One Go build, queued behind cargo on the shared lock; the launcher binary is exec'd afterwards."""
+    prebuilt = os.environ.get('CADENCE_SD_REAL_LAUNCHER')
+    if prebuilt:  # built beforehand under the cargo lock so a gate can hold the lock for its whole run
+        return Path(prebuilt)
     binary = work / 'shard-distributor-real'
     env = {**os.environ, 'GOFLAGS': '-p=2', 'GOMAXPROCS': '2'}
     subprocess.run(['flock', '/tmp/cargo.lock', 'nice', '-n', '10', 'ionice', '-c3', 'go', 'build', '-o', str(binary),
@@ -989,6 +992,7 @@ try:
                         })
                         if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
                             probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
+                    probe_environment['CADENCE_MATCHING_TRANSPORT'] = args.matching_transport
                     if args.cassandra:
                         probe_environment.update({
                             'CADENCE_MATCHING_CASSANDRA_GATE': '1',

@@ -23,3 +23,5 @@ cadence_visibility.db*
 *.swp
 *.iml
 .DS_Store
+__pycache__/
+*.pyc

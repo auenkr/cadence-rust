@@ -1,0 +1,59 @@
+{
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goMatchingStarted": false,
+  "rustServices": [
+    "matching"
+  ],
+  "goServices": [
+    "frontend",
+    "history",
+    "worker"
+  ],
+  "rustProductionBinary": "/mnt/storage/service/gate-runs/g6/bin/cadence-matching",
+  "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+  "historyTransport": "grpc",
+  "matchingTransport": "grpc",
+  "rustDynamicConfigFile": "/mnt/storage/service/gate-runs/g6/sdreal/rust-dynamic-config.yaml",
+  "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+  "acceptanceEligible": false,
+  "persistence": null,
+  "shardDistributor": {
+    "fixture": "go/tests/shard-distributor-interoperability (pinned shard-manager handlers, in-memory store)",
+    "address": "127.0.0.1:53249",
+    "control": "http://127.0.0.1:51933",
+    "namespace": "matching",
+    "onboardingPercentage": 100,
+    "real": true,
+    "etcdImage": "quay.io/coreos/etcd:v3.5.5"
+  },
+  "serverCommand": [
+    "/mnt/storage/service/gate-runs/g6/build/cadence-server",
+    "--config",
+    "/mnt/storage/service/gate-runs/g6/sdreal/config",
+    "--zone",
+    "sqlite",
+    "start",
+    "--auto-setup",
+    "--services",
+    "frontend,history,worker"
+  ],
+  "artifactsDirectory": "/mnt/storage/service/gate-runs/g6/sdreal",
+  "etcd": {
+    "container": "cadence-rust-gate-etcd-1076932-1792762732",
+    "image": "quay.io/coreos/etcd:v3.5.5",
+    "port": "59195",
+    "prefix": "gate-1076932-1792762732"
+  },
+  "shardDistributorFixture": {
+    "address": "127.0.0.1:53249",
+    "control_address": "127.0.0.1:51933",
+    "namespace": "matching"
+  },
+  "probeExitCode": 0,
+  "goServicesPid": 1077092,
+  "goServicesAliveAfterProbe": true,
+  "matchingExporter": null,
+  "matchingExporterAddress": null,
+  "runExitCode": 0,
+  "failure": null
+}

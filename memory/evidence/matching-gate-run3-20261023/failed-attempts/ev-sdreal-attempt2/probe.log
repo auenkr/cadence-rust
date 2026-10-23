@@ -1,0 +1,6 @@
+PROBE BODY FAILED: Error: Rust Matching before-restart did not become discoverable through Go Frontend; last readiness error: WorkflowAPI.DescribeTaskList failed for task list discovery-ready-11b62ad2-2a9e-44e9-aa3d-1cb8293b3170: 12 UNIMPLEMENTED: ; see /mnt/storage/service/gate-runs/g6/sdreal/rust-matching/rust-server-before-restart.log
+    at waitForRustReady (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:460:11)
+    at async run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:469:5)
+Error: Rust Matching before-restart did not become discoverable through Go Frontend; last readiness error: WorkflowAPI.DescribeTaskList failed for task list discovery-ready-11b62ad2-2a9e-44e9-aa3d-1cb8293b3170: 12 UNIMPLEMENTED: ; see /mnt/storage/service/gate-runs/g6/sdreal/rust-matching/rust-server-before-restart.log
+    at waitForRustReady (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:460:11)
+    at async run (/mnt/storage/service/github/wt/gate6/tests/matching-service-compat.cjs:469:5)
