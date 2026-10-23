@@ -713,6 +713,25 @@ fn matching_semaphore_grant_rejects_unknown_write_outcome() {
     );
 }
 
+// TestALateStopUnregistersOnlyItself (1028), the replacement-stays-registered
+// assertion. The self-unregister half (Go OnStopFn) is the ignored test below.
+#[tokio::test]
+async fn matching_semaphore_late_stop_leaves_replacement_registered() {
+    let store = ScriptStore::new(free(&[1]), vec![]);
+    let registry = Registry::new(store.clone());
+    let id = Identifier::new("uuid-d", "sem", 2).unwrap();
+    let old = registry.get_or_create(id.clone()).await.unwrap();
+    assert!(registry.unregister(&old));
+    *store.rows.lock().unwrap() = Some(Ok(free(&[1])));
+    let replacement = registry.get_or_create(id.clone()).await.unwrap();
+    old.stop();
+    assert!(Arc::ptr_eq(
+        &replacement,
+        &registry.by_identifier(&id).unwrap()
+    ));
+    replacement.stop();
+}
+
 #[tokio::test]
 #[ignore = "parity gap: Manager::stop has no registry callback; direct stop does not unregister itself. Go go/service/matching/semaphore/semaphore_manager_test.go:1028"]
 async fn matching_semaphore_late_stop_unregisters_only_itself() {

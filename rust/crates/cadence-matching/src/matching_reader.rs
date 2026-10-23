@@ -1163,6 +1163,30 @@ mod tests {
         );
     }
 
+    // Go: TestTaskReaderBatchSizeValidation (task_reader_test.go:464). Go's test re-implements the
+    // fallback rule instead of calling newTaskReader, so this checks the production sizing path:
+    // non-positive batch sizes use the 1000 default, and each group buffer holds batch-1 rows.
+    #[test]
+    fn matching_reader_batch_size_fallback_sizes_group_buffer_like_go() {
+        for (configured, expected_buffer) in [(1000_i64, 999_u32), (1, 0), (0, 999), (-5, 999)] {
+            let config = ReaderConfig {
+                live: Some(Arc::new(ReaderLive {
+                    batch_size: Arc::new(move || configured),
+                    read_range_size: Arc::new(|| 100_i64),
+                    dispatch_timeout: Arc::new(|| 3_000_000_000_i64),
+                    update_ack_interval: Arc::new(|| 60_000_000_000_i64),
+                })),
+                ..Default::default()
+            };
+            // A buffer of one is the unbuffered rendezvous, so the slot count is `batch - 1`.
+            assert_eq!(
+                config.buffer_batch_size() - 1,
+                expected_buffer,
+                "configured batch size {configured}"
+            );
+        }
+    }
+
     fn fixture(
         count: usize,
         batch: u32,
@@ -1874,6 +1898,122 @@ mod tests {
         assert_eq!(queue.levels().1, 0);
         queue.complete(task.task_id).unwrap();
         assert_eq!(queue.levels().1, 1);
+        stop(queue, reader).await;
+    }
+    fn isolation_by_partition_group(groups: &[&str]) -> IsolationConfig {
+        IsolationConfig {
+            groups: groups.iter().map(|group| (*group).to_owned()).collect(),
+            should_reload: Arc::new(|| false),
+            select: Arc::new(|task| {
+                (
+                    task.partition_config
+                        .as_ref()
+                        .and_then(|config| config.get("isolation-group"))
+                        .cloned()
+                        .unwrap_or_default(),
+                    0,
+                    None,
+                )
+            }),
+        }
+    }
+    fn partition_task(group: &str) -> TaskData {
+        TaskData {
+            partition_config: Some(std::collections::BTreeMap::from([(
+                "isolation-group".into(),
+                group.into(),
+            )])),
+            ..Default::default()
+        }
+    }
+    fn dispatched_group(task: &AllocatedTask) -> String {
+        task.data
+            .partition_config
+            .as_ref()
+            .and_then(|config| config.get("isolation-group"))
+            .cloned()
+            .unwrap_or_default()
+    }
+    // Go: TestDispatchSingleTaskFromBuffer (task_reader_test.go:57), success rows. A task with a known
+    // isolation group reaches that group's poller with the group stamped on it. A task with no
+    // isolation group reaches the default poller with an empty group.
+    #[tokio::test]
+    async fn matching_reader_dispatch_success_uses_known_or_default_group() {
+        let (_directory, queue, initial, wake) = fixture(0, 3);
+        initial.stop();
+        initial.wait_stopped().await;
+        let reader = TaskReader::with_isolation(
+            queue.clone(),
+            wake.clone(),
+            ReaderConfig {
+                batch_size: NonZeroU32::new(3).unwrap(),
+                ..Default::default()
+            },
+            Arc::new(|| true),
+            Arc::new(TaskListLimiter::with_defaults()),
+            isolation_by_partition_group(&["a", "b"]),
+        );
+        queue
+            .append(&[partition_task("a"), TaskData::default()], now())
+            .unwrap();
+        wake.notify_waiters();
+        wait_read(&queue, 2).await;
+        let known = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(known.task_id, 1);
+        assert_eq!(dispatched_group(&known), "a");
+        let plain = tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(plain.task_id, 2);
+        assert_eq!(dispatched_group(&plain), "");
+        queue.complete(known.task_id).unwrap();
+        queue.complete(plain.task_id).unwrap();
+        assert_eq!(queue.levels().1, 2);
+        stop(queue, reader).await;
+    }
+    // Go: TestTaskPump (task_reader_test.go:303). The pump reads persisted rows and dispatches each
+    // one with its isolation group. A known group stays on its own buffer; an unknown group falls
+    // back to the default buffer with an empty group.
+    #[tokio::test]
+    async fn matching_reader_pump_falls_back_to_default_for_unknown_isolation_group() {
+        let (_directory, queue, initial, wake) = fixture(0, 3);
+        initial.stop();
+        initial.wait_stopped().await;
+        let reader = TaskReader::with_isolation(
+            queue.clone(),
+            wake.clone(),
+            ReaderConfig {
+                batch_size: NonZeroU32::new(3).unwrap(),
+                ..Default::default()
+            },
+            Arc::new(|| true),
+            Arc::new(TaskListLimiter::with_defaults()),
+            isolation_by_partition_group(&["a"]),
+        );
+        queue
+            .append(&[partition_task("a"), partition_task("unknown")], now())
+            .unwrap();
+        wake.notify_waiters();
+        wait_read(&queue, 2).await;
+        let known = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(known.task_id, 1);
+        assert_eq!(dispatched_group(&known), "a");
+        let fallback = tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fallback.task_id, 2);
+        assert_eq!(dispatched_group(&fallback), "");
+        queue.complete(known.task_id).unwrap();
+        queue.complete(fallback.task_id).unwrap();
+        assert_eq!(queue.levels().1, 2);
         stop(queue, reader).await;
     }
     #[tokio::test]
