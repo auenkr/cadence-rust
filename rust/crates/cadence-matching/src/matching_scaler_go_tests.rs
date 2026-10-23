@@ -1038,13 +1038,21 @@ fn run_scaler_cycle(
             ..AggregateMetrics::default()
         }
     };
-    scaler.tick(config, now, read, write, &metrics, |id| {
-        if describe_trailing {
+    if describe_trailing {
+        return scaler.tick(config, now, read, write, &metrics, |id| {
             response(id).map(|resp| resp.partition_metrics(id, config.empty_check))
-        } else {
-            None
-        }
-    })
+        });
+    }
+    let prepared = scaler.tick_prepare(config, now, write, &metrics);
+    let (new_read, changed) = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(super::adjust_read_partitions_async(
+        &metrics,
+        read,
+        &prepared.write,
+        |id| async move {
+            response(id).map(|resp| resp.partition_metrics(id, config.empty_check))
+        },
+    ));
+    scaler.tick_finish(prepared, read, &metrics, new_read, changed)
 }
 
 #[test]
@@ -1143,8 +1151,9 @@ fn matching_adaptive_scaler_underload_sustained_then_drain() {
 }
 
 #[test]
-#[ignore = "parity gap: scaler_update passes `|_| None` to Scaler::tick for non-isolated roots, so trailing drains never describe partitions over RPC; Go adaptiveScalerImpl.adjustReadPartitions describes them (adaptive_scaler.go:289-306). Go go/service/matching/tasklist/adaptive_scaler_test.go:251"]
 fn matching_adaptive_scaler_production_drain_describes_trailing_partitions() {
+    // Production path: trailing partitions come from an async describe source
+    // (a fake in-process stand-in for the DescribeTaskList RPC), not `|_| None`.
     run_scaler_case(non_isolated(underload_then_drain_cycles()), false);
 }
 
@@ -1424,4 +1433,33 @@ fn matching_adaptive_scaler_clamp_malformed_minimum_write_partitions_to_one_on_d
         },
         true,
     );
+}
+
+/// Differs from the former re-sorting loop. Go `ensureMinimumGroupsPerPartition`
+/// sorts once ([P0, P1, P3, P2] by group count) and walks two pointers, so the
+/// second donor is P2 (hi stays on P2 while it has more than the minimum).
+/// Derivation: memory/evidence/matching-scaler-fix-20261023/notes.md.
+#[test]
+fn matching_isolation_balancer_ensure_minimum_single_pass_keeps_donor() {
+    let sizes: HashMap<String, f64> = [
+        ("g1", 1.0), ("g2", 2.0), ("g3", 3.0), ("g4", 4.0), ("g5", 5.0), ("g6", 7.0),
+        ("h1", 10.0), ("h2", 11.0), ("h3", 12.0), ("h4", 13.0), ("k", 0.5),
+    ]
+    .into_iter()
+    .map(|(group, size)| (group.to_owned(), size))
+    .collect();
+    let set = |groups: &[&str]| -> std::collections::HashSet<String> {
+        groups.iter().map(|group| (*group).to_owned()).collect()
+    };
+    let mut by_partition: HashMap<i32, std::collections::HashSet<String>> = HashMap::from([
+        (0, set(&[])),
+        (1, set(&["k"])),
+        (2, set(&["g1", "g2", "g3", "g4", "g5", "g6"])),
+        (3, set(&["h1", "h2", "h3", "h4"])),
+    ]);
+    assert!(super::ensure_minimum_groups(2, &sizes, &mut by_partition));
+    assert_eq!(by_partition[&0], set(&["g6", "g4"]));
+    assert_eq!(by_partition[&1], set(&["k", "g5"]));
+    assert_eq!(by_partition[&2], set(&["g1", "g2", "g3"]));
+    assert_eq!(by_partition[&3], set(&["h1", "h2", "h3", "h4"]));
 }

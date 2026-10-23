@@ -171,6 +171,41 @@ pub fn adjust_read_partitions(
     (result, changed)
 }
 
+/// `adjust_read_partitions` with an async describe source. Go describes
+/// trailing partitions over RPC from inside `adjustReadPartitions`; the sync
+/// core cannot await, so missing partitions are fetched and the pass retried.
+pub async fn adjust_read_partitions_async<F, Fut>(
+    metrics: &AggregateMetrics,
+    old_read: &PartitionMap,
+    new_write: &PartitionMap,
+    mut describe: F,
+) -> (PartitionMap, bool)
+where
+    F: FnMut(i32) -> Fut,
+    Fut: std::future::Future<Output = Option<PartitionMetrics>>,
+{
+    let mut fetched: HashMap<i32, Option<PartitionMetrics>> = HashMap::new();
+    loop {
+        let mut missing = None;
+        let outcome = adjust_read_partitions(metrics, old_read, new_write, |id| {
+            match fetched.get(&id) {
+                Some(entry) => entry.clone(),
+                None => {
+                    missing = Some(id);
+                    None
+                }
+            }
+        });
+        match missing {
+            Some(id) if !fetched.contains_key(&id) => {
+                let entry = describe(id).await;
+                fetched.insert(id, entry);
+            }
+            _ => return outcome,
+        }
+    }
+}
+
 struct GroupState {
     under_load: Sustain,
     over_load: Sustain,
@@ -463,31 +498,43 @@ fn ensure_minimum_groups(
     sizes: &HashMap<String, f64>,
     by_partition: &mut HashMap<i32, std::collections::HashSet<String>>,
 ) -> bool {
+    // Go isolation_balancer.go ensureMinimumGroupsPerPartition: sort once, then
+    // a single two-pointer pass (lo/hi advance past satisfied/exhausted ends).
     let mut changed = false;
-    loop {
-        let mut ids: Vec<i32> = by_partition.keys().copied().collect();
-        ids.sort_by(|a, b| {
-            let (la, lb) = (by_partition[a].len(), by_partition[b].len());
-            la.cmp(&lb).then_with(|| {
-                partition_size(sizes, &by_partition[a])
-                    .partial_cmp(&partition_size(sizes, &by_partition[b]))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-        });
-        if ids.len() < 2 {
-            return changed;
+    let mut ids: Vec<i32> = by_partition.keys().copied().collect();
+    ids.sort_by(|a, b| {
+        let (la, lb) = (by_partition[a].len(), by_partition[b].len());
+        la.cmp(&lb).then_with(|| {
+            partition_size(sizes, &by_partition[a])
+                .partial_cmp(&partition_size(sizes, &by_partition[b]))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    if ids.is_empty() {
+        return changed;
+    }
+    let (mut lo, mut hi) = (0usize, ids.len() - 1);
+    while lo < hi {
+        let (lo_id, hi_id) = (ids[lo], ids[hi]);
+        if by_partition[&lo_id].len() >= minimum as usize {
+            lo += 1;
+            continue;
         }
-        let (lo, hi) = (ids[0], ids[ids.len() - 1]);
-        if by_partition[&lo].len() >= minimum as usize
-            || by_partition[&hi].len() <= minimum as usize
-        {
-            return changed;
+        if by_partition[&hi_id].len() <= minimum as usize {
+            hi -= 1;
+            continue;
         }
         changed = true;
-        let needed = minimum as usize - by_partition[&lo].len();
-        let available = by_partition[&hi].len() - minimum as usize;
-        move_groups(needed.min(available), hi, lo, sizes, by_partition);
+        let needed = minimum as usize - by_partition[&lo_id].len();
+        let available = by_partition[&hi_id].len() - minimum as usize;
+        let before = by_partition[&lo_id].len();
+        move_groups(needed.min(available), hi_id, lo_id, sizes, by_partition);
+        if by_partition[&lo_id].len() == before {
+            // Go would spin forever when no movable group exists; stop instead.
+            return changed;
+        }
     }
+    changed
 }
 fn move_groups(
     mut amount: usize,
@@ -520,6 +567,15 @@ fn move_groups(
         by_partition.get_mut(&to).map(|set| set.insert(group));
         let _ = (from_size - size, to_size + size);
     }
+}
+
+/// State carried from `Scaler::tick_prepare` to `Scaler::tick_finish`.
+pub struct TickPrepared {
+    pub write: PartitionMap,
+    write_changed: bool,
+    isolation_changed: bool,
+    assignable_before: HashMap<String, bool>,
+    counts_before: HashMap<String, i64>,
 }
 
 /// Daemon state for one root partition: sustained-load clocks and the
@@ -566,6 +622,22 @@ impl Scaler {
         metrics: &AggregateMetrics,
         describe: impl FnMut(i32) -> Option<PartitionMetrics>,
     ) -> Option<(PartitionMap, PartitionMap)> {
+        let prepared = self.tick_prepare(config, now, current_write, metrics);
+        let (read, read_changed) =
+            adjust_read_partitions(metrics, current_read, &prepared.write, describe);
+        self.tick_finish(prepared, current_read, metrics, read, read_changed)
+    }
+
+    /// First half of Go `run()` after metrics collection: write partition
+    /// and isolation adjustment. Split from `tick` so a caller can describe
+    /// trailing read partitions asynchronously between the two halves.
+    pub fn tick_prepare(
+        &mut self,
+        config: &ScalerConfig,
+        now: i64,
+        current_write: &PartitionMap,
+        metrics: &AggregateMetrics,
+    ) -> TickPrepared {
         let current_write_count = current_write.len();
         if let Some((metrics_sink, context)) = &self.telemetry {
             metrics_sink.scaler_tick(
@@ -605,8 +677,31 @@ impl Scaler {
         } else {
             self.balancer.reset();
         }
-        let (read, read_changed) =
-            adjust_read_partitions(metrics, current_read, &write, describe);
+        TickPrepared {
+            write,
+            isolation_changed,
+            write_changed,
+            assignable_before,
+            counts_before,
+        }
+    }
+
+    /// Second half of `tick`: telemetry and the update decision.
+    pub fn tick_finish(
+        &mut self,
+        prepared: TickPrepared,
+        current_read: &PartitionMap,
+        metrics: &AggregateMetrics,
+        read: PartitionMap,
+        read_changed: bool,
+    ) -> Option<(PartitionMap, PartitionMap)> {
+        let TickPrepared {
+            write,
+            isolation_changed,
+            write_changed,
+            assignable_before,
+            counts_before,
+        } = prepared;
         if let Some((metrics_sink, context)) = &self.telemetry {
             if isolation_changed {
                 metrics_sink.isolation_rebalance(context);

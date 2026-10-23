@@ -1810,14 +1810,32 @@ impl QueueRegistry {
                 ..AggregateMetrics::default()
             }
         };
-        match scaler.tick(
-            config,
-            now,
-            &current.read_partitions,
-            &current.write_partitions,
+        let prepared = scaler.tick_prepare(config, now, &current.write_partitions, &metrics);
+        let name = cadence_common::task_list::TaskListName::parse(&root.name)
+            .map_err(Status::invalid_argument)?;
+        let write_for_describe = prepared.write.clone();
+        let (read, read_changed) = crate::matching_scaler::adjust_read_partitions_async(
             &metrics,
-            |_| None,
-        ) {
+            &current.read_partitions,
+            &prepared.write,
+            |id| {
+                let name = &name;
+                let write = &write_for_describe;
+                async move {
+                    let write_ids: HashMap<i32, Vec<String>> = write.clone();
+                    self.describe_scaled_partition(root, name, id, config, &write_ids, now)
+                        .await
+                        .ok()
+                        .map(|partition| PartitionMetrics {
+                            qps: partition.qps,
+                            read_only: !partition.has_write,
+                            empty: partition.empty,
+                        })
+                }
+            },
+        )
+        .await;
+        match scaler.tick_finish(prepared, &current.read_partitions, &metrics, read, read_changed) {
             Some((read_partitions, write_partitions)) => {
                 scaler.record_update_counter(false);
                 let result = self.update_partition_config(
