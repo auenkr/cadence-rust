@@ -63,7 +63,7 @@ Build rules (RAM is the limit, a cadence-server rustc can use 2-3GB):
 - Do not run `cargo check --workspace` separately: `cargo clippy --workspace --all-targets -- -D warnings` already type-checks. Run clippy, then `cargo test --workspace`, never both in parallel. For small changes use `-p <crate>` first, full workspace only for the final gate.
 - Do not run cargo at all while a mixed-cluster gate (MySQL/PostgreSQL + Go services) is running, and run only one gate at a time. Build the gate binaries first, then start the gate.
 - Check load before starting heavy work: `uptime` load above 6 or `free` available below 2GB means wait.
-- Max 5 subagents, but most should be code-writing or read-only audit work. At most 2 may be waiting on or running cargo at the same time (the lock queues the rest); do not poll in tight loops (sleep >= 60s).
+- Max 2 subagents running at the same time (user decision 2026-10-23). Existing workers are allowed to finish; start a new one only when fewer than 2 are running. At most 1 of them may be waiting on or running cargo; do not poll in tight loops (sleep >= 60s).
 - Always record the exit code to a file: `cmd > log 2>&1; echo $? > file.exit`.
 Overload guard (observed 2026-10-23: load 12, swap full, 150MB RAM free with 5 agents + cargo + a stray puppeteer Chrome using 1.8GB):
 - Before starting a build, gate or new worker, run `uptime; free -h`. If load > 6 or available RAM < 2GB, wait or pause the least important cargo-using worker.
