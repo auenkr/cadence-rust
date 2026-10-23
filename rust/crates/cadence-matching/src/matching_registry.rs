@@ -1754,8 +1754,8 @@ impl QueueRegistry {
         if handle.queue.is_stopped() {
             return Ok(false);
         }
+        // Go `run()` returns before touching the sustains when the scaler is disabled.
         if !config.enabled || !config.cache_enabled {
-            scaler.reset();
             return Ok(true);
         }
         let current =

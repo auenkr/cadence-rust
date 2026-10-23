@@ -826,3 +826,7 @@ mod tests {
         assert_eq!(map, write);
     }
 }
+
+#[cfg(test)]
+#[path = "matching_scaler_go_tests.rs"]
+mod go_tests;
