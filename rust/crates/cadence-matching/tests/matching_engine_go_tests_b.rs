@@ -410,12 +410,17 @@ async fn shut_down_tasklists_not_owned_unloads_only_moved_owner() {
 // TestUpdateTaskListPartitionConfig
 // ---------------------------------------------------------------------------
 
+/// Go's proto mapper sends `NumReadPartitions = len(ReadPartitions)` (and the
+/// write count likewise), and Rust's `partition_map` reads the count, so the
+/// deprecated counts must be set to match the maps.
+#[allow(deprecated)]
 fn root_partition_config(version: i64) -> p::TaskListPartitionConfig {
     p::TaskListPartitionConfig {
         version,
+        num_read_partitions: 1,
+        num_write_partitions: 1,
         read_partitions: HashMap::from([(0, Default::default())]),
         write_partitions: HashMap::from([(0, Default::default())]),
-        ..Default::default()
     }
 }
 
