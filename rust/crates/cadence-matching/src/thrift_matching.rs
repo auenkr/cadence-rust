@@ -619,12 +619,11 @@ fn application_error(
     )];
     // Go's thrift mapper (common/types/mapper/thrift/shared.go) always fills
     // these fields, and thriftrw rejects a reply that omits a required one.
-    let detail = |value: &prost_types::Any| value.value.as_slice();
     match name {
         "DomainNotActiveError" => {
             let v = details
                 .as_ref()
-                .and_then(|v| p::DomainNotActiveError::decode(detail(v)).ok())
+                .and_then(|v| p::DomainNotActiveError::decode(v.value.as_slice()).ok())
                 .unwrap_or_default();
             fields.extend([
                 (2, text(v.domain)),
@@ -639,7 +638,7 @@ fn application_error(
         "EntityNotExistsError" => {
             let v = details
                 .as_ref()
-                .and_then(|v| p::EntityNotExistsError::decode(detail(v)).ok())
+                .and_then(|v| p::EntityNotExistsError::decode(v.value.as_slice()).ok())
                 .unwrap_or_default();
             fields.extend([
                 (2, text(v.current_cluster)),
@@ -653,7 +652,7 @@ fn application_error(
         "ServiceBusyError" => {
             let v = details
                 .as_ref()
-                .and_then(|v| p::ServiceBusyError::decode(detail(v)).ok())
+                .and_then(|v| p::ServiceBusyError::decode(v.value.as_slice()).ok())
                 .unwrap_or_default();
             fields.push((2, text(v.reason)));
         }
