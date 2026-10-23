@@ -3186,6 +3186,51 @@ async fn matching_rpc_child_poll_receives_parent_query_and_preserves_completion_
 }
 
 #[tokio::test]
+async fn matching_rpc_standby_child_query_poll_receives_parent_query() {
+    // Standby getTask serves only queryTaskC; the child forwards PollForQuery
+    // to the parent, and the parent's query channel answers the poll.
+    let peer = start_fake_history(mutable_state()).await;
+    let (_directory, _store, matching, _key) = fixture_with_history(&peer);
+    let domain = Uuid::from_u128(3).to_string();
+    matching.frontend.state.domains.create(
+        cadence_api::types::DomainInfo { name: "standby".into(), uuid: domain.clone(), ..Default::default() },
+        Default::default(),
+        cadence_api::types::DomainReplicationConfiguration { active_cluster_name: "remote".into(), ..Default::default() },
+        true,
+    ).unwrap();
+    let root = matching.durable_queue(&domain, &list().unwrap(), 0).await.unwrap();
+    let worker = matching.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move { worker.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+        domain_id: poll_domain, poller_id: "standby-query-poll".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: Some(p::TaskList {
+            name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default()
+        }), ..Default::default() }), ..Default::default()
+    }))).await.unwrap().into_inner() });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !root.queries.has_waiters() { tokio::task::yield_now().await; }
+    }).await.expect("standby forwarded poll must wait for the parent's query channel");
+    let caller = matching.clone();
+    let query_domain = domain.clone();
+    let query = tokio::spawn(async move { caller.query_workflow(Request::new(m::QueryWorkflowRequest {
+        domain_id: query_domain, task_list: list(),
+        request: Some(p::QueryWorkflowRequest { domain: "standby".into(), workflow_execution: execution(),
+            query: Some(p::WorkflowQuery { query_type: "ping".into(), query_args: None }), ..Default::default() }), ..Default::default()
+    })).await.unwrap().into_inner() });
+    let response = tokio::time::timeout(Duration::from_secs(10), poll).await.unwrap().unwrap();
+    assert_eq!(response.query.unwrap().query_type, "ping");
+    let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(&response.task_token).unwrap();
+    matching.respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+        domain_id: domain, task_list: list(), task_id: token.task_id,
+        request: Some(p::RespondQueryTaskCompletedRequest { result: Some(p::WorkflowQueryResult {
+            result_type: p::QueryResultType::Answered as i32, answer: Some(p::Payload { data: b"pong".to_vec() }), error_message: String::new(),
+        }), ..Default::default() }),
+    })).await.unwrap();
+    assert_eq!(tokio::time::timeout(Duration::from_secs(10), query).await.unwrap().unwrap().query_result.unwrap().data, b"pong");
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+#[tokio::test]
 async fn matching_rpc_local_parent_poll_applies_its_own_expiration_and_tailroom() {
     let (_directory, _store, matching, key) = fixture();
     let child_list = Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() });
