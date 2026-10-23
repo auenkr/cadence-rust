@@ -133,7 +133,7 @@ fn sorted_keys<V>(map: &HashMap<String, V>) -> Vec<&str> {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn get_task_lists_by_domain__domain_cache_error_is_not_found() {
+async fn get_task_lists_by_domain_domain_cache_error_is_not_found() {
     // Go: GetDomainID returns an error, so the RPC returns an error.
     let matching = Matching::new(AppState::default());
     let err = matching
@@ -180,14 +180,14 @@ async fn describe_loaded_lists(all_kinds: bool) -> m::GetTaskListsByDomainRespon
 }
 
 #[tokio::test]
-async fn get_task_lists_by_domain__success_lists_normal_kinds() {
+async fn get_task_lists_by_domain_success_lists_normal_kinds() {
     let resp = describe_loaded_lists(false).await;
     assert_eq!(sorted_keys(&resp.decision_task_list_map), vec!["decision0"]);
     assert_eq!(sorted_keys(&resp.activity_task_list_map), vec!["activity0"]);
 }
 
 #[tokio::test]
-async fn get_task_lists_by_domain__success_all_kinds_includes_sticky() {
+async fn get_task_lists_by_domain_success_all_kinds_includes_sticky() {
     let resp = describe_loaded_lists(true).await;
     assert_eq!(
         sorted_keys(&resp.decision_task_list_map),
@@ -198,7 +198,7 @@ async fn get_task_lists_by_domain__success_all_kinds_includes_sticky() {
 
 #[tokio::test]
 #[ignore = "parity gap: Go describes mock managers with scripted pollers (Identity \"test-poller-decision0\"); Rust describes queues whose poller history is only populated by live long-poll traffic, and no public seam injects poller identities"]
-async fn get_task_lists_by_domain__success_reports_poller_identity() {
+async fn get_task_lists_by_domain_success_reports_poller_identity() {
     let resp = describe_loaded_lists(false).await;
     assert_eq!(
         resp.decision_task_list_map["decision0"].pollers[0].identity,
@@ -221,7 +221,7 @@ fn list_partitions_request(task_list: &str) -> Request<m::ListTaskListPartitions
 }
 
 #[tokio::test]
-async fn list_task_list_partitions__domain_cache_error_is_not_found() {
+async fn list_task_list_partitions_domain_cache_error_is_not_found() {
     let matching = Matching::new(AppState::default());
     let err = matching
         .list_task_list_partitions(list_partitions_request(TASK_LIST))
@@ -231,7 +231,7 @@ async fn list_task_list_partitions__domain_cache_error_is_not_found() {
 }
 
 #[tokio::test]
-async fn list_task_list_partitions__invalid_tasklist_name_is_error() {
+async fn list_task_list_partitions_invalid_tasklist_name_is_error() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     let matching = Matching::new(state);
@@ -243,7 +243,7 @@ async fn list_task_list_partitions__invalid_tasklist_name_is_error() {
 }
 
 #[tokio::test]
-async fn list_task_list_partitions__success_returns_root_then_write_partitions() {
+async fn list_task_list_partitions_success_returns_root_then_write_partitions() {
     // Go `NumTasklistWritePartitions` = 3, so root plus partitions 1 and 2 for both kinds.
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
@@ -269,7 +269,7 @@ async fn list_task_list_partitions__success_returns_root_then_write_partitions()
 
 #[tokio::test]
 #[ignore = "parity gap: Go resolves each partition owner through a scripted membership Lookup (addr0..addr3, with one lookup error yielding an empty owner); Rust resolves owners from the real hash ring, so the scripted owner names cannot be reproduced through the public API"]
-async fn list_task_list_partitions__success_owner_hosts_match_go_lookups() {
+async fn list_task_list_partitions_success_owner_hosts_match_go_lookups() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     set_config(&state, "matching.numTasklistWritePartitions", json!(3));
@@ -304,7 +304,7 @@ fn cancel_request(task_list: &str) -> Request<m::CancelOutstandingPollRequest> {
 }
 
 #[tokio::test]
-async fn cancel_outstanding_poll__invalid_tasklist_name_is_error() {
+async fn cancel_outstanding_poll_invalid_tasklist_name_is_error() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     let durable = durable(state);
@@ -316,7 +316,7 @@ async fn cancel_outstanding_poll__invalid_tasklist_name_is_error() {
 }
 
 #[tokio::test]
-async fn cancel_outstanding_poll__success() {
+async fn cancel_outstanding_poll_success() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     let durable = durable(state);
@@ -333,7 +333,7 @@ async fn cancel_outstanding_poll__success() {
 
 #[test]
 #[ignore = "parity gap: Go errIfShardOwnershipLost is one engine method that a unit test calls with a mock executor, resolver, and shutdown channel; Rust ownership is the private closure shard_task_list_ownership_check in matching_runtime.rs, reachable only through a live shard distributor, so the 8 Go subtests (SD ProcessNotFound, nil process, shutdown, excluded owner changed/same, non-excluded UUID name) cannot run against production code from tests/"]
-fn err_if_shard_ownership_lost__go_subtests_not_reproduced() {
+fn err_if_shard_ownership_lost_go_subtests_not_reproduced() {
     unimplemented!("no public seam for the production shard-ownership closure");
 }
 
@@ -342,7 +342,7 @@ fn err_if_shard_ownership_lost__go_subtests_not_reproduced() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn is_excluded_from_shard_distributor__go_cases() {
+fn is_excluded_from_shard_distributor_go_cases() {
     // Go pins percentage onboarded at 100, so the short-lived flag and a UUID in the name decide.
     let cases = [
         ("flag disabled, uuid name", UUID_TASK_LIST, false, false),
@@ -377,7 +377,7 @@ fn respond_query_request(task_id: &str) -> Request<m::RespondQueryTaskCompletedR
 }
 
 #[tokio::test]
-async fn respond_query_task_completed__success_delivers_answer_to_waiter() {
+async fn respond_query_task_completed_success_delivers_answer_to_waiter() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     let durable = durable(state);
@@ -398,7 +398,7 @@ async fn respond_query_task_completed__success_delivers_answer_to_waiter() {
 }
 
 #[tokio::test]
-async fn respond_query_task_completed__query_task_not_found_is_error() {
+async fn respond_query_task_completed_query_task_not_found_is_error() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     let durable = durable(state);
