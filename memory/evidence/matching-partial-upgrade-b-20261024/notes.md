@@ -43,4 +43,8 @@ New tests: 15 functions in `tests/matching_partial_upgrade_b.rs` (12 active, 3 `
 
 Not compiled or run locally (per instruction). Verification is the GitHub Actions run below (`rust-ci.yml`, package `cadence-matching`, clippy `-D warnings` then `cargo test`).
 
-Run: _pending_
+Final green run: https://github.com/auenkr/cadence-rust/actions/runs/40034718613 (head `baddcb9f8`; workflow_dispatch, package cadence-matching). Clippy `-D warnings` exit 0. `cadence-matching` lib: 600 passed, 13 ignored. `tests/matching_partial_upgrade_b.rs`: 12 passed, 3 ignored.
+
+Earlier failing runs, kept for the record:
+- https://github.com/auenkr/cadence-rust/actions/runs/40034066426: 5 of my handler tests failed. Cause: add and poll are worker-class RPCs, so the denied state needed `matching.workerrps` and `matching.domainworkerrps`; the activity add also needed a schedule-to-start timeout.
+- https://github.com/auenkr/cadence-rust/actions/runs/40034451317: 1 failed (the activity poll success case), which is now an `#[ignore]` gap.
