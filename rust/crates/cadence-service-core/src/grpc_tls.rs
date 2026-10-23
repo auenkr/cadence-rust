@@ -483,4 +483,77 @@ mod tests {
             Ok(())
         );
     }
+
+    #[test]
+    fn lone_client_cert_file_is_not_loaded_like_go() {
+        // Go ToTLSConfig loads the client pair only when certFile and keyFile are both set,
+        // so a lone certFile is never read and the config builds.
+        let one_sided = TlsConfig {
+            enabled: true,
+            cert_file: "/does/not/exist-cert.pem".into(),
+            ..Default::default()
+        };
+        assert!(client_tls(&one_sided).unwrap().is_some());
+    }
+
+    #[test]
+    fn missing_ca_file_fails_tls_load_like_go() {
+        // Go ToTLSConfig returns the os.ReadFile error for the CA list on both sides,
+        // which aborts startup. The identity is valid so only the CA read can fail.
+        let dir = tempfile::tempdir().unwrap();
+        let ca = new_ca();
+        let (cert, key) = issue(&ca, &["localhost"]);
+        let missing_ca = TlsConfig {
+            enabled: true,
+            cert_file: write(dir.path(), "cert.pem", &cert),
+            key_file: write(dir.path(), "key.pem", &key),
+            ca_file: "/does/not/exist-ca.pem".into(),
+            ..Default::default()
+        };
+        assert!(server_tls(&missing_ca).is_err());
+        assert!(client_tls(&missing_ca).is_err());
+    }
+
+    #[tokio::test]
+    async fn ca_files_and_ca_file_are_both_trusted() {
+        // Go appends caFile to caFiles and builds one pool from both entries.
+        install_tls_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let listed = new_ca();
+        let single = new_ca();
+        let listed_identity = issue(&listed, &["localhost", "127.0.0.1"]);
+        let single_identity = issue(&single, &["localhost", "127.0.0.1"]);
+        let listed_file = write(dir.path(), "listed-ca.pem", &listed.cert.pem());
+        let single_file = write(dir.path(), "single-ca.pem", &single.cert.pem());
+        let listed_server = server_tls(&server_config(
+            dir.path(),
+            &listed_file,
+            &listed_identity,
+            false,
+        ))
+        .unwrap()
+        .unwrap();
+        let single_server = server_tls(&server_config(
+            dir.path(),
+            &single_file,
+            &single_identity,
+            false,
+        ))
+        .unwrap()
+        .unwrap();
+        let listed_addr = serve_reflection(Some(listed_server)).await;
+        let single_addr = serve_reflection(Some(single_server)).await;
+
+        let client = client_tls(&TlsConfig {
+            enabled: true,
+            ca_files: vec![listed_file],
+            ca_file: single_file,
+            enable_host_verification: true,
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(call(listed_addr, Some(&client)).await, Ok(()));
+        assert_eq!(call(single_addr, Some(&client)).await, Ok(()));
+    }
 }
