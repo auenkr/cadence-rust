@@ -1030,6 +1030,10 @@ try:
                             'system.allIsolationGroups': '["zone-a","zone-b"]',
                             'system.enableGRPCOutbound': str(args.history_transport == 'grpc').lower(),
                         }
+                        # CONTROL ONLY (gatectl worktree, not for merge): CADENCE_CONTROL_NO_LONGPOLL_SEED=1 drops the 2s long-poll seed and its probe assertion.
+                        control_no_longpoll = os.environ.get('CADENCE_CONTROL_NO_LONGPOLL_SEED') == '1'
+                        if control_no_longpoll:
+                            del seed_values['matching.longPollExpirationInterval']
                         seed_binary = args.configstore_seed_binary or (work / 'configstore-seed')
                         if not args.configstore_seed_binary:
                             subprocess.run(['nice', 'ionice', '-c3', 'go', 'build', '-o', str(seed_binary), './tests/configstore-seed'],
@@ -1041,7 +1045,8 @@ try:
                         if seed.returncode != 0:
                             raise RuntimeError(f'configstore seed failed: {seed.stderr}')
                         results['configstoreSeed'] = {'values': seed_values, 'output': seed.stdout.strip()}
-                        probe_environment['CADENCE_MATCHING_CONFIGSTORE_POLL_MS'] = '2000'
+                        if not control_no_longpoll:
+                            probe_environment['CADENCE_MATCHING_CONFIGSTORE_POLL_MS'] = '2000'
                     if args.cassandra:
                         probe_environment.update({
                             'CADENCE_MATCHING_CASSANDRA_GATE': '1',

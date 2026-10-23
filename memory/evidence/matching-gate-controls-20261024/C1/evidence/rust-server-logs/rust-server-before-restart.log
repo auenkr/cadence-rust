@@ -1,0 +1,9 @@
+initialising ConfigStore dynamic config client
+starting matching (api v1-thrift)
+dynamic config float read failed (value was missing or invalid); using default
+cadence-server running on 0.0.0.0:0: matching
+Cadence internal matching gRPC listening on 127.0.0.1:52613
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:34931
+dynamic config integer read failed (value was not found); using default
+Matching membership cleanup failed: status: Internal, message: "Not enough hosts to serve the request", details: [], metadata: MetadataMap { headers: {} }
+shutting down

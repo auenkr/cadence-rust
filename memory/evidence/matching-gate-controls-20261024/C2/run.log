@@ -1,0 +1,11 @@
+ 05:02:27 up 14 days, 18:30,  1 user,  load average: 0.70, 1.50, 2.26
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       4.1Gi       508Mi       6.8Mi       3.4Gi       3.6Gi
+Swap:           11Gi       3.3Gi       8.3Gi
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Go baseline artifacts: /mnt/storage/service/gate-runs/gatectl/c2/run
+Selected evidence copied to /mnt/storage/service/github/wt/gatectl/memory/evidence/matching-gate-controls-20261024/C2/evidence: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'go-sdk.log', 'graceful-drain-sdk.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-after-graceful-drain.log', 'rust-server-logs/rust-server-before-restart.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_mysql.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Traceback (most recent call last):
+  File "/mnt/storage/service/github/wt/gatectl/tests/run-go-service-baseline.py", line 1109, in <module>
+    raise RuntimeError(f'Go baseline probe failed; see {work / "probe.log"}')
+RuntimeError: Go baseline probe failed; see /mnt/storage/service/gate-runs/gatectl/c2/run/probe.log

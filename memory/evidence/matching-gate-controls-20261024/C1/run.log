@@ -1,0 +1,8 @@
+ 04:59:09 up 14 days, 18:26,  1 user,  load average: 1.42, 2.13, 2.59
+               total        used        free      shared  buff/cache   available
+Mem:           7.7Gi       3.9Gi       424Mi       6.3Mi       3.7Gi       3.8Gi
+Swap:           11Gi       3.3Gi       8.2Gi
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Go baseline artifacts: /mnt/storage/service/gate-runs/gatectl/c1/run
+Selected evidence copied to /mnt/storage/service/github/wt/gatectl/memory/evidence/matching-gate-controls-20261024/C1/evidence: ['probe.log', 'results.json', 'run.exit', 'command.txt', 'server.log', 'db-observations.json', 'gc-backlog-sdk.log', 'go-sdk.log', 'graceful-drain-sdk.log', 'matching-shutdown.json', 'rust-server-logs/rust-server-after-graceful-drain.log', 'rust-server-logs/rust-server-before-restart.log', 'config-redacted/base.yaml', 'config-redacted/development.yaml', 'config-redacted/development_mysql.yaml', 'config-redacted/rust-matching.yaml', 'config-redacted/rust-dynamic-config.yaml', 'source.json', 'binaries.json', 'config-hashes.json', 'results-copy.json', 'EVIDENCE.md']
+Preliminary production process probe completed; it is not Matching acceptance evidence: /mnt/storage/service/gate-runs/gatectl/c1/run/results.json

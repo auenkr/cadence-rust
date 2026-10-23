@@ -1,0 +1,1 @@
+tests/gates/run-mysql-lane.sh /mnt/storage/service/gate-runs/gatectl/c0 /mnt/storage/service/gate-runs/gatectl/bin/cadence-matching --binary /mnt/storage/service/gate-runs/gatefinal3/build/cadence-server --history-transport grpc --evidence-dir /mnt/storage/service/github/wt/gatectl/memory/evidence/matching-gate-controls-20261024/C0/evidence

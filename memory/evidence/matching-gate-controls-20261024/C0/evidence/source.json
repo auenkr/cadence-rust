@@ -1,0 +1,9 @@
+{
+  "repository": "/mnt/storage/service/github/wt/gatectl",
+  "head": "8d31b6f6138c7aebad29e5b03ae19111ef87e50d",
+  "branch": "matching-gate-controls-20261024",
+  "status": [
+    "M tests/run-go-service-baseline.py",
+    "?? memory/evidence/matching-gate-controls-20261024/"
+  ]
+}
