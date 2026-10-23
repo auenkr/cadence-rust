@@ -1818,6 +1818,102 @@ mod tests {
         assert_eq!(queue.levels().1, 0);
         assert!(queue.retry_data(1).is_ok());
     }
+    // Go: TestDeliverBufferTasks (task_list_manager_test.go:127), rate-limiter case. Go lowers the
+    // limit to 0.1 and consumes the only token, so the buffered row waits on the limiter. Stopping
+    // the reader must join the pump and leave the row unacknowledged, as in the no-poller case.
+    #[tokio::test]
+    async fn stop_joins_pump_waiting_on_exhausted_dispatch_limiter() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store,
+                TaskListKey {
+                    domain_id: Uuid::from_u128(1),
+                    name: "reader".into(),
+                    task_type: 0,
+                },
+                0,
+                NonZeroU32::new(100).unwrap(),
+                now(),
+            )
+            .unwrap(),
+        );
+        let limiter = Arc::new(TaskListLimiter::with_defaults());
+        limiter.report_limit(0.1);
+        let (_keep, stopped) = tokio::sync::watch::channel(false);
+        assert_eq!(
+            limiter.wait_until(stopped, None).await,
+            WaitOutcome::Acquired,
+            "the only burst token is consumed as Go's ratelimit does"
+        );
+        queue.append(&[TaskData::default()], now()).unwrap();
+        let reader = TaskReader::with_domain_activity_and_limiter(
+            queue.clone(),
+            Arc::new(Notify::new()),
+            ReaderConfig {
+                batch_size: NonZeroU32::new(1).unwrap(),
+                read_range_size: 100,
+                ..ReaderConfig::default()
+            },
+            Arc::new(|| true),
+            limiter,
+        );
+        wait_read(&queue, 1).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(queue.levels().1, 0, "the limited row is not acknowledged");
+        stop(queue.clone(), reader).await;
+        assert_eq!(queue.levels().1, 0);
+        assert!(queue.retry_data(1).is_ok());
+    }
+    // Go: TestMisconfiguredZoneDoesNotBlock (task_list_manager_test.go:671). A task whose isolation
+    // group has no buffer is redirected to the default group and never blocks the reader. Each row
+    // is dispatched to the default matcher, and the original group is kept for diagnosis.
+    #[tokio::test]
+    async fn matching_reader_misconfigured_isolation_group_dispatches_to_default() {
+        let (_directory, queue, reader, wake) = fixture(0, 3);
+        reader.stop();
+        reader.wait_stopped().await;
+        let invalid = || TaskData {
+            partition_config: Some(std::collections::BTreeMap::from([(
+                "isolation-group".into(),
+                "invalid".into(),
+            )])),
+            ..TaskData::default()
+        };
+        queue
+            .append(&[invalid(), invalid(), invalid()], now())
+            .unwrap();
+        let reader = TaskReader::with_isolation(
+            queue.clone(),
+            wake,
+            ReaderConfig {
+                batch_size: NonZeroU32::new(3).unwrap(),
+                read_range_size: 100,
+                ..ReaderConfig::default()
+            },
+            Arc::new(|| true),
+            Arc::new(TaskListLimiter::with_defaults()),
+            IsolationConfig {
+                groups: vec!["a".into()],
+                select: Arc::new(|_| (String::from("invalid"), 0, None)),
+                ..Default::default()
+            },
+        );
+        for _ in 0..3 {
+            let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll())
+                .await
+                .unwrap()
+                .unwrap();
+            let config = delivered.data.partition_config.unwrap();
+            assert_eq!(config["isolation-group"], "");
+            assert_eq!(config["original-isolation-group"], "invalid");
+        }
+        stop(queue, reader).await;
+    }
     // Go: TestReadLevelForAllExpiredTasksInBatch (task_list_manager_test.go:181). Rows that are
     // already expired advance the read level without advancing the ack level, and a later mixed
     // batch moves the read level past both expired and live rows.
