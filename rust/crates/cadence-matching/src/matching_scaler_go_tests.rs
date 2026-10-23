@@ -8,7 +8,10 @@
 //! registry-bound.
 use std::collections::HashMap;
 
-use super::{AggregateMetrics, IsolationBalancer, PartitionMap, PartitionMetrics, Scaler, ScalerConfig};
+use super::{
+    AggregateMetrics, IsolationBalancer, PartitionMap, PartitionMetrics, Scaler, ScalerConfig,
+    ScalerDaemon,
+};
 
 /// Go `cycleInterval` for the balancer tests.
 const CYCLE_NANOS: i64 = 15_000_000_000;
@@ -1055,9 +1058,33 @@ fn run_scaler_cycle(
     scaler.tick_finish(prepared, read, &metrics, new_read, changed)
 }
 
-#[test]
-#[ignore = "parity gap: Scaler has no Start/Stop daemon handle; lifecycle is the registry scaler_loop (matching_registry.rs). Go go/service/matching/tasklist/adaptive_scaler_test.go:87"]
-fn matching_adaptive_scaler_lifecycle_start_stop_is_idempotent_gap() {}
+// Go TestAdaptiveScalerLifecycle (adaptive_scaler_test.go:87): Start and Stop are idempotent.
+// Rust adds the observable state: one loop per start, and no restart after stop.
+#[tokio::test]
+async fn matching_adaptive_scaler_lifecycle_start_stop_is_idempotent() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    fn periodic(runs: std::sync::Arc<AtomicUsize>) -> impl std::future::Future<Output = ()> + Send + 'static {
+        async move {
+            runs.fetch_add(1, Ordering::SeqCst);
+            std::future::pending::<()>().await
+        }
+    }
+    let runs = std::sync::Arc::new(AtomicUsize::new(0));
+    let daemon = ScalerDaemon::default();
+    assert!(!daemon.is_started());
+    daemon.start(periodic(runs.clone()));
+    daemon.start(periodic(runs.clone()));
+    tokio::task::yield_now().await;
+    assert!(daemon.is_started());
+    assert_eq!(runs.load(Ordering::SeqCst), 1, "second Start must not spawn a loop");
+    daemon.stop();
+    daemon.stop();
+    assert!(!daemon.is_started());
+    daemon.start(periodic(runs.clone()));
+    tokio::task::yield_now().await;
+    assert!(!daemon.is_started(), "a stopped daemon must not restart");
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+}
 
 #[test]
 fn matching_adaptive_scaler_no_op() {
