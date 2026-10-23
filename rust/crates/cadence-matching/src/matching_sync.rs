@@ -500,4 +500,84 @@ mod tests {
         assert_eq!(matcher.state.lock().unwrap().offers.len(), 0);
         assert_eq!(matcher.state.lock().unwrap().pollers.len(), 0);
     }
+    const SOURCE: &str = "00000000-0000-0000-0000-000000000001";
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_local_match_hands_off_to_waiting_poller() {
+        // Go TestLocalSyncMatch: a waiting poller takes the offer and finishes
+        // it, so Offer reports a sync match.
+        let (_stop, matcher) = fixture();
+        let poller = matcher.clone();
+        let poll = tokio::spawn(async move {
+            if let Some(received) = poller.poll("").await {
+                received.finish(Ok(()));
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            matcher
+                .offer(
+                    task(),
+                    "",
+                    SOURCE,
+                    false,
+                    Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await
+        );
+        poll.await.unwrap();
+    }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_local_timeout_reports_no_match_when_poller_finishes_late() {
+        // Go TestLocalSyncMatchTimeout: the poller takes the task, but finishes
+        // after the offer's 100ms budget has expired.
+        let (_stop, matcher) = fixture();
+        let poller = matcher.clone();
+        let poll = tokio::spawn(async move {
+            if let Some(received) = poller.poll("").await {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                received.finish(Ok(()));
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !matcher
+                .offer(
+                    task(),
+                    "",
+                    SOURCE,
+                    false,
+                    Duration::from_millis(100),
+                    Instant::now() + Duration::from_millis(100)
+                )
+                .await
+        );
+        poll.await.unwrap();
+    }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_isolation_group_hands_off_within_its_group() {
+        // Go TestIsolationLocalSyncMatch (dca1): the fixture's configured group
+        // "a" plays the isolation group.
+        let (_stop, matcher) = fixture();
+        let poller = matcher.clone();
+        let poll = tokio::spawn(async move {
+            if let Some(received) = poller.poll("a").await {
+                received.finish(Ok(()));
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            matcher
+                .offer(
+                    task(),
+                    "a",
+                    SOURCE,
+                    false,
+                    Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await
+        );
+        poll.await.unwrap();
+    }
 }

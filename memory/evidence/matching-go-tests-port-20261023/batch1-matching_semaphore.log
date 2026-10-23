@@ -1,0 +1,30 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-api)
+   Compiling mysql_async v0.37.1 (/mnt/storage/service/github/wt/gotests/rust/vendor/mysql_async-0.37.1)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-thrift)
+   Compiling scylla v1.9.0 (/mnt/storage/service/github/wt/gotests/rust/vendor/scylla-1.9.0)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/wt/gotests/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 27s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 14 tests
+test matching_semaphore::tests::matching_semaphore_all_managers_is_a_snapshot ... ok
+test matching_semaphore::tests::matching_semaphore_concurrent_callers_share_one_manager ... ok
+test matching_semaphore::tests::matching_semaphore_confirm_hold_drops_stale_index_entry ... ok
+test matching_semaphore::tests::matching_semaphore_grants_until_full_then_reports_no_slot ... ok
+test grpc_matching::durable_tests::matching_semaphore_domain_filter_and_ring_admission_precede_creation ... ok
+test matching_semaphore::tests::matching_semaphore_identifier_is_usable_as_a_map_key ... ok
+test matching_semaphore::tests::matching_semaphore_identifier_matches_go_validation ... ok
+test matching_semaphore::tests::matching_semaphore_load_rebuilds_index_from_persisted_holds ... ok
+test matching_semaphore::tests::matching_semaphore_missing_semaphore_is_not_ready_after_scan ... ok
+test matching_semaphore::tests::matching_semaphore_registry_register_lookup_and_unregister ... ok
+test matching_semaphore::tests::matching_semaphore_registry_shares_one_manager_per_bucket ... ok
+test matching_semaphore::tests::matching_semaphore_ring_key_separates_buckets ... ok
+test matching_semaphore::tests::matching_semaphore_sweep_unloads_idle_buckets ... ok
+test matching_semaphore::tests::matching_semaphore_unregister_ignores_a_stale_manager ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 404 filtered out; finished in 0.00s
+
