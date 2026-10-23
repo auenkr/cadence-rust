@@ -4266,9 +4266,9 @@ async fn go_engine_add_then_poll_decision_tasks_delivers_each_task_and_drains_st
             request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
         }))).await.unwrap().into_inner();
         assert!(!response.task_token.is_empty());
-        seen.push(response.scheduled_event_id);
+        seen.push(response.started_event_id);
     }
-    assert_eq!(seen, vec![0, 3, 6, 9, 12, 15]);
+    assert_eq!(seen, vec![1, 4, 7, 10, 13, 16]);
     tokio::time::timeout(Duration::from_secs(5), async {
         while store.task_list_size(&key, 0).unwrap() != 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
     }).await.expect("acked tasks are deleted");
