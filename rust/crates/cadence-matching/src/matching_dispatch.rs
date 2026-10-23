@@ -1806,6 +1806,25 @@ mod tests {
             .any(|event| event.name == crate::matching_metrics::POLL_TIMEOUT));
     }
     #[tokio::test]
+    async fn matching_dispatch_non_blocking_poll_with_no_tasks_returns_immediately() {
+        // Go Test_pollNonBlocking_NoTasks: with no task and no wait budget the poll
+        // returns ErrNoTasks at once; handler/engine.go maps that to an empty poll.
+        let (_directory, _store, _key, dispatcher) = fixture(0);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let copy = calls.clone();
+        let started = tokio::time::Instant::now();
+        let response = dispatcher
+            .poll((), Duration::ZERO, move |_, _| {
+                copy.fetch_add(1, Ordering::Relaxed);
+                std::future::ready(Ok(m::PollForActivityTaskResponse::default()))
+            })
+            .await
+            .unwrap();
+        assert!(response.task_token.is_empty());
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+    #[tokio::test]
     async fn matching_dispatch_poller_wait_ends_before_history_and_restarts_after_failure() {
         let (_directory, _store, _key, dispatcher) = fixture(1);
         let manager = Arc::new(Mutex::new(cadence_common::poller::Manager::default()));

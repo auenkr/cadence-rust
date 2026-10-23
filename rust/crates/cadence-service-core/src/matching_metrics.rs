@@ -354,10 +354,10 @@ pub fn record_persistence_qps_rejection(
     }
 }
 
-/// Go `base.emptyMetric` for a successful list call that returned no rows.
-/// Only the count is emitted; Go's row-size and payload-size histograms need
-/// `ResponseRowSizeBuckets` and `ResponsePayloadSizeBuckets`, which no exporter
-/// models yet.
+/// Go `base.emitRowCountMetrics` for a successful list call that returned no
+/// rows: only the empty-response count. The non-empty row-size histogram and
+/// the payload-size histogram are emitted by `record_persistence_response_rows`
+/// and `record_persistence_response_payload`.
 pub fn record_persistence_empty_response(sink: &dyn MetricSink, operation: &'static str) {
     sink.record(MetricEvent {
         name: PERSISTENCE_EMPTY_RESPONSE,

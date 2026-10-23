@@ -795,20 +795,46 @@ mod tests {
         stop.send(true).unwrap();
         assert!(poll.await.unwrap());
     }
-    #[tokio::test]
-    // parity gap: Go Test_pollNonBlocking_NoTasks (go/service/matching/tasklist/matcher_test.go:1224) expects a non-blocking poll with no tasks to return ErrNoTasks at once; Rust SyncMatcher::poll has no non-blocking mode and parks until a task arrives or stop fires (matching_sync.rs:90-123).
-    #[ignore = "parity gap: Rust SyncMatcher::poll has no non-blocking mode (matcher_test.go:1224)"]
-    async fn sync_match_non_blocking_poll_with_no_tasks_returns_immediately() {
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_invalid_isolation_group_poll_falls_back_to_default_group() {
+        // Go Poll (matcher.go:440-445): an unknown isolation group polls the default
+        // task channel instead of failing. TestIsolationPollFailure only errors
+        // because its context ends with no default-group task.
         let (_stop, matcher) = fixture();
-        let polled = tokio::time::timeout(Duration::from_millis(100), matcher.poll("")).await;
-        assert!(matches!(polled, Ok(None)), "poll with no tasks returns None without waiting");
-    }
-    #[tokio::test]
-    // parity gap: Go TestIsolationPollFailure (go/service/matching/tasklist/matcher_test.go:673) expects a poll for an unknown isolation group to fail; Rust poll_group maps unknown groups to the default group and parks (matching_sync.rs:80-86).
-    #[ignore = "parity gap: unknown isolation group is not rejected (matcher_test.go:673)"]
-    async fn sync_match_invalid_isolation_group_poll_gets_no_task() {
-        let (_stop, matcher) = fixture();
-        let polled = tokio::time::timeout(Duration::from_millis(100), matcher.poll("invalid-group")).await;
-        assert!(matches!(polled, Ok(None)), "unknown group poll returns no task without waiting");
+        let poller = matcher.clone();
+        let poll = tokio::spawn(async move {
+            poller
+                .poll("invalid-group")
+                .await
+                .map(|received| received.finish(Ok(())))
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !matcher
+                .offer(
+                    task(),
+                    "a",
+                    SOURCE,
+                    false,
+                    Duration::from_millis(100),
+                    Instant::now() + Duration::from_millis(100)
+                )
+                .await,
+            "an isolated offer is not taken by a poll for an unknown group"
+        );
+        assert!(
+            matcher
+                .offer(
+                    task(),
+                    "",
+                    SOURCE,
+                    false,
+                    Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .await,
+            "a default-group offer is taken by a poll for an unknown group"
+        );
+        assert!(poll.await.unwrap().is_some());
     }
 }
