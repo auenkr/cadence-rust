@@ -73,6 +73,7 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
         self.shutdown = Some(tx);
         let provider = self.provider.clone();
         let membership = self.membership.clone();
+        let refresh = membership.refresh_signal();
         let service = self.service.clone();
         let stopped = self.stopped.clone();
         self.worker = Some(tokio::spawn(async move {
@@ -115,6 +116,17 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
                         }
                     },
                     _ = ticker.tick() => {
+                        if last_changed.is_none_or(|last| last.elapsed() >= MIN_REFRESH) {
+                            if let Ok(hosts) = snapshot(provider.as_ref(), &service).await {
+                                if membership.replace_if_addresses_changed(hosts) {
+                                    last_changed = Some(Instant::now());
+                                }
+                            }
+                        }
+                    },
+                    // Failed empty-ring lookup, Go Ring.signalSelf -> refreshRingWorker.
+                    // Same MIN_REFRESH guard as Go Ring.Refresh.
+                    _ = refresh.notified() => {
                         if last_changed.is_none_or(|last| last.elapsed() >= MIN_REFRESH) {
                             if let Ok(hosts) = snapshot(provider.as_ref(), &service).await {
                                 if membership.replace_if_addresses_changed(hosts) {
@@ -699,6 +711,27 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    // Go hashring_test.go TestFailedLookupWillAskProvider: the initial fetch is
+    // the first GetMembers, and the failed empty-ring lookup adds the second.
+    #[tokio::test(start_paused = true)]
+    async fn failed_owner_lookup_asks_provider_to_refresh() {
+        let p = Arc::new(Fake::new());
+        let m = Membership::new("self", vec![]);
+        let mut lifecycle = MatchingMembershipLifecycle::new("matching", p.clone(), m.clone());
+        lifecycle.start().await.unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(p.fetches.load(Ordering::SeqCst), 1);
+
+        // Paused time: only the signal can cause the second fetch, not the 2s ticker.
+        assert!(m.owner("a").is_err());
+        tokio::task::yield_now().await;
+        assert_eq!(p.fetches.load(Ordering::SeqCst), 2);
+        assert!(m.owner("a").is_err());
+        tokio::task::yield_now().await;
+        assert_eq!(p.fetches.load(Ordering::SeqCst), 3);
+        lifecycle.shutdown().await.unwrap();
     }
 
     #[tokio::test]

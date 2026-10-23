@@ -12,6 +12,9 @@ pub struct Membership {
     ring: Arc<RwLock<Ring>>,
     channels: Arc<Mutex<HashMap<String, tonic::transport::Channel>>>,
     changed: tokio::sync::watch::Sender<u64>,
+    /// Go hashring `refreshChan`: an empty-ring lookup asks the lifecycle worker
+    /// to refresh. Notify stores at most one permit, like Go's capacity-1 channel.
+    refresh: Arc<tokio::sync::Notify>,
     /// Go's Matching outbound TLS, taken from Matching's own `rpc.tls`.
     peer_tls: Option<crate::grpc_tls::ClientTls>,
     metrics: Arc<RwLock<crate::matching_metrics::MatchingMetrics>>,
@@ -23,6 +26,7 @@ impl Membership {
             ring: Arc::new(RwLock::new(Ring::new(hosts))),
             channels: Arc::default(),
             changed: tokio::sync::watch::channel(0).0,
+            refresh: Arc::default(),
             peer_tls: None,
             metrics: Arc::new(RwLock::new(
                 crate::matching_metrics::MatchingMetrics::default(),
@@ -106,12 +110,21 @@ impl Membership {
         self.changed.subscribe()
     }
     pub fn owner(&self, key: &str) -> Result<Host, Status> {
-        self.ring
+        let owner = self
+            .ring
             .read()
             .expect("Matching membership lock")
             .lookup(key)
-            .cloned()
-            .ok_or_else(|| Status::internal("Not enough hosts to serve the request"))
+            .cloned();
+        owner.ok_or_else(|| {
+            // Go Ring.LookupRaw calls signalSelf on an empty-ring lookup.
+            self.refresh.notify_one();
+            Status::internal("Not enough hosts to serve the request")
+        })
+    }
+    /// Shared with the lifecycle worker, which refreshes from the provider when signalled.
+    pub(crate) fn refresh_signal(&self) -> Arc<tokio::sync::Notify> {
+        self.refresh.clone()
     }
     /// Ring-only multi-host lookup used by Matching's shard-distributor
     /// resolver, whose Go `LookupN` deliberately does not use the spectator.
