@@ -419,3 +419,127 @@ mod metric_parity_tests {
         assert_eq!(events[0].tags["operation"], "ResolverHostNotFound");
     }
 }
+
+#[cfg(test)]
+mod go_membership_port_tests {
+    use super::*;
+    use crate::matching_metrics::{MetricValue, RecordingMetricSink};
+
+    fn host(address: &str) -> Host {
+        Host {
+            address: address.into(),
+            identity: String::new(),
+            grpc_address: String::new(),
+        }
+    }
+
+    // Go hashring_test.go TestDiffMemberMakesCorrectDiff. Go returns the added and
+    // removed lists; Rust only reports whether the address set changed.
+    #[test]
+    fn go_diff_cases_report_change_only_for_address_set_differences() {
+        let cases: [(&str, Vec<&str>, Vec<&str>, bool); 5] = [
+            ("empty and one added", vec![], vec!["a"], true),
+            ("non-empty and added", vec!["a"], vec!["a", "b"], true),
+            ("empty and nothing has changed", vec![], vec![], false),
+            ("multiple hosts, but no change", vec!["a", "b", "c"], vec!["c", "b", "a"], false),
+            ("multiple hosts, add/delete", vec!["a", "b", "c"], vec!["b", "e", "f"], true),
+        ];
+        for (name, current, next, changed) in cases {
+            let membership = Membership::new("local", current.into_iter().map(host).collect());
+            assert_eq!(
+                membership.replace_if_addresses_changed(next.into_iter().map(host).collect()),
+                changed,
+                "{name}"
+            );
+        }
+    }
+
+    // Go hashring_test.go TestMemberCountReturnsNumber.
+    #[test]
+    fn go_member_count_tracks_replaced_ring_hosts() {
+        let membership = Membership::new("local", vec![]);
+        assert_eq!(membership.hosts().len(), 0);
+        membership.replace(vec![host("127"), host("128")]);
+        assert_eq!(membership.hosts().len(), 2);
+    }
+
+    // Go resolver_test.go TestMethodsAreRoutedToARing: Lookup("key") on the
+    // two-member ring {127, 128} resolves to 127.
+    #[test]
+    fn go_lookup_routes_key_on_two_member_ring() {
+        let membership = Membership::new("local", vec![host("127"), host("128")]);
+        assert_eq!(membership.owner("key").unwrap().address, "127");
+    }
+
+    // Go hashring_test.go TestRefreshWillNotifySubscribers and
+    // TestRefreshUpdatesRingOnlyWhenRingHasChanged: subscribers wake only when the
+    // address set changes; a metadata-only refresh is ignored.
+    #[test]
+    fn go_subscribers_wake_only_when_placement_addresses_change() {
+        let membership = Membership::new("local", vec![host("127")]);
+        let mut changed = membership.subscribe();
+        changed.borrow_and_update();
+
+        let same_address_new_identity = vec![Host {
+            address: "127".into(),
+            identity: "other".into(),
+            grpc_address: String::new(),
+        }];
+        assert!(!membership.replace_if_addresses_changed(same_address_new_identity));
+        assert!(!changed.has_changed().unwrap());
+
+        assert!(membership.replace_if_addresses_changed(vec![host("127"), host("128")]));
+        assert!(changed.has_changed().unwrap());
+    }
+
+    // Go hashring_test.go TestLookupAndRefreshRaceCondition: owner lookups keep
+    // succeeding while refreshes publish new placements.
+    #[test]
+    fn go_lookup_and_refresh_race_never_observes_missing_owner() {
+        let membership = Membership::new("local", vec![host("127"), host("128")]);
+        let lookups = membership.clone();
+        let refresher = membership.clone();
+        let refreshed = vec![host("127"), host("128"), host("129")];
+        let base = vec![host("127"), host("128")];
+
+        let lookup_thread = std::thread::spawn(move || {
+            for _ in 0..50 {
+                lookups.owner("a").expect("owner during refresh");
+            }
+        });
+        let refresh_thread = std::thread::spawn(move || {
+            for index in 0..50 {
+                let next = if index % 2 == 0 { refreshed.clone() } else { base.clone() };
+                refresher.replace(next);
+            }
+        });
+        lookup_thread.join().unwrap();
+        refresh_thread.join().unwrap();
+    }
+
+    // Go hashring_test.go TestEmitHashringView. Go's emitHashIdentifier hashes the
+    // descending address list with farm.Hash32, but Rust hashes it with
+    // fingerprint32 (Go Fingerprint32 used by the ring). Ignored until the
+    // identifier path is fixed.
+    #[test]
+    #[ignore = "parity gap: hashring view identifier uses fingerprint32, Go uses farm.Hash32; Go hashring.go:360-396, hashring_test.go:463"]
+    fn go_hashring_view_identifier_matches_go_emit_vectors() {
+        fn identifier(addresses: &[&str]) -> f64 {
+            let sink = Arc::new(RecordingMetricSink::default());
+            // Seed a different address so the first replace always changes the view.
+            let membership =
+                Membership::new("host123", vec![host("seed:1")]).with_metrics(sink.clone());
+            membership.replace_if_addresses_changed(addresses.iter().map(|a| host(a)).collect());
+            let events = sink.events();
+            assert_eq!(events.len(), 1);
+            match events[0].value {
+                MetricValue::Number(value) => value,
+                ref other => panic!("unexpected metric value {other:?}"),
+            }
+        }
+
+        assert_eq!(identifier(&["10.0.0.1:1234", "10.0.0.2:1234", "10.0.0.3:1234"]), 835.0);
+        assert_eq!(identifier(&["10.0.0.3:1234", "10.0.0.1:1234", "10.0.0.2:1234"]), 835.0);
+        assert_eq!(identifier(&[]), 242.0);
+    }
+}
