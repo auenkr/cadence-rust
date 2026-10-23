@@ -1,0 +1,50 @@
+PROBE BODY FAILED: Error: 12 UNIMPLEMENTED: unrecognized service name "cadence-matching", available services: "cadence-frontend"
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:70:50
+    at new Promise (<anonymous>)
+    at acquireSemaphore (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:70:10)
+    at semaphoreAcquire (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:452:54)
+    at /mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:460:60
+    at Array.map (<anonymous>)
+    at run (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:460:47)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 12,
+  details: 'unrecognized service name "cadence-matching", available services: "cadence-frontend"',
+  metadata: Metadata {
+    internalRepr: Map(1) { 'content-type' => [Array] },
+    options: {}
+  }
+}
+Error: 12 UNIMPLEMENTED: unrecognized service name "cadence-matching", available services: "cadence-frontend"
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:70:50
+    at new Promise (<anonymous>)
+    at acquireSemaphore (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:70:10)
+    at semaphoreAcquire (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:452:54)
+    at /mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:460:60
+    at Array.map (<anonymous>)
+    at run (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:460:47)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 12,
+  details: 'unrecognized service name "cadence-matching", available services: "cadence-frontend"',
+  metadata: Metadata {
+    internalRepr: Map(1) { 'content-type' => [Array] },
+    options: {}
+  }
+}

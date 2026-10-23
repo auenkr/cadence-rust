@@ -348,7 +348,9 @@ if args.cassandra and (args.mysql or args.postgres):
     parser.error('--cassandra, --mysql and --postgres select different production databases; choose one')
 if args.cassandra and not production_matching:
     parser.error('--cassandra requires --rust-services matching')
-if args.cassandra and not args.matching_failure_recovery:
+if args.cassandra:
+    # Same scenario set as the MySQL lane (restart/drain plus two-node recovery).
+    args.matching_restart = True
     args.matching_failure_recovery = True
 if args.cassandra and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', args.cassandra_keyspace):
     parser.error('--cassandra-keyspace must be a CQL identifier')
@@ -796,7 +798,7 @@ def start_etcd():
     """Single-node etcd in a uniquely named container; never reuses another container."""
     name = f'cadence-rust-gate-etcd-{os.getpid()}-{int(time.time())}'
     etcd['name'] = name
-    subprocess.run(['docker', 'run', '-d', '--name', name, '-p', f'127.0.0.1:{ports["SD_ETCD_PORT"]}:2379', args.etcd_image,
+    subprocess.run(['docker', 'run', '-d', '--name', name, '--memory', '512m', '--memory-swap', '512m', '--cpus', '0.5', '--pids-limit', '512', '-p', f'127.0.0.1:{ports["SD_ETCD_PORT"]}:2379', args.etcd_image,
                     'etcd', '--name', 'gate', '--data-dir', '/tmp/etcd-data',
                     '--listen-client-urls', 'http://0.0.0.0:2379', '--advertise-client-urls', 'http://0.0.0.0:2379'],
                    check=True, stdout=subprocess.DEVNULL)

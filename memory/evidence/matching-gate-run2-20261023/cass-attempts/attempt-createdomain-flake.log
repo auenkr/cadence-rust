@@ -1,0 +1,29 @@
+Error: 2 UNKNOWN: cadence internal error, msg: CreateDomain operation failed. Error: domain operation condition failure
+    at callErrorFromStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/mnt/storage/service/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:220:67
+    at new Promise (<anonymous>)
+    at callRpc (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:220:10)
+    at call (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:212:10)
+    at run (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:295:9)
+    at Object.<anonymous> (/mnt/storage/service/github/wt/gate5/tests/matching-service-compat.cjs:1281:1)
+    at Module._compile (node:internal/modules/cjs/loader:1829:14)
+    at Object..js (node:internal/modules/cjs/loader:1969:10) {
+  code: 2,
+  details: 'cadence internal error, msg: CreateDomain operation failed. Error: domain operation condition failure',
+  metadata: Metadata {
+    internalRepr: Map(3) {
+      'rpc-service' => [Array],
+      'rpc-application-error' => [Array],
+      'rpc-application-error-details' => [Array]
+    },
+    options: {}
+  }
+}
