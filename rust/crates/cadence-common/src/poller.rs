@@ -1,5 +1,5 @@
 //! State semantics of Go service/matching/poller/manager.go.
-//! Callers own poll cancellation and synchronization; timestamps are Unix nanos.
+//! Callers supply poll cancellation callbacks and synchronization; timestamps are Unix nanos.
 use std::collections::{HashMap, VecDeque};
 const TTL: i64 = 300_000_000_000;
 const CAPACITY: usize = 5000;

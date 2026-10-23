@@ -3422,3 +3422,21 @@ async fn matching_failover_callback_excludes_sticky_activity_and_other_domains()
     assert!(tokio::time::timeout(Duration::from_secs(2), poll).await.unwrap().unwrap().unwrap().into_inner().task_token.is_empty());
     registry.shutdown(matching_now()).await.unwrap();
 }
+
+#[tokio::test]
+async fn matching_grpc_listener_registers_meta_health_and_gates_startup() {
+    let matching = Matching::new(crate::handlers::AppState::default()).with_start_pending();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let service = matching.clone();
+    let server = tokio::spawn(async move { serve_with_listener(listener, service).await });
+    let mut client = p::meta_api_client::MetaApiClient::connect(format!("http://{address}")).await.unwrap();
+    let mut health = tokio::spawn(async move { client.health(p::HealthRequest {}).await });
+    assert!(tokio::time::timeout(Duration::from_millis(30), &mut health).await.is_err());
+    matching.mark_started();
+    let response = tokio::time::timeout(Duration::from_secs(2), health).await.unwrap().unwrap().unwrap().into_inner();
+    assert!(response.ok);
+    assert_eq!(response.message, "matching good");
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+}
