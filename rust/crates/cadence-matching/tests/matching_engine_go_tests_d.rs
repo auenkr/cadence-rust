@@ -442,7 +442,7 @@ async fn unload_semaphore_manager_stops_it_and_next_request_builds_fresh() {
     assert!(registry.all_managers().is_empty());
 
     assert_eq!(
-        mgr.acquire("owner-1").await.err(),
+        mgr.acquire("owner-1", None).await.err(),
         Some(ManagerError::NotReady),
         "an unloaded manager must stop serving"
     );
