@@ -172,6 +172,7 @@ fn semaphore_status(error: crate::matching_semaphore::ManagerError) -> Status {
             Status::invalid_argument("distributed semaphore is not enabled for this domain")
         }
         ManagerError::NotFound(message) => Status::not_found(message),
+        ManagerError::Deadline => Status::deadline_exceeded("semaphore acquire deadline exceeded"),
         ManagerError::NotReady => crate::grpc::detailed_status(
             tonic::Code::ResourceExhausted,
             "semaphore manager is not ready",
@@ -2933,7 +2934,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         self.semaphores.get_or_create_with_idle_ttl(identifier, idle_ttl)
                             .await.map_err(semaphore_status)?
                     };
-                    let result = manager.acquire(&r.owner_id).await.map_err(semaphore_status)?;
+                    let result = manager.acquire(&r.owner_id, deadline).await.map_err(semaphore_status)?;
                     let outcome = match result.outcome {
                         SemaphoreAcquireOutcome::Acquired => 1,
                         SemaphoreAcquireOutcome::NoSlot => 2,
