@@ -933,7 +933,7 @@ async function run() {
     const drainID = `graceful-drain-${id}`, drainTaskList = `graceful-drain-tasks-${id}`;
     const drainRequest = { ...startRequest, workflowId: drainID, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: drainTaskList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')) };
     const drainStarted = await call('WorkflowAPI', 'StartWorkflowExecution', drainRequest);
-    if (!process.env.CADENCE_MATCHING_SQLITE_DB && !process.env.CADENCE_MATCHING_MYSQL && !process.env.CADENCE_MATCHING_POSTGRES) throw new Error('production Matching mode requires a configured persistence probe target');
+    if (!cassandraGate && !process.env.CADENCE_MATCHING_SQLITE_DB && !process.env.CADENCE_MATCHING_MYSQL && !process.env.CADENCE_MATCHING_POSTGRES) throw new Error('production Matching mode requires a configured persistence probe target');
     const queued = await taskObserver.observe(domainId, drainTaskList, 20, 'task-before-graceful-drain');
     assert(queued.queued_rows > 0, 'Go History did not persist the graceful-drain decision task');
     const drainMembershipPeer = directMatchingClient('127.0.0.1:' + rustGrpcPort);
