@@ -231,6 +231,17 @@ async fn query_workflow_success_reports_partition_config() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     let durable = durable(state);
+    // Go's gomock manager reports a stored root config (version 1, read/write {0});
+    // Rust returns the stored config and nothing when none is stored, so store one.
+    durable
+        .matching
+        .update_task_list_partition_config(update_request(
+            TASK_LIST,
+            0,
+            Some(root_partition_config(1)),
+        ))
+        .await
+        .unwrap();
     let queue = durable
         .queues
         .get(key(domain_id(), TASK_LIST, 0), 0, now_nanos())
