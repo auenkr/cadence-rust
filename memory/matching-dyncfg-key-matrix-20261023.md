@@ -77,3 +77,4 @@ Durations are ParseDuration strings on both sides; Rust stores nanoseconds. `Unl
 - `matching.percentageOnboardedToShardManager`: Go consumer is `go/cmd/server/cadence/server.go:157` (`operationalDynamicConfig.GetIntProperty` into `membership.NewPercentageOnboarded`, `go/common/membership/percentage_onboarded.go`, which emits gauge `percentage_onboarded_to_shard_manager` per `Value()`), default 0, unfiltered. Rust `launcher.rs:1347` unfiltered int, default 0: match.
 
 ## CI evidence
+- rust-ci (package=cadence-matching, clippy -D warnings + tests) on tests commit d7fd41ba8: **success** — https://github.com/auenkr/cadence-rust/actions/runs/40015249155 (later commit adds only this doc).
