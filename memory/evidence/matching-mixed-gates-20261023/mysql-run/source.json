@@ -1,0 +1,11 @@
+{
+  "repository": "/mnt/storage/service/github/wt/mixed3",
+  "head": "47774da67582f652418867331e31293e7fce5a57",
+  "branch": "matching-mixed-gates-20261023",
+  "status": [
+    "M tests/__pycache__/matching_evidence.cpython-314.pyc",
+    "?? artifacts/frozen/",
+    "?? artifacts/mysql-run/",
+    "?? memory/evidence/matching-mixed-gates-20261023/"
+  ]
+}
