@@ -1088,6 +1088,43 @@ mod tests {
         assert!(wire.get(7).is_some());
     }
 
+    #[test]
+    fn matching_thrift_forwarded_sync_miss_and_failed_query_use_go_exception_types() {
+        // Go errRemoteSyncMatchFailed is declared on AddDecisionTask (field 6).
+        let decision = cadence_thrift::find_method("MatchingService::AddDecisionTask").unwrap();
+        let (wire, error) = application_error(
+            decision,
+            crate::matching_dispatch::remote_sync_match_failed(),
+        );
+        assert_eq!(error.unwrap().0, "RemoteSyncMatchedError");
+        let Value::Struct(details) = wire.get(6).unwrap() else {
+            panic!("wrong remote exception field")
+        };
+        assert_eq!(
+            details.opt_string(10).unwrap().as_deref(),
+            Some("remote sync match failed")
+        );
+        // Go QueryFailedError{Message: worker error} is declared on QueryWorkflow (field 4).
+        let query = cadence_thrift::find_method("MatchingService::QueryWorkflow").unwrap();
+        let failed = crate::matching_query::query_outcome(
+            crate::matching_query::QueryOutcome::Worker(crate::matching_query::WorkerAnswer::new(
+                p::WorkflowQueryResult {
+                    result_type: p::QueryResultType::Failed as i32,
+                    answer: None,
+                    error_message: "boom".into(),
+                },
+            )),
+            false,
+        )
+        .unwrap_err();
+        let (wire, error) = application_error(query, failed);
+        assert_eq!(error.unwrap().0, "QueryFailedError");
+        let Value::Struct(details) = wire.get(4).unwrap() else {
+            panic!("wrong query exception field")
+        };
+        assert_eq!(details.opt_string(1).unwrap().as_deref(), Some("boom"));
+    }
+
     #[tokio::test]
     async fn dedicated_http_listener_applies_configured_procedure_allowlist() {
         use axum::{
