@@ -6,7 +6,7 @@ task_completer_test.go, or handler/membership_test.go. Shared map is not edited.
 
 Branch: `matching-partial-upgrade-a-20261024` (from origin/master `bafd65a77`).
 Verification: GitHub Actions `rust-ci.yml`, package `cadence-matching`. No local cargo was run.
-Run: RUN_URL_PLACEHOLDER
+Run: https://github.com/auenkr/cadence-rust/actions/runs/40033617026 (success; clippy and test passed; package cadence-matching)
 
 ## Table
 
@@ -41,3 +41,10 @@ Files touched: `tests/matching_partial_upgrade_a.rs` (new), `src/matching_reader
   (`ReaderLive::batch_size`). Only the positive half is asserted as a pass-through.
 - Rows 4-7: the Go engine-error subcases need a failing engine. Rust has no seam for that.
   The rate-limit and validation subcases already have existing Rust tests (`go_handler_*_rate_limited_*`).
+
+## CI result (run 40033617026, conclusion: success)
+
+- Clippy (`-D warnings`): pass. Test (`cargo test -p cadence-matching`): pass.
+- Lib unit tests: 602 passed, 0 failed, 18 ignored. New passing: `matching_reader::tests::go_get_tasks_batch_size_positive_values_pass_through`, `grpc_matching::durable_tests::go_handler_describe_task_list_success_returns_response`.
+- `tests/matching_partial_upgrade_a.rs`: 1 passed (`go_new_config_readers_return_go_test_values`), 3 ignored.
+- Ignored gap markers added here are confirmed in the log: `go_get_tasks_batch_size_returns_raw_non_positive_values`, the four `*_engine_error_is_internal_service_error` tests, `go_handle_err_passes_typed_errors_through_unchanged`, `go_handler_start_calls_engine_start_once_and_stop_calls_engine_stop_once`, `go_new_config_every_field_has_a_rust_reader`.
