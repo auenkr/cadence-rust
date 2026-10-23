@@ -18,3 +18,6 @@ Binary: `cadence-matching` debug, sha256 in `rust-sha256.txt`. Built with
 `CARGO_TARGET_DIR=/mnt/storage/service/cargo-target-final`. First build attempt failed (exit 1) because
 the worktree lacked the `go/idls` submodule; fixed with `git submodule update --init go/idls`.
 The first attempt's log is not kept.
+
+Final build record: `build-final/` (copied from `/mnt/storage/service/gate-runs/backlog-build/`).
+`build.exit` is 0 there; the earlier exit-1 attempt (missing go/idls submodule) is superseded.
