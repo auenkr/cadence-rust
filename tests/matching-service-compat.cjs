@@ -361,7 +361,14 @@ const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskLis
 async function run() {
   const id = process.env.CADENCE_MATCHING_TEST_ID || randomUUID();
   const domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
-  await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+  // Go's worker registers cadence-system at startup; two concurrent SQL domain registrations race on
+  // domain_metadata's notification_version and the loser fails before writing anything, so retry.
+  for (let attempt = 0; ; attempt++) {
+    try { await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } }); break; } catch (error) {
+      if (attempt >= 5 || !/Failed to update domain metadata/.test(error.message)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
   const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
   let pageTokenDomain, domainPages = 0;
   if (cassandraGate) {
