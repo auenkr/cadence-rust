@@ -545,7 +545,7 @@ async function run() {
       await call('SemaphoreAPI', 'CreateSemaphore', {
         domain, semaphoreName: gapSemaphoreName, capacity: 1, bucketCapacity: 1,
       });
-      const gapRequest = { domainId, semaphoreName: gapSemaphoreName, bucket: 0, ownerId: `${id.length}:${id}:${randomUUID()}:gap` };
+      const gapRequest = { domainId, semaphoreName: gapSemaphoreName, bucket: 0, ownerId: `${id.length}:${id}:${randomUUID()}:1` };
       const gapGrant = await acquireSemaphore(semaphoreClients[0], gapRequest).catch(error => {
         if (error.code === grpc.status.ABORTED || error.code === grpc.status.UNAVAILABLE) return acquireSemaphore(semaphoreClients[1], gapRequest);
         throw error;
