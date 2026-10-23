@@ -1648,6 +1648,140 @@ mod tests {
         assert_eq!(queue.levels().1, 0);
         assert!(tokens.try_acquire().is_some());
     }
+    // Go TestMustOffer_ContextExpiredFirstAttempt: no forwarder and no poller,
+    // so the dispatch deadline expires. The durable row stays unacknowledged
+    // and a later poller receives the same row.
+    #[tokio::test]
+    async fn matching_reader_dispatch_timeout_without_poller_keeps_row_unacked() {
+        let (_directory, queue, reader, wake) = configured_fixture(0, 1, Duration::from_millis(50), true);
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        reader.with_metric_context(
+            crate::matching_metrics::MatchingMetrics::new(sink.clone()),
+            crate::matching_metrics::PollMetricContext {
+                domain: "reader-domain".into(), task_list: "child-list".into(),
+                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+            },
+        );
+        queue.append(&[TaskData { schedule_id: 31, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_DISPATCH_TIMEOUTS) {
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        assert_eq!(queue.levels().1, 0, "dispatch timeout must not ack the durable row");
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        assert_eq!(delivered.data.schedule_id, 31);
+        stop(queue, reader).await;
+    }
+
+    // Go TestMustOffer_ContextExpiredAfterFirstAttempt: the forward token is
+    // requested but never granted, so no forward is sent and the expired
+    // dispatch leaves the durable row unacknowledged.
+    #[tokio::test]
+    async fn matching_reader_dispatch_timeout_without_token_never_forwards_or_acks() {
+        let (_directory, queue, reader, wake) = configured_fixture(0, 1, Duration::from_millis(50), true);
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        reader.with_metric_context(
+            crate::matching_metrics::MatchingMetrics::new(sink.clone()),
+            crate::matching_metrics::PollMetricContext {
+                domain: "reader-domain".into(), task_list: "child-list".into(),
+                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+            },
+        );
+        let forwarded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = forwarded.clone();
+        reader.set_backlog_forwarder(BacklogForward {
+            tokens: test_tokens(0),
+            forward: Arc::new(move |_task| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData { schedule_id: 32, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_DISPATCH_TIMEOUTS) {
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        assert_eq!(forwarded.load(Ordering::SeqCst), 0, "no token means no forward");
+        assert_eq!(queue.levels().1, 0, "expired dispatch must not ack the durable row");
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        assert_eq!(delivered.data.schedule_id, 32);
+        stop(queue, reader).await;
+    }
+
+    // One token admits one forward. The token is held for as long as that
+    // forward is in flight, and stopping the reader releases it without an ack.
+    #[tokio::test]
+    async fn matching_reader_one_forward_per_token_while_forward_is_in_flight() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let attempted = Arc::new(Notify::new());
+        let observed_attempt = attempted.clone();
+        let forwarded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = forwarded.clone();
+        let tokens = test_tokens(1);
+        reader.set_backlog_forwarder(BacklogForward {
+            tokens: tokens.clone(),
+            forward: Arc::new(move |_task| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                observed_attempt.notify_one();
+                Box::pin(std::future::pending())
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData { schedule_id: 33, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
+        // Shorter than the 2-second forward deadline and the 3-second dispatch timeout.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(forwarded.load(Ordering::SeqCst), 1, "one token admits one in-flight forward");
+        assert!(tokens.try_acquire().is_none(), "the in-flight forward holds the only token");
+        assert_eq!(queue.levels().1, 0);
+        let queue_for_levels = queue.clone();
+        stop(queue, reader).await;
+        assert_eq!(queue_for_levels.levels().1, 0, "stopping an in-flight forward must not ack");
+        assert!(tokens.try_acquire().is_some(), "stopping releases the token held by the forward");
+    }
+
+    // Go TestMustOffer_ContextExpiredAfterForwardError: a forward error keeps
+    // the durable row and returns its token before the reader waits for a
+    // local poller. Cancelling that wait leaves the row unacknowledged.
+    #[tokio::test]
+    async fn matching_reader_forward_error_then_stop_releases_token_without_ack() {
+        let (_directory, queue, reader, wake) = fixture(0, 1);
+        let attempted = Arc::new(Notify::new());
+        let observed_attempt = attempted.clone();
+        let forwarded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = forwarded.clone();
+        let tokens = test_tokens(1);
+        reader.set_backlog_forwarder(BacklogForward {
+            tokens: tokens.clone(),
+            forward: Arc::new(move |_task| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                observed_attempt.notify_one();
+                Box::pin(async { Err(crate::matching_forward::ForwardError::NoParent) })
+            }),
+            local_wait: Arc::new(|| Duration::ZERO),
+        });
+        queue.append(&[TaskData { schedule_id: 34, ..TaskData::default() }], now()).unwrap();
+        wake.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if tokens.try_acquire().is_some() { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        assert_eq!(forwarded.load(Ordering::SeqCst), 1, "one token admits one forward");
+        let queue_for_levels = queue.clone();
+        stop(queue, reader).await;
+        assert_eq!(queue_for_levels.levels().1, 0, "cancelled retry must not ack the durable row");
+        assert!(tokens.try_acquire().is_some(), "the failed forward's token is free after cancellation");
+    }
+
     #[tokio::test]
     async fn matching_reader_restored_backlog_has_forwarder_before_pump_starts() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
