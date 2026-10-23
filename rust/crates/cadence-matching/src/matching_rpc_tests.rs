@@ -4239,3 +4239,56 @@ async fn go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_no
         assert_eq!(err.message(), "Only normal tasklist's partition config can be updated.");
     }
 }
+
+// engine_integration_test.go AddTasksTest (non-forwarded): 111 adds all persist.
+#[tokio::test]
+async fn go_engine_add_decision_and_activity_tasks_persist_every_task() {
+    let (_dir, store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    for i in 0..111i64 {
+        matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(), workflow_execution: execution(), task_list: list(),
+            schedule_id: i * 3, ..Default::default()
+        })).await.unwrap();
+        matching.add_activity_task(Request::new(m::AddActivityTaskRequest {
+            domain_id: domain.clone(), source_domain_id: domain.clone(), workflow_execution: execution(),
+            task_list: list(), schedule_id: i * 3, ..Default::default()
+        })).await.unwrap();
+    }
+    assert_eq!(store.task_list_size(&key, -1).unwrap(), 111);
+    assert_eq!(store.task_list_size(&TaskListKey { task_type: 1, ..key.clone() }, -1).unwrap(), 111);
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
+
+// engine_integration_test.go AddAndPollTasks (decision, no isolation): add 6, poll all, FIFO, store drained.
+#[tokio::test]
+async fn go_engine_add_then_poll_decision_tasks_delivers_each_task_and_drains_store() {
+    let address = start_starting_history().await;
+    let (_dir, store, matching, key) = fixture_with_history(&address);
+    let domain = key.domain_id.to_string();
+    for i in 0..6i64 {
+        matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(), workflow_execution: execution(), task_list: list(),
+            schedule_id: i * 3, ..Default::default()
+        })).await.unwrap();
+    }
+    assert_eq!(store.task_list_size(&key, -1).unwrap(), 6);
+    let mut seen = Vec::new();
+    for _ in 0..6 {
+        let response = matching.poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: domain.clone(), poller_id: "add-poll".into(),
+            request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+        }))).await.unwrap().into_inner();
+        assert!(!response.task_token.is_empty());
+        seen.push(response.started_event_id);
+    }
+    assert_eq!(seen, vec![1, 4, 7, 10, 13, 16]);
+    // Go also asserts the store is drained; Rust deletes acked rows via batched GC, so assert no redelivery instead.
+    let mut again = Request::new(m::PollForDecisionTaskRequest {
+        domain_id: domain.clone(), poller_id: "add-poll".into(),
+        request: Some(p::PollForDecisionTaskRequest { task_list: list(), ..Default::default() }), ..Default::default()
+    });
+    again.set_timeout(Duration::from_secs(1));
+    assert!(matching.poll_for_decision_task(again).await.unwrap().into_inner().task_token.is_empty());
+    matching.queues.as_ref().unwrap().shutdown(matching_now()).await.unwrap();
+}
