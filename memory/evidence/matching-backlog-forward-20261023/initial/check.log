@@ -1,0 +1,41 @@
+    Checking tokio v1.53.3
+    Checking bitflags v2.13.2
+   Compiling tempfile v3.27.0
+   Compiling prost-build v0.13.5
+    Checking cadence-common v0.1.0 (/mnt/storage/service/github/wt/backlog2/rust/crates/cadence-common)
+    Checking tokio-util v0.7.20
+    Checking h2 v0.4.20
+    Checking tokio-rustls v0.26.6
+    Checking hyper v1.12.0
+    Checking tower v0.5.3
+    Checking axum v0.7.9
+    Checking hyper-util v0.1.21
+    Checking hyper-timeout v0.5.2
+    Checking tokio-postgres v0.7.18
+    Checking tower v0.4.13
+    Checking tokio-stream v0.1.19
+    Checking openssl v0.10.81
+   Compiling tonic-build v0.12.3
+    Checking tokio-openssl v0.6.5
+    Checking mysql_common v0.37.3
+    Checking mysql_common v0.35.5
+    Checking scylla-cql v2.0.0
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/wt/backlog2/rust/crates/cadence-proto)
+    Checking tonic v0.12.3
+    Checking cadence-api v0.1.0 (/mnt/storage/service/github/wt/backlog2/rust/crates/cadence-api)
+    Checking hickory-proto v0.24.4
+    Checking mysql v26.0.1
+    Checking rusqlite v0.32.1
+    Checking mysql_async v0.37.1 (/mnt/storage/service/github/wt/backlog2/rust/vendor/mysql_async-0.37.1)
+    Checking cadence-thrift v0.1.0 (/mnt/storage/service/github/wt/backlog2/rust/crates/cadence-thrift)
+    Checking scylla v1.9.0 (/mnt/storage/service/github/wt/backlog2/rust/vendor/scylla-1.9.0)
+    Checking postgres-openssl v0.5.3
+    Checking fs-err v3.3.2
+    Checking postgres v0.19.14
+    Checking axum v0.8.9
+    Checking cadence-persistence v0.1.0 (/mnt/storage/service/github/wt/backlog2/rust/crates/cadence-persistence)
+    Checking hickory-resolver v0.24.4
+    Checking axum-server v0.8.0
+    Checking tonic-reflection v0.12.3
+    Checking cadence-server v0.1.0 (/mnt/storage/service/github/wt/backlog2/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 42s
