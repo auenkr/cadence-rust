@@ -87,8 +87,14 @@ fn expect(expected: PartitionMap) -> BalancerCycle {
 /// Go `cycleInterval` advances before each cycle. Groups per partition live
 /// in dynamic config, so cases can change them between cycles.
 fn run_balancer(groups_per_partition: i64, cycles: Vec<BalancerCycle>) {
+    // Go `isolationConfig`: every isolation-group sustain is cycleInterval*4.
+    // ScalerConfig::default() uses 120s for the downscale sustain, so set all four.
     let mut config = ScalerConfig {
         groups_per_partition,
+        group_upscale_sustain_nanos: 4 * CYCLE_NANOS,
+        group_downscale_sustain_nanos: 4 * CYCLE_NANOS,
+        group_has_pollers_sustain_nanos: 4 * CYCLE_NANOS,
+        group_no_pollers_sustain_nanos: 4 * CYCLE_NANOS,
         ..ScalerConfig::default()
     };
     let mut balancer = IsolationBalancer::default();
