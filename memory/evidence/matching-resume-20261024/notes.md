@@ -11,3 +11,11 @@ Fresh whole-workspace validation started at https://github.com/auenkr/cadence-ru
 Source inspection found numerous ignored tests whose comments are stale or describe missing seams rather than behavioral gaps. Example: poller history callback production metric behavior is already implemented in PollLifecycle::begin and PollWaitGuard::drop, although matching_partial_upgrade_b ignores the callback API test. Do not add unused callback plumbing simply to reproduce Go class structure. Audit actual observable behavior and map replacement tests.
 
 Matching remains incomplete. Required: worker outcomes, current-head acceptance evidence (Cassandra especially), fresh workspace CI success, and requirement-by-requirement parity closure. Existing MySQL two-node pass alone does not prove completion.
+
+## Integration candidate
+
+Reviewed and integrated existing unmerged semaphore params/pagination, P1 semaphore startup, lifecycle-v2, and nodiff A/B branches into `matching-completion-integration-20261024`. No master merge yet: candidate requires CI review. Resolved overlapping semaphore constructor conflicts in favor of the required stop callback and paginated persistence API, preserving both behavior fixes. Prior semaphore branch CI failed three lifecycle tests; combined candidate must prove these now pass.
+
+Whole-workspace candidate run: https://github.com/auenkr/cadence-rust/actions/runs/40073886465 (pending). Remaining branch work includes OpenFeature (assigned to a replacement Luna worker), error seams, panic recovery and tracing; inspect before declaring any blocker closed. Current final-parity audit merged to master in d71bef324; its remaining-gap list predates these integrations.
+
+TLS source evidence in nodiff-b notes resolves the TChannel question: pinned Go supports rpc.tls only on gRPC (and HTTP configuration separately); Go TChannel listener uses no credentials. Rust need not invent a TLS mode Go does not have. Source guard is supplementary, not runtime TLS evidence.
