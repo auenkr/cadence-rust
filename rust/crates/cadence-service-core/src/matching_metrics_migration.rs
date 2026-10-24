@@ -788,3 +788,98 @@ mod production_matching_metric_tests {
         assert!(default.counters.emit("unmigrated", true));
     }
 }
+
+#[cfg(test)]
+mod production_matching_metric_tests {
+    use super::*;
+    use crate::matching_metrics::{InboundMetricContext, MatchingMetrics, RecordingMetricSink};
+    use std::time::Duration;
+
+    #[test]
+    fn sync_match_timer_histogram_names_tags_and_default_gating_match_go() {
+        let recording = Arc::new(RecordingMetricSink::default());
+        let sink = Arc::new(MigrationMetricSink::new(
+            recording.clone(),
+            MigrationPolicy::default(),
+        ));
+        MatchingMetrics::new(sink).handler_sync_match_latency(
+            "AddDecisionTask",
+            Some("domain-a"),
+            Some(("queue/a", Some(0))),
+            Some(InboundMetricContext {
+                caller: Some("frontend".into()),
+                transport: Some("grpc".into()),
+            }),
+            Duration::from_millis(12),
+        );
+        let timer = recording.events();
+        assert_eq!(timer.len(), 1);
+        assert_eq!(timer[0].name, "syncmatch_latency_per_tl");
+        assert_eq!(timer[0].kind, MetricKind::Timer);
+        assert_eq!(timer[0].tags["operation"], "AddDecisionTask");
+        assert_eq!(timer[0].tags["domain"], "domain-a");
+        assert_eq!(timer[0].tags["tasklist"], "queue_a");
+        assert_eq!(timer[0].tags["caller"], "frontend");
+        assert_eq!(timer[0].tags["transport"], "grpc");
+
+        let mut both = MigrationPolicy::default();
+        both.histograms.default = "both".into();
+        let recording = Arc::new(RecordingMetricSink::default());
+        let sink = Arc::new(MigrationMetricSink::new(recording.clone(), both));
+        MatchingMetrics::new(sink).handler_sync_match_latency(
+            "AddDecisionTask",
+            Some("domain-a"),
+            Some(("queue/a", Some(0))),
+            Some(InboundMetricContext {
+                caller: Some("frontend".into()),
+                transport: Some("grpc".into()),
+            }),
+            Duration::from_millis(12),
+        );
+        let events = recording.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name, "syncmatch_latency_per_tl");
+        assert_eq!(events[0].kind, MetricKind::Timer);
+        assert_eq!(events[1].name, "syncmatch_latency_per_tl_ns");
+        assert_eq!(events[1].kind, MetricKind::Histogram);
+        for (key, value) in &events[0].tags {
+            assert_eq!(events[1].tags[key], *value);
+        }
+        assert_eq!(events[1].tags["histogram_start"], "1ms");
+        assert_eq!(events[1].tags["histogram_end"], "17m28.576s");
+        assert_eq!(events[1].tags["histogram_scale"], "1");
+    }
+
+    #[test]
+    fn every_go_allowlisted_name_uses_the_same_default_and_both_mode() {
+        let default = MigrationPolicy::default();
+        let mut both = MigrationPolicy::default();
+        both.histograms.default = "both".into();
+        both.gauges.default = "both".into();
+        both.counters.default = "both".into();
+
+        for name in HISTOGRAM_MIGRATION_NAMES {
+            assert!(default.histograms.emit(name, false), "default timer: {name}");
+            assert!(!default.histograms.emit(name, true), "default histogram: {name}");
+            assert!(both.histograms.emit(name, false), "both timer: {name}");
+            assert!(both.histograms.emit(name, true), "both histogram: {name}");
+        }
+        for name in GAUGE_MIGRATION_NAMES {
+            assert!(default.gauges.emit(name, false), "default timer: {name}");
+            assert!(!default.gauges.emit(name, true), "default gauge: {name}");
+            assert!(both.gauges.emit(name, false), "both timer: {name}");
+            assert!(both.gauges.emit(name, true), "both gauge: {name}");
+        }
+        for name in COUNTER_MIGRATION_NAMES {
+            assert!(default.counters.emit(name, false), "default timer: {name}");
+            assert!(!default.counters.emit(name, true), "default counter: {name}");
+            assert!(both.counters.emit(name, false), "both timer: {name}");
+            assert!(both.counters.emit(name, true), "both counter: {name}");
+        }
+
+        assert!(default.histograms.emit("unmigrated", false));
+        assert!(default.histograms.emit("unmigrated", true));
+        assert!(default.gauges.emit("unmigrated", true));
+        assert!(default.counters.emit("unmigrated", true));
+    }
+}

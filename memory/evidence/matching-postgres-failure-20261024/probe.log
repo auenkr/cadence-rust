@@ -1,0 +1,8 @@
+PROBE BODY FAILED: Error: Matching task persistence did not reach queued state in 20s: {"queued_rows":0,"range_id":2}
+    at state (/home/runner/work/cadence-rust/cadence-rust/tests/matching-task-observer.cjs:20:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:714:16)
+Error: Matching task persistence did not reach queued state in 20s: {"queued_rows":0,"range_id":2}
+    at state (/home/runner/work/cadence-rust/cadence-rust/tests/matching-task-observer.cjs:20:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:714:16)

@@ -160,7 +160,8 @@ async function queryStandby(ctx) {
 async function listPartitions(ctx) {
   const n = 3;
   const results = [];
-  for (const listName of [`list-partitions-${ctx.id}`, partitionName(`list-partitions-b-${ctx.id}`, 2)]) {
+  // These isolated-database fixture names match the harness's filtered config.
+  for (const listName of ['probe-list-partitions-root', partitionName('probe-list-partitions-child', 2)]) {
     const rootName = listName.startsWith('/__cadence_sys/') ? listName.split('/')[2] : listName;
     const expectedKeys = Array.from({ length: n }, (_, i) => partitionName(rootName, i));
     const views = [];

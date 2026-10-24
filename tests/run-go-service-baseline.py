@@ -14,9 +14,11 @@ dynamic config); the default grpc keeps today's gRPC path.
 """
 import argparse
 import base64
+import errno
 import gzip
 import json
 import os
+import secrets
 from pathlib import Path
 import re
 import shlex
@@ -498,7 +500,13 @@ if args.matching_idle_check_seconds is not None:
     )
 if args.probe_list_partitions:
     # Go engine.go getAllPartitions reads this key to build the ListTaskListPartitions answer.
-    dynamic_text += '\nmatching.numTasklistWritePartitions:\n  - value: 3\nmatching.numTasklistReadPartitions:\n  - value: 3\n'
+    # Only the listing fixture needs three partitions. A global override also
+    # routes crash/restart workflows to random child partitions while their
+    # persistence checkpoints deliberately observe the root owner.
+    for key in ('matching.numTasklistWritePartitions', 'matching.numTasklistReadPartitions'):
+        dynamic_text += f'\n{key}:\n'
+        for task_list in ('probe-list-partitions-root', 'probe-list-partitions-child'):
+            dynamic_text += f'  - value: 3\n    constraints: {{taskListName: {task_list}}}\n'
 if args.probe_auto_config_hint:
     # go/config/dynamicconfig/development.yaml sets matching.enableClientAutoConfig to true; the probe asserts false,
     # so override the shipped value for this run (both Go and Rust read dynamic_text).
@@ -529,8 +537,26 @@ if args.shard_distributor:
         keys.append('SD_ETCD_PORT')
 reservations = [socket.socket() for _ in keys]
 try:
+    # Keep service listeners outside Linux's ephemeral source-port range.
+    # After reservations close, Go startup opens many outbound connections;
+    # bind(port=0) could let one consume a future Rust listener's port.
+    ephemeral_start = 32768
+    port_range = Path('/proc/sys/net/ipv4/ip_local_port_range')
+    if port_range.exists():
+        ephemeral_start = int(port_range.read_text().split()[0])
+    listener_upper = min(30000, ephemeral_start)
+    if listener_upper <= 10000:
+        raise RuntimeError('no test listener range below ephemeral source ports')
     for listener in reservations:
-        listener.bind(('127.0.0.1', 0))
+        for attempt in range(1000):
+            try:
+                listener.bind(('127.0.0.1', 10000 + secrets.randbelow(listener_upper - 10000)))
+                break
+            except OSError as error:
+                if error.errno != errno.EADDRINUSE:  # EADDRINUSE: choose another test listener.
+                    raise
+        else:
+            raise RuntimeError('could not reserve a test listener port')
     ports = {key: str(listener.getsockname()[1]) for key, listener in zip(keys, reservations)}
 finally:
     for listener in reservations:

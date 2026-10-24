@@ -1,0 +1,281 @@
+{
+  "topology": "two Rust Matching hosts with Go Frontend/History/Worker",
+  "sameRingOwnershipMap": [
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:10558",
+      "secondaryOwner": "127.0.0.1:10558"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    },
+    {
+      "primaryOwner": "127.0.0.1:24903",
+      "secondaryOwner": "127.0.0.1:24903"
+    }
+  ],
+  "idleEviction": {
+    "taskList": "production-idle-08391714-c651-4c14-8812-a5fa97faeec6",
+    "releasedWithEmptyResponse": true,
+    "sdkCompletedWorkflow": "production-idle-recovery-08391714-c651-4c14-8812-a5fa97faeec6",
+    "completionEvents": 1
+  },
+  "crashRecovery": {
+    "taskList": "production-crash-08391714-c651-4c14-8812-a5fa97faeec6",
+    "crashedPid": 18354,
+    "crashedHostIndex": 0,
+    "survivorPid": 18367,
+    "workflowId": "production-crash-recovery-08391714-c651-4c14-8812-a5fa97faeec6",
+    "completionEvents": 1,
+    "rangeBefore": 1,
+    "rangeAfter": 2,
+    "ackBefore": 0,
+    "ackAfter": 1,
+    "queuedRowsAfterCompletion": 0
+  },
+  "cassandraDomainPageToken": null
+}

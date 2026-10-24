@@ -1,0 +1,154 @@
+{
+  "result": "passed",
+  "ackedList": "pg-gc-acked-08391714-c651-4c14-8812-a5fa97faeec6",
+  "pendingList": "pg-gc-pending-08391714-c651-4c14-8812-a5fa97faeec6",
+  "watermark": 1,
+  "taskGarbageCollection": {
+    "pendingTaskRows": 1,
+    "statements": [
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a16d64f29d77c0b1ee80203a3ec3e2') AND name='pg-gc-acked-08391714-c651-4c14-8812-a5fa97faeec6' ORDER BY task_type",
+      "SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('01a16d64f29d77c0b1ee80203a3ec3e2') AND task_list_name='pg-gc-pending-08391714-c651-4c14-8812-a5fa97faeec6'"
+    ],
+    "snapshots": [
+      {
+        "at": "2026-10-24T10:12:29.252Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-24T10:12:29.856Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-24T10:12:30.458Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-24T10:12:31.064Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-24T10:12:31.738Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-24T10:12:32.341Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-24T10:12:32.942Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-24T10:12:33.619Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": true,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      }
+    ],
+    "queues": {
+      "pgDecision": {
+        "taskList": "pg-gc-acked-08391714-c651-4c14-8812-a5fa97faeec6",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw"
+      }
+    },
+    "rangeSize": 100000
+  },
+  "domainMetadata": {
+    "domain": "service-compat-08391714-c651-4c14-8812-a5fa97faeec6",
+    "domainId": "01a16d64f29d77c0b1ee80203a3ec3e2",
+    "isGlobal": 0,
+    "dataEncoding": "thriftrw",
+    "dataLength": 493,
+    "notificationVersions": [
+      5
+    ]
+  }
+}
