@@ -52,3 +52,11 @@ Go has no TLS on TChannel (see Go evidence). Rust `tchannel.rs` has no TLS refer
 
 - No local cargo (per directive). Verification is GitHub Actions `rust-ci.yml` with `package=cadence-matching`, then a whole-workspace run on the final head.
 - Head SHA and run IDs are recorded below after the runs.
+
+## CI evidence
+
+- Code head `af4c30001` (after merge of origin/master 69a3f72e5 and the lib.rs attribute fix).
+- `cadence-matching` package run: `40067793834`, success.
+- Whole workspace run: `40067992637`, success.
+- Earlier red runs, all clippy `result_large_err` from the attribute fix: `40067400086`, `40067667306`.
+- Item 3 (`handleErr`) and the production wiring of item 4 remain open; see sections above.
