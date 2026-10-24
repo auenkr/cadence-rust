@@ -1,0 +1,55 @@
+ 08:55:05 up 3 min,  0 user,  load average: 1.81, 0.91, 0.36
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       1.2Gi       8.1Gi        49Mi       6.7Gi        14Gi
+Swap:          3.0Gi          0B       3.0Gi
+Unable to find image 'cassandra:4.1.7' locally
+4.1.7: Pulling from library/cassandra
+9cb31e2e37ea: Pulling fs layer
+2218709e815f: Pulling fs layer
+f7988bfb5529: Pulling fs layer
+d854889cc390: Pulling fs layer
+4bf2a4e8b353: Pulling fs layer
+8ff791e8dd7b: Pulling fs layer
+21c5c6ce640c: Pulling fs layer
+97eef1920ae6: Pulling fs layer
+874bb8494e46: Pulling fs layer
+fabb5f2f1a78: Pulling fs layer
+d854889cc390: Waiting
+4bf2a4e8b353: Waiting
+8ff791e8dd7b: Waiting
+21c5c6ce640c: Waiting
+97eef1920ae6: Waiting
+874bb8494e46: Waiting
+fabb5f2f1a78: Waiting
+2218709e815f: Verifying Checksum
+2218709e815f: Download complete
+9cb31e2e37ea: Download complete
+f7988bfb5529: Verifying Checksum
+f7988bfb5529: Download complete
+d854889cc390: Verifying Checksum
+d854889cc390: Download complete
+4bf2a4e8b353: Verifying Checksum
+4bf2a4e8b353: Download complete
+8ff791e8dd7b: Verifying Checksum
+8ff791e8dd7b: Download complete
+21c5c6ce640c: Verifying Checksum
+21c5c6ce640c: Download complete
+97eef1920ae6: Verifying Checksum
+97eef1920ae6: Download complete
+fabb5f2f1a78: Verifying Checksum
+fabb5f2f1a78: Download complete
+874bb8494e46: Download complete
+9cb31e2e37ea: Pull complete
+2218709e815f: Pull complete
+f7988bfb5529: Pull complete
+d854889cc390: Pull complete
+4bf2a4e8b353: Pull complete
+8ff791e8dd7b: Pull complete
+21c5c6ce640c: Pull complete
+97eef1920ae6: Pull complete
+874bb8494e46: Pull complete
+fabb5f2f1a78: Pull complete
+Digest: sha256:17850cb6e5f96a58bce0d9c7e3fbe470b6b73a554e1abe2b8d300552baa6cf43
+Status: Downloaded newer image for cassandra:4.1.7
+Go baseline artifacts: /home/runner/work/cadence-rust/cadence-rust/out/gate/run
+Cassandra mixed-service Matching gate finished (service parity audit still required): /home/runner/work/cadence-rust/cadence-rust/out/gate/run/results.json
