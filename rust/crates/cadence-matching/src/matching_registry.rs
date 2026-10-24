@@ -196,6 +196,9 @@ pub struct QueueRegistry {
     /// Go `cfg.QPSTrackerInterval(domain, taskList, type)`. `None` uses the
     /// dynamic-property default (10s).
     qps_interval: Option<QpsIntervalProvider>,
+    /// Clock behind each owner's QPS tracker (Go's `timeSource`). Production
+    /// keeps the wall clock; tests replace it through `with_qps_clock`.
+    qps_clock: cadence_common::qps::Clock,
     isolation: Option<IsolationProvider>,
     /// Live reader configuration (Go's `TaskListConfig.GetTasksBatchSize`,
     /// `ReadRangeSize` and `AsyncTaskDispatchTimeout`). `None` keeps the Go
@@ -725,6 +728,7 @@ impl QueueRegistry {
             forward_rate: None,
             scaler_config: None,
             qps_interval: None,
+            qps_clock: cadence_common::qps::system_clock(),
             isolation: None,
             reader_live: None,
             min_burst: None,
@@ -888,6 +892,13 @@ impl QueueRegistry {
     /// `matching.qpsTrackerInterval` (default 10s) in nanoseconds.
     pub fn with_qps_interval(mut self, provider: QpsIntervalProvider) -> Self {
         self.qps_interval = Some(provider);
+        self
+    }
+    /// Test seam: owner QPS trackers read `clock` instead of the wall clock, so
+    /// a test can close windows deterministically (Go mocks the tracker).
+    #[cfg(test)]
+    pub(crate) fn with_qps_clock(mut self, clock: cadence_common::qps::Clock) -> Self {
+        self.qps_clock = clock;
         self
     }
     pub fn with_isolation(mut self, provider: IsolationProvider) -> Self {
@@ -1144,7 +1155,7 @@ impl QueueRegistry {
                                 .unwrap_or(DEFAULT_QPS_TRACKER_INTERVAL_NANOS)
                                 .max(1) as u64,
                         ),
-                        cadence_common::qps::system_clock(),
+                        registry.qps_clock.clone(),
                     ));
                     let activity_domain = domain.clone();
                     let metadata = registry.domain_metadata.clone();
@@ -3459,12 +3470,21 @@ mod tests {
     // Go: TestQueriesPerSecond (task_list_manager_test.go:457), case "returns QPS from tracker"
     // (mocked 42.5). Rust's owner tracker is a wall-clock EMA with no per-owner injection seam,
     // so the exact non-zero value cannot be asserted deterministically.
-    #[ignore = "parity gap: Go mocks the owner QPS tracker to return exactly 42.5; Rust's owner tracker is a wall-clock EMA with no injection seam"]
+    // Go: TestQueriesPerSecond (task_list_manager_test.go:447) mocks the tracker to return 42.5.
+    // Here the owner's real EMA tracker runs on a mocked clock instead: 425 arrivals in the first
+    // 10s window fold to exactly 42.5 (the default `matching.qpsTrackerInterval`).
     #[tokio::test]
     async fn loaded_owner_reports_mocked_tracker_qps_after_arrivals() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        let now = Arc::new(AtomicI64::new(0));
+        let clock = now.clone();
         let (_dir, _store, registry, key) = fixture();
+        let registry = registry.with_qps_clock(Arc::new(move || clock.load(Ordering::SeqCst)));
         let handle = registry.get(key.clone(), 0, 1).await.unwrap();
-        crate::grpc_matching::report_arrival(&handle, &TaskData::default());
+        for _ in 0..425 {
+            crate::grpc_matching::report_arrival(&handle, &TaskData::default());
+        }
+        now.store(10_000_000_000, Ordering::SeqCst);
         assert_eq!(handle.qps.qps(), 42.5);
     }
     // Go: TestAddTaskStandby (task_list_manager_test.go:590) and TestTaskWriterShutdown

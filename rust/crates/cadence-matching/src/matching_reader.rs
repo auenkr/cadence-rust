@@ -40,15 +40,9 @@ pub struct ReaderLive {
     pub update_ack_interval: LiveInt,
 }
 impl ReaderLive {
-    /// Go `taskReader` batch reads: a non-positive value uses the property
-    /// default instead of querying for zero tasks.
-    fn batch_size(&self) -> u32 {
-        let value = (self.batch_size)();
-        if value <= 0 {
-            DEFAULT_TASKS_BATCH_SIZE as u32
-        } else {
-            u32::try_from(value).unwrap_or(u32::MAX)
-        }
+    /// Go `cfg.GetTasksBatchSize()` raw value; validation happens in the reader.
+    fn raw_batch_size(&self) -> i64 {
+        (self.batch_size)()
     }
     /// Go advances by `ReadRangeSize` each scan step and tolerates a
     /// non-positive value by making no progress (the ten-step scan is bounded).
@@ -74,12 +68,25 @@ pub struct ReaderConfig {
     pub live: Option<Arc<ReaderLive>>,
 }
 impl ReaderConfig {
+    /// Go `cfg.GetTasksBatchSize()` as configured, unvalidated: Go's `Config`
+    /// returns the raw dynamic-property value, including 0 and negatives.
+    pub fn raw_batch_size(&self) -> i64 {
+        self.live.as_ref().map_or_else(
+            || i64::from(self.batch_size.get()),
+            |live| live.raw_batch_size(),
+        )
+    }
     /// Go `newTaskReader` sizes each group buffer from the configured batch
-    /// size, reserving one slot for the dispatch head.
+    /// size, reserving one slot for the dispatch head. Go's `newTaskReader` and
+    /// `getTaskBatchWithRange` both replace a non-positive value with the
+    /// property default, so both paths validate here.
     fn buffer_batch_size(&self) -> u32 {
-        self.live
-            .as_ref()
-            .map_or_else(|| self.batch_size.get(), |live| live.batch_size())
+        let value = self.raw_batch_size();
+        if value <= 0 {
+            DEFAULT_TASKS_BATCH_SIZE as u32
+        } else {
+            u32::try_from(value).unwrap_or(u32::MAX)
+        }
     }
     /// Batch size for the next bounded read (Go `getTaskBatchWithRange`).
     fn read_batch_size(&self) -> NonZeroU32 {
@@ -1115,7 +1122,6 @@ mod tests {
 
     // Go config_test.go TestGetTasksBatchSizeValidation expects the raw 0 and -5 from GetTasksBatchSize.
     #[test]
-    #[ignore = "parity gap: Rust has no raw GetTasksBatchSize accessor. The read path substitutes DEFAULT_TASKS_BATCH_SIZE (1000) for 0 and -5, where Go's Config returns the raw 0 / -5"]
     fn go_get_tasks_batch_size_returns_raw_non_positive_values() {
         for value in [0i64, -5] {
             let live = Arc::new(ReaderLive {
@@ -1128,7 +1134,9 @@ mod tests {
                 live: Some(live),
                 ..Default::default()
             };
-            assert_eq!(config.read_batch_size().get() as i64, value);
+            assert_eq!(config.raw_batch_size(), value);
+            // The read path still validates the same raw value to the default.
+            assert_eq!(config.read_batch_size().get(), DEFAULT_TASKS_BATCH_SIZE as u32);
         }
     }
 
