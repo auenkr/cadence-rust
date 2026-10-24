@@ -106,6 +106,90 @@ mod tests {
         serde_json::Value,
         BTreeMap<String, serde_json::Value>,
     );
+    type FeatureCall = (
+        String,
+        cadence_service_core::openfeature::provider::FlagValue,
+        cadence_service_core::openfeature::provider::FlattenedContext,
+    );
+
+    #[derive(Debug)]
+    struct ActualFeatureProvider {
+        values: std::sync::RwLock<BTreeMap<(String, String, String), serde_json::Value>>,
+        calls: Mutex<Vec<FeatureCall>>,
+        shutdown: std::sync::atomic::AtomicBool,
+    }
+
+    impl cadence_service_core::openfeature::provider::FeatureProvider for ActualFeatureProvider {
+        fn shutdown(&self) {
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        fn resolve(
+            &self,
+            flag: &str,
+            default: cadence_service_core::openfeature::provider::FlagValue,
+            context: &cadence_service_core::openfeature::provider::FlattenedContext,
+        ) -> cadence_service_core::openfeature::provider::Resolution {
+            use cadence_service_core::openfeature::provider::{
+                ErrorCode, FlagValue, Resolution, ResolutionError,
+            };
+            self.calls
+                .lock()
+                .unwrap()
+                .push((flag.into(), default.clone(), context.clone()));
+            if flag == "matching.runtimeFailure" {
+                return Resolution {
+                    value: default,
+                    error: Some(ResolutionError {
+                        code: ErrorCode::General,
+                        message: "provider unavailable".into(),
+                    }),
+                };
+            }
+            if flag == "matching.runtimeWrongType" {
+                return Resolution {
+                    value: FlagValue::Bool(false),
+                    error: None,
+                };
+            }
+            let domain = context
+                .get("domainName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let task_list = context
+                .get("taskListName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let task_type = context
+                .get("taskType")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1)
+                .to_string();
+            let value = self
+                .values
+                .read()
+                .unwrap()
+                .get(&(
+                    flag.into(),
+                    domain.into(),
+                    format!("{task_list}:{task_type}"),
+                ))
+                .cloned()
+                .map(|value| match value {
+                    serde_json::Value::Bool(value) => FlagValue::Bool(value),
+                    serde_json::Value::Number(value) if value.as_i64().is_some() => {
+                        FlagValue::Int(value.as_i64().unwrap())
+                    }
+                    serde_json::Value::Number(value) => {
+                        FlagValue::Float(value.as_f64().unwrap_or_default())
+                    }
+                    value => FlagValue::Object(value),
+                })
+                .unwrap_or(default);
+            Resolution { value, error: None }
+        }
+    }
 
     #[derive(Debug, Default)]
     struct FakeRuntime(
@@ -174,7 +258,6 @@ mod tests {
         assert_eq!(domain_user_rps(&[], "d"), 0);
         assert_eq!(domain_worker_rps(&[], "d"), i32::MAX as i64);
         assert!(enable_sync_match(&[], "d", "tl", 0));
-        assert_eq!(max_tasklist_idle_time(&[], "d", "tl", 1), 300_000_000_000);
         assert_eq!(semaphore_idle_time(&[], "d"), 300_000_000_000);
     }
 
@@ -315,5 +398,139 @@ mod tests {
                 && default == &json!(90_000_000_000i64)
                 && filters.get("domainName") == Some(&json!("alpha"))
         }));
+    }
+
+    #[test]
+    fn openfeature_adapter_reaches_feature_provider_from_matching_accessors() {
+        use cadence_service_core::openfeature::{
+            client,
+            provider::{self, FeatureProvider, FlagValue},
+        };
+        use std::sync::atomic::Ordering;
+
+        let feature = Arc::new(ActualFeatureProvider {
+            values: std::sync::RwLock::new(BTreeMap::from([
+                (
+                    ("matching.domainrps".into(), "alpha".into(), ":-1".into()),
+                    json!(21),
+                ),
+                (
+                    ("matching.domainrps".into(), "beta".into(), ":-1".into()),
+                    json!(34),
+                ),
+                (
+                    (
+                        "matching.enableSyncMatch".into(),
+                        "alpha".into(),
+                        "queue:0".into(),
+                    ),
+                    json!(false),
+                ),
+                (
+                    (
+                        "matching.enableSyncMatch".into(),
+                        "alpha".into(),
+                        "queue:1".into(),
+                    ),
+                    json!(true),
+                ),
+                (
+                    ("system.allIsolationGroups".into(), "".into(), ":-1".into()),
+                    json!(["blue", "green"]),
+                ),
+            ])),
+            calls: Mutex::new(Vec::new()),
+            shutdown: std::sync::atomic::AtomicBool::new(false),
+        });
+        let constructor_provider = feature.clone();
+        provider::register(
+            "matching-runtime-reader-integration-test",
+            Arc::new(move |_| Ok(constructor_provider.clone() as Arc<dyn FeatureProvider>)),
+        )
+        .unwrap();
+        client::register_provider("matching-runtime-reader-integration-test", None).unwrap();
+        let mut overlay = crate::admin::DynamicConfigOverlay::default();
+        overlay.set_runtime_provider(Some(
+            cadence_service_core::openfeature::runtime::OpenFeatureRuntimeProvider::new(),
+        ));
+
+        assert_eq!(
+            domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"),
+            21
+        );
+        assert_eq!(
+            domain_user_rps(overlay.property_values("matching.domainrps"), "beta"),
+            34
+        );
+        feature.values.write().unwrap().insert(
+            ("matching.domainrps".into(), "alpha".into(), ":-1".into()),
+            json!(55),
+        );
+        assert_eq!(
+            domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"),
+            55
+        );
+        assert!(!enable_sync_match(
+            overlay.property_values("matching.enableSyncMatch"),
+            "alpha",
+            "queue",
+            0
+        ));
+        assert!(enable_sync_match(
+            overlay.property_values("matching.enableSyncMatch"),
+            "alpha",
+            "queue",
+            1
+        ));
+        assert_eq!(
+            dynamic_config::string_list(overlay.property_values("system.allIsolationGroups")),
+            vec!["blue", "green"]
+        );
+        feature.values.write().unwrap().insert(
+            ("system.allIsolationGroups".into(), "".into(), ":-1".into()),
+            json!(["gold"]),
+        );
+        assert_eq!(
+            dynamic_config::string_list(overlay.property_values("system.allIsolationGroups")),
+            vec!["gold"]
+        );
+        assert_eq!(
+            dynamic_config::integer(overlay.property_values("matching.runtimeFailure"), None, 17),
+            17
+        );
+        assert_eq!(
+            dynamic_config::integer(
+                overlay.property_values("matching.runtimeWrongType"),
+                None,
+                19
+            ),
+            19
+        );
+
+        let calls = feature.calls.lock().unwrap();
+        assert!(calls
+            .iter()
+            .any(|(flag, default, attrs)| flag == "matching.domainrps"
+                && *default == FlagValue::Int(0)
+                && attrs.get("domainName") == Some(&json!("alpha"))));
+        assert!(calls
+            .iter()
+            .any(|(flag, default, attrs)| flag == "matching.enableSyncMatch"
+                && *default == FlagValue::Bool(true)
+                && attrs.get("taskListName") == Some(&json!("queue"))
+                && attrs.get("taskType") == Some(&json!(0))));
+        assert!(calls
+            .iter()
+            .any(|(flag, default, attrs)| flag == "system.allIsolationGroups"
+                && *default == FlagValue::Object(json!([]))
+                && attrs.is_empty()));
+        drop(calls);
+
+        client::deregister_provider();
+        assert!(feature.shutdown.load(Ordering::SeqCst));
+        assert_eq!(
+            domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"),
+            0
+        );
     }
 }

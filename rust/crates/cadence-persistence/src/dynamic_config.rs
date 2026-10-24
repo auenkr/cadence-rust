@@ -93,6 +93,12 @@ impl<'a> PropertyValues<'a> {
         self.runtime = runtime;
         self
     }
+    /// The ordered file/config-store snapshot, for explicit snapshot-only
+    /// inspection. Typed runtime consumers should use the dynamic_config
+    /// accessors so they retain provider identity.
+    pub fn snapshot_values(&self) -> &[DynamicConfigValue] {
+        self.values
+    }
     pub fn evaluate(
         &self,
         property_type: RuntimePropertyType,
@@ -102,13 +108,6 @@ impl<'a> PropertyValues<'a> {
         self.runtime
             .as_ref()
             .map(|runtime| runtime.evaluate(property_type, default, filters))
-    }
-}
-
-impl std::ops::Deref for PropertyValues<'_> {
-    type Target = [DynamicConfigValue];
-    fn deref(&self) -> &Self::Target {
-        self.values
     }
 }
 

@@ -49,7 +49,26 @@ fn dynamic_bool_property(
     let Ok(overlay) = overlay.lock() else {
         return default;
     };
-    cadence_persistence::dynamic_config::boolean(overlay.property_values(name), None, default)
+    let values = overlay.property_values(name);
+    if let Some(result) = values.evaluate(
+        cadence_persistence::dynamic_config::RuntimePropertyType::Boolean,
+        serde_json::Value::Bool(default),
+        &std::collections::BTreeMap::new(),
+    ) {
+        return result
+            .ok()
+            .and_then(|value| value.as_bool())
+            .unwrap_or(default);
+    }
+    values
+        .snapshot_values()
+        .iter()
+        .filter(|value| value.filters.is_empty())
+        .filter_map(|value| value.value.as_ref())
+        .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
+        .filter_map(|blob| serde_json::from_slice::<bool>(&blob.data).ok())
+        .next_back()
+        .unwrap_or(default)
 }
 
 fn history_named_port(grpc_outbound: bool) -> crate::matching_history_peer_resolver::NamedPort {
@@ -68,7 +87,26 @@ fn dynamic_i64_property(
     let Ok(overlay) = overlay.lock() else {
         return default;
     };
-    cadence_persistence::dynamic_config::integer(overlay.property_values(name), None, default)
+    let values = overlay.property_values(name);
+    if let Some(result) = values.evaluate(
+        cadence_persistence::dynamic_config::RuntimePropertyType::Integer,
+        serde_json::Value::from(default),
+        &std::collections::BTreeMap::new(),
+    ) {
+        return result
+            .ok()
+            .and_then(|value| value.as_i64())
+            .unwrap_or(default);
+    }
+    values
+        .snapshot_values()
+        .iter()
+        .filter(|value| value.filters.is_empty())
+        .filter_map(|value| value.value.as_ref())
+        .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
+        .filter_map(|blob| serde_json::from_slice::<i64>(&blob.data).ok())
+        .next_back()
+        .unwrap_or(default)
 }
 
 /// Owns the process-wide OpenFeature registration for this Matching process.
