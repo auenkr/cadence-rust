@@ -260,6 +260,73 @@ async function autoConfigHint(ctx) {
   return { result: 'passed', decisionHint, activityHint };
 }
 
+// CADENCE_PROBE_ACTIVE_OFFER: register a real Rust Matching decision poller first,
+// then ask Go Frontend/History to create a workflow task on that list. Delivery
+// with no task row proves the active offer reached the waiter instead of falling
+// back to the durable queue.
+async function activeOffer(ctx) {
+  const taskList = { name: `active-offer-${ctx.id}` };
+  const identity = `active-offer-poller-${ctx.id}`;
+  const pendingPoll = ownerRpc(ctx, 'PollForDecisionTask', {
+    domainId: ctx.domainId, pollerId: randomUUID(),
+    request: { domain: ctx.domain, taskList, identity },
+  });
+  const deadline = Date.now() + 30000;
+  let poller;
+  do {
+    const described = await ownerRpc(ctx, 'DescribeTaskList', {
+      domainId: ctx.domainId,
+      request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION' },
+    });
+    poller = described.pollers.find(entry => entry.identity === identity);
+    if (!poller && Date.now() > deadline) throw new Error('active-offer decision poller was not registered');
+    if (!poller) await sleep(20);
+  } while (!poller);
+
+  // An after-delivery row count alone cannot distinguish direct offer from a
+  // row that was persisted and consumed quickly. Audit inserts for this exact
+  // task list while Go History schedules the task.
+  const suffix = ctx.id.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  const auditTable = `active_offer_audit_${suffix}`;
+  const auditTrigger = `active_offer_insert_${suffix}`;
+  const auditSql = sql => {
+    const container = process.env.CADENCE_MYSQL_DOCKER_CONTAINER;
+    const password = process.env.CADENCE_MYSQL_PASSWORD || '';
+    const database = process.env.CADENCE_MYSQL_DATABASE || 'cadence';
+    const command = container
+      ? ['docker', ['exec', container, 'mysql', '--batch', '--skip-column-names', '-uroot', `-p${password}`, database, '-e', sql]]
+      : ['mysql', ['--batch', '--skip-column-names', '--host', process.env.CADENCE_MYSQL_HOST || '127.0.0.1', '--port', process.env.CADENCE_MYSQL_PORT || '3306',
+        '--user', process.env.CADENCE_MYSQL_USER || 'root', `--password=${password}`, database, '-e', sql]];
+    const result = spawnSync(command[0], command[1], { encoding: 'utf8', timeout: 30000 });
+    if (result.status !== 0) throw new Error(`active-offer MySQL audit failed: ${result.stderr || result.error}`);
+    return result.stdout.trim();
+  };
+  auditSql(`CREATE TABLE ${auditTable} (task_id BIGINT NOT NULL) ENGINE=InnoDB`);
+  try {
+    auditSql(`CREATE TRIGGER ${auditTrigger} BEFORE INSERT ON tasks FOR EACH ROW INSERT INTO ${auditTable}(task_id) SELECT NEW.task_id WHERE NEW.domain_id=UNHEX('${ctx.domainId.replace(/-/g, '')}') AND NEW.task_list_name='${taskList.name}' AND NEW.task_type=0`);
+    const workflowId = `active-offer-workflow-${ctx.id}`;
+    const started = await ctx.call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...ctx.startRequest, workflowId, taskList, requestId: randomUUID(),
+    });
+    assert(started.runId, 'Go History did not return a workflow run id');
+    const task = await pendingPoll;
+    assert(task.taskToken?.length, 'Go History decision task was not delivered to the waiting poller');
+    assert.equal(task.workflowExecution.workflowId, workflowId, 'poller received a different workflow task');
+    assert.equal(task.workflowExecution.runId, started.runId, 'poller received a different workflow run');
+    const persistedRows = ctx.durableTaskCount(ctx.domainId, taskList.name, 0, undefined);
+    assert.equal(persistedRows.status, 0, `could not check active-offer task rows: ${persistedRows.stderr}`);
+    assert.equal(Number(String(persistedRows.stdout).trim()), 0, 'active-offered task unexpectedly remains in the durable queue');
+    const insertAttempts = Number(auditSql(`SELECT COUNT(*) FROM ${auditTable}`));
+    assert.equal(insertAttempts, 0, 'active-offered task was inserted into the durable queue before delivery');
+    await ctx.call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: task.taskToken, decisions: [] });
+    return { result: 'passed', taskList: taskList.name, pollerIdentity: identity, workflowId, runId: started.runId,
+      historyScheduledTaskDelivered: true, taskTokenDelivered: true, persistedTaskRows: 0, persistedTaskInsertAttempts: insertAttempts };
+  } finally {
+    auditSql(`DROP TRIGGER IF EXISTS ${auditTrigger}`);
+    auditSql(`DROP TABLE IF EXISTS ${auditTable}`);
+  }
+}
+
 async function runScenario(name, flag, fn, ctx, results) {
   if (process.env[flag] !== '1') { results[name] = 'not requested'; return; }
   results[name] = await fn(ctx);
@@ -273,6 +340,7 @@ async function runProbeScenarios(ctx) {
   await runScenario('listTaskListPartitions', 'CADENCE_PROBE_LIST_PARTITIONS', listPartitions, ctx, results);
   await runScenario('durableRestartDrain', 'CADENCE_PROBE_DURABLE_RESTART', durableRestart, ctx, results);
   await runScenario('autoConfigHint', 'CADENCE_PROBE_AUTO_CONFIG_HINT', autoConfigHint, ctx, results);
+  await runScenario('activeOffer', 'CADENCE_PROBE_ACTIVE_OFFER', activeOffer, ctx, results);
   return results;
 }
 
