@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-mysql-fresh
+      CARGO_TARGET_DIR: /tmp/cadence-cargo-target-mysql-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: IDL submodule

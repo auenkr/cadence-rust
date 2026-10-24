@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-cassandra-fresh
+      CARGO_TARGET_DIR: /tmp/cadence-cargo-target-cassandra-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Init IDL submodule
