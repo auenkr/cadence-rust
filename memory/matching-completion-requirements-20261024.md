@@ -30,3 +30,18 @@ mock-only APIs or label a real branch unneeded just because it lacks a test seam
 
 After integration, repeat the mixed lanes on one candidate, inspect artifacts,
 reconcile the final parity audit and only then consider Matching complete.
+
+## Resume checkpoint (2026-10-24)
+
+Master resumed at e499ac04d. AGENTS.md already contains the user requirement that
+all Cargo commands, including formatting, run only on GitHub Actions.
+Luna medium/default workers live-reader-resume-v2, unleash-lifecycle-v3 and
+matching-metrics-emission-v3 remain active; no duplicate workers were started.
+
+Configstore run https://github.com/auenkr/cadence-rust/actions/runs/40086025472
+(source 1fc9ee1fd) failed after successful membership convergence: the configstore
+empty-poll probe directly targeted the primary although Ringpop assigned its
+random task list to the secondary. The probe now resolves the partition owner
+and polls that host, preserving the expiry and empty-response assertions and
+recording the owner. `node --check tests/matching-service-compat.cjs` passed.
+This is a fixture correction; a successful rerun is still required.

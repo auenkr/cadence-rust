@@ -1249,12 +1249,24 @@ async function run() {
     // (2s); the default is 60s, so an empty direct poll with a 10s deadline only returns early
     // (an empty response, not DEADLINE_EXCEEDED) if the Rust configstore client applied the row.
     const expected = Number(process.env.CADENCE_MATCHING_CONFIGSTORE_POLL_MS);
+    const taskListName = `configstore-empty-${id}`;
+    const membershipClient = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    const owner = await directPartitionOwner(membershipClient, domain, taskListName);
+    membershipClient.close();
+    const primaryOwner = owner === `127.0.0.1:${rustTChannel}`;
+    assert(primaryOwner || owner === `127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL}`, `configstore task list has unknown owner: ${owner}`);
+    const pollClient = directMatchingClient(`127.0.0.1:${primaryOwner ? rustGrpcPort : process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
     const begin = Date.now();
-    const emptyPoll = await directDecisionPoll(directMatchingClient(`127.0.0.1:${rustGrpcPort}`), domainId, `configstore-empty-${id}`, 'configstore');
+    let emptyPoll;
+    try {
+      emptyPoll = await directDecisionPoll(pollClient, domainId, taskListName, 'configstore');
+    } finally {
+      pollClient.close();
+    }
     const elapsed = Date.now() - begin;
     assert(elapsed >= expected - 500 && elapsed <= expected + 4000, `configstore long-poll expiry not applied: empty poll took ${elapsed}ms, expected about ${expected}ms`);
     assert(!emptyPoll.taskToken || emptyPoll.taskToken.length === 0, 'configstore empty poll returned a task');
-    configstoreEvidence = { seededLongPollExpiryMs: expected, emptyPollElapsedMs: elapsed };
+    configstoreEvidence = { seededLongPollExpiryMs: expected, emptyPollElapsedMs: elapsed, owner };
   }
   // Query dispatched directly through matching: the workflow is open with no
   // pending decision, so Go History routes the query to Rust Matching, which
