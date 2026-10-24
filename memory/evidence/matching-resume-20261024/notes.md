@@ -19,3 +19,9 @@ Reviewed and integrated existing unmerged semaphore params/pagination, P1 semaph
 Whole-workspace candidate run: https://github.com/auenkr/cadence-rust/actions/runs/40073886465 (pending). Remaining branch work includes OpenFeature (assigned to a replacement Luna worker), error seams, panic recovery and tracing; inspect before declaring any blocker closed. Current final-parity audit merged to master in d71bef324; its remaining-gap list predates these integrations.
 
 TLS source evidence in nodiff-b notes resolves the TChannel question: pinned Go supports rpc.tls only on gRPC (and HTTP configuration separately); Go TChannel listener uses no credentials. Rust need not invent a TLS mode Go does not have. Source guard is supplementary, not runtime TLS evidence.
+
+## Additional integration and current failure
+
+Integrated remaining sync-task construction/isolation tests (`matching-missing-tests-20261023`) and the optional frontend AutoConfigHint acceptance probe (`matching-auto-config-hint-20261024`) into candidate cae99549a. Probe is opt-in and not yet evidence of a pass. Its historical local-build instructions are superseded by current CI-only Cargo rule.
+
+Recovery integration worker is actively fixing candidate syntax after run 40078703654 failed Clippy with mismatched closing delimiters near DescribeTaskList in grpc_matching.rs (not a behavioral test failure). Avoid parallel edits in that worker's owned recovery/error-seam files. All three current workers were confirmed live. Metrics migration policy is the next independent worker task once a slot opens; implementation brief is memory/matching-metrics-migration-next-20261024.md.
