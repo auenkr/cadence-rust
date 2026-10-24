@@ -169,17 +169,87 @@ impl MetricsBucket {
     }
 }
 fn default_instance_id() -> String {
-    let user = std::env::var("USER")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| format!("generated-{}", std::process::id()));
-    match std::fs::read_to_string("/etc/hostname")
-        .ok()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
-    {
+    // Match os/user.Current and os.Hostname, rather than environment variables
+    // or Linux-specific files. Go's fallback username includes random entropy
+    // as well as the PID, so separate processes do not share an identity.
+    let user = current_username().unwrap_or_else(|| {
+        format!(
+            "generated-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        )
+    });
+    match system_hostname().filter(|value| !value.is_empty()) {
         Some(host) => format!("{user}-{host}"),
         None => user,
+    }
+}
+
+#[cfg(unix)]
+fn current_username() -> Option<String> {
+    // SAFETY: getpwuid returns a process-global record; copy the name before
+    // making another libc call and reject a null pointer.
+    unsafe {
+        let entry = libc::getpwuid(libc::geteuid());
+        if entry.is_null() || (*entry).pw_name.is_null() {
+            return None;
+        }
+        std::ffi::CStr::from_ptr((*entry).pw_name)
+            .to_str()
+            .ok()
+            .map(str::to_owned)
+    }
+}
+#[cfg(not(unix))]
+fn current_username() -> Option<String> {
+    std::env::var("USERNAME").ok().filter(|s| !s.is_empty())
+}
+
+#[cfg(unix)]
+fn system_hostname() -> Option<String> {
+    let mut name = [0 as libc::c_char; 256];
+    // SAFETY: writable buffer and its exact size are supplied to gethostname.
+    if unsafe { libc::gethostname(name.as_mut_ptr(), name.len()) } != 0 {
+        return None;
+    }
+    unsafe {
+        std::ffi::CStr::from_ptr(name.as_ptr())
+            .to_str()
+            .ok()
+            .map(str::to_owned)
+    }
+}
+#[cfg(not(unix))]
+fn system_hostname() -> Option<String> {
+    std::env::var("COMPUTERNAME").ok()
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+struct FetchBackoff {
+    errors: u8,
+    skips: u8,
+}
+impl FetchBackoff {
+    fn status_failure(&mut self, status: reqwest::StatusCode) {
+        if matches!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED
+                | reqwest::StatusCode::FORBIDDEN
+                | reqwest::StatusCode::NOT_FOUND
+        ) {
+            self.errors = 10;
+            self.skips = 10;
+        } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            self.errors = self.errors.saturating_add(1).min(10);
+            self.skips = self.errors;
+        }
+    }
+    fn decoded_success(&mut self) {
+        self.errors = self.errors.saturating_sub(1);
+        self.skips = self.errors;
+    }
+    fn delay(&self, interval: Duration) -> Duration {
+        interval.saturating_mul(u32::from(self.skips) + 1)
     }
 }
 impl UnleashRepository {
@@ -248,6 +318,7 @@ impl UnleashRepository {
         let poll_etag = etag.clone();
         let state = features.clone();
         let stop_flag = stop.clone();
+        let poll_interval = interval;
         let poller = std::thread::Builder::new()
             .name("unleash-repository".into())
             .spawn(move || {
@@ -259,6 +330,7 @@ impl UnleashRepository {
                 else {
                     return;
                 };
+                let mut backoff = FetchBackoff::default();
                 while !stop_flag.load(Ordering::Acquire) {
                     let mut request = client.get(endpoint.clone());
                     for (name, value) in &headers {
@@ -272,6 +344,8 @@ impl UnleashRepository {
                     }
                     if let Ok(response) = request.send() {
                         if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+                            // A 304 is a successful transport response but does
+                            // not count as a decoded fetch in Go's repository.
                         } else if response.status().is_success() {
                             let new_etag = response
                                 .headers()
@@ -283,10 +357,13 @@ impl UnleashRepository {
                                     feature_map(body);
                                 *poll_etag.lock().unwrap_or_else(|p| p.into_inner()) =
                                     new_etag.unwrap_or_default();
+                                backoff.decoded_success();
                             }
+                        } else {
+                            backoff.status_failure(response.status());
                         }
                     }
-                    let until = std::time::Instant::now() + interval;
+                    let until = std::time::Instant::now() + backoff.delay(poll_interval);
                     while !stop_flag.load(Ordering::Acquire) && std::time::Instant::now() < until {
                         std::thread::sleep(
                             Duration::from_millis(10)
@@ -623,6 +700,74 @@ pub fn constructor() -> Constructor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fetch_backoff_matches_status_recovery_and_304_contract() {
+        let interval = Duration::from_millis(25);
+        let mut state = FetchBackoff::default();
+        state.status_failure(reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 1,
+                skips: 1
+            }
+        );
+        assert_eq!(state.delay(interval), interval * 2);
+        // Network errors, malformed JSON, and 304 do not enter either success
+        // or status-failure transitions; the poller only calls these methods
+        // after observing a classified HTTP status or decoding a body.
+        state.status_failure(reqwest::StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 1,
+                skips: 1
+            }
+        );
+        state.decoded_success();
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 0,
+                skips: 0
+            }
+        );
+        state.status_failure(reqwest::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 10,
+                skips: 10
+            }
+        );
+        state.decoded_success();
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 9,
+                skips: 9
+            }
+        );
+        state.status_failure(reqwest::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 9,
+                skips: 9
+            }
+        );
+        for _ in 0..20 {
+            state.status_failure(reqwest::StatusCode::TOO_MANY_REQUESTS);
+        }
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 10,
+                skips: 10
+            }
+        );
+    }
 
     fn yaml(text: &str) -> serde_yaml::Value {
         serde_yaml::from_str(text).expect("valid yaml")
