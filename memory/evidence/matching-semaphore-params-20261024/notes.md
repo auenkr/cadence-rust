@@ -28,7 +28,7 @@ Behaviour changes:
 ## 2. Scan page tokens (Go semaphore_manager_test.go:180)
 
 Go refs: `semaphore_manager.go:426-466` (`loadTokenOwnership` paging loop, stops on empty token),
-`semaphore_manager.go:33-ish scanPageSize = 2*MaxSemaphoreBucketSize+1`,
+`semaphore_manager.go:23` `scanPageSize = 2*MaxSemaphoreBucketSize+1`,
 `go/common/persistence/data_manager_interfaces.go:1596-1613` (request/response with `PageSize`, `NextPageToken`),
 `go/common/persistence/nosql/nosql_semaphore_token_store.go:143-170` (paged select).
 `go/common/persistence/semaphore_metadata_manager.go:42` `MaxSemaphoreBucketSize = 250`.
