@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 async-trait = "0.1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
 cadence-persistence = { path = "../cadence-persistence" }
