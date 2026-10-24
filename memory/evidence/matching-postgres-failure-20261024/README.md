@@ -24,3 +24,12 @@ still explicitly configures its own three-partition list. Python AST and Node
 syntax checks pass; no Cargo locally. Fresh PostgreSQL rerun:
 https://github.com/auenkr/cadence-rust/actions/runs/40083957441 (pending).
 This is a source-backed hypothesis until the rerun proves the checkpoint.
+
+Run 40083957441 failed before readiness with Address already in use, so it
+neither confirms nor disproves the partition fixture correction. Listener
+ports were all ephemeral (e.g. Rust gRPC 59717): Go startup outbound source
+ports or Rust's port=0 HTTP listener can claim a released reservation. Commit
+1dd23e8a5 chooses reserved listeners below the OS ephemeral range instead.
+Python AST check and execution of the actual reservation block with 20 sockets
+passed (unique ports, all 10000..29999); no heavy local work. New fresh run:
+https://github.com/auenkr/cadence-rust/actions/runs/40084530178 (pending).
