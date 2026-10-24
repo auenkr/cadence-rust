@@ -123,6 +123,39 @@ impl MetricSink for HistogramTagSink {
     }
 }
 
+/// Emit Go MetricDefs[Matching] root rollups beside their per-task-list series.
+/// The rollup name is migration-filtered independently by the wrapped sink.
+struct GoRollupSink(Arc<dyn MetricSink>);
+impl MetricSink for GoRollupSink {
+    fn record(&self, event: MetricEvent) {
+        let rollup = crate::matching_metrics_rollup::rollup(event.name).map(|name| {
+            let tags = if event.histogram.is_some() {
+                ["histogram_start", "histogram_end", "histogram_scale"]
+                    .into_iter()
+                    .filter_map(|key| event.tags.get(key).map(|value| (key.to_owned(), value.clone())))
+                    .collect()
+            } else {
+                BTreeMap::new()
+            };
+            MetricEvent {
+                name,
+                kind: event.kind,
+                value: event.value.clone(),
+                tags,
+                histogram: event.histogram,
+            }
+        });
+        self.0.record(event);
+        if let Some(rollup) = rollup {
+            self.0.record(rollup);
+        }
+    }
+
+    fn flush(&self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
 pub trait MetricSink: Send + Sync + 'static {
     fn record(&self, event: MetricEvent);
 
@@ -665,7 +698,7 @@ impl Default for MatchingMetrics {
 
 impl MatchingMetrics {
     pub fn new(sink: Arc<dyn MetricSink>) -> Self {
-        Self(Arc::new(HistogramTagSink(sink)))
+        Self(Arc::new(HistogramTagSink(Arc::new(GoRollupSink(sink)))))
     }
 
     pub fn membership_view(&self, host: &str, identifier: u32) {

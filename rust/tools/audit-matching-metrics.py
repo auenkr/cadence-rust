@@ -11,6 +11,7 @@ GO_CONFIG = ROOT / "go/common/metrics/config.go"
 GO_MATCHING = ROOT / "go/service/matching"
 RUST_CRATES = ROOT / "rust/crates"
 RUST_MIGRATION = ROOT / "rust/crates/cadence-service-core/src/matching_metrics_migration.rs"
+RUST_ROLLUPS = ROOT / "rust/crates/cadence-service-core/src/matching_metrics_rollup.rs"
 
 
 def allowlist(source: str, go_name: str, rust_name: str, rust_source: str):
@@ -25,6 +26,7 @@ def main():
     go_defs = GO_DEFS.read_text()
     go_config = GO_CONFIG.read_text()
     rust_migration = RUST_MIGRATION.read_text()
+    rust_rollups = RUST_ROLLUPS.read_text()
     rust_sources = "\n".join(path.read_text(errors="ignore") for path in RUST_CRATES.rglob("*.rs"))
 
     mismatches = []
@@ -49,6 +51,12 @@ def main():
             rollup = re.search(r'metricRollupName: "([a-z0-9_]+)"', attributes)
             definitions.append((ident, name, metric_type.group(1) if metric_type else "Counter", rollup.group(1) if rollup else None))
 
+    go_rollups = {name: rollup for _, name, _, rollup in definitions if rollup}
+    rust_rollup_map = dict(re.findall(r'"([a-z0-9_]+)"\s*=>\s*Some\("([a-z0-9_]+)"\)', rust_rollups))
+    missing_rollups = {name: value for name, value in go_rollups.items() if rust_rollup_map.get(name) != value}
+    extra_rollups = {name: value for name, value in rust_rollup_map.items() if go_rollups.get(name) != value}
+    print(f"Matching root rollups: Go={len(go_rollups)} Rust={len(rust_rollup_map)} missing/changed={missing_rollups} extra/changed={extra_rollups}")
+
     go_files = [path for path in GO_MATCHING.rglob("*.go") if not path.name.endswith("_test.go")]
     rust_metric_names = set(re.findall(r'"([a-z0-9_]+)"', rust_sources))
     active, catalog_only, missing = [], [], []
@@ -62,7 +70,7 @@ def main():
     print(f"Matching definitions={len(definitions)}; Go production callsites={len(active)}; catalog-only={len(catalog_only)}")
     print(f"Active definition types={counts}; active names missing from Rust source inventory={missing}")
     print("Catalog-only Go definitions=" + ", ".join(f"{ident}:{name}" for ident, name, _, _ in catalog_only))
-    if mismatches or missing:
+    if mismatches or missing or missing_rollups or extra_rollups:
         raise SystemExit(1)
 
 

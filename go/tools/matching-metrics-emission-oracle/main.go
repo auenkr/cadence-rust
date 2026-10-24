@@ -1,0 +1,79 @@
+// Emits a deterministic snapshot from the production metrics client and tally test sink.
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/uber-go/tally"
+	"github.com/uber/cadence/common/metrics"
+)
+
+type row struct {
+	Name  string            `json:"name"`
+	Kind  string            `json:"kind"`
+	Tags  map[string]string `json:"tags"`
+	Count int64             `json:"count,omitempty"`
+}
+
+func main() {
+	mode := "default"
+	if len(os.Args) > 1 {
+		mode = os.Args[1]
+	}
+	migration := metrics.MigrationConfig{}
+	if strings.HasPrefix(mode, "both") {
+		migration.Histogram.Default = "both"
+	}
+	if mode == "name-on" {
+		migration.Histogram.Names = map[string]bool{"syncmatch_latency_per_tl_ns": true}
+	}
+	if mode == "name-off" {
+		migration.Histogram.Default = "both"
+		migration.Histogram.Names = map[string]bool{"syncmatch_latency_per_tl_ns": false}
+	}
+	root := tally.NewTestScope("", nil)
+	client := metrics.NewClient(root, metrics.Matching, migration)
+	ctx := client.Scope(metrics.MatchingTaskListMgrScope, metrics.DomainTag("domain-a"), metrics.TaskListTag("queue-a"), metrics.TaskListTypeTag("decision"))
+	ctx.IncCounter(metrics.PollSuccessPerTaskListCounter)
+	ctx.IncCounter(metrics.PollTimeoutPerTaskListCounter)
+	ctx.IncCounter(metrics.ConditionFailedErrorPerTaskListCounter)
+	ctx.IncCounter(metrics.ForwardedPerTaskListCounter)
+	ctx.IncCounter(metrics.SyncMatchForwardTaskThrottleErrorPerTasklist)
+	ctx.UpdateGauge(metrics.PollerPerTaskListCounter, 2)
+	ctx.RecordTimer(metrics.SyncMatchLocalPollLatencyPerTaskList, 5*time.Millisecond)
+	ctx.RecordHistogramDuration(metrics.SyncMatchLocalPollLatencyPerTaskListHistogram, 5*time.Millisecond)
+	request := client.Scope(metrics.MatchingAddTaskScope, metrics.DomainTag("domain-a"), metrics.TaskListTag("queue/a"), metrics.CallerTag("history"), metrics.TransportTag("grpc"))
+	request.RecordTimer(metrics.SyncMatchLatencyPerTaskList, 5*time.Millisecond)
+	request.RecordHistogramDuration(metrics.SyncMatchLatencyPerTaskListHistogram, 5*time.Millisecond)
+	client.Scope(metrics.MatchingAddTaskScope, metrics.DomainTag("domain-a"), metrics.TaskListTag("queue/a"), metrics.TaskListTypeTag("decision_task"), metrics.MatchingHostTag("matching-test")).IncCounter(metrics.CadenceTasklistRequests)
+	persistence := client.Scope(metrics.PersistenceGetTasksScope, metrics.TaskCategoryTag("none"))
+	persistence.IncCounter(metrics.PersistenceEmptyResponseCounter)
+	persistence.RecordHistogramValue(metrics.PersistenceResponseRowSize, 3)
+	persistence.RecordHistogramValue(metrics.PersistenceResponsePayloadSize, 4096)
+
+	s := root.Snapshot()
+	rows := []row{}
+	for _, v := range s.Counters() {
+		rows = append(rows, row{v.Name(), "counter", v.Tags(), v.Value()})
+	}
+	for _, v := range s.Gauges() {
+		rows = append(rows, row{v.Name(), "gauge", v.Tags(), 0})
+	}
+	for _, v := range s.Timers() {
+		rows = append(rows, row{v.Name(), "timer", v.Tags(), int64(len(v.Values()))})
+	}
+	for _, v := range s.Histograms() {
+		rows = append(rows, row{v.Name(), "histogram", v.Tags(), int64(len(v.Durations()) + len(v.Values()))})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Name != rows[j].Name {
+			return rows[i].Name < rows[j].Name
+		}
+		return rows[i].Kind < rows[j].Kind
+	})
+	_ = json.NewEncoder(os.Stdout).Encode(rows)
+}

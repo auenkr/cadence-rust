@@ -38,6 +38,10 @@ jobs:
           cache: false
       - name: Verify Go mapped IPv4 CIDR oracle
         run: GO111MODULE=off go run tests/matching-unleash/go_ipnet_oracle.go
+      - name: Audit Matching definitions and rollup map
+        run: python3 rust/tools/audit-matching-metrics.py
+      - name: Check Go emission oracle formatting
+        run: test -z "$(gofmt -d go/tools/matching-metrics-emission-oracle/main.go)"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -85,6 +89,26 @@ jobs:
           result=${PIPESTATUS[0]}
           echo "$result" > test.exit
           exit "$result"
+      - name: Compare live Go tally and Rust Matching emissions
+        if: success() && (inputs.package == '' || inputs.package == 'cadence-server')
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/matching-metrics-emission"
+          mkdir -p "$evidence"
+          for mode in default both name-on name-off; do
+            (cd go && go run ./tools/matching-metrics-emission-oracle "$mode") > "$evidence/go-$mode.json"
+            (cd rust && cargo run -p cadence-server --example matching_metrics_emission_oracle -- "$mode") > "$evidence/rust-$mode.json"
+            python3 tests/compare-matching-metrics-emission.py "$evidence/go-$mode.json" "$evidence/rust-$mode.json" > "$evidence/compare-$mode.json"
+          done
+          git rev-parse HEAD > "$evidence/head-sha.txt"
+          sha256sum "${CARGO_TARGET_DIR:-rust/target}/debug/examples/matching_metrics_emission_oracle" > "$evidence/rust-binary.sha256"
+      - name: Upload Matching metrics comparison evidence
+        if: always() && (inputs.package == '' || inputs.package == 'cadence-server')
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-metrics-emission-evidence
+          retention-days: 3
+          path: ${{ runner.temp }}/matching-metrics-emission
       - name: Record validation identity
         if: always()
         run: |

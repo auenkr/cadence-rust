@@ -13,6 +13,7 @@ pub mod service;
 pub mod tchannel_json_client;
 pub mod yarpc;
 pub mod matching_metrics;
+mod matching_metrics_rollup;
 pub mod matching_metrics_prometheus;
 pub mod matching_metrics_statsd;
 pub mod matching_metrics_m3;
