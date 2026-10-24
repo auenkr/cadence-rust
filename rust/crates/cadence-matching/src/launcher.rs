@@ -89,6 +89,16 @@ fn dynamic_i64_property(
         .unwrap_or(default)
 }
 
+/// Owns the process-wide OpenFeature registration for this Matching process.
+/// Go installs it from an fx lifecycle hook and deregisters it on shutdown.
+struct OpenFeatureLifecycle;
+
+impl Drop for OpenFeatureLifecycle {
+    fn drop(&mut self) {
+        cadence_service_core::openfeature::client::deregister_provider();
+    }
+}
+
 fn matching_listen_ip(rpc: Option<&config::RpcConfig>) -> anyhow::Result<std::net::IpAddr> {
     if let Some(rpc) = rpc {
         if rpc.bind_on_local_host && !rpc.bind_on_ip.is_empty() {
@@ -527,6 +537,7 @@ pub async fn run(
                 .map(std::path::PathBuf::from)
                 .unwrap_or(std::env::current_dir()?);
             let dynamic_config_provider = cfg.dynamic_config_provider();
+            let mut openfeature_lifecycle: Option<OpenFeatureLifecycle> = None;
             let dynamic_config_poll = match &dynamic_config_provider {
                 config::DynamicConfigProvider::FileBased(provider)
                     if !provider.poll_interval.is_empty() =>
@@ -610,10 +621,22 @@ pub async fn run(
                     }
                     None
                 }
-                config::DynamicConfigProvider::OpenFeature(feature) => anyhow::bail!(
-                    "dynamicconfig.client \"openfeature\" (providerName {:?}) is not supported by Rust Matching: Go (dynamicconfigfx/fx.go:103-119) registers the named OpenFeature provider plugin (e.g. unleash) on start; no provider plugin is ported",
-                    feature.provider_name
-                ),
+                config::DynamicConfigProvider::OpenFeature(feature) => {
+                    use cadence_service_core::openfeature::{
+                        client::register_provider,
+                        provider,
+                        unleash,
+                    };
+                    // Go's server binary blank-imports this plugin, whose init
+                    // function registers the constructor before fx startup.
+                    if provider::get(unleash::PROVIDER_NAME).is_none() {
+                        provider::register(unleash::PROVIDER_NAME, unleash::constructor())?;
+                    }
+                    eprintln!("initialising OpenFeature dynamic config client");
+                    register_provider(&feature.provider_name, feature.provider.as_ref())?;
+                    openfeature_lifecycle = Some(OpenFeatureLifecycle);
+                    None
+                }
             };
             let wanted: Vec<service::ServiceName> = if services.is_empty() {
                 only.map_or_else(|| service::ServiceName::all().to_vec(), <[_]>::to_vec)
@@ -662,6 +685,10 @@ pub async fn run(
                 num_history_shards,
                 ..Default::default()
             };
+            // Keep the registration alive through listener and Matching
+            // shutdown. Drop runs on every normal/error return from this
+            // command arm, mirroring the Go fx OnStop hook.
+            let _openfeature_lifecycle = openfeature_lifecycle;
             let mut dynamic_config_loaded_at = None;
             if let Some(client) = config_store_client.as_ref() {
                 if let Some(snapshot) = client.snapshot() {
