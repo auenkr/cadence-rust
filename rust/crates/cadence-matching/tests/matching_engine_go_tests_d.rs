@@ -521,7 +521,6 @@ async fn acquire_semaphore_undecodable_owner_is_refused_before_any_store_call() 
     assert_eq!(store.scan_count(), 0);
 }
 
-#[ignore = "parity gap: Rust Manager::acquire waits for the startup load with no deadline, and the handler applies the gRPC deadline only after acquire returns, so a request arriving during a slow load waits until that load ends"]
 #[tokio::test]
 async fn acquire_semaphore_request_during_load_gives_up_at_its_own_deadline() {
     let store = SemaphoreStore::holding(0);
