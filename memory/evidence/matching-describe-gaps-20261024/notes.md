@@ -62,3 +62,11 @@ Not run locally (no cargo on this host). Verified with GitHub Actions `rust-ci.y
 
 - RUN_PKG_PLACEHOLDER
 - RUN_WS_PLACEHOLDER
+
+## Whole-workspace runs (head b9a66bbf3 = code c460d1d5e + notes)
+
+- 40065798391 (first attempt): failure. Test `matching_reader::tests::matching_reader_pump_falls_back_to_default_for_unknown_isolation_group` (matching_reader.rs:2273, left 2 right 1). 648 passed, 1 failed, 15 ignored.
+- 40065798391 (rerun, same head): failure. Test `matching_reader::tests::matching_reader_dispatch_success_uses_known_or_default_group` (matching_reader.rs:2232). 648 passed, 1 failed, 15 ignored.
+- Control 40066185225 on origin/master e7285da4f: failure with the same two reader tests (645 passed, 2 failed, 17 ignored). The failures are pre-existing on master and are not caused by this branch.
+
+Status: the package gate is green on c460d1d5e. The whole-workspace gate is NOT green on this branch, because of the pre-existing reader failures above. Not fixed here (outside the describe gap scope).
