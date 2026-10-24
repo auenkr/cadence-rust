@@ -231,6 +231,34 @@ async function durableRestart(ctx) {
   return { result: 'passed', rootPartition: rootName, queuedBeforeRestart: queued, restart, drainedAfterRestart: drained };
 }
 
+// CADENCE_PROBE_AUTO_CONFIG_HINT: the poll responses that Go Frontend forwards from Rust Matching carry autoConfigHint.
+// The harness sets matching.enableClientAutoConfig=false for this flag, so enableAutoConfig must be false.
+// The field is checked for presence on the message: with proto-loader defaults:true an unset message is null,
+// while an unset bool would read as false and hide a missing hint.
+function autoConfigHintOf(response, label) {
+  assert(response.autoConfigHint, `${label} poll response has no autoConfigHint`);
+  assert.equal(response.autoConfigHint.enableAutoConfig, false, `${label} poll response autoConfigHint.enableAutoConfig must be false`);
+  return { enableAutoConfig: response.autoConfigHint.enableAutoConfig };
+}
+
+async function autoConfigHint(ctx) {
+  const decisionList = { name: `auto-config-decision-${ctx.id}` };
+  const activityList = { name: `auto-config-activity-${ctx.id}` };
+  const started = await ctx.call('WorkflowAPI', 'StartWorkflowExecution', { ...ctx.startRequest, workflowId: `auto-config-${ctx.id}`, taskList: decisionList, requestId: randomUUID() });
+  const decision = await ctx.call('WorkerAPI', 'PollForDecisionTask', { domain: ctx.domain, taskList: decisionList, identity: 'auto-config-decision-poller' });
+  assert.equal(decision.workflowExecution.runId, started.runId, 'decision poll returned a different run');
+  const decisionHint = autoConfigHintOf(decision, 'decision');
+  await ctx.call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: decision.taskToken, identity: 'auto-config-decision-poller', decisions: [{ scheduleActivityTaskDecisionAttributes: {
+    activityId: 'auto-config-activity', activityType: { name: 'Echo' }, taskList: activityList,
+    scheduleToCloseTimeout: { seconds: '60' }, scheduleToStartTimeout: { seconds: '60' }, startToCloseTimeout: { seconds: '30' },
+  } }] });
+  const activity = await ctx.call('WorkerAPI', 'PollForActivityTask', { domain: ctx.domain, taskList: activityList, identity: 'auto-config-activity-poller' });
+  assert.equal(activity.activityId, 'auto-config-activity', 'activity poll did not return the scheduled activity');
+  const activityHint = autoConfigHintOf(activity, 'activity');
+  await ctx.call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: activity.taskToken, result: payload('auto-config-ok'), identity: 'auto-config-activity-poller' });
+  return { result: 'passed', decisionHint, activityHint };
+}
+
 async function runScenario(name, flag, fn, ctx, results) {
   if (process.env[flag] !== '1') { results[name] = 'not requested'; return; }
   results[name] = await fn(ctx);
@@ -243,6 +271,7 @@ async function runProbeScenarios(ctx) {
   await runScenario('queryStandbyForwarding', 'CADENCE_PROBE_QUERY_STANDBY', queryStandby, ctx, results);
   await runScenario('listTaskListPartitions', 'CADENCE_PROBE_LIST_PARTITIONS', listPartitions, ctx, results);
   await runScenario('durableRestartDrain', 'CADENCE_PROBE_DURABLE_RESTART', durableRestart, ctx, results);
+  await runScenario('autoConfigHint', 'CADENCE_PROBE_AUTO_CONFIG_HINT', autoConfigHint, ctx, results);
   return results;
 }
 
