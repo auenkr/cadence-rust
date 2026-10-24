@@ -1,0 +1,1 @@
+tests/gates/run-mysql-lane.sh out/gate /home/runner/work/cadence-rust/cadence-rust/rust/target/debug/cadence-matching --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3

@@ -1,0 +1,20 @@
+[
+  "/home/runner/work/cadence-rust/cadence-rust/rust/target/debug/cadence-matching",
+  "start",
+  "--config",
+  "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching.yaml",
+  "--root",
+  "/home/runner/work/cadence-rust/cadence-rust/out/gate/run",
+  "--services",
+  "matching",
+  "--port",
+  "0",
+  "--history-grpc-port",
+  "60369",
+  "--matching-grpc-port",
+  "51985",
+  "--matching-tchannel-port",
+  "48379",
+  "--data-dir",
+  "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching-data"
+]

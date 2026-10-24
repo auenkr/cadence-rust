@@ -1,0 +1,29 @@
+Existing Go SDK resumed and completed the pre-restart workflow/activity
+
+go: downloading go.uber.org/thriftrw v1.32.0
+go: downloading google.golang.org/grpc v1.67.3
+go: downloading golang.org/x/net v0.28.0
+go: downloading github.com/golang-jwt/jwt/v5 v5.2.0
+go: downloading github.com/jonboulle/clockwork v0.4.0
+go: downloading github.com/pborman/uuid v0.0.0-20160209185913-a97ce2ca70fa
+go: downloading github.com/stretchr/testify v1.9.0
+go: downloading github.com/uber/cadence-idl v0.0.0-20260609034356-3ee08a98cf70
+go: downloading golang.org/x/oauth2 v0.22.0
+go: downloading golang.org/x/time v0.0.0-20170927054726-6dc17368e09b
+go: downloading github.com/prometheus/client_golang v1.11.1
+go: downloading github.com/prometheus/client_model v0.6.0
+go: downloading golang.org/x/sys v0.28.0
+go: downloading github.com/davecgh/go-spew v1.1.1
+go: downloading github.com/pmezard/go-difflib v1.0.0
+go: downloading github.com/prometheus/common v0.26.0
+go: downloading github.com/prometheus/procfs v0.6.0
+go: downloading google.golang.org/protobuf v1.34.2
+go: downloading google.golang.org/genproto/googleapis/rpc v0.0.0-20240814211410-ddb44dafa142
+go: downloading go.uber.org/fx v1.22.0
+go: downloading golang.org/x/text v0.17.0
+go: downloading go.uber.org/dig v1.17.1
+{"level":"info","ts":"2026-10-24T06:56:32.006Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-10-24T06:56:32.006Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-10-24T06:56:32.049Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"service-compat-7603ed93-4205-486a-99e5-045f2d015240","TaskList":"production-idle-7603ed93-4205-486a-99e5-045f2d015240","WorkerID":"21116@runnervm8k3b6@production-idle-7603ed93-4205-486a-99e5-045f2d015240@046ba3a6-73de-4966-84a5-20e5821f6f1f"}
+{"level":"info","ts":"2026-10-24T06:56:32.052Z","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"service-compat-7603ed93-4205-486a-99e5-045f2d015240","TaskList":"production-idle-7603ed93-4205-486a-99e5-045f2d015240","WorkerID":"21116@runnervm8k3b6@production-idle-7603ed93-4205-486a-99e5-045f2d015240@046ba3a6-73de-4966-84a5-20e5821f6f1f"}
+{"level":"info","ts":"2026-10-24T06:56:32.119Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"service-compat-7603ed93-4205-486a-99e5-045f2d015240","TaskList":"production-idle-7603ed93-4205-486a-99e5-045f2d015240","WorkerID":"21116@runnervm8k3b6@production-idle-7603ed93-4205-486a-99e5-045f2d015240@046ba3a6-73de-4966-84a5-20e5821f6f1f"}
