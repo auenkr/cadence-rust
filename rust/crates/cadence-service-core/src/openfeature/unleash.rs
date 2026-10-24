@@ -106,8 +106,81 @@ pub fn new_provider(
 pub struct UnleashRepository {
     features: Arc<RwLock<Value>>,
     static_context: UnleashContext,
+    metrics: Arc<Mutex<MetricsBucket>>,
     stop: Arc<AtomicBool>,
     poller: Mutex<Option<JoinHandle<()>>>,
+    reporter: Mutex<Option<JoinHandle<()>>>,
+}
+
+#[derive(Default)]
+struct MetricsBucket {
+    toggles: serde_json::Map<String, Value>,
+    start: Option<String>,
+}
+impl MetricsBucket {
+    fn count(&mut self, name: &str, enabled: bool, variant: Option<&str>) {
+        let toggle = self
+            .toggles
+            .entry(name.to_owned())
+            .or_insert_with(|| serde_json::json!({"yes":0,"no":0,"variants":{}}));
+        let key = if enabled { "yes" } else { "no" };
+        toggle[key] = Value::from(toggle[key].as_i64().unwrap_or(0) + 1);
+        if let Some(variant) = variant {
+            let variants = toggle["variants"].as_object_mut().expect("variants map");
+            variants.insert(
+                variant.to_owned(),
+                Value::from(variants.get(variant).and_then(Value::as_i64).unwrap_or(0) + 1),
+            );
+        }
+    }
+
+    fn reset(&mut self, next_start: String) -> (String, serde_json::Map<String, Value>) {
+        let start = self.start.take().unwrap_or_else(|| next_start.clone());
+        let toggles = std::mem::take(&mut self.toggles);
+        self.start = Some(next_start);
+        (start, toggles)
+    }
+
+    fn restore_failed(&mut self, start: String, toggles: serde_json::Map<String, Value>) {
+        for (name, counts) in toggles {
+            let current = self
+                .toggles
+                .entry(name)
+                .or_insert_with(|| serde_json::json!({"yes":0,"no":0,"variants":{}}));
+            for field in ["yes", "no"] {
+                current[field] = Value::from(
+                    current[field].as_i64().unwrap_or(0) + counts[field].as_i64().unwrap_or(0),
+                );
+            }
+            for (variant, count) in counts["variants"].as_object().into_iter().flatten() {
+                let variants = current["variants"].as_object_mut().expect("variants map");
+                variants.insert(
+                    variant.clone(),
+                    Value::from(
+                        variants.get(variant).and_then(Value::as_i64).unwrap_or(0)
+                            + count.as_i64().unwrap_or(0),
+                    ),
+                );
+            }
+        }
+        // Go's failed-post path moves the new bucket start back to the failed
+        // bucket boundary, so the retry covers the full retained interval.
+        self.start = Some(start);
+    }
+}
+fn default_instance_id() -> String {
+    let user = std::env::var("USER")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("generated-{}", std::process::id()));
+    match std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+    {
+        Some(host) => format!("{user}-{host}"),
+        None => user,
+    }
 }
 impl UnleashRepository {
     fn new(config: UnleashConfig, bootstrap: Option<Value>) -> anyhow::Result<Self> {
@@ -143,14 +216,36 @@ impl UnleashRepository {
         if !config.project_name.is_empty() {
             endpoint.set_query(Some(&format!("project={}", config.project_name)));
         }
+        let instance_id = if config.instance_id.is_empty() {
+            default_instance_id()
+        } else {
+            config.instance_id.clone()
+        };
+        let metrics_interval = if config.metrics_interval_nanos > 0 {
+            Duration::from_nanos(config.metrics_interval_nanos as u64)
+        } else {
+            Duration::from_secs(60)
+        };
+        let connection_id = uuid::Uuid::new_v4().to_string();
         let headers = vec![
             ("UNLEASH-APPNAME", config.app_name.clone()),
-            ("UNLEASH-INSTANCEID", config.instance_id.clone()),
+            ("UNLEASH-INSTANCEID", instance_id.clone()),
             ("Unleash-Interval", interval.as_millis().to_string()),
             ("User-Agent", config.app_name.clone()),
             ("Unleash-Client-Spec", "4.3.1".into()),
             ("Authorization", config.api_token.clone()),
+            ("Unleash-SDK", "unleash-client-go:4.5.0".into()),
+            ("Unleash-Connection-Id", connection_id.clone()),
         ];
+        let mut shared_headers = headers.clone();
+        if let Some((_, value)) = shared_headers
+            .iter_mut()
+            .find(|(name, _)| *name == "Unleash-Interval")
+        {
+            *value = metrics_interval.as_millis().to_string();
+        }
+        let etag = Arc::new(Mutex::new(String::new()));
+        let poll_etag = etag.clone();
         let state = features.clone();
         let stop_flag = stop.clone();
         let poller = std::thread::Builder::new()
@@ -171,11 +266,23 @@ impl UnleashRepository {
                             request = request.header(*name, value);
                         }
                     }
+                    let tag = poll_etag.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                    if !tag.is_empty() {
+                        request = request.header("If-None-Match", tag);
+                    }
                     if let Ok(response) = request.send() {
-                        if response.status().is_success() {
+                        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+                        } else if response.status().is_success() {
+                            let new_etag = response
+                                .headers()
+                                .get(reqwest::header::ETAG)
+                                .and_then(|v| v.to_str().ok())
+                                .map(str::to_owned);
                             if let Ok(body) = response.json::<Value>() {
                                 *state.write().unwrap_or_else(|p| p.into_inner()) =
                                     feature_map(body);
+                                *poll_etag.lock().unwrap_or_else(|p| p.into_inner()) =
+                                    new_etag.unwrap_or_default();
                             }
                         }
                     }
@@ -189,11 +296,93 @@ impl UnleashRepository {
                 }
             })
             .map_err(|e| anyhow!("failed to start unleash poller: {e}"))?;
+        let metrics = Arc::new(Mutex::new(MetricsBucket {
+            toggles: serde_json::Map::new(),
+            start: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)),
+        }));
+        let report_metrics = metrics.clone();
+        let report_stop = stop.clone();
+        let report_url = url
+            .join("./client/metrics")
+            .map_err(|e| anyhow!("invalid unleash url: {e}"))?;
+        let register_url = url
+            .join("./client/register")
+            .map_err(|e| anyhow!("invalid unleash url: {e}"))?;
+        let app_name = config.app_name.clone();
+        let strategies = vec![
+            "default",
+            "applicationHostname",
+            "gradualRollout/random",
+            "gradualRollout/sessionId",
+            "gradualRollout/userId",
+            "remoteAddress",
+            "userWithId",
+            "flexibleRollout",
+        ];
+        let reporter_result = std::thread::Builder::new().name("unleash-metrics".into()).spawn(move || {
+            let Ok(client) = reqwest::blocking::Client::builder().timeout(Duration::from_millis(500)).build() else { return; };
+            let started = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+            let register = serde_json::json!({"appName":app_name,"instanceId":instance_id,"connectionId":connection_id,"sdkVersion":"unleash-client-go:4.5.0","strategies":strategies,"started":started,"interval":metrics_interval.as_secs(),"platformVersion":format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),"platformName":"rust","yggdrasilVersion":null,"specVersion":"4.3.1"});
+            let mut req = client.post(register_url).json(&register);
+            for (name,value) in &shared_headers { if !value.is_empty() { req = req.header(*name,value); } }
+            let _ = req.send();
+            let mut next = std::time::Instant::now() + metrics_interval;
+            let mut errors = 0u8;
+            let mut skips = 0u8;
+            while !report_stop.load(Ordering::Acquire) {
+                while !report_stop.load(Ordering::Acquire) && std::time::Instant::now() < next { std::thread::sleep(Duration::from_millis(10).min(next.saturating_duration_since(std::time::Instant::now()))); }
+                if report_stop.load(Ordering::Acquire) { break; }
+                next = std::time::Instant::now() + metrics_interval;
+                if skips > 0 {
+                    skips -= 1;
+                    continue;
+                }
+                let mut bucket = report_metrics.lock().unwrap_or_else(|p| p.into_inner());
+                let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+                let (start, toggles) = bucket.reset(now.clone());
+                if toggles.is_empty() { continue; }
+                drop(bucket);
+                let payload = serde_json::json!({"appName":app_name,"instanceId":instance_id,"connectionId":connection_id,"bucket":{"start":start,"stop":now,"toggles":toggles},"platformVersion":format!("{} {}",std::env::consts::OS,std::env::consts::ARCH),"platformName":"rust","yggdrasilVersion":null,"sdkVersion":"unleash-client-go:4.5.0","specVersion":"4.3.1"});
+                let mut req = client.post(report_url.clone()).json(&payload);
+                for (name,value) in &shared_headers { if !value.is_empty() { req = req.header(*name,value); } }
+                let post_result = req.send();
+                let failed_status = post_result
+                    .as_ref()
+                    .ok()
+                    .map(reqwest::blocking::Response::status)
+                    .filter(|status| !status.is_success());
+                if post_result.is_err() || failed_status.is_some() {
+                    if let Some(status) = failed_status {
+                        if matches!(status, reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND) {
+                            errors = 10;
+                        } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                            errors = (errors + 1).min(10);
+                        }
+                        skips = errors;
+                    }
+                    let mut bucket = report_metrics.lock().unwrap_or_else(|p| p.into_inner());
+                    bucket.restore_failed(start, toggles);
+                } else {
+                    errors = errors.saturating_sub(1);
+                    skips = errors;
+                }
+            }
+        });
+        let reporter = match reporter_result {
+            Ok(reporter) => reporter,
+            Err(error) => {
+                stop.store(true, Ordering::Release);
+                let _ = poller.join();
+                return Err(anyhow!("failed to start unleash metrics sender: {error}"));
+            }
+        };
         Ok(Self {
             features,
             static_context,
+            metrics,
             stop,
             poller: Mutex::new(Some(poller)),
+            reporter: Mutex::new(Some(reporter)),
         })
     }
     pub fn snapshot(&self) -> Value {
@@ -205,6 +394,14 @@ impl UnleashRepository {
     pub fn shutdown(&self) {
         self.stop.store(true, Ordering::Release);
         if let Some(task) = self.poller.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            let _ = task.join();
+        }
+        if let Some(task) = self
+            .reporter
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
             let _ = task.join();
         }
     }
@@ -270,18 +467,27 @@ impl FeatureProvider for UnleashProvider {
                 FlagValue::Bool(value) => *value,
                 _ => unreachable!(),
             };
+            let enabled = if snapshot.features.iter().any(|feature| feature.name == flag) {
+                unleash_engine::is_enabled(&snapshot, flag, &context)
+            } else {
+                fallback
+            };
+            self.repository
+                .metrics
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .count(flag, enabled, None);
             return Resolution {
-                value: FlagValue::Bool(
-                    if snapshot.features.iter().any(|feature| feature.name == flag) {
-                        unleash_engine::is_enabled(&snapshot, flag, &context)
-                    } else {
-                        fallback
-                    },
-                ),
+                value: FlagValue::Bool(enabled),
                 error: None,
             };
         }
         let variant = unleash_engine::get_variant(&snapshot, flag, &context, 0);
+        self.repository
+            .metrics
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .count(flag, variant.feature_enabled, Some(&variant.name));
         if !variant.feature_enabled || variant.name == "disabled" {
             return Resolution {
                 value: default,
@@ -629,7 +835,7 @@ mod tests {
         std::thread::JoinHandle<()>,
     )
     where
-        F: FnMut(usize) -> (&'static str, &'static str) + Send + 'static,
+        F: FnMut(usize, &str) -> (&'static str, &'static str) + Send + 'static,
     {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -637,7 +843,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
-            for index in 0..4 {
+            for index in 0..5 {
                 let Ok((mut stream, _)) = listener.accept() else {
                     break;
                 };
@@ -645,7 +851,7 @@ mod tests {
                 let size = stream.read(&mut request).unwrap_or(0);
                 tx.send(String::from_utf8_lossy(&request[..size]).into_owned())
                     .unwrap();
-                let (status, body) = respond(index);
+                let (status, body) = respond(index, &String::from_utf8_lossy(&request));
                 let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
             }
         });
@@ -667,19 +873,26 @@ mod tests {
     fn polling_bootstraps_refreshes_uses_go_url_and_headers_and_keeps_cache_on_errors() {
         let (release_first_response, wait_for_release) = std::sync::mpsc::channel();
         let (release_final_response, wait_for_final_release) = std::sync::mpsc::channel();
-        let (base, requests, server) = local_server(move |index| {
-            if index == 0 {
+        let mut get_count = 0usize;
+        let (base, requests, server) = local_server(move |_index, request| {
+            if request.starts_with("GET ") {
+                get_count += 1;
+            }
+            if request.starts_with("GET ") && get_count == 1 {
                 wait_for_release.recv().unwrap();
             }
-            if index == 3 {
+            if request.starts_with("GET ") && get_count == 4 {
                 wait_for_final_release.recv().unwrap();
             }
-            match index {
-                0 => (
+            if request.starts_with("POST ") {
+                return ("200 OK", "{}");
+            }
+            match get_count {
+                1 => (
                     "200 OK",
                     r#"{"features":[{"name":"refreshed","enabled":true}]}"#,
                 ),
-                1 => ("503 Service Unavailable", "{}"),
+                2 => ("503 Service Unavailable", "{}"),
                 _ => ("200 OK", "not-json"),
             }
         });
@@ -698,7 +911,14 @@ mod tests {
         )
         .unwrap();
         assert!(repository.snapshot().get("bootstrapped").is_some());
-        let first = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+        let mut observed = Vec::new();
+        let first = loop {
+            let request = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+            if request.starts_with("GET ") {
+                break request;
+            }
+            observed.push(request);
+        };
         assert!(
             first.starts_with("GET /api/client/features?project=project%20blue HTTP/1.1"),
             "{first}"
@@ -720,9 +940,9 @@ mod tests {
                 "missing {expected} in {first}"
             );
         }
-        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
-        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
-        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
+        while observed.len() < 4 {
+            observed.push(requests.recv_timeout(Duration::from_secs(1)).unwrap());
+        }
         assert!(repository.snapshot().get("refreshed").is_some());
         release_final_response.send(()).unwrap();
         let provider = UnleashProvider {
@@ -766,6 +986,213 @@ mod tests {
         };
         provider.shutdown();
         assert!(started.elapsed() < Duration::from_secs(2));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn metrics_registration_flush_and_shutdown_use_fake_http_server() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            for index in 0..4 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 1024];
+                loop {
+                    let n = stream.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some(length) = text
+                        .to_ascii_lowercase()
+                        .split("content-length: ")
+                        .nth(1)
+                        .and_then(|s| s.split("\r\n").next())
+                        .and_then(|s| s.parse::<usize>().ok())
+                    {
+                        if let Some(body) = text.split("\r\n\r\n").nth(1) {
+                            if body.len() >= length {
+                                break;
+                            }
+                        }
+                    } else if text.contains("\r\n\r\n") {
+                        break;
+                    }
+                }
+                let raw = String::from_utf8_lossy(&request).into_owned();
+                tx.send(raw).unwrap();
+                let body = if request.starts_with(b"GET ") {
+                    r#"{"features":[{"name":"flag","enabled":true,"strategies":[{"name":"default"}],"variants":[{"name":"blue","weight":100}]},{"name":"enabled-no-variants","enabled":true,"strategies":[{"name":"default"}]}]}"#
+                } else {
+                    "{}"
+                };
+                let status = if index == 2 {
+                    "500 Internal Server Error"
+                } else {
+                    "200 OK"
+                };
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let repository = UnleashRepository::new(
+            UnleashConfig {
+                url: format!("http://{address}/api"),
+                app_name: "cadence-test".into(),
+                instance_id: "instance-test".into(),
+                refresh_interval_nanos: 60_000_000_000,
+                metrics_interval_nanos: 40_000_000,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let mut first = None;
+        let mut register = None;
+        while first.is_none() || register.is_none() {
+            let request = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            if request.starts_with("GET /api/client/features") {
+                first = Some(request);
+            } else if request.starts_with("POST /api/client/register") {
+                register = Some(request);
+            }
+        }
+        let first = first.unwrap();
+        let register = register.unwrap();
+        assert!(first.starts_with("GET /api/client/features"), "{first}");
+        assert!(first
+            .to_ascii_lowercase()
+            .contains("unleash-instanceid: instance-test"));
+        assert!(
+            register.starts_with("POST /api/client/register"),
+            "{register}"
+        );
+        assert!(register
+            .to_ascii_lowercase()
+            .contains("content-type: application/json"));
+        assert!(
+            register.contains("\"instanceId\":\"instance-test\""),
+            "{register}"
+        );
+        assert!(
+            register.contains("\"sdkVersion\":\"unleash-client-go:4.5.0\""),
+            "{register}"
+        );
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(true),
+        };
+        wait_for_feature(&provider.repository, "flag");
+        let result = provider.resolve("flag", FlagValue::Bool(false), &Default::default());
+        assert_eq!(result.value, FlagValue::Bool(true));
+        let _ = provider.resolve(
+            "flag",
+            FlagValue::String("fallback".into()),
+            &Default::default(),
+        );
+        let _ = provider.resolve(
+            "enabled-no-variants",
+            FlagValue::String("fallback".into()),
+            &Default::default(),
+        );
+        let metrics = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(metrics.starts_with("POST /api/client/metrics"), "{metrics}");
+        assert!(metrics.contains("\"flag\":{"), "{metrics}");
+        assert!(metrics.contains("\"yes\":2"), "{metrics}");
+        assert!(metrics.contains("\"blue\":1"), "{metrics}");
+        assert!(metrics.contains("\"disabled\":1"), "{metrics}");
+        let retry = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(retry.starts_with("POST /api/client/metrics"), "{retry}");
+        assert!(retry.contains("\"yes\":2"), "{retry}");
+        assert!(retry.contains("\"blue\":1"), "{retry}");
+        assert!(retry.contains("\"disabled\":1"), "{retry}");
+        provider.shutdown();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn metrics_bucket_reset_advances_boundary_and_failed_post_restores_it() {
+        let mut bucket = MetricsBucket {
+            toggles: serde_json::Map::new(),
+            start: Some("start-0".into()),
+        };
+        bucket.count("flag", true, Some("blue"));
+        let (first_start, first_toggles) = bucket.reset("boundary-1".into());
+        assert_eq!(first_start, "start-0");
+        assert_eq!(first_toggles["flag"]["yes"], 1);
+        assert_eq!(bucket.start.as_deref(), Some("boundary-1"));
+
+        bucket.count("flag", false, Some("disabled"));
+        let (second_start, second_toggles) = bucket.reset("boundary-2".into());
+        assert_eq!(second_start, "boundary-1");
+        bucket.restore_failed(second_start, second_toggles);
+        assert_eq!(bucket.start.as_deref(), Some("boundary-1"));
+        assert_eq!(bucket.toggles["flag"]["no"], 1);
+        assert_eq!(bucket.toggles["flag"]["variants"]["disabled"], 1);
+    }
+
+    #[test]
+    fn etag_304_retains_snapshot_and_sends_if_none_match() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let mut feature_requests = 0;
+            for _ in 0..4 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 4096];
+                let n = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..n]).into_owned();
+                let is_features = request.starts_with("GET ");
+                if is_features {
+                    feature_requests += 1;
+                }
+                tx.send(request).unwrap();
+                if !is_features {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                    )
+                    .unwrap();
+                } else if feature_requests == 1 {
+                    let body = r#"{"features":[{"name":"retained","enabled":true}]}"#;
+                    write!(stream, "HTTP/1.1 200 OK\r\nETag: \"rev-1\"\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                } else {
+                    write!(stream, "HTTP/1.1 304 Not Modified\r\nETag: \"rev-1\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                }
+            }
+        });
+        let repository = UnleashRepository::new(
+            UnleashConfig {
+                url: format!("http://{address}/api"),
+                app_name: "etag-test".into(),
+                refresh_interval_nanos: 20_000_000,
+                metrics_interval_nanos: 60_000_000_000,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        wait_for_feature(&repository, "retained");
+        let mut requests = Vec::new();
+        for _ in 0..4 {
+            requests.push(rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        }
+        assert_eq!(requests.iter().filter(|r| r.starts_with("GET ")).count(), 3);
+        assert!(
+            requests
+                .iter()
+                .any(|r| r.contains("if-none-match: \"rev-1\"")),
+            "{requests:?}"
+        );
+        assert!(repository.snapshot().get("retained").is_some());
+        repository.shutdown();
         server.join().unwrap();
     }
 }

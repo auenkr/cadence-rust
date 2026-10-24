@@ -74,7 +74,7 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          rustfmt --edition 2021 --check crates/cadence-service-core/src/openfeature/unleash_engine.rs > fmt.log 2>&1
+          rustfmt --edition 2021 --check crates/cadence-service-core/src/openfeature/unleash_engine.rs crates/cadence-service-core/src/openfeature/unleash.rs > fmt.log 2>&1
           result=$?
           echo "$result" > fmt.exit
           cat fmt.log

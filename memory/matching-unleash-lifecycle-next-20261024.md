@@ -30,3 +30,11 @@ Review found a separate engine bug: raw Murmur3 was compared directly with
 rollout percentage. Go helpers.go uses hash%100+1; worker was notified to fix
 and add differential fixtures before integration. Green package tests without
 these fixtures were insufficient.
+
+## Completion record (2026-10-24)
+
+The lifecycle task is implemented and validated at source SHA
+`cbd1b41ea10403f437e2dbc40ca89f98157bf34d`. Fresh-target service-core and
+workspace CI both passed. See
+[`memory/evidence/matching-unleash-lifecycle-20261024/notes.md`](evidence/matching-unleash-lifecycle-20261024/notes.md)
+for run URLs, source audit, fake-server coverage, and known parity limits.
