@@ -1,0 +1,153 @@
+{
+  "workflowId": "production-crash-recovery-45c7320b-4e6a-448f-ad7a-31995a895096",
+  "runId": "2f38826c-60f0-4a3e-830b-eb07f16aa485",
+  "taskList": "production-crash-45c7320b-4e6a-448f-ad7a-31995a895096",
+  "diagnostics": [
+    {
+      "status": "fulfilled",
+      "value": {
+        "rawHistory": [],
+        "history": {
+          "events": [
+            {
+              "eventId": "1",
+              "eventTime": {
+                "seconds": "1792835499",
+                "nanos": 477734210
+              },
+              "version": "-24",
+              "taskId": "1048581",
+              "workflowExecutionStartedEventAttributes": {
+                "partitionConfig": {},
+                "workflowType": {
+                  "name": "main.EchoWorkflow"
+                },
+                "parentExecutionInfo": null,
+                "taskList": {
+                  "name": "production-crash-45c7320b-4e6a-448f-ad7a-31995a895096",
+                  "kind": "TASK_LIST_KIND_INVALID",
+                  "baseName": ""
+                },
+                "input": {
+                  "data": {
+                    "type": "Buffer",
+                    "data": [
+                      34,
+                      114,
+                      101,
+                      115,
+                      116,
+                      97,
+                      114,
+                      116,
+                      45,
+                      112,
+                      114,
+                      111,
+                      111,
+                      102,
+                      34
+                    ]
+                  }
+                },
+                "executionStartToCloseTimeout": {
+                  "seconds": "300",
+                  "nanos": 0
+                },
+                "taskStartToCloseTimeout": {
+                  "seconds": "10",
+                  "nanos": 0
+                },
+                "continuedExecutionRunId": "",
+                "initiator": "CONTINUE_AS_NEW_INITIATOR_INVALID",
+                "continuedFailure": null,
+                "lastCompletionResult": null,
+                "originalExecutionRunId": "2f38826c-60f0-4a3e-830b-eb07f16aa485",
+                "identity": "",
+                "firstExecutionRunId": "2f38826c-60f0-4a3e-830b-eb07f16aa485",
+                "retryPolicy": null,
+                "attempt": 0,
+                "expirationTime": null,
+                "cronSchedule": "",
+                "firstDecisionTaskBackoff": {
+                  "seconds": "0",
+                  "nanos": 0
+                },
+                "memo": null,
+                "searchAttributes": null,
+                "prevAutoResetPoints": null,
+                "header": null,
+                "firstScheduledTime": null,
+                "requestId": "d2d277e9-655f-4495-977e-9e83489807f3",
+                "cronOverlapPolicy": "CRON_OVERLAP_POLICY_INVALID",
+                "activeClusterSelectionPolicy": null
+              },
+              "attributes": "workflowExecutionStartedEventAttributes"
+            },
+            {
+              "eventId": "2",
+              "eventTime": {
+                "seconds": "1792835499",
+                "nanos": 477757234
+              },
+              "version": "-24",
+              "taskId": "1048582",
+              "decisionTaskScheduledEventAttributes": {
+                "taskList": {
+                  "name": "production-crash-45c7320b-4e6a-448f-ad7a-31995a895096",
+                  "kind": "TASK_LIST_KIND_INVALID",
+                  "baseName": ""
+                },
+                "startToCloseTimeout": {
+                  "seconds": "10",
+                  "nanos": 0
+                },
+                "attempt": 0
+              },
+              "attributes": "decisionTaskScheduledEventAttributes"
+            }
+          ]
+        },
+        "nextPageToken": {
+          "type": "Buffer",
+          "data": []
+        },
+        "archived": false
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "pollers": [],
+        "taskListStatus": {
+          "isolationGroupMetrics": {
+            "zone-b": {
+              "newTasksPerSecond": 0,
+              "pollerCount": "0"
+            },
+            "zone-a": {
+              "newTasksPerSecond": 0,
+              "pollerCount": "0"
+            }
+          },
+          "backlogCountHint": "0",
+          "readLevel": "100000",
+          "ackLevel": "100000",
+          "ratePerSecond": 33333.333333333336,
+          "taskIdBlock": {
+            "startId": "200001",
+            "endId": "300000"
+          },
+          "newTasksPerSecond": 0,
+          "empty": false
+        },
+        "partitionConfig": null,
+        "taskList": {
+          "name": "production-crash-45c7320b-4e6a-448f-ad7a-31995a895096",
+          "kind": "TASK_LIST_KIND_NORMAL",
+          "baseName": ""
+        }
+      }
+    }
+  ]
+}
