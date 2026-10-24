@@ -1013,16 +1013,15 @@ pub async fn run(
                 .map(|service| &service.metrics)
                 .unwrap_or(&default_matching_metrics);
             let mut matching_metrics_runtime = if run_matching {
-                let mut runtime =
-                    crate::matching_metrics_runtime::MatchingMetricsRuntime::new(
-                        matching_metrics_config,
-                        matching_service_config.map(|service| &service.pprof),
-                        cadence_service_core::matching_metrics_migration::MigrationPolicy {
-                            histograms: cfg.histograms.clone(),
-                            gauges: cfg.gauge_migration.clone(),
-                            counters: cfg.counter_migration.clone(),
-                        },
-                    )?;
+                let mut runtime = crate::matching_metrics_runtime::MatchingMetricsRuntime::new(
+                    matching_metrics_config,
+                    matching_service_config.map(|service| &service.pprof),
+                    cadence_service_core::matching_metrics_migration::MigrationPolicy {
+                        histograms: cfg.histograms.clone(),
+                        gauges: cfg.gauge_migration.clone(),
+                        counters: cfg.counter_migration.clone(),
+                    },
+                )?;
                 runtime.start().await?;
                 Some(runtime)
             } else {
