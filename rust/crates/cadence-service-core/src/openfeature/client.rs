@@ -769,11 +769,11 @@ mod tests {
         let _guard = test_lock();
         let (client, _) = new_test_client(
             "test-float",
-            one_flag("testGetFloat64PropertyKey", static_variant(Value::from(3.14))),
+            one_flag("testGetFloat64PropertyKey", static_variant(Value::from(314.0 / 100.0))),
         );
         let (value, err) = client.get_float_value("testGetFloat64PropertyKey", 0.0, &no_filters());
         assert!(err.is_none());
-        assert_eq!(value, 3.14);
+        assert_eq!(value, 314.0 / 100.0);
         deregister_provider();
     }
 
