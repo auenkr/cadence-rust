@@ -1,6 +1,7 @@
 //! Matching-only Go-compatible metric migration policies. Allow-lists mirror go/common/metrics/config.go.
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
+use serde::de::Error as DeError;
 use crate::matching_metrics::{MetricEvent, MetricKind, MetricSink};
 
 pub const HISTOGRAM_MIGRATION_NAMES: &[&str] = &[
@@ -318,17 +319,20 @@ pub const COUNTER_MIGRATION_NAMES: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HistogramMigration { #[serde(default)] pub default: String, #[serde(default)] pub names: BTreeMap<String,bool> }
+pub struct HistogramMigration { #[serde(default, deserialize_with="de_histogram_mode")] pub default: String, #[serde(default)] pub names: BTreeMap<String,bool> }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GaugeMigration { #[serde(default)] pub default: String, #[serde(default)] pub names: BTreeMap<String,bool> }
+pub struct GaugeMigration { #[serde(default, deserialize_with="de_gauge_mode")] pub default: String, #[serde(default)] pub names: BTreeMap<String,bool> }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CounterMigration { #[serde(default)] pub default: String, #[serde(default)] pub names: BTreeMap<String,bool> }
+pub struct CounterMigration { #[serde(default, deserialize_with="de_counter_mode")] pub default: String, #[serde(default)] pub names: BTreeMap<String,bool> }
+fn de_histogram_mode<'de,D:serde::Deserializer<'de>>(d:D)->Result<String,D::Error>{ let v=String::deserialize(d)?; if ["timer","histogram","both"].contains(&v.as_str()){Ok(v)}else{Err(D::Error::custom(format!("unsupported histogram migration mode {v:?}, must be \"timer\", \"histogram\", or \"both\"")))} }
+fn de_gauge_mode<'de,D:serde::Deserializer<'de>>(d:D)->Result<String,D::Error>{ let v=String::deserialize(d)?; if ["timer","gauge","both"].contains(&v.as_str()){Ok(v)}else{Err(D::Error::custom(format!("unsupported gauge migration mode {v:?}, must be \"timer\", \"gauge\", or \"both\"")))} }
+fn de_counter_mode<'de,D:serde::Deserializer<'de>>(d:D)->Result<String,D::Error>{ let v=String::deserialize(d)?; if ["timer","counter","both"].contains(&v.as_str()){Ok(v)}else{Err(D::Error::custom(format!("unsupported counter migration mode {v:?}, must be \"timer\", \"counter\", or \"both\"")))} }
 fn valid(mode: &str, choices: &[&str], kind: &str) -> anyhow::Result<()> { if mode.is_empty() || choices.contains(&mode) { Ok(()) } else { anyhow::bail!("unsupported {kind} migration mode {mode:?}") } }
 fn allow(name: &str, names: &[&str]) -> bool { names.contains(&name) }
 fn pick(name: &str, names: &[&str], overrides: &BTreeMap<String,bool>, default: bool) -> bool { !allow(name,names) || overrides.get(name).copied().unwrap_or(default) }
 impl HistogramMigration { pub fn validate(&self)->anyhow::Result<()> { valid(&self.default,&["timer","histogram","both"],"histogram")?; for n in self.names.keys(){if !allow(n,HISTOGRAM_MIGRATION_NAMES){anyhow::bail!("unknown histogram-migration metric name {n:?}")}} Ok(()) } fn emit(&self,n:&str,hist:bool)->bool { pick(n,HISTOGRAM_MIGRATION_NAMES,&self.names,if hist {self.default=="histogram"||self.default=="both"}else{self.default.is_empty()||self.default=="timer"||self.default=="both"}) } }
 impl GaugeMigration { pub fn validate(&self)->anyhow::Result<()> { valid(&self.default,&["timer","gauge","both"],"gauge")?; for n in self.names.keys(){if !allow(n,GAUGE_MIGRATION_NAMES){anyhow::bail!("unknown gauge-migration metric name {n:?}")}} Ok(()) } fn emit(&self,n:&str,gauge:bool)->bool { pick(n,GAUGE_MIGRATION_NAMES,&self.names,if gauge {self.default=="gauge"||self.default=="both"}else{self.default.is_empty()||self.default=="timer"||self.default=="both"}) } }
-impl CounterMigration { pub fn validate(&self)->anyhow::Result<()> { valid(&self.default,&["timer","counter","both"],"counter")?; for n in self.names.keys(){if !allow(n,COUNTER_MIGRATION_NAMES){anyhow::bail!("unknown counter-migration metric name {n:?}")}} Ok(()) } fn emit(&self,n:&str,counter:bool)->bool { pick(n,COUNTER_MIGRATION_NAMES,&self.names,self.default.is_empty()||self.default=="timer"||self.default=="both" && !counter || self.default=="counter"&&counter || self.default=="both"&&counter) } }
+impl CounterMigration { pub fn validate(&self)->anyhow::Result<()> { valid(&self.default,&["timer","counter","both"],"counter")?; for n in self.names.keys(){if !allow(n,COUNTER_MIGRATION_NAMES){anyhow::bail!("unknown counter-migration metric name {n:?}")}} Ok(()) } fn emit(&self,n:&str,counter:bool)->bool { let emit = match (self.default.as_str(), counter) { ("timer", false) | ("both", false) | ("counter", true) | ("both", true) | ("", false) => true, _ => false }; pick(n,COUNTER_MIGRATION_NAMES,&self.names,emit) } }
 #[derive(Clone, Default)] pub struct MigrationPolicy { pub histograms: HistogramMigration, pub gauges: GaugeMigration, pub counters: CounterMigration }
 impl MigrationPolicy { pub fn validate(&self)->anyhow::Result<()> { self.histograms.validate()?;self.gauges.validate()?;self.counters.validate() } fn accepts(&self,e:&MetricEvent)->bool { match e.kind { MetricKind::Timer => self.histograms.emit(e.name,false)&&self.gauges.emit(e.name,false)&&self.counters.emit(e.name,false), MetricKind::Histogram=>self.histograms.emit(e.name,true), MetricKind::Gauge=>self.gauges.emit(e.name,true), MetricKind::Counter=>self.counters.emit(e.name,true) } } }
 pub struct MigrationMetricSink { inner: Arc<dyn MetricSink>, policy: MigrationPolicy }
@@ -357,6 +361,16 @@ mod sink_tests {
         assert_eq!(recording.events().len(), 2);
         assert_eq!(recording.events()[0].tags.get("domain").unwrap(), "example");
 
+        let rollup = event("persistence_latency_ns_rollup", MetricKind::Histogram);
+        let recording = Arc::new(RecordingMetricSink::default());
+        MigrationMetricSink::new(recording.clone(), MigrationPolicy::default()).record(rollup.clone());
+        assert!(recording.events().is_empty());
+        let mut rollup_policy = MigrationPolicy::default();
+        rollup_policy.histograms.default = "both".into();
+        MigrationMetricSink::new(recording.clone(), rollup_policy).record(rollup.clone());
+        assert_eq!(recording.events(), vec![rollup]);
+        assert!(recording.events()[0].tags.is_empty() || recording.events()[0].tags.contains_key("histogram_scale"));
+
         let mut policy = MigrationPolicy::default();
         policy.histograms.default = "both".into();
         policy.gauges.default = "both".into();
@@ -381,7 +395,33 @@ mod sink_tests {
         assert!(p.validate().is_err());
         let yaml = "histograms: {default: nope}";
         assert!(crate::config::Config::from_yaml(yaml).is_err());
+        assert!(crate::config::Config::from_yaml("histograms: {default: ''}").is_err());
+        assert!(crate::config::Config::from_yaml("gauge-migration: {default: ''}").is_err());
+        assert!(crate::config::Config::from_yaml("counter-migration: {default: ''}").is_err());
         let yaml = "gauge-migration: {names: {bogus_gauge: false}}";
         assert!(crate::config::Config::from_yaml(yaml).is_err());
+    }
+}
+
+#[cfg(test)] mod counter_mode_tests { use super::*; #[test] fn counter_modes_match_go_for_every_kind(){ for (mode,timer,counter) in [("",true,false),("timer",true,false),("counter",false,true),("both",true,true)] { let mut p=CounterMigration::default();p.default=mode.into();p.validate().unwrap(); assert_eq!(p.emit("replication_tasks_fetched_counter",false),timer,"timer mode {mode}");assert_eq!(p.emit("replication_tasks_fetched_counter",true),counter,"counter mode {mode}"); } let mut p=CounterMigration::default();p.default="both".into();p.names.insert("replication_tasks_fetched_counter".into(),false);assert!(!p.emit("replication_tasks_fetched_counter",false));assert!(!p.emit("replication_tasks_fetched_counter",true)); } }
+
+#[cfg(test)]
+mod mode_matrix_tests {
+    use super::*;
+    #[test]
+    fn all_modes_gate_each_migrated_metric_kind() {
+        let names = ["task_latency", "cache_size_gauge", "replication_tasks_fetched_counter"];
+        for mode in ["timer", "histogram", "gauge", "counter", "both"] {
+            let mut h = HistogramMigration::default(); h.default = mode.into();
+            let mut g = GaugeMigration::default(); g.default = mode.into();
+            let mut c = CounterMigration::default(); c.default = mode.into();
+            // The same name must be in the relevant Go allow-list for each predicate.
+            assert_eq!(h.emit(names[0], false), mode == "timer" || mode == "both");
+            assert_eq!(h.emit(names[0], true), mode == "histogram" || mode == "both");
+            assert_eq!(g.emit(names[1], false), mode == "timer" || mode == "both");
+            assert_eq!(g.emit(names[1], true), mode == "gauge" || mode == "both");
+            assert_eq!(c.emit(names[2], false), mode == "timer" || mode == "both");
+            assert_eq!(c.emit(names[2], true), mode == "counter" || mode == "both");
+        }
     }
 }
