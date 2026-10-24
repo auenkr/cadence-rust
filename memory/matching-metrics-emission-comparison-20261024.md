@@ -3,8 +3,8 @@
 ## Final CI evidence
 
 - Branch: `t3/matching-metrics-emission-parity`
-- Source SHA: `765fbe11d8cb1a646125164c9edbd24bd7a38761`
-- CI: https://github.com/auenkr/cadence-rust/actions/runs/40104751037
+- Source SHA: `e9fa52d4362475a6c5f05d2d6b5c4e3a3bb43ea4`
+- CI: https://github.com/auenkr/cadence-rust/actions/runs/40106065466
 - Conclusion: success. The runner selected a fresh target at
   `/home/runner/work/_temp/cargo-target-final`; workspace clippy passed before
   workspace tests. Formatting, definition audit, Go fixture capture, four live
@@ -39,13 +39,14 @@ Matching metric catalog and all 74 Go-to-Rust rollup mappings.
 ## Persistence wrapper comparison
 
 The Go persistence capture invokes `metered.NewTaskManager` backed by a small
-deterministic `TaskManager` implementation. It performs one successful empty
-`GetTasks` and one BadRequest failure. The Rust test calls the production
+deterministic `TaskManager` implementation. It performs an empty success, a
+one-row success, and a BadRequest failure. The Rust test calls the production
 `limit_task_store` wrapper backed by a deterministic `MatchingTaskStore`; the
 wrapper records request, latency, response, error-class, and root rollup
 emissions through the configured `MigrationMetricSink`. The two generated
-snapshots each contain eight series and match on names, kinds, and complete
-tags. The snapshots are `go-persistence-wrapper.json` and
+snapshots each contain nine series and match on names, kinds, and complete
+tags, including the successful response-row histogram. The snapshots are
+`go-persistence-wrapper.json` and
 `rust-persistence-wrapper.json` in the artifact.
 
 The first live wrapper comparison exposed a real mismatch: Go persistence root
@@ -88,5 +89,7 @@ a claim that every runtime branch of Matching has been exercised.
 Earlier attempts on this branch failed before the final successful run:
 `40090929433` failed the persistence scope fixture, `40091471559` found the
 rollup tag mismatch and fixture scope regressions, `40091983545` found a test
-fixture Arc type error, and `40104173563` found one remaining unit-test scope
-expectation. All were corrected before the successful run recorded above.
+fixture Arc type error, `40104173563` found one remaining unit-test scope
+expectation, and `40105523745` showed the Go fixture had not called its failure
+case after adding the response row. All were corrected before the successful
+run recorded above.
