@@ -16,7 +16,7 @@ fn file_based_oracle_poll_reload_observes_rewritten_file() {
     std::fs::write(&path, "testGetIntPropertyKey:\n- value: 2\n").unwrap();
     // Go's client keeps the same instance and must surface value 2 after a poll.
     let value: i64 = serde_json::from_slice(
-        &overlay.property_values("testGetIntPropertyKey")[0]
+        &overlay.property_values("testGetIntPropertyKey").snapshot_values()[0]
             .value
             .as_ref()
             .unwrap()

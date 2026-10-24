@@ -8,6 +8,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use cadence_api::admin::{DynamicConfigFilter, DynamicConfigValue};
+use cadence_persistence::dynamic_config::{
+    PropertyValues, RuntimePropertyProvider, RuntimePropertyRead,
+};
 
 fn yaml_value_to_json(value: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
     Ok(match value {
@@ -16,7 +19,10 @@ fn yaml_value_to_json(value: &serde_yaml::Value) -> anyhow::Result<serde_json::V
         serde_yaml::Value::Number(value) => serde_json::to_value(value)?,
         serde_yaml::Value::String(value) => serde_json::Value::String(value.clone()),
         serde_yaml::Value::Sequence(values) => serde_json::Value::Array(
-            values.iter().map(yaml_value_to_json).collect::<anyhow::Result<_>>()?,
+            values
+                .iter()
+                .map(yaml_value_to_json)
+                .collect::<anyhow::Result<_>>()?,
         ),
         serde_yaml::Value::Mapping(values) => {
             let mut output = serde_json::Map::new();
@@ -32,11 +38,11 @@ fn yaml_value_to_json(value: &serde_yaml::Value) -> anyhow::Result<serde_json::V
     })
 }
 
-
 #[derive(Debug, Clone, Default)]
 pub struct DynamicConfigOverlay {
     normal: HashMap<String, Vec<DynamicConfigValue>>,
     operational: HashMap<String, Vec<DynamicConfigValue>>,
+    runtime_provider: Option<Arc<dyn RuntimePropertyProvider>>,
 }
 
 fn filters_match(value: &DynamicConfigValue, filters: &[DynamicConfigFilter]) -> bool {
@@ -61,7 +67,9 @@ impl DynamicConfigOverlay {
     pub fn from_config_store(snapshot: &cadence_persistence::config_store::Snapshot) -> Self {
         let mut overlay = Self::default();
         for entry in snapshot.entries.iter().flatten() {
-            overlay.normal.insert(entry.name.clone(), entry.values.clone());
+            overlay
+                .normal
+                .insert(entry.name.clone(), entry.values.clone());
         }
         overlay
     }
@@ -74,7 +82,9 @@ impl DynamicConfigOverlay {
         // Go's yaml.Unmarshal accepts an empty document or a root `null` as
         // an empty/nil map.
         let Some(mapping) = root.as_mapping() else {
-            if root.is_null() { return Ok(Self::default()); }
+            if root.is_null() {
+                return Ok(Self::default());
+            }
             anyhow::bail!("dynamic config root must be a mapping");
         };
         let mut overlay = Self::default();
@@ -83,7 +93,10 @@ impl DynamicConfigOverlay {
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("dynamic config keys must be strings"))?;
             let Some(entries) = entries.as_sequence() else {
-                if entries.is_null() { overlay.normal.insert(name.to_string(), Vec::new()); continue; }
+                if entries.is_null() {
+                    overlay.normal.insert(name.to_string(), Vec::new());
+                    continue;
+                }
                 anyhow::bail!("dynamic config {name:?} must contain a list");
             };
             let mut values = Vec::with_capacity(entries.len());
@@ -98,28 +111,33 @@ impl DynamicConfigOverlay {
                 let raw_value = fields.get(&value_key).unwrap_or(&null_value);
                 let data = serde_json::to_vec(&yaml_value_to_json(raw_value)?)?;
                 let mut filters = Vec::new();
-                if let Some(constraints) = fields.get(serde_yaml::Value::String("constraints".into())) {
-                    if constraints.is_null() { /* Go treats YAML null as a nil map. */ }
-                    else {
-                    let constraints = constraints.as_mapping().ok_or_else(|| {
-                        anyhow::anyhow!("constraints for {name:?} must be a mapping")
-                    })?;
-                    for (filter_name, filter_value) in constraints {
-                        let filter_name = filter_name
-                            .as_str()
-                            .ok_or_else(|| anyhow::anyhow!("constraint names must be strings"))?;
-                        filters.push(DynamicConfigFilter {
-                            name: filter_name.to_string(),
-                            value: Some(cadence_api::types::DataBlob {
-                                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
-                                // Go does not recursively convert constraints.
-                                // A nested non-string map key therefore stays
-                                // an unusable constraint without invalidating
-                                // the whole file snapshot.
-                                data: serde_json::to_vec(&yaml_value_to_json(filter_value).unwrap_or(serde_json::Value::Null))?,
-                            }),
-                        });
-                    }
+                if let Some(constraints) =
+                    fields.get(serde_yaml::Value::String("constraints".into()))
+                {
+                    if constraints.is_null() { /* Go treats YAML null as a nil map. */
+                    } else {
+                        let constraints = constraints.as_mapping().ok_or_else(|| {
+                            anyhow::anyhow!("constraints for {name:?} must be a mapping")
+                        })?;
+                        for (filter_name, filter_value) in constraints {
+                            let filter_name = filter_name.as_str().ok_or_else(|| {
+                                anyhow::anyhow!("constraint names must be strings")
+                            })?;
+                            filters.push(DynamicConfigFilter {
+                                name: filter_name.to_string(),
+                                value: Some(cadence_api::types::DataBlob {
+                                    encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                                    // Go does not recursively convert constraints.
+                                    // A nested non-string map key therefore stays
+                                    // an unusable constraint without invalidating
+                                    // the whole file snapshot.
+                                    data: serde_json::to_vec(
+                                        &yaml_value_to_json(filter_value)
+                                            .unwrap_or(serde_json::Value::Null),
+                                    )?,
+                                }),
+                            });
+                        }
                     }
                 }
                 values.push(DynamicConfigValue {
@@ -134,7 +152,6 @@ impl DynamicConfigOverlay {
         }
         Ok(overlay)
     }
-
 
     fn map(&self, operational: bool) -> &HashMap<String, Vec<DynamicConfigValue>> {
         if operational {
@@ -160,12 +177,26 @@ impl DynamicConfigOverlay {
         name: &str,
         filters: &[DynamicConfigFilter],
     ) -> Option<DynamicConfigValue> {
-        self.map(operational).get(name)?.iter().find(|v| filters_match(v, filters)).cloned()
+        self.map(operational)
+            .get(name)?
+            .iter()
+            .find(|v| filters_match(v, filters))
+            .cloned()
     }
 
     /// Ordered normal config entries for runtime property resolution.
-    pub fn property_values(&self, name: &str) -> &[DynamicConfigValue] {
-        self.normal.get(name).map(Vec::as_slice).unwrap_or(&[])
+    pub fn property_values(&self, name: &str) -> PropertyValues {
+        PropertyValues::snapshot(self.normal.get(name).cloned().unwrap_or_default()).with_runtime(
+            self.runtime_provider
+                .as_ref()
+                .map(|provider| RuntimePropertyRead::new(name, provider.clone())),
+        )
+    }
+
+    /// Enable live typed reads for OpenFeature while retaining ordered
+    /// snapshot behavior for file and config-store sources.
+    pub fn set_runtime_provider(&mut self, provider: Option<Arc<dyn RuntimePropertyProvider>>) {
+        self.runtime_provider = provider;
     }
 
     /// Replace the value list, mirroring the config-store client's update.
@@ -178,7 +209,9 @@ impl DynamicConfigOverlay {
     pub fn restore(&mut self, operational: bool, name: &str, filters: &[DynamicConfigFilter]) {
         if let Some(values) = self.map_mut(operational).get_mut(name) {
             values.retain(|v| {
-                if filters.is_empty() { return !v.filters.is_empty(); }
+                if filters.is_empty() {
+                    return !v.filters.is_empty();
+                }
                 v.filters.is_empty() || !filters_match(v, filters)
             });
         }
@@ -191,8 +224,7 @@ impl DynamicConfigOverlay {
         operational: bool,
         name: &str,
     ) -> Vec<cadence_api::admin::DynamicConfigEntry> {
-        self
-            .map(operational)
+        self.map(operational)
             .iter()
             .filter(|(key, _)| name.is_empty() || *key == name)
             .map(|(key, values)| cadence_api::admin::DynamicConfigEntry {
@@ -208,8 +240,7 @@ impl DynamicConfigOverlay {
 #[derive(Debug, Clone, Default)]
 pub struct AdminState {
     pub dynamic_config: Arc<Mutex<DynamicConfigOverlay>>,
-    pub custom_search_attributes:
-        Arc<Mutex<HashMap<String, cadence_api::enums::IndexedValueType>>>,
+    pub custom_search_attributes: Arc<Mutex<HashMap<String, cadence_api::enums::IndexedValueType>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -305,13 +336,11 @@ pub async fn delete_workflow(
             })
         }
         Err(cadence_persistence::WorkflowMutationError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
-            error_response(
-                "WorkflowExecutionAlreadyCompletedError",
-                StatusCode::BAD_REQUEST,
-                error.message,
-            )
-        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => error_response(
+            "WorkflowExecutionAlreadyCompletedError",
+            StatusCode::BAD_REQUEST,
+            error.message,
+        ),
     }
 }
 
@@ -323,12 +352,12 @@ pub async fn refresh_workflow_tasks(
 ) -> Response {
     // Go resolves the domain by name, falling back to the UUID.
     let domain = if req.domain.is_empty() {
-        match state.domains.describe(
-            &cadence_api::service_types::DescribeDomainRequest {
+        match state
+            .domains
+            .describe(&cadence_api::service_types::DescribeDomainRequest {
                 name: None,
                 uuid: Some(req.domain_id.clone()),
-            },
-        ) {
+            }) {
             Ok(desc) => desc.domain_info.map(|i| i.name).unwrap_or_default(),
             Err(error) => return entity_not_exists(error),
         }
@@ -352,13 +381,11 @@ pub async fn refresh_workflow_tasks(
     match executions.refresh_tasks(&domain, &execution) {
         Ok(()) => ok_json(cadence_api::admin::RefreshWorkflowTasksResponse {}),
         Err(cadence_persistence::WorkflowMutationError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
-            error_response(
-                "WorkflowExecutionAlreadyCompletedError",
-                StatusCode::BAD_REQUEST,
-                error.message,
-            )
-        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => error_response(
+            "WorkflowExecutionAlreadyCompletedError",
+            StatusCode::BAD_REQUEST,
+            error.message,
+        ),
     }
 }
 
@@ -410,9 +437,7 @@ pub async fn get_dynamic_config(
     }
     let overlay = state.admin.dynamic_config.lock().expect("admin lock");
     match overlay.get(false, &req.config_name, &req.filters) {
-        Some(entry) => ok_json(cadence_api::admin::GetDynamicConfigResponse {
-            value: entry.value,
-        }),
+        Some(entry) => ok_json(cadence_api::admin::GetDynamicConfigResponse { value: entry.value }),
         None => entity_not_exists(cadence_api::errors::EntityNotExistsError::new(format!(
             "Dynamic config {:?} does not have a value for the given filters.",
             req.config_name
@@ -477,9 +502,7 @@ pub async fn get_operational_dynamic_config(
     }
     let overlay = state.admin.dynamic_config.lock().expect("admin lock");
     match overlay.get(true, &req.config_name, &req.filters) {
-        Some(entry) => ok_json(cadence_api::admin::GetDynamicConfigResponse {
-            value: entry.value,
-        }),
+        Some(entry) => ok_json(cadence_api::admin::GetDynamicConfigResponse { value: entry.value }),
         None => entity_not_exists(cadence_api::errors::EntityNotExistsError::new(format!(
             "Dynamic config {:?} does not have a value for the given filters.",
             req.config_name
@@ -565,20 +588,16 @@ pub async fn reapply_events(
         serde_json::from_slice(&blob.data).unwrap_or_default();
     let signals: Vec<_> = events
         .into_iter()
-        .filter(|e| {
-            e.event_type == Some(cadence_api::enums::EventType::WorkflowExecutionSignaled)
-        })
+        .filter(|e| e.event_type == Some(cadence_api::enums::EventType::WorkflowExecutionSignaled))
         .collect();
     match executions.reapply_signals(&req.domain, &execution.workflow_id, signals) {
         Ok(()) => ok_json(cadence_api::admin::ReapplyEventsResponse {}),
         Err(cadence_persistence::WorkflowMutationError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
-            error_response(
-                "WorkflowExecutionAlreadyCompletedError",
-                StatusCode::BAD_REQUEST,
-                error.message,
-            )
-        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => error_response(
+            "WorkflowExecutionAlreadyCompletedError",
+            StatusCode::BAD_REQUEST,
+            error.message,
+        ),
     }
 }
 
@@ -671,10 +690,14 @@ pub async fn resend_replication_tasks(
     Json(req): Json<cadence_api::admin::ResendReplicationTasksRequest>,
 ) -> Response {
     if req.domain_id.is_empty() || req.workflow_id.is_empty() || req.run_id.is_empty() {
-        return bad_request(BadRequestError::new("Workflow execution is not set on request."));
+        return bad_request(BadRequestError::new(
+            "Workflow execution is not set on request.",
+        ));
     }
     if req.remote_cluster.is_empty() {
-        return bad_request(BadRequestError::new("Remote cluster is not set on request."));
+        return bad_request(BadRequestError::new(
+            "Remote cluster is not set on request.",
+        ));
     }
     if req.remote_cluster != state.current_cluster_name {
         return bad_request(BadRequestError::new(format!(
@@ -691,7 +714,9 @@ pub async fn get_cross_cluster_tasks(
     Json(req): Json<cadence_api::admin::GetCrossClusterTasksRequest>,
 ) -> Response {
     if req.target_cluster.is_empty() {
-        return bad_request(BadRequestError::new("Target cluster is not set on request."));
+        return bad_request(BadRequestError::new(
+            "Target cluster is not set on request.",
+        ));
     }
     ok_json(serde_json::json!({ "tasksByShard": {}, "failedCauseByShard": {} }))
 }
@@ -702,7 +727,9 @@ pub async fn respond_cross_cluster_tasks_completed(
     Json(req): Json<cadence_api::admin::RespondCrossClusterTasksCompletedRequest>,
 ) -> Response {
     if req.target_cluster.is_empty() {
-        return bad_request(BadRequestError::new("Target cluster is not set on request."));
+        return bad_request(BadRequestError::new(
+            "Target cluster is not set on request.",
+        ));
     }
     ok_json(cadence_api::admin::RespondCrossClusterTasksCompletedResponse {})
 }
@@ -734,9 +761,7 @@ pub async fn describe_history_host(
 }
 
 /// Single-host shard distribution: every shard maps to this host.
-pub async fn describe_shard_distribution(
-    State(state): State<StdArc<AppState>>,
-) -> Response {
+pub async fn describe_shard_distribution(State(state): State<StdArc<AppState>>) -> Response {
     let count = shard_count(&state);
     let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
     ok_json(cadence_api::admin::DescribeShardDistributionResponse {
@@ -809,8 +834,7 @@ pub async fn describe_queue(
     if req.task_type.is_none() {
         return bad_request(BadRequestError::new("TaskType is not set on request."));
     }
-    let (decisions, activities, timers, backoffs, schedules) =
-        state.executions.queue_depths();
+    let (decisions, activities, timers, backoffs, schedules) = state.executions.queue_depths();
     let states = vec![
         format!("{{\"queue\":\"decision\",\"pending\":{decisions}}}"),
         format!("{{\"queue\":\"activity\",\"pending\":{activities}}}"),
@@ -850,9 +874,7 @@ pub async fn get_workflow_execution_raw_history(
         match executions.mutable_state_view(&req.domain, &execution) {
             Ok(view) => match view.version_histories {
                 Some(vh) => vh,
-                None => {
-                    return bad_request(BadRequestError::new("Invalid version histories."))
-                }
+                None => return bad_request(BadRequestError::new("Invalid version histories.")),
             },
             Err(e) => return entity_not_exists(e),
         }
@@ -886,11 +908,13 @@ pub async fn get_workflow_execution_raw_history(
 
     // Exclusive-exclusive empty range check.
     if req.start_event_id.unwrap_or(0) + 1 == req.end_event_id.unwrap_or(0) {
-        return ok_json(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
-            next_page_token: Vec::new(),
-            history_batches: vec![],
-            version_history: Some(target_history),
-        });
+        return ok_json(
+            cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
+                next_page_token: Vec::new(),
+                history_batches: vec![],
+                version_history: Some(target_history),
+            },
+        );
     }
 
     match executions.raw_history(
@@ -923,20 +947,24 @@ pub async fn get_workflow_execution_raw_history(
                 };
                 new_token.to_bytes().unwrap_or_default()
             };
-            ok_json(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
-                next_page_token,
-                history_batches: vec![batch],
-                version_history: Some(target_history),
-            })
+            ok_json(
+                cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
+                    next_page_token,
+                    history_batches: vec![batch],
+                    version_history: Some(target_history),
+                },
+            )
         }
         Err(e) => {
             // Go returns empty response on EntityNotExists from DB.
             let _ = e;
-            ok_json(cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
-                next_page_token: Vec::new(),
-                history_batches: vec![],
-                version_history: Some(target_history),
-            })
+            ok_json(
+                cadence_api::admin::GetWorkflowExecutionRawHistoryV2Response {
+                    next_page_token: Vec::new(),
+                    history_batches: vec![],
+                    version_history: Some(target_history),
+                },
+            )
         }
     }
 }
@@ -995,20 +1023,16 @@ pub async fn maintain_corrupt_workflow(
             })
         }
         Err(cadence_persistence::WorkflowMutationError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
-            error_response(
-                "WorkflowExecutionAlreadyCompletedError",
-                StatusCode::BAD_REQUEST,
-                error.message,
-            )
-        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => error_response(
+            "WorkflowExecutionAlreadyCompletedError",
+            StatusCode::BAD_REQUEST,
+            error.message,
+        ),
     }
 }
 
 /// Read the cluster-global isolation groups.
-pub async fn get_global_isolation_groups(
-    State(state): State<StdArc<AppState>>,
-) -> Response {
+pub async fn get_global_isolation_groups(State(state): State<StdArc<AppState>>) -> Response {
     ok_json(cadence_api::admin::GetGlobalIsolationGroupsResponse {
         isolation_groups: state.domains.global_isolation_groups(),
     })
@@ -1082,10 +1106,10 @@ pub async fn update_domain_async_workflow_configuration(
     if req.domain.is_empty() {
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
-    match state.domains.update_domain_async_workflow_config(
-        &req.domain,
-        req.configuration,
-    ) {
+    match state
+        .domains
+        .update_domain_async_workflow_config(&req.domain, req.configuration)
+    {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse {}),
         Err(e) => entity_not_exists(e),
     }
@@ -1112,10 +1136,13 @@ mod tests {
             }]),
         };
         let overlay = DynamicConfigOverlay::from_config_store(&snapshot);
-        assert_eq!(overlay.property_values("k").len(), 2);
-        assert!(DynamicConfigOverlay::from_config_store(&Snapshot::default())
-            .property_values("k")
-            .is_empty());
+        assert_eq!(overlay.property_values("k").snapshot_values().len(), 2);
+        assert!(
+            DynamicConfigOverlay::from_config_store(&Snapshot::default())
+                .property_values("k")
+                .snapshot_values()
+                .is_empty()
+        );
     }
 
     use super::*;
@@ -1148,7 +1175,8 @@ mod tests {
         ));
         std::fs::write(&path, "test.key:\n  - value: fallback\n  - value: constrained\n    constraints:\n      domainName: sample\n").unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
-        let values = overlay.property_values("test.key");
+        let property_values = overlay.property_values("test.key");
+        let values = property_values.snapshot_values();
         assert_eq!(values.len(), 2);
         assert_eq!(
             serde_json::from_slice::<String>(&values[0].value.as_ref().unwrap().data).unwrap(),
@@ -1169,41 +1197,105 @@ mod tests {
 
     #[test]
     fn file_based_yaml_matches_go_null_and_map_key_conversion() {
-        let path = std::env::temp_dir().join(format!("cadence-dynamic-config-null-{}.yaml", std::process::id()));
-        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-null.yaml")).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "cadence-dynamic-config-null-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            include_str!("../tests/fixtures/dynamic-config-go-null.yaml"),
+        )
+        .unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
         for key in ["missingValue", "explicitNull"] {
-            let value = overlay.property_values(key)[0].value.as_ref().unwrap();
-            assert_eq!(serde_json::from_slice::<serde_json::Value>(&value.data).unwrap(), serde_json::Value::Null);
+            let property_values = overlay.property_values(key);
+            let value = property_values.snapshot_values()[0].value.as_ref().unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&value.data).unwrap(),
+                serde_json::Value::Null
+            );
         }
-        assert!(overlay.property_values("nullConstraints")[0].filters.is_empty());
-        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-null-list.yaml")).unwrap();
+        assert!(
+            overlay.property_values("nullConstraints").snapshot_values()[0]
+                .filters
+                .is_empty()
+        );
+        std::fs::write(
+            &path,
+            include_str!("../tests/fixtures/dynamic-config-go-null-list.yaml"),
+        )
+        .unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
-        assert!(overlay.property_values("emptyValues").is_empty());
-        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-constraint-key.yaml")).unwrap();
-        assert!(DynamicConfigOverlay::from_file(&path).is_ok(), "Go does not recursively convert constraint values");
-        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-integer-key.yaml")).unwrap();
-        assert!(DynamicConfigOverlay::from_file(&path).unwrap_err().to_string().contains("not a string"));
-        std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-nested-boolean-key.yaml")).unwrap();
-        assert!(DynamicConfigOverlay::from_file(&path).unwrap_err().to_string().contains("not a string"));
+        assert!(overlay
+            .property_values("emptyValues")
+            .snapshot_values()
+            .is_empty());
+        std::fs::write(
+            &path,
+            include_str!("../tests/fixtures/dynamic-config-go-nested-constraint-key.yaml"),
+        )
+        .unwrap();
+        assert!(
+            DynamicConfigOverlay::from_file(&path).is_ok(),
+            "Go does not recursively convert constraint values"
+        );
+        std::fs::write(
+            &path,
+            include_str!("../tests/fixtures/dynamic-config-go-nested-integer-key.yaml"),
+        )
+        .unwrap();
+        assert!(DynamicConfigOverlay::from_file(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("not a string"));
+        std::fs::write(
+            &path,
+            include_str!("../tests/fixtures/dynamic-config-go-nested-boolean-key.yaml"),
+        )
+        .unwrap();
+        assert!(DynamicConfigOverlay::from_file(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("not a string"));
         std::fs::remove_file(path).unwrap();
-        let empty_path = std::env::temp_dir().join(format!("cadence-dynamic-config-empty-{}.yaml", std::process::id()));
-        std::fs::write(&empty_path, include_str!("../tests/fixtures/dynamic-config-go-empty.yaml")).unwrap();
-        assert!(DynamicConfigOverlay::from_file(&empty_path).unwrap().property_values("absent").is_empty());
+        let empty_path = std::env::temp_dir().join(format!(
+            "cadence-dynamic-config-empty-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &empty_path,
+            include_str!("../tests/fixtures/dynamic-config-go-empty.yaml"),
+        )
+        .unwrap();
+        assert!(DynamicConfigOverlay::from_file(&empty_path)
+            .unwrap()
+            .property_values("absent")
+            .snapshot_values()
+            .is_empty());
         std::fs::remove_file(empty_path).unwrap();
     }
 
     #[test]
     fn parses_the_go_filebased_client_fixture() {
-        let path = std::env::temp_dir().join(format!("cadence-go-dynamic-config-{}.yaml", std::process::id()));
-        std::fs::write(&path, include_str!("../../../../go/common/dynamicconfig/config/testConfig.yaml")).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "cadence-go-dynamic-config-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            include_str!("../../../../go/common/dynamicconfig/config/testConfig.yaml"),
+        )
+        .unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
-        let values = overlay.property_values("testGetBoolPropertyKey");
+        let property_values = overlay.property_values("testGetBoolPropertyKey");
+        let values = property_values.snapshot_values();
         assert_eq!(values.len(), 3);
         assert!(!serde_json::from_slice::<bool>(&values[0].value.as_ref().unwrap().data).unwrap());
         assert_eq!(values[1].filters[0].name, "domainName");
-        let attributes = overlay.property_values("frontend.validSearchAttributes");
-        let json: serde_json::Value = serde_json::from_slice(&attributes[0].value.as_ref().unwrap().data).unwrap();
+        let property_attributes = overlay.property_values("frontend.validSearchAttributes");
+        let attributes = property_attributes.snapshot_values();
+        let json: serde_json::Value =
+            serde_json::from_slice(&attributes[0].value.as_ref().unwrap().data).unwrap();
         assert_eq!(json["DomainID"], 1);
         std::fs::remove_file(path).unwrap();
     }

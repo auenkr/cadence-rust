@@ -49,8 +49,19 @@ fn dynamic_bool_property(
     let Ok(overlay) = overlay.lock() else {
         return default;
     };
-    overlay
-        .property_values(name)
+    let values = overlay.property_values(name);
+    if let Some(result) = values.evaluate(
+        cadence_persistence::dynamic_config::RuntimePropertyType::Boolean,
+        serde_json::Value::Bool(default),
+        &std::collections::BTreeMap::new(),
+    ) {
+        return result
+            .ok()
+            .and_then(|value| value.as_bool())
+            .unwrap_or(default);
+    }
+    values
+        .snapshot_values()
         .iter()
         .filter(|value| value.filters.is_empty())
         .filter_map(|value| value.value.as_ref())
@@ -60,9 +71,7 @@ fn dynamic_bool_property(
         .unwrap_or(default)
 }
 
-fn history_named_port(
-    grpc_outbound: bool,
-) -> crate::matching_history_peer_resolver::NamedPort {
+fn history_named_port(grpc_outbound: bool) -> crate::matching_history_peer_resolver::NamedPort {
     if grpc_outbound {
         crate::matching_history_peer_resolver::NamedPort::Grpc
     } else {
@@ -78,8 +87,19 @@ fn dynamic_i64_property(
     let Ok(overlay) = overlay.lock() else {
         return default;
     };
-    overlay
-        .property_values(name)
+    let values = overlay.property_values(name);
+    if let Some(result) = values.evaluate(
+        cadence_persistence::dynamic_config::RuntimePropertyType::Integer,
+        serde_json::Value::from(default),
+        &std::collections::BTreeMap::new(),
+    ) {
+        return result
+            .ok()
+            .and_then(|value| value.as_i64())
+            .unwrap_or(default);
+    }
+    values
+        .snapshot_values()
         .iter()
         .filter(|value| value.filters.is_empty())
         .filter_map(|value| value.value.as_ref())
@@ -515,16 +535,13 @@ pub async fn run(
             let cfg = match config {
                 Some(path) if std::path::Path::new(&path).is_dir() => {
                     // Go `--config <dir> --env --zone` layered loader.
-                    let var = |names: &[&str]| {
-                        names.iter().find_map(|name| std::env::var(name).ok())
-                    };
+                    let var =
+                        |names: &[&str]| names.iter().find_map(|name| std::env::var(name).ok());
                     let env = env
                         .or_else(|| var(&["CADENCE_ENVIRONMENT"]))
                         .unwrap_or_default();
                     let zone = zone
-                        .or_else(|| {
-                            var(&["CADENCE_AVAILABILITY_ZONE", "CADENCE_AVAILABILTY_ZONE"])
-                        })
+                        .or_else(|| var(&["CADENCE_AVAILABILITY_ZONE", "CADENCE_AVAILABILTY_ZONE"]))
                         .unwrap_or_default();
                     config::Config::from_layers(&path, &env, &zone)?
                 }
@@ -538,6 +555,9 @@ pub async fn run(
                 .unwrap_or(std::env::current_dir()?);
             let dynamic_config_provider = cfg.dynamic_config_provider();
             let mut openfeature_lifecycle: Option<OpenFeatureLifecycle> = None;
+            let mut runtime_property_provider: Option<
+                std::sync::Arc<dyn cadence_persistence::dynamic_config::RuntimePropertyProvider>,
+            > = None;
             let dynamic_config_poll = match &dynamic_config_provider {
                 config::DynamicConfigProvider::FileBased(provider)
                     if !provider.poll_interval.is_empty() =>
@@ -623,9 +643,7 @@ pub async fn run(
                 }
                 config::DynamicConfigProvider::OpenFeature(feature) => {
                     use cadence_service_core::openfeature::{
-                        client::register_provider,
-                        provider,
-                        unleash,
+                        client::register_provider, provider, unleash,
                     };
                     // Go's server binary blank-imports this plugin, whose init
                     // function registers the constructor before fx startup.
@@ -635,6 +653,14 @@ pub async fn run(
                     eprintln!("initialising OpenFeature dynamic config client");
                     register_provider(&feature.provider_name, feature.provider.as_ref())?;
                     openfeature_lifecycle = Some(OpenFeatureLifecycle);
+                    runtime_property_provider = Some(
+                        cadence_service_core::openfeature::runtime::OpenFeatureRuntimeProvider::with_cluster_name(
+                            cfg.cluster_metadata
+                                .as_ref()
+                                .map(|metadata| metadata.current_cluster_name.clone())
+                                .unwrap_or_default(),
+                        ),
+                    );
                     None
                 }
             };
@@ -721,6 +747,14 @@ pub async fn run(
             } else {
                 false
             };
+            if let Some(provider) = runtime_property_provider {
+                state
+                    .admin
+                    .dynamic_config
+                    .lock()
+                    .expect("dynamic config lock")
+                    .set_runtime_provider(Some(provider));
+            }
             // Go reads these once while constructing the clients
             // (persistence/client/factory.go:195-199, client/clientfactory.go:183-185,
             // handler/engine.go:1593 for EnableDebugMode at config build).
@@ -741,34 +775,33 @@ pub async fn run(
                     ),
                 )
             };
-            crate::matching_task_info_log::install(crate::matching_task_info_log::TaskInfoLog::new(
-                state.admin.dynamic_config.clone(),
-                debug_mode,
-            ));
-            let matching_member_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let matching_persistence_limiter = if wanted.contains(&service::ServiceName::Matching)
-                && !embedded_development
-            {
-                Some(crate::matching_persistence_limiter::MatchingPersistenceLimiter::new(
+            crate::matching_task_info_log::install(
+                crate::matching_task_info_log::TaskInfoLog::new(
                     state.admin.dynamic_config.clone(),
-                    matching_member_count.clone(),
-                ))
-            } else {
-                None
-            };
+                    debug_mode,
+                ),
+            );
+            let matching_member_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let matching_persistence_limiter =
+                if wanted.contains(&service::ServiceName::Matching) && !embedded_development {
+                    Some(
+                        crate::matching_persistence_limiter::MatchingPersistenceLimiter::new(
+                            state.admin.dynamic_config.clone(),
+                            matching_member_count.clone(),
+                        ),
+                    )
+                } else {
+                    None
+                };
             if let Some(limiter) = matching_persistence_limiter.as_ref() {
                 // Go constructs semaphore persistence from the configured
                 // default datastore and shares that datastore's limiter with
                 // task and domain persistence.
-                let store = crate::matching_task_store::open_configured_semaphore_store(
-                    &cfg.persistence,
-                )
-                .await?;
+                let store =
+                    crate::matching_task_store::open_configured_semaphore_store(&cfg.persistence)
+                        .await?;
                 state.semaphore_persistence = Some(
-                    crate::matching_persistence::limit_semaphore_store(
-                        store,
-                        limiter.clone(),
-                    ),
+                    crate::matching_persistence::limit_semaphore_store(store, limiter.clone()),
                 );
             }
             state.matching_http_isolated = wanted.contains(&service::ServiceName::Matching)
@@ -984,16 +1017,15 @@ pub async fn run(
                 .map(|service| &service.metrics)
                 .unwrap_or(&default_matching_metrics);
             let mut matching_metrics_runtime = if run_matching {
-                let mut runtime =
-                    crate::matching_metrics_runtime::MatchingMetricsRuntime::new(
-                        matching_metrics_config,
-                        matching_service_config.map(|service| &service.pprof),
-                        cadence_service_core::matching_metrics_migration::MigrationPolicy {
-                            histograms: cfg.histograms.clone(),
-                            gauges: cfg.gauge_migration.clone(),
-                            counters: cfg.counter_migration.clone(),
-                        },
-                    )?;
+                let mut runtime = crate::matching_metrics_runtime::MatchingMetricsRuntime::new(
+                    matching_metrics_config,
+                    matching_service_config.map(|service| &service.pprof),
+                    cadence_service_core::matching_metrics_migration::MigrationPolicy {
+                        histograms: cfg.histograms.clone(),
+                        gauges: cfg.gauge_migration.clone(),
+                        counters: cfg.counter_migration.clone(),
+                    },
+                )?;
                 runtime.start().await?;
                 Some(runtime)
             } else {
@@ -1002,9 +1034,10 @@ pub async fn run(
             let matching_metric_sink = matching_metrics_runtime
                 .as_ref()
                 .map(|runtime| runtime.sink());
-            if let (Some(limiter), Some(sink)) =
-                (matching_persistence_limiter.as_ref(), matching_metric_sink.as_ref())
-            {
+            if let (Some(limiter), Some(sink)) = (
+                matching_persistence_limiter.as_ref(),
+                matching_metric_sink.as_ref(),
+            ) {
                 limiter.with_metric_sink(sink.clone());
             }
             if let Some(limiter) = matching_persistence_limiter.as_ref() {
@@ -1065,7 +1098,9 @@ pub async fn run(
                     Vec::new(),
                 )
                 .with_peer_tls(matching_peer_tls.clone())
-                .with_metrics(matching_metric_sink.clone().unwrap_or_else(|| std::sync::Arc::new(crate::matching_metrics::NoopMetricSink)))
+                .with_metrics(matching_metric_sink.clone().unwrap_or_else(|| {
+                    std::sync::Arc::new(crate::matching_metrics::NoopMetricSink)
+                }))
             });
             let mut matching_membership_lifecycle = matching_ringpop_provider
                 .as_ref()
@@ -1129,9 +1164,9 @@ pub async fn run(
                 .with_tls(history_tls);
                 // Matching's outbound History client shares the service
                 // exporter and root tags with the inbound Matching handlers.
-                let history = matching_metric_sink.as_ref().map_or(history.clone(), |sink| {
-                    history.with_metrics(sink.clone())
-                });
+                let history = matching_metric_sink
+                    .as_ref()
+                    .map_or(history.clone(), |sink| history.with_metrics(sink.clone()));
                 if let Some(provider) = matching_ringpop_provider.as_ref() {
                     let named_port = history_named_port(grpc_outbound);
                     let history_membership = std::sync::Arc::new(
@@ -1206,10 +1241,7 @@ pub async fn run(
                         limiter.clone(),
                     );
                     stores.domain_metadata_source = stores.domain_metadata_source.map(|source| {
-                        crate::matching_persistence::limit_domain_source(
-                            source,
-                            limiter.clone(),
-                        )
+                        crate::matching_persistence::limit_domain_source(source, limiter.clone())
                     });
                 }
                 Some(stores)
@@ -1236,7 +1268,10 @@ pub async fn run(
             } else {
                 None
             };
-            if let (Some(limiter), Some(cache)) = (matching_persistence_limiter.as_ref(), matching_domain_cache.as_ref()) {
+            if let (Some(limiter), Some(cache)) = (
+                matching_persistence_limiter.as_ref(),
+                matching_domain_cache.as_ref(),
+            ) {
                 limiter.with_domain_cache(cache);
             }
             // Explicit production config starts the shared metadata cache and
@@ -1361,7 +1396,8 @@ pub async fn run(
                     "matching.excludeShortLivedTaskListsFromShardManager",
                     true,
                 )
-            }) as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
+            })
+                as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
             if run_matching && !cfg.shard_distributor_matching.namespaces.is_empty() {
                 let membership = matching_membership.clone().ok_or_else(|| {
                     anyhow::anyhow!(
@@ -1434,13 +1470,12 @@ pub async fn run(
                     let matching = matching_tchannel_service.clone();
                     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
                     let task = tokio::spawn(async move {
-                        let result =
-                            crate::tchannel::serve_matching_with_ringpop_listener(
-                                listener,
-                                matching,
-                                ringpop_handler,
-                            )
-                            .await;
+                        let result = crate::tchannel::serve_matching_with_ringpop_listener(
+                            listener,
+                            matching,
+                            ringpop_handler,
+                        )
+                        .await;
                         let _ = done_tx.send(result);
                     });
                     (Some(task), Some(done_rx))
@@ -1507,9 +1542,7 @@ pub async fn run(
                     if run_frontend {
                         app
                     } else {
-                        app.merge(crate::thrift_matching::router(
-                            matching_service.clone(),
-                        ))
+                        app.merge(crate::thrift_matching::router(matching_service.clone()))
                     }
                 }
             } else {
@@ -1667,11 +1700,13 @@ pub async fn run(
                     Ok((name, Ok(()))) => serving_shutdown_errors
                         .push(format!("{name} listener stopped unexpectedly during drain")),
                     Ok((name, Err(error))) => {
-                        serving_shutdown_errors.push(format!("{name} listener failed during drain: {error:#}"));
+                        serving_shutdown_errors
+                            .push(format!("{name} listener failed during drain: {error:#}"));
                     }
                     Err(error) if error.is_cancelled() => {}
-                    Err(error) => serving_shutdown_errors
-                        .push(format!("joining listener task: {error}")),
+                    Err(error) => {
+                        serving_shutdown_errors.push(format!("joining listener task: {error}"))
+                    }
                 }
             }
             if let Some(task) = matching_tchannel_task.take() {
@@ -1871,11 +1906,12 @@ mod matching_http_listener_tests {
         let overlay = std::sync::Arc::new(std::sync::Mutex::new(
             crate::admin::DynamicConfigOverlay::default(),
         ));
-        let selected = || {
-            dynamic_bool_property(overlay.clone(), "system.enableGRPCOutbound", true)
-        };
+        let selected = || dynamic_bool_property(overlay.clone(), "system.enableGRPCOutbound", true);
         assert!(selected(), "Go defaults outbound RPCs to gRPC");
-        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Grpc);
+        assert_eq!(
+            history_named_port(selected()),
+            crate::matching_history_peer_resolver::NamedPort::Grpc
+        );
 
         let json = |value: &[u8]| Some(DataBlob::new(EncodingType::JSON, value.to_vec()));
         let constrained = |value: &[u8]| DynamicConfigValue {
@@ -1889,24 +1925,45 @@ mod matching_http_listener_tests {
             false,
             "system.enableGRPCOutbound",
             vec![
-                DynamicConfigValue { value: json(b"false"), filters: vec![] },
+                DynamicConfigValue {
+                    value: json(b"false"),
+                    filters: vec![],
+                },
                 constrained(b"true"),
             ],
         );
-        assert!(!selected(), "a domain-filtered value is not the startup selector");
-        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Tchannel);
+        assert!(
+            !selected(),
+            "a domain-filtered value is not the startup selector"
+        );
+        assert_eq!(
+            history_named_port(selected()),
+            crate::matching_history_peer_resolver::NamedPort::Tchannel
+        );
 
         overlay.lock().unwrap().update(
             false,
             "system.enableGRPCOutbound",
             vec![
-                DynamicConfigValue { value: json(b"true"), filters: vec![] },
-                DynamicConfigValue { value: json(b"false"), filters: vec![] },
+                DynamicConfigValue {
+                    value: json(b"true"),
+                    filters: vec![],
+                },
+                DynamicConfigValue {
+                    value: json(b"false"),
+                    filters: vec![],
+                },
                 constrained(b"true"),
             ],
         );
-        assert!(!selected(), "the last unfiltered global value selects TChannel");
-        assert_eq!(history_named_port(selected()), crate::matching_history_peer_resolver::NamedPort::Tchannel);
+        assert!(
+            !selected(),
+            "the last unfiltered global value selects TChannel"
+        );
+        assert_eq!(
+            history_named_port(selected()),
+            crate::matching_history_peer_resolver::NamedPort::Tchannel
+        );
     }
 
     #[tokio::test(start_paused = true)]

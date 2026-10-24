@@ -4029,6 +4029,7 @@ async fn matching_rpc_report_limit_does_not_hold_the_admin_overlay() {
                 .try_lock()
                 .expect("poll_rate must release the admin overlay before reporting")
                 .property_values("matching.numTasklistReadPartitions")
+                .snapshot_values()
                 .len() as i64
                 + 2
         }),

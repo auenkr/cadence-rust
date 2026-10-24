@@ -56,6 +56,10 @@ jobs:
           echo "$?" > workspace-format.exit
           exit 0
         continue-on-error: true
+      - name: Check changed Matching runtime formatting
+        working-directory: rust
+        run: |
+          rustfmt --edition 2021 --check crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs
       - name: Clippy
         working-directory: rust
         run: |

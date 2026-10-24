@@ -458,8 +458,7 @@ impl Matching {
                     let values = overlay
                         .lock()
                         .expect("admin lock")
-                        .property_values("matching.numTasklistWritePartitions")
-                        .to_vec();
+                        .property_values("matching.numTasklistWritePartitions");
                     cadence_persistence::dynamic_config::task_list_integer(
                         &values,
                         domain_name_for(&domains, domain_id).as_deref(),
@@ -536,8 +535,7 @@ impl Matching {
                     let values = overlay
                         .lock()
                         .expect("admin lock")
-                        .property_values("matching.qpsTrackerInterval")
-                        .to_vec();
+                        .property_values("matching.qpsTrackerInterval");
                     cadence_persistence::dynamic_config::task_list_duration(
                         &values,
                         domain_name_for(&domains, domain_id).as_deref(),
