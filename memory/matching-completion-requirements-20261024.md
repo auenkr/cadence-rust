@@ -45,3 +45,28 @@ random task list to the secondary. The probe now resolves the partition owner
 and polls that host, preserving the expiry and empty-response assertions and
 recording the owner. `node --check tests/matching-service-compat.cjs` passed.
 This is a fixture correction; a successful rerun is still required.
+
+## Integrated runtime reader checkpoint
+
+Merged `t3/matching-runtime-provider-reads` as `9d8f10768`. Worker source
+`bb08503dc3eded7704410736ba70b86825c5248c` passed package run40086417167 and
+fresh workspace run40086744572. Reconciled the earlier live-reader branch; only
+the explicit-type, owned `PropertyValues` design without Deref was integrated.
+Combined-source fresh CI: https://github.com/auenkr/cadence-rust/actions/runs/40087325751
+(pending when recorded).
+
+Configstore run40086531679 passed sourcee0aeae9e8, with seeded expiry2000ms
+and measured2008ms; compact evidence is now preserved under
+`memory/evidence/matching-configstore-acceptance-20261024/`.
+Shard-distributor run40087044393 tests source14953932f and remains active.
+These mixed runs predate runtime-reader integration and must not establish final
+integrated-source acceptance. Unleash lifecycle and actual metrics comparison
+workers remain active. No local Cargo commands were run.
+
+Rechecked the ignored root-start notification test: its claim that production
+lacks a start-time sender is stale. `matching_registry.rs` starts bounded
+`notify_read_partitions` at root startup (currently around line1526). The ignored
+test itself is still an unimplemented placeholder. Existing mixed partition
+probes do not by themselves prove this specific startup push; retain the need
+for direct startup-notification evidence rather than treating implementation
+inspection as behavioral validation.
