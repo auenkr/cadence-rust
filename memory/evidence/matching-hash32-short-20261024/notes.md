@@ -79,4 +79,12 @@ signed result 801663339 is pinned in the test.
 
 ## CI runs
 
-- (filled in below)
+- Head `4c460760d`, `rust-ci.yml` workflow_dispatch, `package=cadence-common`:
+  https://github.com/auenkr/cadence-rust/actions/runs/40065022399 — **success**.
+  Clippy `-p cadence-common --all-targets -- -D warnings` exit 0. Tests:
+  `membership::fingerprint_tests::go_hash32_matches_go_farm_vectors ... ok`;
+  cadence-common lib `72 passed; 0 failed`.
+- The same-branch push run (`40065018250`) was cancelled by the concurrency group
+  when the dispatch started. It is not evidence.
+- Final head: see the commit that contains this line (the run for it is recorded
+  in the task report, since a notes-only commit changes the head).
