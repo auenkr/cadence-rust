@@ -494,11 +494,6 @@ impl FeatureProvider for UnleashProvider {
                 error: None,
             };
         }
-        self.repository
-            .metrics
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .count(flag, true, Some(&variant.name));
         let payload = variant.payload.value;
         let fallback = default.clone();
         match default {
