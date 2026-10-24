@@ -46,5 +46,23 @@ RUST_LOG=matching::poll=debug flock /tmp/cargo.lock /mnt/storage/service/bin/wor
 
 ## Verification
 
-Build/test/clippy: GitHub Actions `rust-ci.yml` on this branch (run id and result recorded in the commit
-message / PR, not here). No local cargo was run.
+No local cargo was run. Whole-workspace `rust-ci.yml` (`gh workflow run --ref <branch>`, no package input):
+
+| run | head | result |
+| --- | --- | --- |
+| 40066959326 | 087e185bd | failure: clippy passed; `matching_reader::tests::matching_reader_dispatch_success_uses_known_or_default_group` (matching_reader.rs:2232, left 2, right 1) |
+| 40067271889 | 087e185bd | failure: same test, same assertion |
+| 40067459897 | 2e6144d36 (base `origin/matching-longpoll-fix-20261024`, control) | success |
+| 40067739838 | 087e185bd | **success (green, final head)** |
+
+Notes on the failure:
+
+- The same test flaked once before (`memory/evidence/matching-ci-20261023/runs.md`, merge11). It was treated as a flake there too.
+- CI's `Cargo.lock` resolution for this branch only adds packages (`tracing-subscriber` v0.3.23 and its deps:
+  matchers, nu-ansi-term, sharded-slab, thread_local, tracing-log, valuable, lazy_static). No existing package
+  changed version, and the library code under test is identical to the base.
+- The test was not changed. The failure is an ordering race in the test's reader setup, not something this
+  change touches. Fixing it is out of scope for this task.
+- Open question: 2 of 3 runs on this head failed versus 0 of 3 on the base head. Whether that is chance or a
+  runner-image effect is not established. Note that `ubuntu-latest` is migrating to Ubuntu 26 (CI warning on
+  2026-10-24).
