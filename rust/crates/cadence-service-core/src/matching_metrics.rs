@@ -129,14 +129,12 @@ struct GoRollupSink(Arc<dyn MetricSink>);
 impl MetricSink for GoRollupSink {
     fn record(&self, event: MetricEvent) {
         let rollup = crate::matching_metrics_rollup::rollup(event.name).map(|name| {
-            let tags = if event.histogram.is_some() {
-                ["histogram_start", "histogram_end", "histogram_scale"]
-                    .into_iter()
-                    .filter_map(|key| event.tags.get(key).map(|value| (key.to_owned(), value.clone())))
-                    .collect()
-            } else {
-                BTreeMap::new()
-            };
+            let mut tags = BTreeMap::new();
+            for key in ["operation", "histogram_start", "histogram_end", "histogram_scale"] {
+                if let Some(value) = event.tags.get(key) {
+                    tags.insert(key.to_owned(), value.clone());
+                }
+            }
             MetricEvent {
                 name,
                 kind: event.kind,
