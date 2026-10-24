@@ -1,5 +1,8 @@
 name: Matching mixed gate (MySQL, two Rust Matching nodes)
 on:
+  push:
+    branches: [matching-twonode-20261024]
+    paths: ['.github/workflows/matching-mixed-gate.yml', 'rust/**', 'tests/**']
   workflow_dispatch:
     inputs:
       extra_args:
@@ -40,11 +43,14 @@ jobs:
           npm install @grpc/grpc-js@^1.14.6 @grpc/proto-loader@^0.8.1
           echo "NODE_PATH=$RUNNER_TEMP/node-grpc/node_modules" >> "$GITHUB_ENV"
       - name: Gate
+        env:
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+          DEFAULT_ARGS: --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3
         run: |
           git rev-parse HEAD > out/commit.txt
-          echo "tests/gates/run-mysql-lane.sh out/gate $PWD/rust/target/debug/cadence-matching ${{ inputs.extra_args }}" > out/command.txt
+          echo "tests/gates/run-mysql-lane.sh out/gate $PWD/rust/target/debug/cadence-matching ${EXTRA_ARGS:-$DEFAULT_ARGS}" > out/command.txt
           set +e
-          tests/gates/run-mysql-lane.sh out/gate "$PWD/rust/target/debug/cadence-matching" ${{ inputs.extra_args }} > out/gate.log 2>&1
+          tests/gates/run-mysql-lane.sh out/gate "$PWD/rust/target/debug/cadence-matching" ${EXTRA_ARGS:-$DEFAULT_ARGS} > out/gate.log 2>&1
           echo $? > out/gate.exit
           cat out/gate.exit
           tail -60 out/gate.log | cut -c1-300
