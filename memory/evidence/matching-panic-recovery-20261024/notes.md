@@ -70,4 +70,24 @@ active tests with the same intent:
 
 ## CI evidence
 
-(recorded below after the runs)
+Code head: `ee15c99b0dc5d1cea4d532dc2aa7b80cd951edd8`.
+
+- Package `cadence-matching` (`-f package=cadence-matching`): green, run 40065982067. The new tests passed:
+  `grpc_matching::durable_tests::matching_rpc_handler_panic_is_captured_as_go_unknown_error`,
+  `...matching_rpc_membership_loop_panic_ends_loop_without_error`,
+  `...matching_rpc_membership_semaphore_stop_panic_is_contained`, and the `matching_panic::tests::*` cases.
+- Whole workspace (no package input): green, run 40066700904 (the fourth attempt on this head).
+
+Failed attempts on the same head, all in the same flaky reader family and none in the panic path:
+
+| run | scope | failing test (`matching_reader.rs`) |
+|---|---|---|
+| 40065455989 | package | `matching_reader_dispatch_success_uses_known_or_default_group` (`:2232`, left 2, right 1) |
+| 40065788468 | package | `matching_reader_pump_falls_back_to_default_for_unknown_isolation_group` (`:2273`) |
+| 40066168405 | workspace | `matching_reader_dispatch_success_uses_known_or_default_group` |
+| 40066326069 | workspace | `matching_reader_dispatch_success_uses_known_or_default_group` |
+| 40066524647 | workspace | both tests above |
+
+Master's head run 40064723413 (e7285da4f) also fails on `matching_reader_dispatch_success_uses_known_or_default_group`,
+so the flake predates this branch. The test expects task 1 from the `"a"` poller and sometimes gets task 2, which is a
+dispatch-ordering race in the reader. Fixing it is outside this change and was not attempted.
