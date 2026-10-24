@@ -715,7 +715,7 @@ mod tests {
         assert!(ip_match("::ffff:192.0.2.10", "192.0.2.10"));
         assert!(ip_match("::ffff:192.0.2.10", "192.0.2.0/24"));
         assert!(ip_match("192.0.2.10", "::ffff:192.0.2.0/120"));
-        assert!(!ip_match("192.0.2.10", "::ffff:192.0.2.128/120"));
+        assert!(!ip_match("192.0.2.10", "::ffff:192.0.2.128/121"));
     }
 
     #[test]
