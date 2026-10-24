@@ -412,3 +412,36 @@ Counts for the three files in this pass (per Go test function / suite method):
 - Still MISSING: MustOffer (no Rust fn; reader analogs in matching_reader.rs), TestIsolationSyncMatchFailure,
   TestIsolationPollFailure, TestForwardPollError ErrTaskListKind branch, private pollOrForward/poll helpers.
 - Evidence: `memory/evidence/matching-tests-port3-20261024/` (matching-test.log, matching-test.exit).
+
+## Forwarder and matcher coverage re-audit (2026-10-24)
+
+Compared `matcher_test.go` and `forwarder_test.go` against current Rust test bodies before adding
+tests. The port3 “still MISSING” list was stale for the two isolation cases: the matcher tests now
+contain `matching_sync.rs::sync_match_isolation_group_mismatch_does_not_match` (Go
+`TestIsolationSyncMatchFailure`) and `sync_match_invalid_isolation_group_poll_falls_back_to_default_group`
+(Go `TestIsolationPollFailure` observable behavior). The latter explicitly proves the Rust fallback
+to the default channel; Go's error-on-context-expiry is represented by Rust `None` when stopped or
+expired because the Rust poll API returns `Option`, not an error.
+
+Other Go matcher scenarios already asserted in Rust and not duplicated here:
+
+- `TestOffer_RateLimited` / `TestRateLimitHandling`: Rust's matching-level offer path does not own
+  the Go matcher limiter; dispatch admission is covered at the dispatcher/limiter boundary. There is
+  no equivalent `SyncMatcher::offer` throttling branch to port.
+- `TestForwardPollError` `ErrNoParent`: covered by
+  `matching_dispatch.rs::matching_forward_poll_without_parent_waits_locally_and_never_forwards`.
+  `ErrTaskListKind` is a Go forwarder validation that Rust's poll-forward API does not expose; no
+  equivalent error branch exists.
+- `TestOffer_NoTimeoutSyncMatchedNoError`, async/no-wait offers, sync timeout withdrawal, and
+  disconnected/expired poll behavior are covered by the named tests in `matching_sync.rs`.
+- Forwarded task and poll field mapping, remote sync match (including blocking), query forwarding,
+  and parent busy/error behavior are covered by in-process `RecordingParent`/`BusyParent` gRPC tests
+  in `matching_dispatch.rs` and `matching_query_forward_family_tests.rs`.
+
+No production seam or workflow was changed in this re-audit. Genuine remaining matcher gaps are
+architecture-bound: Go `MustOffer` retry-loop cases have no Rust `MustOffer` operation (reader and
+dispatcher use separate behavior), private Go `pollOrForward`/`poll` helpers have no corresponding
+Rust API, `AutoConfigHint` is absent from Rust poll responses, and Go's per-poll cancel-context
+replacement assertion has no distinct Rust context object. No remaining forwarder/matcher test was
+added because the remaining listed candidates either already have matching Rust assertions or test
+Go-only APIs without a Rust behavior branch.
