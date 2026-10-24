@@ -39,7 +39,7 @@ end of this file after the final run.
 |---|---|---|---|
 | TestHandleErrNil (38) | nil error stays nil | grpc_matching.rs error→Status mapping (no nil case) | NOT-ASSESSED |
 | TestHandleErrKnowErrors (48) | known Cadence error types map to their RPC error | grpc.rs:182 `BadRequestError`→invalid_argument; grpc_matching.rs:159 ManagerError mapping | PARTIAL |
-| TestHandleErrUncategorizedError (129) | unknown error becomes internal | none found | MISSING: no test asserts the uncategorized→Internal branch |
+| TestHandleErrUncategorizedError (129) | unknown error becomes internal | grpc_matching.rs::handler_go_tests::matching_handler_uncategorized_error_is_internal (semaphore_status) | PORTED (port2 20261024) |
 
 ### handler/engine_test.go (top-level functions; t.Run subtests inside)
 
@@ -188,7 +188,7 @@ Rust has no separate poller manager struct. Poller bookkeeping is in matching_re
 | Go test (line) | Asserts | Rust equivalent | Status |
 |---|---|---|---|
 | identifier_test.go: TestNewIdentifier (16) | valid/invalid identifiers, string form | matching_semaphore.rs::matching_semaphore_identifier_matches_go_validation | COVERED |
-| identifier_test.go: TestParseRequestOwner (59) | malformed owner → BadRequest | none found in semaphore module | NOT-ASSESSED |
+| identifier_test.go: TestParseRequestOwner (59) | malformed owner → BadRequest | grpc_matching.rs::handler_go_tests::matching_semaphore_parse_request_owner_matches_go | PORTED (port2 20261024) |
 | identifier_test.go: TestRingKey (88) | ring key separates buckets | matching_semaphore.rs::matching_semaphore_ring_key_separates_buckets (PORTED) | PORTED |
 | identifier_test.go: TestIdentifierIsUsableAsAMapKey (101) | hashable map key | matching_semaphore.rs::matching_semaphore_identifier_is_usable_as_a_map_key (PORTED) | PORTED |
 | identifier_test.go: TestLogTags (116) | zap log field tags | none | MISSING: Rust logs via to_log_string; zap tag shape has no Rust analog |
@@ -394,3 +394,10 @@ Counts for the three files in this pass (per Go test function / suite method):
   ports. Each Go subtest should map to a named Rust test with the same scenario.
 - Architecture-only MISSING (no port): panic-recovery tests, Go zap log tags, TaskListString/Display,
   Liveness event loop (no Go daemon in Rust).
+
+## Port2 pass (2026-10-24, branch matching-tests-port2-20261024)
+
+- Ported: TestHandleErrUncategorizedError, TestHandleErrKnowErrors (semaphore error category mapping), TestParseRequestOwner (3 tests, `matching_handler_go_tests.rs`). Evidence: `memory/evidence/matching-tests-port2-20261024/handler-test.{log,exit}` (exit 0).
+- Stale-table note: the semaphore_manager_test.go rows marked MISSING/NOT-ASSESSED above are already ported in `matching_semaphore_parity_tests.rs` (~35 tests: retry, deadline, write-failure, concurrency, late stop). Treat those rows as PORTED.
+- Not done this pass: matcher remote-forward / MustOffer / forwarder parent-client tests (need an in-process fake parent client; no Rust MustOffer/ForwardQueryTask API), engine/task-list-manager PARTIAL rows (per-case ports).
+- Build note: worktree needed go/idls copied from another worktree (submodule not initialised); not committed.
