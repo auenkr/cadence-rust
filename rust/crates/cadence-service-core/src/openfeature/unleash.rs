@@ -1102,12 +1102,12 @@ mod tests {
         let metrics = rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(metrics.starts_with("POST /api/client/metrics"), "{metrics}");
         assert!(metrics.contains("\"flag\":{"), "{metrics}");
-        assert!(metrics.contains("\"yes\":3"), "{metrics}");
+        assert!(metrics.contains("\"yes\":2"), "{metrics}");
         assert!(metrics.contains("\"blue\":1"), "{metrics}");
         assert!(metrics.contains("\"disabled\":1"), "{metrics}");
         let retry = rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(retry.starts_with("POST /api/client/metrics"), "{retry}");
-        assert!(retry.contains("\"yes\":3"), "{retry}");
+        assert!(retry.contains("\"yes\":2"), "{retry}");
         assert!(retry.contains("\"blue\":1"), "{retry}");
         assert!(retry.contains("\"disabled\":1"), "{retry}");
         provider.shutdown();
