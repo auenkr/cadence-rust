@@ -1,0 +1,17 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a00e13301a43ae0ae/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a00e13301a43ae0ae/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a00e13301a43ae0ae/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a00e13301a43ae0ae/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a00e13301a43ae0ae/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a00e13301a43ae0ae/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a00e13301a43ae0ae/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 14s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 3 tests
+test grpc_matching::handler_go_tests::matching_handler_uncategorized_error_is_internal ... ok
+test grpc_matching::handler_go_tests::matching_handler_semaphore_errors_keep_their_category ... ok
+test grpc_matching::handler_go_tests::matching_semaphore_parse_request_owner_matches_go ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 667 filtered out; finished in 0.00s
+

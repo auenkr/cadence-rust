@@ -3653,3 +3653,7 @@ mod durable_tests;
 #[cfg(test)]
 #[path = "matching_query_forward_family_tests.rs"]
 mod query_forward_family_tests;
+
+#[cfg(test)]
+#[path = "matching_handler_go_tests.rs"]
+mod handler_go_tests;
