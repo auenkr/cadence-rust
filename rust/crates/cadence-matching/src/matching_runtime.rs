@@ -833,6 +833,78 @@ mod tests {
         crate::matching_membership::Membership::new("local", Vec::new())
     }
 
+    fn dynamic_config_test_value(runtime: &MatchingRuntime, key: &str) -> i64 {
+        let property = runtime
+            .matching
+            .frontend
+            .state
+            .admin
+            .dynamic_config
+            .lock()
+            .unwrap()
+            .property_values(key);
+        let values = property.snapshot_values();
+        serde_json::from_slice(&values[0].value.as_ref().expect("dynamic config value").data)
+            .unwrap()
+    }
+
+    async fn wait_for_dynamic_config(runtime: &MatchingRuntime, key: &str, expected: i64) {
+        tokio::time::timeout(Duration::from_secs(8), async {
+            loop {
+                if dynamic_config_test_value(runtime, key) == expected {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("dynamic config did not reload to {expected}"));
+    }
+
+    #[tokio::test]
+    async fn dynamic_config_file_watcher_reloads_retains_last_good_and_stops_on_shutdown() {
+        const KEY: &str = "testGetIntPropertyKey";
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("dynamic-config.yaml");
+        std::fs::write(&path, format!("{KEY}:\n- value: 1\n")).unwrap();
+        let state = crate::handlers::AppState::default();
+        *state.admin.dynamic_config.lock().unwrap() =
+            DynamicConfigOverlay::from_file(&path).unwrap();
+        let mut runtime = MatchingRuntime::in_memory(state, Arc::new(|| Duration::ZERO))
+            .with_dynamic_config_file(
+                path.clone(),
+                Duration::from_secs(5),
+                std::time::SystemTime::now(),
+            );
+        assert_eq!(dynamic_config_test_value(&runtime, KEY), 1);
+
+        // The production minimum remains five seconds; use real elapsed time
+        // because the watcher compares filesystem wall-clock modification times.
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&path, format!("{KEY}:\n- value: 2\n")).unwrap();
+        wait_for_dynamic_config(&runtime, KEY, 2).await;
+
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&path, "not: [valid").unwrap();
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        assert_eq!(dynamic_config_test_value(&runtime, KEY), 2);
+
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::remove_file(&path).unwrap();
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        assert_eq!(dynamic_config_test_value(&runtime, KEY), 2);
+
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&path, format!("{KEY}:\n- value: 3\n")).unwrap();
+        wait_for_dynamic_config(&runtime, KEY, 3).await;
+
+        runtime.shutdown().await.unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&path, format!("{KEY}:\n- value: 4\n")).unwrap();
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        assert_eq!(dynamic_config_test_value(&runtime, KEY), 3);
+    }
+
     fn installed_ownership_check(
         percentage: i64,
         draining: bool,
