@@ -26,4 +26,6 @@ CI evidence (all `workflow_dispatch` on the public repository; Cargo was not run
 - Service-core package clippy/tests, including the recording fake test: source `b6c6a851c7f97aaf819fdd1002887ceb7922595e`, [run 40085435460](https://github.com/auenkr/cadence-rust/actions/runs/40085435460), conclusion `success`.
 - Fresh uncached workspace clippy followed by workspace tests (`clean_target=true`): source `b6c6a851c7f97aaf819fdd1002887ceb7922595e`, [run 40085599877](https://github.com/auenkr/cadence-rust/actions/runs/40085599877), conclusion `success`.
 
+Formatting note: a CI `cargo fmt --all -- --check` attempt was not clean; it reports existing workspace formatting drift beginning in unchanged `cadence-api` files. The final configured rust-ci gate validates clippy and tests. Formatting cleanliness for this change is not established.
+
 No Matching production property consumer remains unwired within the audited 57 source call sites. Mixed-cluster and broader Matching parity/recovery gates remain separate service-completion work; this checkpoint only verifies the reader implementation and workspace build/tests. This branch is pushed at `b6c6a851c`; no changes are merged to master.
