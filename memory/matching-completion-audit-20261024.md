@@ -118,10 +118,11 @@ and is no longer in this ignored set.
 ### Behavior gaps or unclosed behavior evidence
 
 - `go_dispatch_task_active_offer_without_error_reaches_poller` in
-  `tests/matching_partial_upgrade_e.rs`: it currently fails with an empty poll
-  in a fixture whose History target is `127.0.0.1:1`; the test itself says
-  `StartWorkflow` may be required. Replace the bad fixture with a live Go
-  History peer and retest before assigning a production fix.
+  `tests/matching_partial_upgrade_e.rs`: the ignored fixture still uses an
+  unreachable History target (`127.0.0.1:1`) and a fabricated task, so it is
+  not evidence of a production delivery failure. A production mixed probe now
+  covers the behavior against real Go History (details below). Keep the unit
+  test ignored and unchanged; do not attribute its timeout to production.
 - `list_task_list_partitions_success_owner_hosts_match_go_lookups` in
   `tests/matching_engine_go_tests.rs`: mock scripted host ordering differs from
   live ring lookup. This is a genuine parity evidence gap; add same-membership
@@ -193,3 +194,43 @@ and is no longer in this ignored set.
 4. Complete live Go/Rust emitted metrics comparison and same-membership owner
    ordering oracle. Reconcile failures and open behavior rows before any
    Matching completion claim.
+
+### Active offer mixed evidence — 2026-10-24
+
+The focused active-offer probe was added to
+`tests/matching-probe-scenarios.cjs` and exposed as
+`--probe-active-offer` by `tests/run-go-service-baseline.py`. It starts a direct
+Rust Matching `PollForDecisionTask`, waits until `DescribeTaskList` reports its
+unique poller identity, then calls Go Frontend `StartWorkflowExecution` for
+that same task list. Go History creates the real workflow decision task and
+calls Rust Matching `AddDecisionTask`. The probe checks the returned token and
+exact workflow/run IDs, then completes the task through Go Frontend. To rule
+out a persisted task being consumed before an after-delivery count, the probe
+installs a uniquely named, task-list-scoped temporary MySQL `BEFORE INSERT`
+audit trigger while scheduling. It requires zero matching inserts as well as
+zero remaining task rows, then removes the trigger and audit table. The ignored
+Go-shaped unit test was not edited or enabled.
+
+- Mixed CI run: <https://github.com/auenkr/cadence-rust/actions/runs/40091676082>
+- Conclusion: `success`; source/head:
+  `f638a7b3c622dfeac25795cb964beed2ec5857a1`.
+- The run used a fresh runner target and built
+  `cadence-matching`; binary SHA256:
+  `83ba7341f85c62e4aca900ab8ee6f6944cb9e26f4432c37fb51b7950c5078860`.
+- Artifact topology says Go Matching was not started; Go Frontend, History,
+  and Worker were running with Rust Matching through production Ringpop. The
+  `activeOffer.json` result passed for workflow
+  `active-offer-workflow-607508c5-f59d-4f11-a452-b8d6285e2619`, run
+  `e9fbaa13-b317-4866-a1c3-06f8b4e084d0`: history-scheduled task delivered,
+  task token delivered, and `persistedTaskRows: 0`. The initial run predates
+  the insert audit strengthening below; the replacement run records the
+  `persistedTaskInsertAttempts` assertion and is the final evidence for this
+  row.
+- The legacy SDK mixed workflow in the same gate also completed (`probeExitCode:
+  0`). The gate's full command and logs are retained in the run artifact.
+
+This closes the active-offer production evidence gap for the supported mixed
+topology. It does not convert the mock-based `TestDispatchTask` expectation
+into an end-to-end proof of every Go dispatch error branch, nor is it a
+Matching completion sign-off; remaining parity rows and current-head backend
+gates above are still open.
