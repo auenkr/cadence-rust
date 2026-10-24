@@ -892,7 +892,7 @@ mod metered_task_tests {
 mod go_metered_emission_oracle_tests {
     use super::*;
     use crate::matching_metrics::{MetricEvent, MetricKind, MetricSink, RecordingMetricSink};
-    use crate::matching_metrics_migration::{MigrationMetricSink, MigrationPolicy};
+    use cadence_service_core::matching_metrics_migration::{MigrationMetricSink, MigrationPolicy};
     use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeSet;
