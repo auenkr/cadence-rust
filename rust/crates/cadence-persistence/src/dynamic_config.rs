@@ -82,6 +82,10 @@ impl PropertyValueSource for PropertyValues<'_> {
     fn snapshot_values(&self) -> &[DynamicConfigValue] { self.values }
     fn runtime_value(&self, default: Value, filters: &BTreeMap<String, Value>) -> Option<Result<Value, String>> { self.evaluate(default, filters) }
 }
+impl PropertyValueSource for &PropertyValues<'_> {
+    fn snapshot_values(&self) -> &[DynamicConfigValue] { self.values }
+    fn runtime_value(&self, default: Value, filters: &BTreeMap<String, Value>) -> Option<Result<Value, String>> { self.evaluate(default, filters) }
+}
 
 impl PropertyValueSource for &[DynamicConfigValue] {
     fn snapshot_values(&self) -> &[DynamicConfigValue] { self }

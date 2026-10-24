@@ -92,6 +92,7 @@ pub fn persistence_task_list_type(api_type: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cadence_api::admin::DynamicConfigValue;
     use serde_json::json;
 
     fn value(v: serde_json::Value) -> Vec<DynamicConfigValue> {
