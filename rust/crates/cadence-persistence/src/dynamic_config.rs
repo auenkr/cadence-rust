@@ -51,14 +51,13 @@ impl RuntimePropertyRead {
 /// source compatible; typed property functions use `evaluate` below.
 #[derive(Clone, Debug)]
 pub struct PropertyValues<'a> {
-    key: String,
     values: &'a [DynamicConfigValue],
     runtime: Option<RuntimePropertyRead>,
 }
 
 impl<'a> PropertyValues<'a> {
-    pub fn snapshot(key: impl Into<String>, values: &'a [DynamicConfigValue]) -> Self {
-        Self { key: key.into(), values, runtime: None }
+    pub fn snapshot(_key: impl Into<String>, values: &'a [DynamicConfigValue]) -> Self {
+        Self { values, runtime: None }
     }
     pub fn with_runtime(mut self, runtime: Option<RuntimePropertyRead>) -> Self {
         self.runtime = runtime;
