@@ -38,6 +38,8 @@ jobs:
           cache: false
       - name: Verify Go mapped IPv4 CIDR oracle
         run: GO111MODULE=off go run tests/matching-unleash/go_ipnet_oracle.go
+      - name: Execute production Go Matching owner ordering oracle
+        run: python3 tests/run-matching-owner-order-oracle.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

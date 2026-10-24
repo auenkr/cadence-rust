@@ -9,6 +9,47 @@ use m::matching_api_server::MatchingApi;
 use std::{num::NonZeroU32, time::Duration};
 use uuid::Uuid;
 
+#[tokio::test]
+async fn engine_partition_owners_and_order_match_executable_go_handler_oracle() {
+    use crate::matching_membership::Membership;
+    use cadence_common::membership::Host;
+    let Ok(path) = std::env::var("CADENCE_MATCHING_OWNER_ORACLE") else {
+        // Ordinary unit runs need not invoke Go; the dedicated CI oracle step sets this.
+        return;
+    };
+    let oracle: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let (_dir, _store, matching, _key) = fixture();
+    let membership = Membership::new("one", vec![]);
+    let matching = matching.with_membership(membership.clone());
+    let set_count = || {
+        matching.frontend.state.admin.dynamic_config.lock().unwrap().update(
+            false,
+            "matching.numTasklistWritePartitions",
+            vec![quota_config(3, None)],
+        )
+    };
+    set_count();
+    for scenario in oracle["scenarios"].as_array().unwrap() {
+        let hosts = scenario["hosts"].as_array().unwrap().iter().map(|host| Host {
+            address: host["address"].as_str().unwrap().into(),
+            identity: host["identity"].as_str().unwrap().into(),
+            grpc_address: host["grpc_address"].as_str().unwrap().into(),
+        }).collect();
+        membership.replace(hosts);
+        for (field, name) in [("root", "queue"), ("child", "/__cadence_sys/queue/9"), ("empty", "")] {
+            let response = matching.list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
+                domain: "domain".into(), task_list: Some(p::TaskList { name: name.into(), ..Default::default() }),
+            })).await.unwrap().into_inner();
+            let as_json = |items: &[p::TaskListPartitionMetadata]| -> serde_json::Value {
+                serde_json::Value::Array(items.iter().map(|item| serde_json::json!({"key":item.key,"owner":item.owner_host_name})).collect())
+            };
+            let expected = &scenario[field];
+            assert_eq!(as_json(&response.activity_task_list_partitions), expected["activity"], "scenario={} request={field} activity", scenario["name"]);
+            assert_eq!(as_json(&response.decision_task_list_partitions), expected["decision"], "scenario={} request={field} decision", scenario["name"]);
+        }
+    }
+}
+
 fn quota_config(value: i64, domain: Option<&str>) -> cadence_api::admin::DynamicConfigValue {
     use cadence_api::{admin::{DynamicConfigFilter, DynamicConfigValue}, enums::EncodingType, types::DataBlob};
     let blob = |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
