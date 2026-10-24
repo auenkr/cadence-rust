@@ -352,16 +352,20 @@ impl MatchingPersistenceLimiter {
         if per_domain {
             // Go metricsScope.{AddCounter,RecordTimer} (scope.go:55-125): the
             // per-domain defs also emit their `metricRollupName` on the root
-            // scope (no operation/domain/is_retry tags). Default (zero)
+            // scope with operation only (no domain/is_retry tags). Default (zero)
             // MigrationConfig: counters and the latency timer emit; the _ns
             // rollup histogram is suppressed (config.go:125-126, EmitHistogram
             // default false).
+            let rollup_tags = std::collections::BTreeMap::from([(
+                OPERATION_TAG.to_owned(),
+                operation.to_owned(),
+            )]);
             let rollup = |name: &'static str, kind, value| {
                 sink.record(MetricEvent {
                     name,
                     kind,
                     value,
-                    tags: Default::default(),
+                    tags: rollup_tags.clone(),
                     histogram: None,
                 })
             };
@@ -373,11 +377,15 @@ impl MatchingPersistenceLimiter {
                 name: "persistence_latency_ns_rollup",
                 kind: MetricKind::Histogram,
                 value: MetricValue::Duration(elapsed),
-                tags: std::collections::BTreeMap::from([
-                    ("histogram_start".into(), "1ms".into()),
-                    ("histogram_end".into(), "17m28.576s".into()),
-                    ("histogram_scale".into(), "2".into()),
-                ]),
+                tags: rollup_tags
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .chain([
+                        ("histogram_start".into(), "1ms".into()),
+                        ("histogram_end".into(), "17m28.576s".into()),
+                        ("histogram_scale".into(), "2".into()),
+                    ])
+                    .collect(),
                 histogram: Some(HistogramSpec::GoDefault1ms100s),
             });
             if let Some(class) = class {
@@ -695,7 +703,7 @@ mod metered_task_tests {
         limiter.record_list_response("GetTasks", 5, 700);
         limiter.record_task_call(
             "GetTasks",
-            None,
+            Some(uuid::Uuid::nil()),
             std::time::Duration::from_millis(1),
             &Err::<(), _>(MatchingTaskStoreError::Backend {
                 kind: BackendErrorKind::DbUnavailable,
@@ -704,7 +712,7 @@ mod metered_task_tests {
         );
         limiter.record_task_call(
             "GetTasks",
-            None,
+            Some(uuid::Uuid::nil()),
             std::time::Duration::from_millis(1),
             &Err::<(), _>(MatchingTaskStoreError::Backend {
                 kind: BackendErrorKind::BadRequest,
@@ -884,7 +892,7 @@ mod metered_task_tests {
             names,
             ["persistence_requests_rollup", "persistence_latency_rollup", "persistence_latency_ns_rollup", "persistence_errors_condition_failed_rollup"]
         );
-        assert!(events.iter().filter(|e| e.name.ends_with("_rollup") && e.kind != MetricKind::Histogram).all(|e| e.tags.is_empty()));
+        assert!(events.iter().filter(|e| e.name.ends_with("_rollup")).all(|e| e.tags.get("operation").is_some_and(|value| value == "GetTasks") && !e.tags.contains_key("domain") && !e.tags.contains_key("is_retry")));
     }
 }
 
@@ -893,7 +901,6 @@ mod go_metered_emission_oracle_tests {
     use super::*;
     use crate::matching_metrics::{MetricEvent, MetricKind, MetricSink, RecordingMetricSink};
     use cadence_service_core::matching_metrics_migration::{MigrationMetricSink, MigrationPolicy};
-    use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeSet;
 
@@ -924,6 +931,98 @@ mod go_metered_emission_oracle_tests {
             .collect()
     }
 
+    struct OracleTaskStore(std::sync::atomic::AtomicUsize);
+
+    impl cadence_persistence::matching_task_store::MatchingTaskStore for OracleTaskStore {
+        fn get_task_list(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+        ) -> cadence_persistence::matching_task_store::Result<cadence_persistence::matching_task_store::TaskListRecord> {
+            unreachable!("oracle only exercises get_tasks")
+        }
+
+        fn lease(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+            _: i16,
+            _: i64,
+            _: i64,
+        ) -> cadence_persistence::matching_task_store::Result<cadence_persistence::matching_task_store::TaskListRecord> {
+            unreachable!("oracle only exercises get_tasks")
+        }
+
+        fn update_task_list(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+            _: i64,
+            _: cadence_persistence::matching_blob::TaskListData,
+            _: i64,
+        ) -> cadence_persistence::matching_task_store::Result<()> {
+            unreachable!("oracle only exercises get_tasks")
+        }
+
+        fn create_tasks_with_domains(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+            _: i64,
+            _: i64,
+            _: &[(uuid::Uuid, &cadence_persistence::matching_task_store::AllocatedTask)],
+        ) -> cadence_persistence::matching_task_store::Result<()> {
+            unreachable!("oracle only exercises get_tasks")
+        }
+
+        fn get_tasks(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+            _: i64,
+            _: i64,
+            _: i64,
+        ) -> cadence_persistence::matching_task_store::Result<Vec<cadence_persistence::matching_task_store::AllocatedTask>> {
+            use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(Vec::new())
+            } else {
+                Err(MatchingTaskStoreError::Backend {
+                    kind: BackendErrorKind::BadRequest,
+                    message: "metrics-oracle-failure".into(),
+                })
+            }
+        }
+
+        fn task_list_size(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+            _: i64,
+        ) -> cadence_persistence::matching_task_store::Result<i64> {
+            unreachable!("oracle only exercises get_tasks")
+        }
+
+        fn complete_task(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+            _: i64,
+        ) -> cadence_persistence::matching_task_store::Result<()> {
+            unreachable!("oracle only exercises get_tasks")
+        }
+
+        fn complete_tasks_less_than(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+            _: i64,
+            _: i64,
+        ) -> cadence_persistence::matching_task_store::Result<usize> {
+            unreachable!("oracle only exercises get_tasks")
+        }
+
+        fn delete_task_list(
+            &self,
+            _: &cadence_persistence::matching_task_store::TaskListKey,
+            _: i64,
+        ) -> cadence_persistence::matching_task_store::Result<()> {
+            unreachable!("oracle only exercises get_tasks")
+        }
+    }
+
     #[test]
     fn rust_metered_task_outcomes_match_go_wrapper_tally_when_ci_fixture_is_present() {
         let Ok(path) = std::env::var("MATCHING_GO_PERSISTENCE_ORACLE") else {
@@ -944,23 +1043,17 @@ mod go_metered_emission_oracle_tests {
             Arc::new(AtomicUsize::new(1)),
         );
         limiter.with_metric_sink(migration);
-        let elapsed = std::time::Duration::from_millis(2);
-        limiter.record_task_call(
-            "GetTasks",
-            Some(uuid::Uuid::nil()),
-            elapsed,
-            &Ok::<_, MatchingTaskStoreError>(()),
+        let wrapped = crate::matching_persistence::limit_task_store(
+            Arc::new(OracleTaskStore(std::sync::atomic::AtomicUsize::new(0))),
+            Arc::new(limiter),
         );
-        limiter.record_list_response("GetTasks", 0, 0);
-        limiter.record_task_call(
-            "GetTasks",
-            Some(uuid::Uuid::nil()),
-            elapsed,
-            &Err::<(), _>(MatchingTaskStoreError::Backend {
-                kind: BackendErrorKind::BadRequest,
-                message: "metrics-oracle-failure".into(),
-            }),
-        );
+        let key = cadence_persistence::matching_task_store::TaskListKey {
+            domain_id: uuid::Uuid::nil(),
+            name: "metrics-oracle".into(),
+            task_type: 0,
+        };
+        assert!(wrapped.get_tasks(&key, 0, 0, 10).unwrap().is_empty());
+        assert!(wrapped.get_tasks(&key, 0, 0, 10).is_err());
         let rust = rust_series(recording.events());
         if let Ok(path) = std::env::var("MATCHING_RUST_PERSISTENCE_ORACLE") {
             std::fs::write(path, serde_json::to_vec(&rust).unwrap()).unwrap();
