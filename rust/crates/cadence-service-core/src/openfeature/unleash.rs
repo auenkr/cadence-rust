@@ -836,16 +836,28 @@ mod tests {
         use std::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = reqwest::Url::parse(&format!("http://{}/api/client/features", listener.local_addr().unwrap())).unwrap();
+        let endpoint = reqwest::Url::parse(&format!(
+            "http://{}/api/client/features",
+            listener.local_addr().unwrap()
+        ))
+        .unwrap();
         let (seen_tx, seen_rx) = std::sync::mpsc::channel();
         let server = std::thread::spawn(move || {
             let replies = [
-                ("200 OK", Some("\"v1\""), r#"{"features":[{"name":"initial","enabled":true}]}"#),
+                (
+                    "200 OK",
+                    Some("\"v1\""),
+                    r#"{"features":[{"name":"initial","enabled":true}]}"#,
+                ),
                 ("503 Service Unavailable", None, "{}"),
                 ("304 Not Modified", None, ""),
                 ("NETWORK", None, ""),
                 ("200 OK", None, "not-json"),
-                ("200 OK", None, r#"{"features":[{"name":"recovered","enabled":true}]}"#),
+                (
+                    "200 OK",
+                    None,
+                    r#"{"features":[{"name":"recovered","enabled":true}]}"#,
+                ),
             ];
             for (status, etag, body) in replies {
                 let (mut stream, _) = listener.accept().unwrap();
@@ -853,18 +865,27 @@ mod tests {
                 let size = stream.read(&mut request).unwrap_or(0);
                 let request = String::from_utf8_lossy(&request[..size]).into_owned();
                 seen_tx.send(request).unwrap();
-                if status == "NETWORK" { continue; }
-                let etag_header = etag.map(|tag| format!("ETag: {tag}\r\n")).unwrap_or_default();
+                if status == "NETWORK" {
+                    continue;
+                }
+                let etag_header = etag
+                    .map(|tag| format!("ETag: {tag}\r\n"))
+                    .unwrap_or_default();
                 write!(stream, "HTTP/1.1 {status}\r\n{etag_header}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             }
         });
 
-        let client = reqwest::blocking::Client::builder().no_proxy().build().unwrap();
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap();
         let headers = [("UNLEASH-APPNAME", "test".to_owned())];
         let state = RwLock::new(serde_json::json!({"features": []}));
         let etag = Mutex::new(String::new());
         let mut backoff = FetchBackoff::default();
-        let fetch = |backoff: &mut FetchBackoff| fetch_once(&client, &endpoint, &headers, &state, &etag, backoff);
+        let fetch = |backoff: &mut FetchBackoff| {
+            fetch_once(&client, &endpoint, &headers, &state, &etag, backoff)
+        };
 
         assert!(backoff.on_tick());
         fetch(&mut backoff);
@@ -878,8 +899,14 @@ mod tests {
         let failed_request = seen_rx.recv().unwrap();
         assert!(failed_request.contains("If-None-Match: \"v1\""));
 
-        assert!(!backoff.on_tick(), "first ticker event must only consume the skip");
-        assert!(seen_rx.try_recv().is_err(), "a skipped event must issue no HTTP request");
+        assert!(
+            !backoff.on_tick(),
+            "first ticker event must only consume the skip"
+        );
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "a skipped event must issue no HTTP request"
+        );
         assert!(backoff.on_tick());
         fetch(&mut backoff);
         let unchanged_request = seen_rx.recv().unwrap();
