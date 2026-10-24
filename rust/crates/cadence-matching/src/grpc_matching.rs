@@ -455,10 +455,8 @@ impl Matching {
             let overlay = overlay.clone();
             Arc::new(
                 move |domain_id: &str, task_list: &str, task_type: i32| -> i64 {
-                    let values = overlay
-                        .lock()
-                        .expect("admin lock")
-                        .property_values("matching.numTasklistWritePartitions");
+                    let config = overlay.lock().expect("admin lock");
+                    let values = config.property_values("matching.numTasklistWritePartitions");
                     cadence_persistence::dynamic_config::task_list_integer(
                         &values,
                         domain_name_for(&domains, domain_id).as_deref(),
@@ -532,10 +530,8 @@ impl Matching {
             let domains = domains.clone();
             Arc::new(
                 move |domain_id: &str, task_list: &str, task_type: i32| -> i64 {
-                    let values = overlay
-                        .lock()
-                        .expect("admin lock")
-                        .property_values("matching.qpsTrackerInterval");
+                    let config = overlay.lock().expect("admin lock");
+                    let values = config.property_values("matching.qpsTrackerInterval");
                     cadence_persistence::dynamic_config::task_list_duration(
                         &values,
                         domain_name_for(&domains, domain_id).as_deref(),
