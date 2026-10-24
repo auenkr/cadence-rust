@@ -37,6 +37,7 @@ fn yaml_value_to_json(value: &serde_yaml::Value) -> anyhow::Result<serde_json::V
 pub struct DynamicConfigOverlay {
     normal: HashMap<String, Vec<DynamicConfigValue>>,
     operational: HashMap<String, Vec<DynamicConfigValue>>,
+    runtime: Option<std::sync::Arc<dyn cadence_persistence::dynamic_config::RuntimePropertyProvider>>,
 }
 
 fn filters_match(value: &DynamicConfigValue, filters: &[DynamicConfigFilter]) -> bool {
@@ -164,8 +165,23 @@ impl DynamicConfigOverlay {
     }
 
     /// Ordered normal config entries for runtime property resolution.
-    pub fn property_values(&self, name: &str) -> &[DynamicConfigValue] {
-        self.normal.get(name).map(Vec::as_slice).unwrap_or(&[])
+    pub fn property_values(&self, name: &str) -> cadence_persistence::dynamic_config::PropertyValues<'_> {
+        cadence_persistence::dynamic_config::PropertyValues::snapshot(
+            name,
+            self.normal.get(name).map(Vec::as_slice).unwrap_or(&[]),
+        ).with_runtime(self.runtime.as_ref().map(|provider| {
+            cadence_persistence::dynamic_config::RuntimePropertyRead::new(name, provider.clone())
+        }))
+    }
+
+    /// Named typed reads retain the original key and snapshot while delegating
+    /// live evaluations to the configured runtime provider when present.
+    pub fn property_read(&self, name: &str) -> cadence_persistence::dynamic_config::PropertyValues<'_> {
+        self.property_values(name)
+    }
+
+    pub fn set_runtime_provider(&mut self, provider: Option<std::sync::Arc<dyn cadence_persistence::dynamic_config::RuntimePropertyProvider>>) {
+        self.runtime = provider;
     }
 
     /// Replace the value list, mirroring the config-store client's update.

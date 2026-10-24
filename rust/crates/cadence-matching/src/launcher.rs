@@ -49,15 +49,7 @@ fn dynamic_bool_property(
     let Ok(overlay) = overlay.lock() else {
         return default;
     };
-    overlay
-        .property_values(name)
-        .iter()
-        .filter(|value| value.filters.is_empty())
-        .filter_map(|value| value.value.as_ref())
-        .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
-        .filter_map(|blob| serde_json::from_slice::<bool>(&blob.data).ok())
-        .next_back()
-        .unwrap_or(default)
+    cadence_persistence::dynamic_config::boolean(overlay.property_values(name), None, default)
 }
 
 fn history_named_port(
@@ -78,15 +70,7 @@ fn dynamic_i64_property(
     let Ok(overlay) = overlay.lock() else {
         return default;
     };
-    overlay
-        .property_values(name)
-        .iter()
-        .filter(|value| value.filters.is_empty())
-        .filter_map(|value| value.value.as_ref())
-        .filter(|blob| blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON))
-        .filter_map(|blob| serde_json::from_slice::<i64>(&blob.data).ok())
-        .next_back()
-        .unwrap_or(default)
+    cadence_persistence::dynamic_config::integer(overlay.property_values(name), None, default)
 }
 
 /// Owns the process-wide OpenFeature registration for this Matching process.
@@ -551,6 +535,7 @@ pub async fn run(
             let mut config_store_client: Option<
                 std::sync::Arc<cadence_persistence::config_store::ConfigStoreClient>,
             > = None;
+            let mut runtime_property_provider: Option<std::sync::Arc<dyn cadence_persistence::dynamic_config::RuntimePropertyProvider>> = None;
             let dynamic_config_path = match dynamic_config_provider {
                 config::DynamicConfigProvider::FileBased(provider) => {
                     if provider.filepath.is_empty() {
@@ -634,6 +619,11 @@ pub async fn run(
                     }
                     eprintln!("initialising OpenFeature dynamic config client");
                     register_provider(&feature.provider_name, feature.provider.as_ref())?;
+                    runtime_property_provider = Some(
+                        cadence_service_core::openfeature::runtime::OpenFeatureRuntimeProvider::with_cluster_name(
+                            cfg.cluster_metadata.as_ref().map(|metadata| metadata.current_cluster_name.clone()).unwrap_or_default(),
+                        ),
+                    );
                     openfeature_lifecycle = Some(OpenFeatureLifecycle);
                     None
                 }
@@ -721,6 +711,8 @@ pub async fn run(
             } else {
                 false
             };
+            state.admin.dynamic_config.lock().expect("admin lock")
+                .set_runtime_provider(runtime_property_provider);
             // Go reads these once while constructing the clients
             // (persistence/client/factory.go:195-199, client/clientfactory.go:183-185,
             // handler/engine.go:1593 for EnableDebugMode at config build).

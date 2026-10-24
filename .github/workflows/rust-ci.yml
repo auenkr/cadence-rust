@@ -35,6 +35,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Formatting
+        working-directory: rust
+        run: cargo fmt --all -- --check
       - name: Select fresh final target
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"

@@ -921,4 +921,91 @@ mod tests {
         assert_eq!(go_duration_string(500), "500ns");
         assert_eq!(go_duration_string(-2_000_000_000), "-2s");
     }
+
+    #[test]
+    fn matching_property_reads_are_live_typed_filtered_and_lifecycle_managed() {
+        use cadence_persistence::dynamic_config;
+        use std::sync::atomic::{AtomicBool, AtomicI64};
+
+        struct RecordingProvider {
+            value: AtomicI64,
+            fail: AtomicBool,
+            calls: Mutex<Vec<(String, FlagValue, FlattenedContext)>>,
+            shutdowns: Arc<AtomicUsize>,
+        }
+        impl FeatureProvider for RecordingProvider {
+            fn shutdown(&self) { self.shutdowns.fetch_add(1, Ordering::SeqCst); }
+            fn resolve(&self, key: &str, default: FlagValue, ctx: &FlattenedContext) -> Resolution {
+                self.calls.lock().unwrap().push((key.to_owned(), default.clone(), ctx.clone()));
+                if self.fail.load(Ordering::SeqCst) {
+                    return Resolution { value: default, error: Some(ResolutionError { code: ErrorCode::General, message: "offline".into() }) };
+                }
+                if key == "matching.contextValue" {
+                    let domain = ctx.get("domainName").and_then(Value::as_str).unwrap_or_default();
+                    let task_list = ctx.get("taskListName").and_then(Value::as_str).unwrap_or_default();
+                    let task_type = ctx.get("taskType").and_then(Value::as_i64).unwrap_or_default();
+                    let scoped = match (domain, task_list, task_type) {
+                        ("domain-a", "queue-a", 0) => 41,
+                        ("domain-b", "queue-b", 1) => 43,
+                        _ => 0,
+                    };
+                    return Resolution { value: FlagValue::Int(scoped), error: None };
+                }
+                let value = self.value.load(Ordering::SeqCst);
+                Resolution { value: FlagValue::Int(value), error: None }
+            }
+        }
+
+        let _guard = test_lock();
+        reset_registration();
+        let shutdowns = Arc::new(AtomicUsize::new(0));
+        let fake = Arc::new(RecordingProvider {
+            value: AtomicI64::new(11), fail: AtomicBool::new(false),
+            calls: Mutex::new(Vec::new()), shutdowns: shutdowns.clone(),
+        });
+        let provider_for_constructor = fake.clone();
+        let name = "matching-runtime-reader-test";
+        let constructor: Constructor = Arc::new(move |_| {
+            Ok(provider_for_constructor.clone() as Arc<dyn FeatureProvider>)
+        });
+        provider::register(name, constructor).unwrap();
+        register_provider(name, None).unwrap();
+
+        let runtime = super::super::runtime::OpenFeatureRuntimeProvider::with_cluster_name("cluster-a");
+        let mut overlay = crate::admin::DynamicConfigOverlay::default();
+        overlay.set_runtime_provider(Some(runtime));
+        let first = dynamic_config::task_list_integer(
+            overlay.property_values("matching.maxTaskBatchSize"), Some("domain-a"), "queue-a", 0, 7,
+        );
+        assert_eq!(first, 11);
+        fake.value.store(19, Ordering::SeqCst);
+        let changed = dynamic_config::task_list_integer(
+            overlay.property_values("matching.maxTaskBatchSize"), Some("domain-b"), "queue-b", 1, 7,
+        );
+        assert_eq!(changed, 19);
+        assert_eq!(dynamic_config::task_list_integer(
+            overlay.property_values("matching.contextValue"), Some("domain-a"), "queue-a", 0, 0,
+        ), 41);
+        assert_eq!(dynamic_config::task_list_integer(
+            overlay.property_values("matching.contextValue"), Some("domain-b"), "queue-b", 1, 0,
+        ), 43);
+
+        let calls = fake.calls.lock().unwrap();
+        assert_eq!(calls[0].0, "matching.maxTaskBatchSize");
+        assert_eq!(calls[0].1, FlagValue::Int(7));
+        assert_eq!(calls[0].2.get("domainName"), Some(&Value::String("domain-a".into())));
+        assert_eq!(calls[0].2.get("taskListName"), Some(&Value::String("queue-a".into())));
+        assert_eq!(calls[0].2.get("taskType"), Some(&Value::from(0)));
+        assert_eq!(calls[0].2.get("clusterName"), Some(&Value::String("cluster-a".into())));
+        assert_eq!(calls[1].2.get("domainName"), Some(&Value::String("domain-b".into())));
+        assert_eq!(calls[1].2.get("taskType"), Some(&Value::from(1)));
+        drop(calls);
+
+        fake.fail.store(true, Ordering::SeqCst);
+        assert_eq!(dynamic_config::integer(overlay.property_values("matching.rps"), None, 23), 23);
+        fake.fail.store(false, Ordering::SeqCst);
+        assert_eq!(dynamic_config::boolean(overlay.property_values("matching.enabled"), None, true), true);
+        deregister_provider();
+        assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+    }
 }

@@ -770,30 +770,10 @@ impl Drop for MatchingRuntime {
 /// without filters and defaults it to zero.
 pub fn live_shutdown_drain_duration(overlay: Arc<Mutex<DynamicConfigOverlay>>) -> DrainDuration {
     Arc::new(move || {
-        let values = overlay
-            .lock()
-            .expect("admin dynamic config lock")
-            .property_values("matching.shutdownDrainDuration")
-            .to_vec();
-        let mut selected = None;
-        for value in values.iter().filter(|value| value.filters.is_empty()) {
-            let Some(blob) = value.value.as_ref() else {
-                continue;
-            };
-            if blob.encoding_type != Some(cadence_api::enums::EncodingType::JSON) {
-                continue;
-            }
-            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&blob.data) {
-                selected = Some(value);
-            }
-        }
-        let nanos = selected
-            .and_then(|value| {
-                value
-                    .as_str()
-                    .and_then(cadence_common::duration::parse_nanos)
-            })
-            .unwrap_or_default();
+        let overlay = overlay.lock().expect("admin dynamic config lock");
+        let nanos = cadence_persistence::dynamic_config::duration(
+            overlay.property_values("matching.shutdownDrainDuration"), None, 0,
+        );
         Duration::from_nanos(nanos.max(0) as u64)
     })
 }

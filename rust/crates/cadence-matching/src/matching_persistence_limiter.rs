@@ -479,19 +479,11 @@ fn read_rate_snapshot(
 ) -> PersistenceRateSnapshot {
     let overlay = overlay.lock().expect("admin dynamic config lock");
     let host_values = overlay.property_values("matching.persistenceMaxQPS");
-    let host_qps = if host_values.is_empty() {
-        HOST_QPS_DEFAULT
-    } else {
-        cadence_persistence::dynamic_config::integer(host_values, None, HOST_QPS_DEFAULT)
-    }
-    .max(0) as f64;
+    let host_qps = cadence_persistence::dynamic_config::integer(host_values, None, HOST_QPS_DEFAULT)
+        .max(0) as f64;
     let global_values = overlay.property_values("matching.persistenceGlobalMaxQPS");
-    let global_qps = if global_values.is_empty() {
-        GLOBAL_QPS_DEFAULT
-    } else {
-        cadence_persistence::dynamic_config::integer(global_values, None, GLOBAL_QPS_DEFAULT)
-    }
-    .max(0) as f64;
+    let global_qps = cadence_persistence::dynamic_config::integer(global_values, None, GLOBAL_QPS_DEFAULT)
+        .max(0) as f64;
     let effective_qps = if global_qps > 0.0 && matching_members > 0 {
         (global_qps / matching_members as f64)
             .max(1.0)

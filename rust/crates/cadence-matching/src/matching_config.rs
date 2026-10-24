@@ -6,8 +6,7 @@
 //! (task_list_manager.go:1040-1062) but nothing in `service/matching` ever
 //! calls the resulting `TaskListConfig` fields, so these readers exist for
 //! config parity and gate no behavior; wiring them would change Go logic.
-use cadence_api::admin::DynamicConfigValue;
-use cadence_persistence::dynamic_config;
+use cadence_persistence::dynamic_config::{self, PropertyValueSource};
 
 /// Go `dynamicproperties.UnlimitedRPS` (`math.MaxInt32`).
 pub const UNLIMITED_RPS: i64 = i32::MAX as i64;
@@ -22,28 +21,28 @@ pub const DEFAULT_IDLE_TIME_NANOS: i64 = 5 * 60 * 1_000_000_000;
 pub const DEFAULT_ACTIVITY_SYNC_MATCH_WAIT_NANOS: i64 = 50_000_000;
 
 /// Go `MatchingUserRPS` (`matching.rps`).
-pub fn user_rps(values: &[DynamicConfigValue]) -> i64 {
+pub fn user_rps(values: impl PropertyValueSource) -> i64 {
     dynamic_config::integer(values, None, DEFAULT_USER_RPS)
 }
 
 /// Go `MatchingWorkerRPS` (`matching.workerrps`).
-pub fn worker_rps(values: &[DynamicConfigValue]) -> i64 {
+pub fn worker_rps(values: impl PropertyValueSource) -> i64 {
     dynamic_config::integer(values, None, UNLIMITED_RPS)
 }
 
 /// Go `MatchingDomainUserRPS` (`matching.domainrps`).
-pub fn domain_user_rps(values: &[DynamicConfigValue], domain: &str) -> i64 {
+pub fn domain_user_rps(values: impl PropertyValueSource, domain: &str) -> i64 {
     dynamic_config::integer(values, Some(domain), DEFAULT_DOMAIN_USER_RPS)
 }
 
 /// Go `MatchingDomainWorkerRPS` (`matching.domainworkerrps`).
-pub fn domain_worker_rps(values: &[DynamicConfigValue], domain: &str) -> i64 {
+pub fn domain_worker_rps(values: impl PropertyValueSource, domain: &str) -> i64 {
     dynamic_config::integer(values, Some(domain), UNLIMITED_RPS)
 }
 
 /// Go `MatchingEnableSyncMatch` (`matching.enableSyncMatch`), not consumed by Go.
 pub fn enable_sync_match(
-    values: &[DynamicConfigValue],
+    values: impl PropertyValueSource,
     domain: &str,
     task_list: &str,
     task_type: i32,
@@ -53,7 +52,7 @@ pub fn enable_sync_match(
 
 /// Go `MaxTasklistIdleTime` (`matching.maxTasklistIdleTime`), not consumed by Go.
 pub fn max_tasklist_idle_time(
-    values: &[DynamicConfigValue],
+    values: impl PropertyValueSource,
     domain: &str,
     task_list: &str,
     task_type: i32,
@@ -69,12 +68,12 @@ pub fn max_tasklist_idle_time(
 
 /// Go `MatchingActivityTaskSyncMatchWaitTime`
 /// (`matching.activityTaskSyncMatchWaitTime`, default 50ms), not consumed by Go.
-pub fn activity_task_sync_match_wait_time(values: &[DynamicConfigValue], domain: &str) -> i64 {
+pub fn activity_task_sync_match_wait_time(values: impl PropertyValueSource, domain: &str) -> i64 {
     dynamic_config::duration(values, Some(domain), DEFAULT_ACTIVITY_SYNC_MATCH_WAIT_NANOS)
 }
 
 /// Go `MatchingSemaphoreIdleTime` (`matching.semaphoreIdleTime`).
-pub fn semaphore_idle_time(values: &[DynamicConfigValue], domain: &str) -> i64 {
+pub fn semaphore_idle_time(values: impl PropertyValueSource, domain: &str) -> i64 {
     dynamic_config::duration(values, Some(domain), DEFAULT_IDLE_TIME_NANOS)
 }
 
