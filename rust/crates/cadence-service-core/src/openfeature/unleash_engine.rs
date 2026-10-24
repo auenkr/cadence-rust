@@ -199,61 +199,118 @@ impl From<&VariantInternal> for Variant {
 /// Evaluate a feature using the SDK's registered built-in strategies. Unknown
 /// strategy names are skipped, as in unleash-client-go v4.5.0.
 pub fn is_enabled(snapshot: &FeatureResponse, name: &str, context: &Context) -> bool {
-    enabled(snapshot, name, context, 0)
+    evaluate(snapshot, name, context, 0).enabled
 }
 
-fn enabled(snapshot: &FeatureResponse, name: &str, ctx: &Context, depth: usize) -> bool {
+struct Evaluation {
+    enabled: bool,
+    strategy_variant: Option<Variant>,
+}
+
+impl Evaluation {
+    fn disabled() -> Self {
+        Self {
+            enabled: false,
+            strategy_variant: None,
+        }
+    }
+}
+
+fn evaluate(snapshot: &FeatureResponse, name: &str, ctx: &Context, depth: usize) -> Evaluation {
     if depth > 16 {
-        return false;
+        return Evaluation::disabled();
     }
     let Some(feature) = snapshot.features.iter().find(|f| f.name == name) else {
-        return false;
+        return Evaluation::disabled();
     };
     if !feature.enabled {
-        return false;
+        return Evaluation::disabled();
     }
     for dep in &feature.dependencies {
         let Some(parent) = snapshot.features.iter().find(|f| f.name == dep.feature) else {
-            return false;
+            return Evaluation::disabled();
         };
         if !parent.dependencies.is_empty() {
-            return false;
+            return Evaluation::disabled();
         }
-        let parent_on = enabled(snapshot, &dep.feature, ctx, depth + 1);
-        let parent_variant = get_variant(snapshot, &dep.feature, ctx, depth + 1);
+        let parent_result = evaluate(snapshot, &dep.feature, ctx, depth + 1);
         let expected = dep.enabled.unwrap_or(true);
-        if parent_on != expected {
-            return false;
+        if parent_result.enabled != expected {
+            return Evaluation::disabled();
         }
         if expected
             && dep.variants.as_ref().is_some_and(|vs| !vs.is_empty())
-            && !dep
-                .variants
+            && parent_result
+                .strategy_variant
                 .as_ref()
-                .unwrap()
-                .contains(&parent_variant.name)
+                .is_some_and(|variant| !dep.variants.as_ref().unwrap().contains(&variant.name))
         {
-            return false;
+            return Evaluation::disabled();
         }
     }
     if feature.strategies.is_empty() {
-        return true;
+        return Evaluation {
+            enabled: true,
+            strategy_variant: None,
+        };
     }
-    feature
-        .strategies
-        .iter()
-        .any(|s| strategy_matches(snapshot, s, ctx))
-}
-
-fn strategy_matches(snapshot: &FeatureResponse, s: &Strategy, ctx: &Context) -> bool {
     let segments: HashMap<i64, &Segment> =
         snapshot.segments.iter().map(|seg| (seg.id, seg)).collect();
-    let seg_ok = s.segments.iter().all(|id| {
-        segments
-            .get(id)
-            .is_some_and(|seg| constraints(ctx, &seg.constraints))
-    });
-    seg_ok && constraints(ctx, &s.constraints) && strategy_enabled(&s.name, &s.parameters, ctx)
+    for strategy in &feature.strategies {
+        if !matches!(
+            strategy.name.as_str(),
+            "default"
+                | "userWithId"
+                | "applicationHostname"
+                | "remoteAddress"
+                | "gradualRolloutUserId"
+                | "gradualRolloutSessionId"
+                | "gradualRolloutRandom"
+                | "flexibleRollout"
+        ) {
+            continue;
+        }
+        let mut segment_constraints = Vec::new();
+        for id in &strategy.segments {
+            let Some(segment) = segments.get(id) else {
+                // Go's repository returns an error for an absent segment and
+                // Client.isEnabled immediately returns a disabled result.
+                return Evaluation::disabled();
+            };
+            segment_constraints.extend(segment.constraints.iter());
+        }
+        if !constraints(
+            ctx,
+            &segment_constraints.into_iter().cloned().collect::<Vec<_>>(),
+        ) || !constraints(ctx, &strategy.constraints)
+            || !strategy_enabled(&strategy.name, &strategy.parameters, ctx)
+        {
+            continue;
+        }
+        let variant = if strategy.variants.is_empty() {
+            None
+        } else {
+            let Some(group) = strategy.parameters.get("groupId").and_then(Value::as_str) else {
+                return Evaluation::disabled();
+            };
+            Some(choose_variant(&strategy.variants, group, ctx).unwrap_or_else(disabled_variant))
+        };
+        // Client.isEnabled returns from the first matching strategy.
+        return Evaluation {
+            enabled: true,
+            strategy_variant: variant,
+        };
+    }
+    Evaluation::disabled()
+}
+
+fn disabled_variant() -> Variant {
+    Variant {
+        name: "disabled".into(),
+        enabled: false,
+        feature_enabled: false,
+        payload: Payload::default(),
+    }
 }
 
 fn strategy_enabled(name: &str, p: &Map<String, Value>, c: &Context) -> bool {
@@ -356,28 +413,67 @@ fn ip_match(ip: &str, list: &str) -> bool {
                 return false;
             };
             match (target, net) {
-                (IpAddr::V4(a), IpAddr::V4(n)) if bits <= 32 => {
-                    let m = if bits == 0 {
-                        0
-                    } else {
-                        u32::MAX << (32 - bits)
-                    };
-                    u32::from(a) & m == u32::from(n) & m
+                (address, IpAddr::V4(network)) if bits <= 32 => {
+                    as_ipv4(address).is_some_and(|address| ipv4_in_subnet(address, network, bits))
                 }
-                (IpAddr::V6(a), IpAddr::V6(n)) if bits <= 128 => {
-                    let m = if bits == 0 {
-                        0
+                (address, IpAddr::V6(network)) if bits <= 128 => {
+                    if let Some(network4) = network.to_ipv4_mapped() {
+                        if bits >= 96 {
+                            as_ipv4(address)
+                                .is_some_and(|address| ipv4_in_subnet(address, network4, bits - 96))
+                        } else {
+                            ipv6_in_subnet(as_ipv6(address), network, bits)
+                        }
                     } else {
-                        u128::MAX << (128 - bits)
-                    };
-                    u128::from(a) & m == u128::from(n) & m
+                        ipv6_in_subnet(as_ipv6(address), network, bits)
+                    }
                 }
                 _ => false,
             }
         } else {
-            entry.parse::<IpAddr>().is_ok_and(|n| n == target)
+            entry
+                .parse::<IpAddr>()
+                .is_ok_and(|network| match (target, network) {
+                    (IpAddr::V4(a), IpAddr::V4(b)) => a == b,
+                    (IpAddr::V6(a), IpAddr::V6(b)) => a == b,
+                    (IpAddr::V4(a), IpAddr::V6(b)) | (IpAddr::V6(b), IpAddr::V4(a)) => {
+                        b.to_ipv4_mapped() == Some(a)
+                    }
+                })
         }
     })
+}
+
+fn ipv4_in_subnet(address: std::net::Ipv4Addr, network: std::net::Ipv4Addr, bits: u8) -> bool {
+    let mask = if bits == 0 {
+        0
+    } else {
+        u32::MAX << (32 - bits)
+    };
+    u32::from(address) & mask == u32::from(network) & mask
+}
+
+fn as_ipv4(address: std::net::IpAddr) -> Option<std::net::Ipv4Addr> {
+    match address {
+        std::net::IpAddr::V4(address) => Some(address),
+        std::net::IpAddr::V6(address) => address.to_ipv4_mapped(),
+    }
+}
+
+fn as_ipv6(address: std::net::IpAddr) -> std::net::Ipv6Addr {
+    match address {
+        std::net::IpAddr::V4(address) => address.to_ipv6_mapped(),
+        std::net::IpAddr::V6(address) => address,
+    }
+}
+
+fn ipv6_in_subnet(address: std::net::Ipv6Addr, network: std::net::Ipv6Addr, bits: u8) -> bool {
+    let mask = if bits == 0 {
+        0
+    } else {
+        u128::MAX << (128 - bits)
+    };
+    u128::from(address) & mask == u128::from(network) & mask
 }
 
 fn constraints(ctx: &Context, cs: &[Constraint]) -> bool {
@@ -454,34 +550,18 @@ fn constraints(ctx: &Context, cs: &[Constraint]) -> bool {
 }
 
 pub fn get_variant(snapshot: &FeatureResponse, name: &str, ctx: &Context, depth: usize) -> Variant {
-    let disabled = || Variant {
-        name: "disabled".into(),
-        enabled: false,
-        feature_enabled: false,
-        payload: Payload::default(),
-    };
     if depth > 16 {
-        return disabled();
+        return disabled_variant();
     }
     let Some(f) = snapshot.features.iter().find(|f| f.name == name) else {
-        return disabled();
+        return disabled_variant();
     };
-    if !enabled(snapshot, name, ctx, depth) {
-        return disabled();
+    let result = evaluate(snapshot, name, ctx, depth);
+    if !result.enabled {
+        return disabled_variant();
     }
-    for s in &f.strategies {
-        if strategy_matches(snapshot, s, ctx) && !s.variants.is_empty() {
-            if let Some(v) = choose_variant(
-                &s.variants,
-                s.parameters
-                    .get("groupId")
-                    .and_then(Value::as_str)
-                    .unwrap_or(""),
-                ctx,
-            ) {
-                return v;
-            }
-        }
+    if let Some(variant) = result.strategy_variant {
+        return variant;
     }
     choose_variant(&f.variants, &f.name, ctx).unwrap_or_else(|| Variant {
         name: "disabled".into(),
@@ -577,6 +657,128 @@ mod tests {
             parameters.as_object().unwrap(),
             &Context::default()
         ));
+    }
+
+    #[test]
+    fn first_matching_strategy_controls_variant_result() {
+        let snapshot: FeatureResponse = serde_json::from_str(
+            r#"{"features":[{"name":"flag","enabled":true,
+              "strategies":[
+                {"name":"default"},
+                {"name":"default","parameters":{"groupId":"later"},
+                 "variants":[{"name":"later-strategy","weight":100,"payload":{"value":"wrong"}}]}
+              ],
+              "variants":[{"name":"feature-level","weight":100,"payload":{"value":"right"}}]}]}"#,
+        )
+        .unwrap();
+        let variant = get_variant(
+            &snapshot,
+            "flag",
+            &Context {
+                user_id: "alice".into(),
+                ..Default::default()
+            },
+            0,
+        );
+        assert_eq!(variant.name, "feature-level");
+        assert_eq!(variant.payload.value, "right");
+    }
+
+    #[test]
+    fn matching_strategy_variants_require_string_group_id() {
+        let snapshot: FeatureResponse = serde_json::from_str(
+            r#"{"features":[{"name":"flag","enabled":true,"strategies":[
+              {"name":"default","variants":[{"name":"v1","weight":100}]}
+            ]}]}"#,
+        )
+        .unwrap();
+        assert!(!is_enabled(&snapshot, "flag", &Context::default()));
+        assert_eq!(
+            get_variant(&snapshot, "flag", &Context::default(), 0).name,
+            "disabled"
+        );
+    }
+
+    #[test]
+    fn missing_segment_stops_strategy_evaluation() {
+        let snapshot: FeatureResponse = serde_json::from_str(
+            r#"{"features":[{"name":"flag","enabled":true,"strategies":[
+              {"name":"default","segments":[404]}, {"name":"default"}
+            ]}]}"#,
+        )
+        .unwrap();
+        assert!(!is_enabled(&snapshot, "flag", &Context::default()));
+    }
+
+    #[test]
+    fn remote_address_matches_go_ipv4_mapped_ip_and_network_semantics() {
+        assert!(ip_match("::ffff:192.0.2.10", "192.0.2.10"));
+        assert!(ip_match("::ffff:192.0.2.10", "192.0.2.0/24"));
+        assert!(ip_match("192.0.2.10", "::ffff:192.0.2.0/120"));
+        assert!(!ip_match("192.0.2.10", "::ffff:192.0.2.128/120"));
+    }
+
+    #[test]
+    fn gradual_flexible_and_random_strategies_match_go_rollout_fixtures() {
+        let context = Context {
+            user_id: "123".into(),
+            session_id: "123".into(),
+            ..Default::default()
+        };
+        let gradual = serde_json::json!({"groupId":"gr1","percentage":73});
+        assert!(strategy_enabled(
+            "gradualRolloutUserId",
+            gradual.as_object().unwrap(),
+            &context
+        ));
+        assert!(strategy_enabled(
+            "gradualRolloutSessionId",
+            gradual.as_object().unwrap(),
+            &context
+        ));
+        let just_below = serde_json::json!({"groupId":"gr1","percentage":72});
+        assert!(!strategy_enabled(
+            "gradualRolloutUserId",
+            just_below.as_object().unwrap(),
+            &context
+        ));
+        let flexible = serde_json::json!({"groupId":"gr1","rollout":73,"stickiness":"default"});
+        assert!(strategy_enabled(
+            "flexibleRollout",
+            flexible.as_object().unwrap(),
+            &context
+        ));
+        let random = serde_json::json!({"percentage":100});
+        assert!(strategy_enabled(
+            "gradualRolloutRandom",
+            random.as_object().unwrap(),
+            &context
+        ));
+    }
+
+    #[test]
+    fn string_numeric_date_and_semver_constraints_match_go_contract() {
+        let context = Context {
+            current_time: "2025-01-01T00:00:00Z".into(),
+            properties: HashMap::from([
+                ("plan".into(), "PROD".into()),
+                ("score".into(), "12.5".into()),
+                ("version".into(), "1.4.0".into()),
+            ]),
+            ..Default::default()
+        };
+        let cs: Vec<Constraint> = serde_json::from_value(serde_json::json!([
+            {"contextName":"plan","operator":"STR_CONTAINS","values":["prod"],"caseInsensitive":true},
+            {"contextName":"score","operator":"NUM_GTE","value":"12"},
+            {"contextName":"version","operator":"SEMVER_GT","value":"1.3.9"},
+            {"contextName":"currentTime","operator":"DATE_AFTER","value":"2024-12-31T23:59:59Z"}
+        ])).unwrap();
+        assert!(constraints(&context, &cs));
+        let bad: Constraint = serde_json::from_value(serde_json::json!({
+            "contextName":"version","operator":"SEMVER_EQ","value":"v1.4.0","inverted":true
+        }))
+        .unwrap();
+        assert!(!constraints(&context, &[bad]));
     }
     #[test]
     fn user_rollout_and_disabled_default() {
