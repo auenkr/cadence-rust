@@ -988,6 +988,11 @@ pub async fn run(
                     crate::matching_metrics_runtime::MatchingMetricsRuntime::new(
                         matching_metrics_config,
                         matching_service_config.map(|service| &service.pprof),
+                        crate::matching_metrics_migration::MigrationPolicy {
+                            histograms: cfg.histograms.clone(),
+                            gauges: cfg.gauge_migration.clone(),
+                            counters: cfg.counter_migration.clone(),
+                        },
                     )?;
                 runtime.start().await?;
                 Some(runtime)
