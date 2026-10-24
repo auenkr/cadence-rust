@@ -41,12 +41,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Format
-        working-directory: rust
-        run: |
-          # Report existing workspace formatting debt without rewriting the tested source.
-          cargo fmt --all -- --check > format.log 2>&1
-        continue-on-error: true
       - name: Select fresh final target
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"
@@ -54,6 +48,14 @@ jobs:
         if: inputs.clean_target != true
         with:
           workspaces: rust
+      - name: Format check
+        working-directory: rust
+        run: |
+          set +e
+          cargo fmt --all -- --check > format.log 2>&1
+          echo "$?" > fmt.exit
+          exit 0
+        continue-on-error: true
       - name: Clippy
         working-directory: rust
         run: |
@@ -102,4 +104,3 @@ jobs:
             rust/commit.txt
             rust/target-dir.txt
             rust/format.log
-            rust/Cargo.lock
