@@ -123,6 +123,37 @@ impl MetricSink for HistogramTagSink {
     }
 }
 
+/// Emit Go MetricDefs[Matching] root rollups beside their per-task-list series.
+/// The rollup name is migration-filtered independently by the wrapped sink.
+struct GoRollupSink(Arc<dyn MetricSink>);
+impl MetricSink for GoRollupSink {
+    fn record(&self, event: MetricEvent) {
+        let rollup = crate::matching_metrics_rollup::rollup(event.name).map(|name| {
+            let mut tags = BTreeMap::new();
+            for key in ["operation", "histogram_start", "histogram_end", "histogram_scale"] {
+                if let Some(value) = event.tags.get(key) {
+                    tags.insert(key.to_owned(), value.clone());
+                }
+            }
+            MetricEvent {
+                name,
+                kind: event.kind,
+                value: event.value.clone(),
+                tags,
+                histogram: event.histogram,
+            }
+        });
+        self.0.record(event);
+        if let Some(rollup) = rollup {
+            self.0.record(rollup);
+        }
+    }
+
+    fn flush(&self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
 pub trait MetricSink: Send + Sync + 'static {
     fn record(&self, event: MetricEvent);
 
@@ -665,7 +696,7 @@ impl Default for MatchingMetrics {
 
 impl MatchingMetrics {
     pub fn new(sink: Arc<dyn MetricSink>) -> Self {
-        Self(Arc::new(HistogramTagSink(sink)))
+        Self(Arc::new(HistogramTagSink(Arc::new(GoRollupSink(sink)))))
     }
 
     pub fn membership_view(&self, host: &str, identifier: u32) {
@@ -1974,6 +2005,13 @@ mod matcher_metric_tests {
         }
     }
 
+    fn task_list_events(events: Vec<MetricEvent>) -> Vec<MetricEvent> {
+        events
+            .into_iter()
+            .filter(|event| event.tags.contains_key(DOMAIN_TAG))
+            .collect()
+    }
+
     #[test]
     fn poll_match_latency_emits_go_timer_and_histogram_pairs() {
         let sink = Arc::new(RecordingMetricSink::default());
@@ -1981,7 +2019,7 @@ mod matcher_metric_tests {
         let elapsed = Duration::from_millis(12);
         metrics.poll_match_latency(&context(), elapsed, false, true);
         metrics.poll_match_latency(&context(), elapsed, true, false);
-        let events = sink.events();
+        let events = task_list_events(sink.events());
         assert_eq!(events.len(), 4);
         assert_eq!(
             events[0].name,
@@ -2016,7 +2054,7 @@ mod matcher_metric_tests {
         let metrics = MatchingMetrics::new(sink.clone());
         let elapsed = Duration::from_millis(7);
         metrics.async_match_local(&context(), Some(3), elapsed);
-        let events = sink.events();
+        let events = task_list_events(sink.events());
         assert_eq!(events.len(), 5);
         assert_eq!(events[0].name, ASYNC_MATCH_LOCAL_POLL);
         assert_eq!(events[1].name, ASYNC_MATCH_LOCAL_POLL_ATTEMPT);
@@ -2034,7 +2072,7 @@ mod matcher_metric_tests {
     fn poller_gauge_uses_go_task_list_dimensions() {
         let sink = Arc::new(RecordingMetricSink::default());
         MatchingMetrics::new(sink.clone()).poller_count(&context(), 3);
-        let events = sink.events();
+        let events = task_list_events(sink.events());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, POLLER_PER_TASK_LIST);
         assert_eq!(events[0].kind, MetricKind::Gauge);
@@ -2054,7 +2092,7 @@ mod matcher_metric_tests {
         let sink = Arc::new(RecordingMetricSink::default());
         let elapsed = Duration::from_millis(7);
         MatchingMetrics::new(sink.clone()).async_match_latency(&context(), elapsed);
-        let events = sink.events();
+        let events = task_list_events(sink.events());
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].name, ASYNC_MATCH_LATENCY);
         assert_eq!(events[0].kind, MetricKind::Timer);
@@ -2080,7 +2118,7 @@ mod matcher_metric_tests {
             }),
             elapsed,
         );
-        let events = sink.events();
+        let events = task_list_events(sink.events());
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].name, "syncmatch_latency_per_tl");
         assert_eq!(events[0].kind, MetricKind::Timer);
@@ -2103,7 +2141,7 @@ mod matcher_metric_tests {
         let metrics = MatchingMetrics::new(sink.clone());
         metrics.condition_failed(&context());
         metrics.async_forward_throttled(&context());
-        let events = sink.events();
+        let events = task_list_events(sink.events());
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].name, "condition_failed_errors_per_tl");
         assert_eq!(events[1].name, "async_forward_task_throttle_errors_per_tl");
@@ -2138,7 +2176,7 @@ mod matcher_metric_tests {
             false,
             false,
         );
-        let events = sink.events();
+        let events = task_list_events(sink.events());
         assert_eq!(events.len(), 2);
         for event in &events {
             assert_eq!(event.tags[OPERATION_TAG], "TaskListMgr");
@@ -2155,7 +2193,7 @@ mod matcher_metric_tests {
         let mut poll_context = context();
         poll_context.task_type = "activity_task";
         MatchingMetrics::new(sink.clone()).async_match_handler_latency(&poll_context, elapsed);
-        let events = sink.events();
+        let events = task_list_events(sink.events());
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].name, "asyncmatch_latency_per_tl");
         assert_eq!(events[0].kind, MetricKind::Timer);
@@ -2266,7 +2304,11 @@ mod go_scope_parity_tests {
         metrics.poller_count(&context, 2);
         metrics.partition_scale_change(&context, true);
         metrics.async_match_local(&context, Some(3), Duration::from_millis(1));
-        let events = sink.events();
+        let events = sink
+            .events()
+            .into_iter()
+            .filter(|event| event.tags.contains_key(DOMAIN_TAG))
+            .collect::<Vec<_>>();
         assert_eq!(events[0].name, "poller_count_per_tl");
         assert_eq!(
             events[0].tags,
