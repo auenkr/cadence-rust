@@ -1,0 +1,78 @@
+name: Matching production validation
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: Supported deployment scenario
+        type: choice
+        options: [postgres, thrift, shard-distributor, configstore, mysql-probes]
+        default: postgres
+concurrency:
+  group: matching-production-validation
+  cancel-in-progress: false
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: /tmp/cargo-target-final-${{ github.run_id }}
+      LANE: ${{ inputs.lane }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/go-sdk/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: PostgreSQL probe client
+        if: inputs.lane == 'postgres'
+        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+      - name: Build fresh Rust Matching
+        run: |
+          mkdir -p out
+          git rev-parse HEAD > out/commit.txt
+          set +e
+          cargo build --manifest-path rust/Cargo.toml -p cadence-matching -j2 > out/build.log 2>&1
+          result=$?
+          echo "$result" > out/build.exit
+          if [ "$result" != 0 ]; then tail -60 out/build.log; exit "$result"; fi
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-matching" > out/binary.sha256
+      - name: Probe dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/node-grpc"
+          cd "$RUNNER_TEMP/node-grpc"
+          npm install @grpc/grpc-js@^1.14.6 @grpc/proto-loader@^0.8.1
+          echo "NODE_PATH=$RUNNER_TEMP/node-grpc/node_modules" >> "$GITHUB_ENV"
+      - name: Mixed Go and Rust validation
+        run: |
+          set +e
+          common=(--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3)
+          wrapper=tests/gates/run-mysql-lane.sh
+          case "$LANE" in
+            postgres)
+              wrapper=tests/gates/run-postgres-lane.sh
+              extra=(--probe-pg-gc-domain --probe-query-standby --probe-list-partitions --probe-durable-restart --probe-auto-config-hint) ;;
+            thrift) extra=(--matching-transport thrift --history-transport tchannel --probe-auto-config-hint) ;;
+            shard-distributor) extra=(--real-shard-distributor) ;;
+            configstore) extra=(--matching-configstore) ;;
+            mysql-probes) extra=(--matching-backlog-forward --probe-query-standby --probe-list-partitions --probe-durable-restart --probe-auto-config-hint) ;;
+            *) exit 2 ;;
+          esac
+          printf '%q ' "$wrapper" out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" "${common[@]}" "${extra[@]}" > out/command.txt
+          "$wrapper" out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" "${common[@]}" "${extra[@]}" > out/gate.log 2>&1
+          result=$?
+          echo "$result" > out/gate.exit
+          tail -60 out/gate.log | cut -c1-300
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: matching-production-${{ inputs.lane }}
+          path: out/
+          retention-days: 3
