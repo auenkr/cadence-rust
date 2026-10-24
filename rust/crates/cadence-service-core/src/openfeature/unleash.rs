@@ -1,9 +1,8 @@
 //! Unleash provider configuration and construction, mirroring Go
 //! `common/dynamicconfig/openfeatureprovider/unleash` (`init.go`, `unleash.go`).
 //!
-//! PARTIAL PORT. Config decoding, validation, bootstrap, and repository
-//! polling are implemented. Strategy evaluation, variants and payloads remain
-//! unported, so lookups still return the supplied default with a clear error.
+//! Config decoding, bootstrap, repository polling and local evaluation are
+//! implemented against unleash-client-go v4.5.0 semantics.
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -17,15 +16,12 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::provider::{Constructor, FeatureProvider};
+use super::provider::{ErrorCode, FlagValue, FlattenedContext, Resolution, ResolutionError};
+use super::unleash_engine::{self, Context as UnleashContext, FeatureResponse};
 use crate::config::de_go_duration;
 
 /// Plugin name, set as `dynamicconfig.openfeature.providerName`.
 pub const PROVIDER_NAME: &str = "unleash";
-
-/// Returned by flag lookups until the evaluation engine is ported.
-pub const NOT_PORTED_MESSAGE: &str = "unleash provider evaluation is not ported to Rust yet: \
-    Go's unleash-client-go v4.5.0 polling, strategy and variant evaluation has no Rust \
-    equivalent (memory/evidence/matching-openfeature-20261024/notes.md)";
 
 /// Go `unleash.Config`, decoded from the `provider:` block. Durations are
 /// nanoseconds, as Go's `time.Duration`; zero means "client default".
@@ -99,13 +95,17 @@ pub fn new_provider(
         None
     };
     let repository = UnleashRepository::new(config, bootstrap)?;
-    Ok(Arc::new(UnleashProvider { repository }))
+    Ok(Arc::new(UnleashProvider {
+        repository,
+        ready: AtomicBool::new(false),
+    }))
 }
 
 /// Client-feature repository state. This ports storage and polling only;
 /// OpenFeature evaluation remains explicitly unported.
 pub struct UnleashRepository {
     features: Arc<RwLock<Value>>,
+    static_context: UnleashContext,
     stop: Arc<AtomicBool>,
     poller: Mutex<Option<JoinHandle<()>>>,
 }
@@ -114,6 +114,15 @@ impl UnleashRepository {
         let features = Arc::new(RwLock::new(feature_map(
             bootstrap.unwrap_or_else(|| serde_json::json!({"features": []})),
         )));
+        let static_context = UnleashContext {
+            app_name: config.app_name.clone(),
+            environment: if config.environment.is_empty() {
+                "default".into()
+            } else {
+                config.environment.clone()
+            },
+            ..Default::default()
+        };
         let stop = Arc::new(AtomicBool::new(false));
         let interval = if config.refresh_interval_nanos > 0 {
             Duration::from_nanos(config.refresh_interval_nanos as u64)
@@ -182,6 +191,7 @@ impl UnleashRepository {
             .map_err(|e| anyhow!("failed to start unleash poller: {e}"))?;
         Ok(Self {
             features,
+            static_context,
             stop,
             poller: Mutex::new(Some(poller)),
         })
@@ -213,29 +223,189 @@ fn feature_map(body: Value) -> Value {
             }
         }
     }
+    map.insert(
+        "__segments".into(),
+        body.get("segments")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    );
     Value::Object(map)
 }
 struct UnleashProvider {
     repository: UnleashRepository,
+    ready: AtomicBool,
 }
 impl FeatureProvider for UnleashProvider {
+    fn init(&self) -> anyhow::Result<()> {
+        self.ready.store(true, Ordering::Release);
+        Ok(())
+    }
+
     fn shutdown(&self) {
+        self.ready.store(false, Ordering::Release);
         self.repository.shutdown();
     }
-    fn resolve(
-        &self,
-        _flag: &str,
-        default: super::provider::FlagValue,
-        _ctx: &super::provider::FlattenedContext,
-    ) -> super::provider::Resolution {
-        super::provider::Resolution {
-            value: default,
-            error: Some(super::provider::ResolutionError {
-                code: super::provider::ErrorCode::ProviderNotReady,
-                message: NOT_PORTED_MESSAGE.into(),
-            }),
+    fn resolve(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext) -> Resolution {
+        if !self.ready.load(Ordering::Acquire) {
+            return failure(default, ErrorCode::ProviderNotReady, "Provider not ready");
+        }
+        let context = match unleash_context(ctx) {
+            Ok(context) => context,
+            Err(error) => {
+                let code = if matches!(default, FlagValue::Bool(_)) {
+                    ErrorCode::InvalidContext
+                } else {
+                    ErrorCode::General
+                };
+                return failure(default, code, error);
+            }
+        };
+        let context = merge_context(self.repository.static_context.clone(), context);
+        let snapshot = match evaluation_snapshot(self.repository.snapshot()) {
+            Ok(snapshot) => snapshot,
+            Err(error) => return failure(default, ErrorCode::General, error.to_string()),
+        };
+        if matches!(default, FlagValue::Bool(_)) {
+            let fallback = match &default {
+                FlagValue::Bool(value) => *value,
+                _ => unreachable!(),
+            };
+            return Resolution {
+                value: FlagValue::Bool(
+                    if snapshot.features.iter().any(|feature| feature.name == flag) {
+                        unleash_engine::is_enabled(&snapshot, flag, &context)
+                    } else {
+                        fallback
+                    },
+                ),
+                error: None,
+            };
+        }
+        let variant = unleash_engine::get_variant(&snapshot, flag, &context, 0);
+        if !variant.feature_enabled || variant.name == "disabled" {
+            return Resolution {
+                value: default,
+                error: None,
+            };
+        }
+        let payload = variant.payload.value;
+        let fallback = default.clone();
+        match default {
+            FlagValue::String(_) => Resolution {
+                value: FlagValue::String(payload),
+                error: None,
+            },
+            FlagValue::Int(_) => match payload.parse::<i64>() {
+                Ok(value) => Resolution {
+                    value: FlagValue::Int(value),
+                    error: None,
+                },
+                Err(_) => failure(
+                    fallback,
+                    ErrorCode::TypeMismatch,
+                    format!("IntEvaluation type error for {flag}"),
+                ),
+            },
+            FlagValue::Float(_) => match payload.parse::<f64>() {
+                Ok(value) => Resolution {
+                    value: FlagValue::Float(value),
+                    error: None,
+                },
+                Err(_) => failure(
+                    fallback,
+                    ErrorCode::TypeMismatch,
+                    format!("FloatEvaluation type error for {flag}"),
+                ),
+            },
+            FlagValue::Object(_) => Resolution {
+                value: FlagValue::Object(Value::String(payload)),
+                error: None,
+            },
+            FlagValue::Bool(value) => Resolution {
+                value: FlagValue::Bool(value),
+                error: None,
+            },
         }
     }
+}
+
+fn failure(default: FlagValue, code: ErrorCode, message: impl Into<String>) -> Resolution {
+    Resolution {
+        value: default,
+        error: Some(ResolutionError {
+            code,
+            message: message.into(),
+        }),
+    }
+}
+
+fn evaluation_snapshot(snapshot: Value) -> anyhow::Result<FeatureResponse> {
+    let entries = snapshot
+        .as_object()
+        .ok_or_else(|| anyhow!("invalid unleash feature cache"))?;
+    let features = entries
+        .iter()
+        .filter(|(name, _)| name.as_str() != "__segments")
+        .map(|(_, feature)| serde_json::from_value(feature.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let segments = entries
+        .get("__segments")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    Ok(FeatureResponse {
+        features,
+        segments: serde_json::from_value(segments)?,
+    })
+}
+
+fn unleash_context(context: &FlattenedContext) -> Result<UnleashContext, String> {
+    let mut output = UnleashContext::default();
+    for (key, value) in context {
+        let text = match value {
+            Value::String(value) => value.clone(),
+            Value::Bool(value) => value.to_string(),
+            Value::Number(value) if value.is_i64() || value.is_u64() => value.to_string(),
+            Value::Number(value) => format!("{:.6}", value.as_f64().unwrap_or_default()),
+            _ => return Err(format!("key `{key}` can not be converted to string")),
+        };
+        match key.as_str() {
+            "AppName" => output.app_name = text,
+            "CurrentTime" => output.current_time = text,
+            "Environment" => output.environment = text,
+            "RemoteAddress" => output.remote_address = text,
+            "SessionId" => output.session_id = text,
+            "UserId" => output.user_id = text,
+            _ => {
+                output.properties.insert(key.clone(), text);
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn merge_context(mut base: UnleashContext, override_context: UnleashContext) -> UnleashContext {
+    if !override_context.user_id.is_empty() {
+        base.user_id = override_context.user_id;
+    }
+    if !override_context.session_id.is_empty() {
+        base.session_id = override_context.session_id;
+    }
+    if !override_context.remote_address.is_empty() {
+        base.remote_address = override_context.remote_address;
+    }
+    if !override_context.environment.is_empty() {
+        base.environment = override_context.environment;
+    }
+    if !override_context.app_name.is_empty() {
+        base.app_name = override_context.app_name;
+    }
+    if !override_context.current_time.is_empty() {
+        base.current_time = override_context.current_time;
+    }
+    if !override_context.properties.is_empty() {
+        base.properties = override_context.properties;
+    }
+    base
 }
 
 /// Go self-registers in `init()`. Rust has no import-time registration, so the
@@ -333,6 +503,102 @@ mod tests {
         let provider = new_provider(Some(&yaml(&config)));
         assert!(provider.is_ok());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn typed_resolutions_use_cached_variant_payloads_and_default_fallbacks() {
+        use super::super::provider::{ErrorCode, FlagValue};
+        use std::collections::BTreeMap;
+
+        let repository = UnleashRepository::new(
+            UnleashConfig {
+                url: "http://127.0.0.1:1/api".into(),
+                app_name: "cadence-test".into(),
+                ..Default::default()
+            },
+            Some(serde_json::json!({"features":[
+                {"name":"number","enabled":true,"strategies":[{"name":"default"}],
+                 "variants":[{"name":"v1","weight":100,"payload":{"type":"string","value":"42"}}]},
+                {"name":"bad-number","enabled":true,"strategies":[{"name":"default"}],
+                 "variants":[{"name":"v1","weight":100,"payload":{"type":"string","value":"nope"}}]},
+                {"name":"off","enabled":false}
+            ]})),
+        )
+        .unwrap();
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(false),
+        };
+        let mut context = BTreeMap::new();
+        context.insert("UserId".into(), Value::String("alice".into()));
+        let not_ready = provider.resolve("number", FlagValue::Int(7), &context);
+        assert_eq!(not_ready.value, FlagValue::Int(7));
+        assert_eq!(not_ready.error.unwrap().code, ErrorCode::ProviderNotReady);
+
+        provider.init().unwrap();
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::Bool(false), &context)
+                .value,
+            FlagValue::Bool(true)
+        );
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::String("fallback".into()), &context)
+                .value,
+            FlagValue::String("42".into())
+        );
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::Int(7), &context)
+                .value,
+            FlagValue::Int(42)
+        );
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::Float(7.0), &context)
+                .value,
+            FlagValue::Float(42.0)
+        );
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::Object(Value::Null), &context)
+                .value,
+            FlagValue::Object(Value::String("42".into()))
+        );
+        let mismatch = provider.resolve("bad-number", FlagValue::Int(7), &context);
+        assert_eq!(mismatch.value, FlagValue::Int(7));
+        assert_eq!(mismatch.error.unwrap().code, ErrorCode::TypeMismatch);
+        assert_eq!(
+            provider.resolve("off", FlagValue::Int(7), &context).value,
+            FlagValue::Int(7)
+        );
+        provider.shutdown();
+    }
+
+    #[test]
+    fn bool_context_conversion_failure_matches_openfeature_invalid_context() {
+        use super::super::provider::{ErrorCode, FlagValue};
+        use std::collections::BTreeMap;
+        let provider = UnleashProvider {
+            repository: UnleashRepository::new(
+                UnleashConfig {
+                    url: "http://127.0.0.1:1/api".into(),
+                    app_name: "test".into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap(),
+            ready: AtomicBool::new(false),
+        };
+        provider.init().unwrap();
+        let mut context = BTreeMap::new();
+        context.insert("bad".into(), Value::Array(vec![]));
+        let result = provider.resolve("flag", FlagValue::Bool(true), &context);
+        assert_eq!(result.value, FlagValue::Bool(true));
+        assert_eq!(result.error.unwrap().code, ErrorCode::InvalidContext);
+        provider.shutdown();
     }
 
     // Field names and duration decoding match init.go / Go's yaml.v3 for
@@ -459,7 +725,10 @@ mod tests {
         assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
         assert!(repository.snapshot().get("refreshed").is_some());
         release_final_response.send(()).unwrap();
-        let provider = UnleashProvider { repository };
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(false),
+        };
         provider.shutdown();
         server.join().unwrap();
     }
@@ -491,7 +760,10 @@ mod tests {
         .unwrap();
         rx.recv_timeout(Duration::from_secs(1)).unwrap();
         let started = std::time::Instant::now();
-        let provider = UnleashProvider { repository };
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(false),
+        };
         provider.shutdown();
         assert!(started.elapsed() < Duration::from_secs(2));
         server.join().unwrap();
