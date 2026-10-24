@@ -1004,7 +1004,7 @@ mod tests {
         fake.fail.store(true, Ordering::SeqCst);
         assert_eq!(dynamic_config::integer(overlay.property_values("matching.rps"), None, 23), 23);
         fake.fail.store(false, Ordering::SeqCst);
-        assert_eq!(dynamic_config::boolean(overlay.property_values("matching.enabled"), None, true), true);
+        assert!(dynamic_config::boolean(overlay.property_values("matching.enabled"), None, true));
         deregister_provider();
         assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
     }
