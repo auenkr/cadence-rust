@@ -86,3 +86,4 @@ jobs:
             rust/commit.txt
             rust/target-dir.txt
             rust/format.log
+            rust/Cargo.lock
