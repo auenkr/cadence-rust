@@ -2416,6 +2416,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn matching_forward_poll_without_parent_waits_locally_and_never_forwards() {
+        // Go TestForwardPollError: ForwardPoll on a list with no parent returns
+        // ErrNoParent, and pollOrForward falls back to the local wait. Rust has no
+        // ForwardPoll error value; the no-parent case must give the same observable
+        // result: no parent RPC, no error, and an empty response at the deadline.
+        let (_directory, _store, _key, dispatcher) = fixture(1);
+        let forward = ForwardState::new(
+            || Box::pin(async { None }),
+            Arc::new(|| 0),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            "/__cadence_sys/queue/1".into(),
+            Arc::new(|| 0),
+        );
+        let dispatcher = dispatcher.with_forward(forward);
+        let started = tokio::time::Instant::now();
+        let response = dispatcher
+            .forward_query_poll(
+                p::PollForDecisionTaskRequest {
+                    identity: "query-worker".into(),
+                    task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
+                    ..Default::default()
+                },
+                Duration::from_millis(200),
+                query_lifecycle(),
+            )
+            .await
+            .unwrap();
+        assert!(response.task_token.is_empty(), "no parent means no forwarded task");
+        assert!(started.elapsed() >= Duration::from_millis(200), "poll waits out its local deadline");
+    }
+
+    #[tokio::test]
     async fn matching_failover_keeps_local_history_delivery_after_end_poll() {
         let (_directory, _store, _key, dispatcher) = fixture(1);
         let entered = Arc::new(Notify::new());

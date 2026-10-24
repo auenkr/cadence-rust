@@ -252,15 +252,15 @@ Rust has no separate poller manager struct. Poller bookkeeping is in matching_re
 | task_test.go: TestNewInternalTask (36) | internal task construction | matching_sync.rs (InternalTask-like types) | NOT-ASSESSED |
 | forwarder_test.go: TestForwarderSuite (54) | suite runner | n/a | n/a |
 | forwarder_test.go: TestForwardTaskError (77) | ErrNoParent for a root list; ErrTaskListKind for sticky | matching_dispatch.rs::matching_forward_task_error_is_no_parent_or_task_list_kind | PORTED |
-| forwarder_test.go: TestForwardDecisionTask (86) | AddDecisionTask request fields (parent name, kind, domain, execution, schedule, forwardedFrom) | matching_dispatch.rs::matching_remote_forward_reaches_go_yarpc_peer (real Go peer; field-level not asserted) | MISSING: needs an in-process mocked parent client |
-| forwarder_test.go: TestForwardActivityTask (110) | AddActivityTask request fields | matching_dispatch.rs::matching_backlog_forward_remote_fields_busy_and_rate_limit (partial field coverage) | MISSING: needs an in-process mocked parent client |
+| forwarder_test.go: TestForwardDecisionTask (86) | AddDecisionTask request fields (parent name, kind, domain, execution, schedule, forwardedFrom) | matching_dispatch.rs::matching_forward_decision_task_fields_match_go_forwarder (in-process RecordingParent; port3 audit: was stale MISSING) | PORTED |
+| forwarder_test.go: TestForwardActivityTask (110) | AddActivityTask request fields | matching_dispatch.rs::matching_forward_activity_task_fields_match_go_forwarder (port3 audit: was stale MISSING) | PORTED |
 | forwarder_test.go: TestForwardTaskRateExceeded (135) | two forwards allowed, third returns ErrForwarderSlowDown | matching_dispatch.rs::matching_forward_task_rate_exceeded_after_two_forwards | PORTED |
-| forwarder_test.go: TestForwardQueryTaskError (148) | ForwardQueryTask: ErrNoParent / ErrTaskListKind | none | MISSING: no Rust ForwardQueryTask API |
-| forwarder_test.go: TestForwardQueryTask (159) | ForwardQueryTask forwards request and returns response | none | MISSING: no Rust ForwardQueryTask API |
-| forwarder_test.go: TestForwardQueryTaskRateNotEnforced (178) | query forwards are not rate limited | none | MISSING: no Rust ForwardQueryTask API |
-| forwarder_test.go: TestForwardPollError (192) | ForwardPoll: ErrNoParent / ErrTaskListKind | none (matching_dispatch.rs::forward_query_poll is a different path) | MISSING: needs a parent-less poll fixture |
-| forwarder_test.go: TestForwardPollForDecision (203) | ForwardPoll decision: poller id, identity, parent name, response routing | none | MISSING: needs an in-process mocked parent client |
-| forwarder_test.go: TestForwardPollForActivity (231) | ForwardPoll activity: same fields | none | MISSING: needs an in-process mocked parent client |
+| forwarder_test.go: TestForwardQueryTaskError (148) | ForwardQueryTask: sticky list never forwards | matching_query_forward_family_tests.rs::query_forward_family_sticky_list_never_forwards_and_waits_for_local_poller (port3 audit) | PORTED (Rust has no ForwardQueryTask fn; behaviour via RPC) |
+| forwarder_test.go: TestForwardQueryTask (159) | query forward reaches parent with parent name | matching_query_forward_family_tests.rs::query_forward_family_forwards_go_forwarder_fields_to_parent (port3 audit) | PORTED |
+| forwarder_test.go: TestForwardQueryTaskRateNotEnforced (178) | query forwards are not rate limited | matching_query_forward_family_tests.rs::query_forward_family_repeated_forwards_are_not_rate_limited (port3 audit) | PORTED |
+| forwarder_test.go: TestForwardPollError (192) | ForwardPoll: ErrNoParent / ErrTaskListKind | matching_dispatch.rs::matching_forward_poll_without_parent_waits_locally_and_never_forwards (port3, NoParent branch only) | PORTED (partial: Rust has no ForwardPoll error value; ErrTaskListKind not asserted) |
+| forwarder_test.go: TestForwardPollForDecision (203) | ForwardPoll decision: poller id, identity, parent name, response routing | matching_dispatch.rs::matching_forward_poll_for_decision_fields_match_go_forwarder (port3 audit) | PORTED |
+| forwarder_test.go: TestForwardPollForActivity (231) | ForwardPoll activity: same fields | matching_dispatch.rs::matching_forward_poll_for_activity_fields_match_go_forwarder (port3 audit) | PORTED |
 | forwarder_test.go: TestMaxOutstandingConcurrency (259) | 50 concurrent callers: contention yields 50, leaked tokens yield 1 | matching_forward.rs::matching_forward_max_outstanding_concurrency | PORTED |
 | forwarder_test.go: TestMaxOutstandingConfigUpdate (311) | token capacity follows the dynamic config after an update | matching_forward.rs::matching_forward_config_update_resizes_generation | PORTED |
 | task_list_limiter_test.go: TestTaskListLimiter (15) | limiter rate and burst | matching_limiter.rs::zero_burst_reports_throttled_without_consuming, wait_paces_after_terminal_burst_until_tokens_replenish | PARTIAL |
@@ -297,17 +297,17 @@ Rust has no separate poller manager struct. Poller bookkeeping is in matching_re
 | matcher_test.go: TestLocalSyncMatch (101) | waiting poller takes offer; Offer = true | matching_sync.rs::sync_match_local_match_hands_off_to_waiting_poller | PORTED |
 | matcher_test.go: TestLocalSyncMatchTimeout (120) | poller finishes after the 100ms offer budget; Offer = false | matching_sync.rs::sync_match_local_timeout_reports_no_match_when_poller_finishes_late | PORTED |
 | matcher_test.go: TestIsolationLocalSyncMatch (142) | isolation-group poller matches local offer | matching_sync.rs::sync_match_isolation_group_hands_off_within_its_group | PORTED |
-| matcher_test.go: TestRemoteSyncMatch (163) | offer forwarded to root partition, root poller matches | none | MISSING: remote forward needs a mocked parent AddDecisionTask/PollForDecisionTask; no in-process Rust fake |
-| matcher_test.go: TestIsolationRemoteSyncMatch (167) | same, isolation group dca1 | none | MISSING: remote forward (same as above) |
-| matcher_test.go: TestRemoteSyncMatchBlocking (171) | same, DbBacklog source blocks until poll | none | MISSING: remote forward (same as above) |
-| matcher_test.go: TestIsolationRemoteSyncMatchBlocking (175) | same, isolation group, DbBacklog | none | MISSING: remote forward (same as above) |
-| matcher_test.go: testRemoteSyncMatch (179) | shared helper for the four remote sync tests | none | MISSING: helper for remote tests |
-| matcher_test.go: TestSyncMatchFailure (244) | remote AddDecisionTask ServiceBusy → no error, no sync match | none (matching_fault_injection.rs exists but no matcher-level fixture) | MISSING: needs a remote peer stub |
+| matcher_test.go: TestRemoteSyncMatch (163) | offer forwarded to root partition, root poller matches | matching_dispatch.rs::matching_remote_sync_match_forwards_to_root_poller (port3 audit: in-process root dispatcher via remote_sync_match_case) | PORTED |
+| matcher_test.go: TestIsolationRemoteSyncMatch (167) | same, isolation group dca1 | matching_dispatch.rs::matching_isolation_remote_sync_match_forwards_to_root_poller | PORTED |
+| matcher_test.go: TestRemoteSyncMatchBlocking (171) | same, DbBacklog source blocks until poll | matching_dispatch.rs::matching_remote_sync_match_blocking_waits_for_root_poller | PORTED |
+| matcher_test.go: TestIsolationRemoteSyncMatchBlocking (175) | same, isolation group, DbBacklog | matching_dispatch.rs::matching_isolation_remote_sync_match_blocking_waits_for_root_poller | PORTED |
+| matcher_test.go: testRemoteSyncMatch (179) | shared helper for the four remote sync tests | matching_dispatch.rs::remote_sync_match_case (helper) | PORTED |
+| matcher_test.go: TestSyncMatchFailure (244) | remote AddDecisionTask ServiceBusy → no error, no sync match | matching_dispatch.rs::matching_sync_match_failure_reports_busy_without_matching (port3 audit: was stale MISSING; Rust returns SlowDown, caller persists) | PORTED |
 | matcher_test.go: TestRateLimitHandling (262) | matcher rate limiter path | matching_limiter.rs::zero_burst_reports_throttled_without_consuming (limiter only) | MISSING: no matcher-level rate-limit fixture |
 | matcher_test.go: TestIsolationSyncMatchFailure (278) | isolation-group remote failure path | none | MISSING: remote forward |
 | matcher_test.go: TestQueryLocalSyncMatch (298) | local poller takes query; OfferQuery returns nil, no error | matching_query.rs::registered_query_is_offered_exactly_once_to_a_parked_poller | PARTIAL: Rust covers single delivery, not the OfferQuery return contract |
-| matcher_test.go: TestQueryRemoteSyncMatch (317) | query forwarded to parent and answered | none | MISSING: remote forward |
-| matcher_test.go: TestQueryRemoteSyncMatchError (368) | remote query error surfaced | none | MISSING: remote forward |
+| matcher_test.go: TestQueryRemoteSyncMatch (317) | query forwarded to parent and answered | matching_query_forward_family_tests.rs::query_forward_family_forwards_go_forwarder_fields_to_parent (port3 audit) | PORTED |
+| matcher_test.go: TestQueryRemoteSyncMatchError (368) | remote query error surfaced | matching_query_forward_family_tests.rs::query_forward_family_busy_parent_keeps_query_for_local_poller (port3 audit) | PORTED |
 | matcher_test.go: TestMustOfferLocalMatch (400) | MustOffer returns nil on a local poll | none | MISSING: no Rust MustOffer; retry loop lives in reader/dispatch |
 | matcher_test.go: TestIsolationMustOfferLocalMatch (418) | MustOffer, isolation group | none | MISSING: no Rust MustOffer |
 | matcher_test.go: TestMustOfferRemoteMatch (437) | MustOffer via remote parent | none | MISSING: remote forward |
@@ -315,8 +315,8 @@ Rust has no separate poller manager struct. Poller bookkeeping is in matching_re
 | matcher_test.go: TestIsolationMustOfferRemoteMatch (524) | MustOffer via remote parent, isolation | none | MISSING: remote forward |
 | matcher_test.go: TestPollersDisconnectedAfterDisconnectBlockedPollers (592) | DisconnectBlockedPollers unblocks pollers | matching_dispatch.rs::release_blocked_pollers (RPC-level: matching_rpc_tests.rs::matching_rpc_domain_failover_releases_blocked_polls) | MISSING: no matcher-level fixture |
 | matcher_test.go: TestPollersConnectedAfterDisconnectBlockedPollersSetCancelContext (606) | pollers after disconnect get a fresh cancel context | none | MISSING: no per-poll cancel context in Rust |
-| matcher_test.go: TestRemotePoll (621) | poll forwarded to parent | matching_dispatch.rs::matching_remote_forward_reaches_go_yarpc_peer (real Go peer, poll path) | MISSING in-process; covered only by the gate |
-| matcher_test.go: TestRemotePollForQuery (647) | query poll forwarded to parent | none | MISSING: remote forward |
+| matcher_test.go: TestRemotePoll (621) | poll forwarded to parent | matching_dispatch.rs::matching_forward_poll_for_decision_fields_match_go_forwarder (in-process parent; port3 audit) | PORTED |
+| matcher_test.go: TestRemotePollForQuery (647) | query poll forwarded to parent | matching_dispatch.rs::matching_standby_query_poll_forwards_to_parent_without_claiming_backlog (port3 audit) | PORTED |
 | matcher_test.go: TestIsolationPollFailure (673) | isolation poll forward failure | none | MISSING: remote forward |
 | matcher_test.go: TestOffer_RateLimited (682) | Offer rejected by rate limiter | matching_limiter.rs::zero_burst_reports_throttled_without_consuming (limiter only) | MISSING: no matcher-level fixture |
 | matcher_test.go: TestOffer_NoTimeoutSyncMatchedNoError (694) | Offer without timeout, sync match, no error | matching_sync.rs::sync_match_local_match_hands_off_to_waiting_poller (analog) | MISSING: Rust offer API takes a deadline; no no-timeout variant |
@@ -325,8 +325,8 @@ Rust has no separate poller manager struct. Poller bookkeeping is in matching_re
 | matcher_test.go: TestOffer_AsyncMatchedNoError (771) | Offer async match, no error | matching_sync.rs::sync_match_waits_for_history_completion_and_preserves_original_metadata (analog) | PARTIAL |
 | matcher_test.go: TestOfferOrTimeout_SyncMatchTimedOut (794) | offerOrTimeout: sync match timeout | matching_sync.rs::sync_match_local_timeout_reports_no_match_when_poller_finishes_late (analog) | PARTIAL: no offerOrTimeout API in Rust |
 | matcher_test.go: TestOfferOrTimeout_AsyncMatchNotMatched (818) | offerOrTimeout: async, not matched | none | MISSING |
-| matcher_test.go: TestOfferQuery_ForwardError (841) | OfferQuery forward error | none | MISSING: remote forward |
-| matcher_test.go: TestOfferQuery_ContextExpired (865) | OfferQuery context expired | matching_query.rs::withdraw_removes_an_abandoned_offer (analog) | PARTIAL |
+| matcher_test.go: TestOfferQuery_ForwardError (841) | OfferQuery forward error | matching_query_forward_family_tests.rs::query_forward_family_parent_error_is_returned_without_local_wait (port3 audit) | PORTED |
+| matcher_test.go: TestOfferQuery_ContextExpired (865) | OfferQuery context expired | matching_query_forward_family_tests.rs::query_forward_family_expired_deadline_never_forwards (port3 audit) | PORTED |
 | matcher_test.go: TestMustOffer_ContextExpiredFirstAttempt (882) | MustOffer, context expired before first attempt | none | MISSING: no MustOffer |
 | matcher_test.go: TestMustOffer_ContextExpiredAfterFirstAttempt (893) | MustOffer, context expired after first attempt | none | MISSING: no MustOffer |
 | matcher_test.go: TestMustOffer_LocalMatchAfterChildCtxExpired (909) | MustOffer, local match after child ctx expired | none | MISSING: no MustOffer |
@@ -401,3 +401,14 @@ Counts for the three files in this pass (per Go test function / suite method):
 - Stale-table note: the semaphore_manager_test.go rows marked MISSING/NOT-ASSESSED above are already ported in `matching_semaphore_parity_tests.rs` (~35 tests: retry, deadline, write-failure, concurrency, late stop). Treat those rows as PORTED.
 - Not done this pass: matcher remote-forward / MustOffer / forwarder parent-client tests (need an in-process fake parent client; no Rust MustOffer/ForwardQueryTask API), engine/task-list-manager PARTIAL rows (per-case ports).
 - Build note: worktree needed go/idls copied from another worktree (submodule not initialised); not committed.
+
+## Port3 pass (2026-10-24, branch matching-tests-port3-20261024)
+
+- Audit correction: most forwarder_test.go and matcher_test.go remote-forward rows above were marked MISSING
+  but already had in-process Rust tests (RecordingParent / BusyParent tonic servers in matching_dispatch.rs
+  and matching_query_forward_family_tests.rs, wired via grpc_matching.rs). Those rows are now PORTED.
+- New: `matching_dispatch.rs::matching_forward_poll_without_parent_waits_locally_and_never_forwards`
+  (Go TestForwardPollError, NoParent branch). ErrTaskListKind for ForwardPoll is not asserted.
+- Still MISSING: MustOffer (no Rust fn; reader analogs in matching_reader.rs), TestIsolationSyncMatchFailure,
+  TestIsolationPollFailure, TestForwardPollError ErrTaskListKind branch, private pollOrForward/poll helpers.
+- Evidence: `memory/evidence/matching-tests-port3-20261024/` (matching-test.log, matching-test.exit).

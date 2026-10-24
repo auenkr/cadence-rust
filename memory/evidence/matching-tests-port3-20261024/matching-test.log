@@ -1,0 +1,122 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/crates/cadence-api)
+   Compiling mysql_async v0.37.1 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/vendor/mysql_async-0.37.1)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/crates/cadence-thrift)
+   Compiling scylla v1.9.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/vendor/scylla-1.9.0)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a8404bd9dda874be9/rust/crates/cadence-matching)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8m 08s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 22 tests
+test grpc_matching::query_forward_family_tests::query_forward_family_expired_deadline_never_forwards ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_forwards_go_forwarder_fields_to_parent ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_busy_parent_keeps_query_for_local_poller ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_parent_error_is_returned_without_local_wait ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_repeated_forwards_are_not_rate_limited ... ok
+test matching_dispatch::tests::matching_forward_activity_task_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_decision_task_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_poll_for_activity_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_poll_for_decision_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_poll_without_parent_waits_locally_and_never_forwards ... ok
+test matching_dispatch::tests::matching_forward_task_error_is_no_parent_or_task_list_kind ... ok
+test matching_dispatch::tests::matching_forward_task_rate_exceeded_after_two_forwards ... ok
+test matching_dispatch::tests::matching_remote_sync_match_blocking_waits_for_root_poller ... ok
+test matching_dispatch::tests::matching_remote_sync_match_forwards_to_root_poller ... ok
+test matching_dispatch::tests::matching_standby_query_poll_forwards_to_parent_without_claiming_backlog ... ok
+test matching_dispatch::tests::matching_sync_match_failure_reports_busy_without_matching ... ok
+test matching_forward::tests::matching_forward_classifies_service_busy_only ... ok
+test matching_forward::tests::matching_forward_config_update_resizes_generation ... ok
+test matching_forward::tests::matching_forward_max_outstanding_concurrency ... ok
+test matching_forward::tests::matching_forward_rate_refreshes_on_five_second_boundary ... ok
+test matching_forward::tests::matching_forward_tokens_replace_generation_without_inflation ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_sticky_list_never_forwards_and_waits_for_local_poller ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 649 filtered out; finished in 1.07s
+
+     Running unittests src/main.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-13a97eb51ef02cbc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_delivery.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_delivery-1ed2303b7379ed0f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/matching_engine_go_tests.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_engine_go_tests-c7199bb011027113)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/matching_engine_go_tests_b.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_engine_go_tests_b-5cf4ce81e6b39015)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+     Running tests/matching_engine_go_tests_c.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_engine_go_tests_c-3a2a9f44e828cf5b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+     Running tests/matching_engine_go_tests_d.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_engine_go_tests_d-2574ce5a2bf77308)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/matching_forward_poll_fallback.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_forward_poll_fallback-096e2e23ebf83fb6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_a.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_a-90c4c5f8f220ea89)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_b.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_b-612f69f5a0159689)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_c.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_c-22e2fb364e18f958)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_d.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_d-e534a572ae753105)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_e.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_e-bc4ecf9066d70c66)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/shard_distributor_go_interop.rs (/mnt/storage/service/cargo-target-shared/debug/deps/shard_distributor_go_interop-a3c0a93172540cbe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+   Doc-tests cadence_matching
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
