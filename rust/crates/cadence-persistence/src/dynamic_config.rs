@@ -73,17 +73,17 @@ impl RuntimePropertyRead {
     }
 }
 
-/// Snapshot values paired with their property identity and optional live
-/// evaluator. The Deref implementation keeps read-only inspection helpers
-/// source compatible; typed property functions use `evaluate` below.
+/// An owned snapshot paired with property identity and its optional live
+/// evaluator. Owning values lets a reader release the overlay lock without
+/// discarding the key/provider handle.
 #[derive(Clone, Debug)]
-pub struct PropertyValues<'a> {
-    values: &'a [DynamicConfigValue],
+pub struct PropertyValues {
+    values: Vec<DynamicConfigValue>,
     runtime: Option<RuntimePropertyRead>,
 }
 
-impl<'a> PropertyValues<'a> {
-    pub fn snapshot(values: &'a [DynamicConfigValue]) -> Self {
+impl PropertyValues {
+    pub fn snapshot(values: Vec<DynamicConfigValue>) -> Self {
         Self {
             values,
             runtime: None,
@@ -97,7 +97,7 @@ impl<'a> PropertyValues<'a> {
     /// inspection. Typed runtime consumers should use the dynamic_config
     /// accessors so they retain provider identity.
     pub fn snapshot_values(&self) -> &[DynamicConfigValue] {
-        self.values
+        &self.values
     }
     pub fn evaluate(
         &self,
@@ -121,9 +121,9 @@ pub trait PropertyValueSource {
     ) -> Option<Result<Value, String>>;
 }
 
-impl PropertyValueSource for PropertyValues<'_> {
+impl PropertyValueSource for PropertyValues {
     fn snapshot_values(&self) -> &[DynamicConfigValue] {
-        self.values
+        &self.values
     }
     fn runtime_value(
         &self,
@@ -134,9 +134,9 @@ impl PropertyValueSource for PropertyValues<'_> {
         self.evaluate(property_type, default, filters)
     }
 }
-impl PropertyValueSource for &PropertyValues<'_> {
+impl PropertyValueSource for &PropertyValues {
     fn snapshot_values(&self) -> &[DynamicConfigValue] {
-        self.values
+        &self.values
     }
     fn runtime_value(
         &self,

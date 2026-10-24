@@ -185,13 +185,12 @@ impl DynamicConfigOverlay {
     }
 
     /// Ordered normal config entries for runtime property resolution.
-    pub fn property_values(&self, name: &str) -> PropertyValues<'_> {
-        PropertyValues::snapshot(self.normal.get(name).map(Vec::as_slice).unwrap_or(&[]))
-            .with_runtime(
-                self.runtime_provider
-                    .as_ref()
-                    .map(|provider| RuntimePropertyRead::new(name, provider.clone())),
-            )
+    pub fn property_values(&self, name: &str) -> PropertyValues {
+        PropertyValues::snapshot(self.normal.get(name).cloned().unwrap_or_default()).with_runtime(
+            self.runtime_provider
+                .as_ref()
+                .map(|provider| RuntimePropertyRead::new(name, provider.clone())),
+        )
     }
 
     /// Enable live typed reads for OpenFeature while retaining ordered
