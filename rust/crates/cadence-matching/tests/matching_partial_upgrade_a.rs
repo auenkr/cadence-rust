@@ -6,8 +6,13 @@ use cadence_api::admin::DynamicConfigValue;
 use cadence_api::enums::EncodingType;
 use cadence_api::types::DataBlob;
 use cadence_matching::matching_config as cfg;
+use cadence_matching::matching_handler::{EngineLifecycle, Handler};
 use cadence_service_core::admin::DynamicConfigOverlay;
 use serde_json::{json, Value};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 fn set(overlay: &mut DynamicConfigOverlay, key: &str, value: Value) {
     overlay.update(
@@ -91,8 +96,32 @@ fn go_handle_err_passes_typed_errors_through_unchanged() {
 
 // Go handler/handler_test.go TestStart (line 129) and TestStop (line 140): the engine's Start is called once,
 // and Stop after Start calls the engine's Stop once, with goleak verifying no goroutines remain.
+struct CountingEngine {
+    starts: Arc<AtomicUsize>,
+    stops: Arc<AtomicUsize>,
+}
+
+impl EngineLifecycle for CountingEngine {
+    fn start(&self) {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+    }
+    fn stop(&self) {
+        self.stops.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 #[test]
-#[ignore = "parity gap: Rust has no Handler object with Start/Stop. Lifecycle is spread over the gRPC listener and registry shutdown paths, and there is no engine start/stop call counter to assert against"]
 fn go_handler_start_calls_engine_start_once_and_stop_calls_engine_stop_once() {
-    panic!("parity gap: no Rust handler start/stop seam");
+    let starts = Arc::new(AtomicUsize::new(0));
+    let stops = Arc::new(AtomicUsize::new(0));
+    let handler = Handler::new(CountingEngine {
+        starts: starts.clone(),
+        stops: stops.clone(),
+    });
+    assert!(handler.start());
+    assert!(!handler.start());
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    assert!(handler.stop());
+    assert!(!handler.stop());
+    assert_eq!(stops.load(Ordering::SeqCst), 1);
 }

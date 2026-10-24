@@ -250,7 +250,7 @@ impl MatchingRuntime {
         })?;
         let enabled = {
             let percentage = percentage_onboarded.clone();
-            Arc::new(move || percentage() > 0) as Arc<dyn Fn() -> bool + Send + Sync>
+            Arc::new(move || crate::matching_shard_routing::shard_distributor_onboarded(percentage())) as Arc<dyn Fn() -> bool + Send + Sync>
         };
         let rpc = Arc::new(
             crate::matching_shard_distributor::TonicExecutorRpc::from_channel(channel.clone()),
@@ -280,7 +280,7 @@ impl MatchingRuntime {
             config.namespaces[0].namespace.clone(),
             Arc::new({
                 let percentage = percentage_onboarded.clone();
-                move || percentage() > 0
+                move || crate::matching_shard_routing::shard_distributor_onboarded(percentage())
             }),
         );
         if let Err(error) = spectator.start().await {
@@ -347,6 +347,58 @@ impl MatchingRuntime {
         self.shard_distributor_drain = Some(drain_tx);
         self.shard_distributor_peer_cleanup = Some(peer_cleanup);
         Ok(self)
+    }
+
+    /// Go `setupExecutor` with no namespaces: install the no-op executor, which
+    /// owns no shards. A task list the percentage admits then has no shard
+    /// process, so ownership is refused as not-owned, the same outcome Go's
+    /// `ErrShardProcessNotFound` path produces.
+    pub fn with_noop_shard_distributor(
+        mut self,
+        membership: crate::matching_membership::Membership,
+        percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
+        exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        let executor = crate::matching_shard_distributor::NoopShardExecutor;
+        let (drain_tx, _) = tokio::sync::watch::channel(false);
+        let lookup: ShardProcessLookup = Arc::new(move |name| {
+            let result = executor.get_shard_process(&name).map(|_| ());
+            Box::pin(async move { result })
+                as Pin<
+                    Box<
+                        dyn Future<
+                                Output = Result<
+                                    (),
+                                    crate::matching_shard_distributor::GetShardProcessError,
+                                >,
+                            > + Send,
+                    >,
+                >
+        });
+        let ownership_check = shard_task_list_ownership_check(
+            membership,
+            percentage_onboarded.clone(),
+            exclude_short_lived.clone(),
+            drain_tx.subscribe(),
+            lookup,
+        );
+        let policy = crate::matching_registry::QueueOwnershipPolicy::new(
+            Arc::new({
+                let percentage = percentage_onboarded.clone();
+                let exclude = exclude_short_lived.clone();
+                move |name| {
+                    !crate::matching_shard_routing::task_list_excluded_from_shard_distributor(
+                        name,
+                        percentage() as u64,
+                        exclude(),
+                    )
+                }
+            }),
+            Arc::new(move |name| executor.has_local_shard_process(name)),
+        );
+        self = self.with_task_list_ownership(ownership_check, policy);
+        self.shard_distributor_drain = Some(drain_tx);
+        self
     }
 
     /// Own Go file-based dynamic-config polling for the lifetime of Matching.

@@ -477,6 +477,45 @@ impl ExecutorRpc for TonicExecutorRpc {
     }
 }
 
+/// Go `executorclient.NewNoopExecutor`: owns no shards, so every lookup reports
+/// not-found and ownership falls back to the local hash ring.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopShardExecutor;
+
+impl NoopShardExecutor {
+    pub fn get_shard_process(&self, shard_key: &str) -> Result<(), GetShardProcessError> {
+        Err(GetShardProcessError::NotFound(shard_key.to_string()))
+    }
+
+    #[must_use]
+    pub fn has_local_shard_process(&self, _shard_key: &str) -> bool {
+        false
+    }
+}
+
+/// The executor Go's `setupExecutor` installs for a given config.
+#[derive(Debug)]
+pub enum ShardExecutorSetup {
+    /// No namespaces configured: Go installs the no-op executor.
+    Noop(NoopShardExecutor),
+    /// Exactly one namespace: Go installs the live executor with this report TTL.
+    Live { report_ttl_nanos: i64 },
+}
+
+/// Go `setupExecutor` decision. Zero namespaces installs the no-op executor,
+/// one installs the live executor, and more is rejected as Go's fatal error.
+pub fn setup_shard_executor(
+    config: &crate::config::ShardDistributorMatchingConfig,
+) -> anyhow::Result<ShardExecutorSetup> {
+    match config.namespaces.len() {
+        0 => Ok(ShardExecutorSetup::Noop(NoopShardExecutor)),
+        1 => Ok(ShardExecutorSetup::Live {
+            report_ttl_nanos: config.report_ttl_nanos(),
+        }),
+        _ => anyhow::bail!("matching service does not support multiple namespaces"),
+    }
+}
+
 #[derive(Debug)]
 pub enum GetShardProcessError {
     NotFound(String),

@@ -302,6 +302,15 @@ impl MatchingShardRouter {
 
 /// Go `TaskListExcludedFromShardDistributor` and `belowPercentage`.
 #[must_use]
+/// Go `setupExecutor` / `shardDistributorOnboarded`: the engine-wide gate that
+/// decides whether this host heartbeats to the shard distributor at all. It is
+/// `percentage > 0` and reads no task list name. Per-task-list admission is
+/// `task_list_excluded_from_shard_distributor`, which is a separate Go rule.
+#[must_use]
+pub fn shard_distributor_onboarded(percentage_onboarded: i64) -> bool {
+    percentage_onboarded > 0
+}
+
 pub fn task_list_excluded_from_shard_distributor(
     task_list_name: &str,
     percentage_onboarded: u64,

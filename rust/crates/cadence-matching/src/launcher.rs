@@ -1314,6 +1314,22 @@ pub async fn run(
                     matching_runtime = Some(runtime.with_membership(membership));
                 }
             }
+            let overlay = state.admin.dynamic_config.clone();
+            let percentage = std::sync::Arc::new(move || {
+                dynamic_i64_property(
+                    overlay.clone(),
+                    "matching.percentageOnboardedToShardManager",
+                    0,
+                )
+            }) as std::sync::Arc<dyn Fn() -> i64 + Send + Sync>;
+            let overlay = state.admin.dynamic_config.clone();
+            let exclude_short_lived = std::sync::Arc::new(move || {
+                dynamic_bool_property(
+                    overlay.clone(),
+                    "matching.excludeShortLivedTaskListsFromShardManager",
+                    true,
+                )
+            }) as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
             if run_matching && !cfg.shard_distributor_matching.namespaces.is_empty() {
                 let membership = matching_membership.clone().ok_or_else(|| {
                     anyhow::anyhow!(
@@ -1340,24 +1356,6 @@ pub async fn run(
                     "hostIP".to_string(),
                     matching_listen_ip(matching_rpc.as_ref())?.to_string(),
                 );
-                let overlay = state.admin.dynamic_config.clone();
-                let percentage = std::sync::Arc::new(move || {
-                    dynamic_i64_property(
-                        overlay.clone(),
-                        "matching.percentageOnboardedToShardManager",
-                        0,
-                    )
-                })
-                    as std::sync::Arc<dyn Fn() -> i64 + Send + Sync>;
-                let overlay = state.admin.dynamic_config.clone();
-                let exclude_short_lived = std::sync::Arc::new(move || {
-                    dynamic_bool_property(
-                        overlay.clone(),
-                        "matching.excludeShortLivedTaskListsFromShardManager",
-                        true,
-                    )
-                })
-                    as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
                 matching_runtime = Some(
                     runtime
                         .with_shard_distributor(
@@ -1365,11 +1363,23 @@ pub async fn run(
                             shard_distributor_channel,
                             membership,
                             metadata,
-                            percentage,
-                            exclude_short_lived,
+                            percentage.clone(),
+                            exclude_short_lived.clone(),
                         )
                         .await?,
                 );
+            }
+            // Go `setupExecutor` with no namespaces installs the no-op executor.
+            if run_matching && cfg.shard_distributor_matching.namespaces.is_empty() {
+                if let Some(membership) = matching_membership.clone() {
+                    if let Some(runtime) = matching_runtime.take() {
+                        matching_runtime = Some(runtime.with_noop_shard_distributor(
+                            membership,
+                            percentage.clone(),
+                            exclude_short_lived.clone(),
+                        ));
+                    }
+                }
             }
             let matching_service = matching_runtime
                 .as_ref()
