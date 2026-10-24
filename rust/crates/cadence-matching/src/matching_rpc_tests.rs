@@ -1490,6 +1490,93 @@ async fn matching_rpc_semaphore_expired_deadline_claims_no_slot() {
     assert_eq!(refused.outcome, 2);
 }
 
+// Go `log.CapturePanic` on every matching handler: a panic in the RPC body is logged and returned
+// as an error whose message is Go's `panic object is not error: %#v` text, and the server keeps serving.
+#[tokio::test]
+async fn matching_rpc_handler_panic_is_captured_as_go_unknown_error() {
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    // The registry lookup is the first thing acquire_semaphore does with a valid request.
+    matching.semaphores.poison_for_test();
+    for _ in 0..2 {
+        let status = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, "1:w:r1:1"))
+            .await
+            .unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unknown);
+        assert!(
+            status
+                .message()
+                .starts_with(r#"panic object is not error: "semaphore registry lock: PoisonError"#),
+            "{}",
+            status.message()
+        );
+    }
+}
+
+// Go `TestMembershipSubscriptionRecoversAfterPanic`: a panic in the membership loop is logged and ends
+// the loop, and the shutdown join sees success rather than a panic or an error.
+#[tokio::test]
+async fn matching_rpc_membership_loop_panic_ends_loop_without_error() {
+    use cadence_common::membership::Host;
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    matching.frontend.state.executions.create_semaphore("domain", "sem", 2, 2).unwrap();
+    // Every bucket hashes to the other host, so the loop has to consult the ring for it.
+    let membership = crate::matching_membership::Membership::new(
+        "rust-matching-0",
+        vec![Host {
+            address: "rust-1:7935".into(),
+            identity: "rust-matching-1".into(),
+            grpc_address: "rust-1:7835".into(),
+        }],
+    );
+    let matching = matching.with_membership(membership.clone());
+    let identifier = crate::matching_semaphore::Identifier::new(&domain, "sem", 0).unwrap();
+    matching.semaphores.get_or_create_with_idle_ttl(identifier, 60_000_000_000).await.unwrap();
+    membership.poison_ring_for_test();
+    let result = matching.maintain_membership_until(std::future::ready(())).await;
+    assert!(result.is_ok(), "{result:?}");
+}
+
+// Go `TestShutDownNonOwnedSemaphoreManagersReportsAPanic`: a Stop that panics is contained. The bucket
+// still leaves the registry, and the other bucket this host does not own still stops.
+#[tokio::test]
+async fn matching_rpc_membership_semaphore_stop_panic_is_contained() {
+    use cadence_common::membership::Host;
+    use crate::matching_semaphore::{Identifier, ManagerError};
+    let (_dir, _store, matching, _key) = fixture();
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    matching.frontend.state.executions.create_semaphore("domain", "sem", 2, 2).unwrap();
+    let membership = crate::matching_membership::Membership::new(
+        "rust-matching-0",
+        vec![Host {
+            address: "rust-1:7935".into(),
+            identity: "rust-matching-1".into(),
+            grpc_address: "rust-1:7835".into(),
+        }],
+    );
+    let matching = matching.with_membership(membership);
+    let panicking = matching
+        .semaphores
+        .get_or_create_with_idle_ttl(Identifier::new(&domain, "sem", 0).unwrap(), 60_000_000_000)
+        .await
+        .unwrap();
+    let healthy = matching
+        .semaphores
+        .get_or_create_with_idle_ttl(Identifier::new(&domain, "sem", 1).unwrap(), 60_000_000_000)
+        .await
+        .unwrap();
+    panicking.poison_for_test();
+    matching.maintain_membership_until(std::future::ready(())).await.unwrap();
+    assert!(matching.semaphores.all_managers().is_empty(), "both unowned buckets leave the registry");
+    assert!(matches!(
+        healthy.acquire("1:w:r1:1", None).await,
+        Err(ManagerError::NotReady)
+    ));
+}
+
 // Go `errIfSemaphoreOwnershipLost` answers "not known" as the owner once the engine is shutting down.
 #[ignore = "parity gap: Rust ownership check has no shutdown branch; Go rejects with SemaphoreNotOwnedByHostError owned-by \"not known\" while shutting down. go/service/matching/handler/engine.go:1675"]
 #[tokio::test]
@@ -4911,25 +4998,57 @@ async fn go_handler_describe_task_list_success_returns_response() {
     assert!(response.pollers.is_empty());
 }
 
-// Go handler_test.go TestDescribeTaskList / TestListTaskListPartitions / TestUpdateTaskListPartitionConfig /
-// TestRefreshTaskListPartitionConfig "Error case - ... failed": an engine error must come back as
-// InternalServiceError carrying the engine's message. Rust has no injectable engine failure seam.
+// Go handler_test.go TestDescribeTaskList / TestListTaskListPartitions / TestUpdateTaskListPartitionConfig
+// "Error case - ... failed": an engine error must come back as InternalServiceError carrying the
+// engine's message. The `engine_fault` seam makes the engine call fail with the Go mock's message.
 #[tokio::test]
-#[ignore = "parity gap: Rust Matching has no injectable engine failure, so the Go mock error (errors.New(msg) -> InternalServiceError{Message: msg}) cannot be reproduced for describe_task_list"]
 async fn go_handler_describe_task_list_engine_error_is_internal_service_error() {
-    panic!("parity gap: no injectable engine failure seam");
+    let (_dir, _store, matching, key) = fixture();
+    *matching.engine_fault.lock().unwrap() = Some(("DescribeTaskList", "describe-tasklist-error".into()));
+    let status = matching
+        .describe_task_list(Request::new(m::DescribeTaskListRequest {
+            domain_id: key.domain_id.to_string(),
+            request: Some(p::DescribeTaskListRequest {
+                task_list: list(),
+                ..Default::default()
+            }),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::Internal);
+    assert_eq!(status.message(), "describe-tasklist-error");
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Rust Matching has no injectable engine failure, so the Go mock error (errors.New(msg) -> InternalServiceError{Message: msg}) cannot be reproduced for list_task_list_partitions"]
 async fn go_handler_list_task_list_partitions_engine_error_is_internal_service_error() {
-    panic!("parity gap: no injectable engine failure seam");
+    let (_dir, _store, matching, _key) = fixture();
+    *matching.engine_fault.lock().unwrap() = Some(("ListTaskListPartitions", "list-tasklist-partitions-error".into()));
+    let status = matching
+        .list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
+            domain: "domain".into(),
+            task_list: list(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::Internal);
+    assert_eq!(status.message(), "list-tasklist-partitions-error");
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Rust Matching has no injectable engine failure, so the Go mock error (errors.New(msg) -> InternalServiceError{Message: msg}) cannot be reproduced for update_task_list_partition_config"]
 async fn go_handler_update_task_list_partition_config_engine_error_is_internal_service_error() {
-    panic!("parity gap: no injectable engine failure seam");
+    let (_dir, _store, matching, key) = fixture();
+    *matching.engine_fault.lock().unwrap() = Some(("UpdateTaskListPartitionConfig", "update-tasklist-error".into()));
+    let status = matching
+        .update_task_list_partition_config(Request::new(m::UpdateTaskListPartitionConfigRequest {
+            domain_id: key.domain_id.to_string(),
+            task_list: list(),
+            task_list_type: 1,
+            partition_config: Some(native_config(1, &[0, 1], &[0, 1])),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::Internal);
+    assert_eq!(status.message(), "update-tasklist-error");
 }
 
 #[tokio::test]

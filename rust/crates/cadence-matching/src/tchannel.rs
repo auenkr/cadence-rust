@@ -558,7 +558,10 @@ async fn handle_call(
     .await;
     let (result, application_error) = match result {
         Err(_) => return error(&writer, id, 1, &call.trace, "Request timed out").await,
-        Ok(Err(message)) => return error(&writer, id, 6, &call.trace, &message).await,
+        Ok(Err(message)) => {
+            let code = crate::thrift_matching::tchannel_error_code(&message);
+            return error(&writer, id, code, &call.trace, &message).await;
+        }
         Ok(Ok(value)) => value,
     };
     let mut meta = vec![("$rpc$-service", expected_service.to_string())];
