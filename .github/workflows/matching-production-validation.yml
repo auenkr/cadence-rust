@@ -9,7 +9,7 @@ on:
         default: postgres
 concurrency:
   group: matching-production-validation
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   gate:
     runs-on: ubuntu-latest
