@@ -1,7 +1,7 @@
 # Executable Go Matching owner ordering comparison
 
 Run: https://github.com/auenkr/cadence-rust/actions/runs/40106750315
-Source: e14928004e (see commit.txt for exact SHA). Conclusion: success.
+Source: e14928004f021361006c0b10a4e521a190db7ed0. Conclusion: success.
 Fresh workspace clippy, tests, strict focused formatting and Go/Rust oracles
 passed. Go-generated ordered partition responses are retained in go-owner-order.json.
 Rust production ListTaskListPartitions responses matched across baseline, added,
