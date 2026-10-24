@@ -62,4 +62,7 @@ File: `rust/crates/cadence-matching/tests/matching_longpoll_expiry_parity.rs`
 ## CI runs
 
 - Package run (`-f package=cadence-matching`), head `cc147f32f`: https://github.com/auenkr/cadence-rust/actions/runs/40066163723
-- Whole-workspace run: pending
+  — success. Clippy `--all-targets -D warnings` passed. `matching_longpoll_expiry_parity.rs`: `2 passed; 0 ignored`
+  (decision test un-ignored and the activity twin both pass).
+- Whole-workspace run, head `4baa03060` (notes-only commit on top of `cc147f32f`; code identical):
+  https://github.com/auenkr/cadence-rust/actions/runs/40066410068 — pending
