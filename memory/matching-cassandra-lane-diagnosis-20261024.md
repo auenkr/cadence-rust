@@ -81,7 +81,7 @@ Decision: Rust stays Go-faithful. Harness changed, no Rust or Go program logic c
 2. **Not recommended:** fix Go to seed token rows in `CreateSemaphore`. That changes Go program logic (out of scope for a no-logic-change port) and needs an upstream decision.
 3. **Rejected:** restore metadata seeding in Rust. Reintroduces the deviation `3076d7837` removed and hides the Go gap.
 
-Verification still outstanding: this verdict rests on reading the source. No Go test was run here. A cheap check is the `semaphore_manager_test` pattern with an empty scan under `work-safe` (not run: diagnosis only, no Go/cargo runs in this task).
+Verification note (2026-10-24): the full Cassandra mixed Go/Rust acceptance lane subsequently passed on GitHub Actions. It observed the fresh semaphore return `NO_SLOT`, then verified a seeded capacity-one race, persisted hold, owner crash/recovery, release and fresh acquire. See [the run evidence](evidence/matching-cassandra-acceptance-20261024/README.md). No Go behavior or Rust program logic was changed for this acceptance fix.
 
 ## Related
 - [[matching-cassandra-protocol-parity-20261021]]

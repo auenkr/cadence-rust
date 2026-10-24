@@ -72,13 +72,14 @@ each backend selects only its own observer. Evidence and server logs go below
 the selected artifact directory. The adapter-only Go seed → Rust persistence
 → Go verify phase remains separate.
 
-The gate is implemented but not yet executed in this source-only lane. Run
-`tests/run-matching-cassandra-validation.sh` after the shared telemetry-owned
-build lane is released. It applies the existing Go cadence and visibility
-schemas, then records the configured mixed gate under
-`memory/evidence/matching-cassandra-validation-<UTC timestamp>/`. Matching
-remains incomplete until the script passes and the resulting evidence is
-audited; do not begin History before that service parity decision.
+The configured production Cassandra mixed gate passed on GitHub Actions on
+2026-10-24. See [the CI acceptance record](matching-cassandra-acceptance-20261024.md)
+for the run URL, head SHA, conclusion, binary SHA-256, and compact evidence
+bundle. This pass covers Rust Matching against Go Frontend/History/Worker with
+the Go Cassandra schema, including SDK probes, task and semaphore persistence,
+two-node recovery, and restart/drain scenarios. The adapter-only validation
+script above remains a separate sequence. Matching's full parity audit remains
+incomplete; do not begin History based only on this lane's passing result.
 
 The runner's reproducible environment is an unauthenticated loopback Cassandra
 4.1.7 container, Go/Rust schema files from this checkout, Go, Node with

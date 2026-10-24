@@ -1,0 +1,2 @@
+env 
+/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/run-go-service-baseline.py --rust-services matching --cassandra --cassandra-port 9042 --cassandra-keyspace cadence --cassandra-visibility-keyspace cadence_visibility --rust-production-binary /tmp/cadence-cargo-target-cassandra-40079714508/debug/cadence-matching --artifacts-dir out/gate/run --matching-restart --matching-idle-check-seconds 3

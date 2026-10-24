@@ -1,0 +1,82 @@
+name: Matching mixed gate (Cassandra, Rust Matching with Go services)
+on:
+  push:
+    branches: ["matching-*"]
+    paths:
+      - '.github/workflows/matching-cassandra-mixed-gate.yml'
+      - 'rust/**'
+      - 'tests/**'
+      - 'go/idls'
+      - 'go/tests/matching-cassandra-interop/**'
+  workflow_dispatch:
+    inputs:
+      extra_args:
+        description: Extra harness arguments (Cassandra already enables two-node failure recovery)
+        required: false
+        default: "--matching-restart --matching-idle-check-seconds 3"
+
+concurrency:
+  group: matching-cassandra-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cassandra-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: /tmp/cadence-cargo-target-cassandra-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init IDL submodule
+        run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/go-sdk/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build Rust cadence-matching from a fresh target directory
+        run: |
+          mkdir -p out "$CARGO_TARGET_DIR"
+          git rev-parse HEAD > out/commit.txt
+          printf '%s\n' "$CARGO_TARGET_DIR" > out/cargo-target-dir.txt
+          set +e
+          cargo build --manifest-path rust/Cargo.toml -p cadence-matching -j2 > out/cargo-build.log 2>&1
+          echo $? > out/cargo-build.exit
+          set -e
+          cat out/cargo-build.exit
+          test "$(cat out/cargo-build.exit)" = 0 || { tail -80 out/cargo-build.log; exit 1; }
+          test -x "$CARGO_TARGET_DIR/debug/cadence-matching"
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-matching" | tee out/binary.sha256
+      - name: Install Node gRPC probe dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/node-grpc" && cd "$RUNNER_TEMP/node-grpc"
+          npm install @grpc/grpc-js@^1.14.6 @grpc/proto-loader@^0.8.1
+          echo "NODE_PATH=$RUNNER_TEMP/node-grpc/node_modules" >> "$GITHUB_ENV"
+      - name: Run Cassandra mixed Go/Rust acceptance gate
+        env:
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+          DEFAULT_ARGS: --matching-restart --matching-idle-check-seconds 3
+        run: |
+          BINARY="$CARGO_TARGET_DIR/debug/cadence-matching"
+          ARGS=${EXTRA_ARGS:-$DEFAULT_ARGS}
+          printf 'tests/gates/run-cassandra-lane.sh out/gate %q %s\n' "$BINARY" "$ARGS" > out/command.txt
+          set +e
+          # The inputs field is a shell word list by contract; preserve each arg.
+          read -r -a GATE_ARGS <<< "$ARGS"
+          tests/gates/run-cassandra-lane.sh out/gate "$BINARY" "${GATE_ARGS[@]}" > out/gate.log 2>&1
+          echo $? > out/gate.exit
+          cat out/gate.exit
+          tail -80 out/gate.log | cut -c1-300
+          exit "$(cat out/gate.exit)"
+      - name: Upload Cassandra gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-cassandra-mixed-gate
+          path: out/
+          retention-days: 3
