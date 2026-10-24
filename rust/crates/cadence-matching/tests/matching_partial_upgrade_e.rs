@@ -331,25 +331,38 @@ async fn go_manager_start_root_pushes_loaded_config_to_remote_child_without_upda
             .unwrap();
     });
 
-    let parent_host = Host {
-        address: "127.0.0.1:7935".into(),
-        identity: "parent".into(),
-        grpc_address: "http://127.0.0.1:7835".into(),
-    };
-    let child_host = Host {
-        address: "127.0.0.1:7936".into(),
-        identity: "child".into(),
-        grpc_address: format!("http://{child_grpc_addr}"),
-    };
-    let membership = cadence_matching::matching_membership::Membership::new(
-        "parent",
-        vec![parent_host, child_host],
-    );
-    let remote_partition = (1..128)
-        .find(|id| {
-            membership
-                .owner(&format!("/__cadence_sys/{TASK_LIST}/{id}"))
-                .is_ok_and(|owner| owner.identity() == "child")
+    // Select deterministic Ringpop placement addresses so the root resolves
+    // to this manager and at least one read partition resolves to the child.
+    let (membership, remote_partition) = (0..1024)
+        .find_map(|seed| {
+            let membership = cadence_matching::matching_membership::Membership::new(
+                "parent",
+                vec![
+                    Host {
+                        address: format!("parent-{seed}:7935"),
+                        identity: "parent".into(),
+                        grpc_address: "http://127.0.0.1:7835".into(),
+                    },
+                    Host {
+                        address: format!("child-{seed}:7935"),
+                        identity: "child".into(),
+                        grpc_address: format!("http://{child_grpc_addr}"),
+                    },
+                ],
+            );
+            (membership
+                .owner(TASK_LIST)
+                .is_ok_and(|owner| owner.identity() == "parent"))
+            .then(|| {
+                (1..128)
+                    .find(|id| {
+                        membership
+                            .owner(&format!("/__cadence_sys/{TASK_LIST}/{id}"))
+                            .is_ok_and(|owner| owner.identity() == "child")
+                    })
+                    .map(|id| (membership, id))
+            })
+            .flatten()
         })
         .expect("a child-owned partition in the test ring");
 
