@@ -524,6 +524,19 @@ pub fn describe_task_list_out(v: tk::DescribeTaskListResponse) -> p::DescribeTas
                 start_id: b.start_id,
                 end_id: b.end_id,
             }),
+            isolation_group_metrics: x
+                .isolation_group_metrics
+                .into_iter()
+                .map(|(group, m)| {
+                    (
+                        group,
+                        p::IsolationGroupMetrics {
+                            new_tasks_per_second: m.new_tasks_per_second,
+                            poller_count: m.poller_count,
+                        },
+                    )
+                })
+                .collect(),
             ..Default::default()
         }),
         task_list: None,

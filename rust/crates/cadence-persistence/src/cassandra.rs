@@ -358,11 +358,7 @@ impl SemaphorePersistence for CassandraSemaphorePersistence {
                         });
                     }
                 }
-                _ => {
-                    return Err(AcquireError::Internal(format!(
-                        "unknown semaphore row type {row_type}"
-                    )))
-                }
+                _ => output.push(SemaphoreRow::Unknown),
             }
         }
         Ok(output)

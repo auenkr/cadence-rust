@@ -79,6 +79,12 @@ Overload guard (observed 2026-10-23: load 12, swap full, 150MB RAM free with 5 a
 - Workers must commit and push their branch at least every 30 minutes. The orchestrator checks `git log origin/<branch>` and `ps` for each worker every ~30 minutes; a worker with no new commit or process activity for 60 minutes is cancelled and its worktree WIP is committed as unverified.
 - Steering a worker with a message restarts its turn; avoid steering unless needed.
 
+Current subagent pool (user directive 2026-10-24, overrides the "ask before starting" rule above):
+- Keep 14 subagents running continuously at any point in time (upper limit; lower it temporarily only when `uptime` load > 6 or MemAvailable < 2GB, and raise it back to 14 as soon as load allows; CI-only workers are light, gates are the heavy part): 8 Claude Haiku 5.5 (`providerInstanceId claudeAgent`, model `claude-haiku-5-5`) plus 6 Codex agents (`providerInstanceId codex`, model `gpt-6-luna`, reasoningEffort `medium`, serviceTier `default` = normal mode, not priority/fast).
+- Luna is about as capable as Haiku, a little weaker: give it the same narrow, self-contained briefs (exact files, exact commands, exact done criteria, Go file refs). Never hand it open-ended design work.
+- When one finishes, start a replacement for the next task in the same model class so 8 Haiku + 6 Luna stay running.
+- Same rules for all of them: CI-only cargo (GitHub Actions), heavy gates only via work-safe/cargo-safe, one gate at a time, commit+push every 30 min, final code head must have a green whole-workspace run before merge, never merge to master themselves.
+
 Subagent count (behaviour, no fixed number in this file):
 - The number of subagents is told by the user. If the user has not said how many, ask before starting any.
 - If the user says N, keep N subagents running in parallel. When one finishes, immediately schedule a new subagent on the next task so N keep running.

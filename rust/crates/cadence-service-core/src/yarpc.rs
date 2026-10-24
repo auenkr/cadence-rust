@@ -620,12 +620,22 @@ async fn handle_poll_decision(state: &AppState, body: &Struct, deadline: Instant
         .as_ref()
         .map(|t| t.name.clone())
         .unwrap_or_default();
-    crate::handlers::note_poller(
+    // Thrift poll args carry no isolation group; the group stays unset here.
+    let rate = crate::handlers::poller_rate(
+        state,
+        &req.domain,
+        &task_list,
+        crate::handlers::DECISION_TASK_TYPE,
+        None,
+    );
+    let _poller = crate::handlers::note_poller(
         state,
         executions.namespace_id().expect("scoped domain"),
         &task_list,
         &req.identity,
         "decision",
+        rate,
+        "",
     );
     loop {
         if let Some(task) = executions.poll_decision(&req.domain, &task_list, &req.identity) {
@@ -692,12 +702,26 @@ async fn handle_poll_activity(state: &AppState, body: &Struct, deadline: Instant
         .as_ref()
         .map(|t| t.name.clone())
         .unwrap_or_default();
-    crate::handlers::note_poller(
+    let worker_rate = req
+        .task_list_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.max_tasks_per_second);
+    // Thrift poll args carry no isolation group; the group stays unset here.
+    let rate = crate::handlers::poller_rate(
+        state,
+        &req.domain,
+        &task_list,
+        crate::handlers::ACTIVITY_TASK_TYPE,
+        worker_rate,
+    );
+    let _poller = crate::handlers::note_poller(
         state,
         executions.namespace_id().expect("scoped domain"),
         &task_list,
         &req.identity,
         "activity",
+        rate,
+        "",
     );
     loop {
         if let Some(task) = executions.poll_activity(&req.domain, &task_list, &req.identity) {
