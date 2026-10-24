@@ -2727,6 +2727,16 @@ impl FromThrift for TaskListStatus {
             task_id_block: s.opt_struct(40)?,
             new_tasks_per_second: s.opt_f64(60)?.unwrap_or(0.0),
             empty: s.opt_bool(70)?.unwrap_or(false),
+            isolation_group_metrics: s.opt_map_str(50)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl FromThrift for IsolationGroupMetrics {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            new_tasks_per_second: s.opt_f64(10)?.unwrap_or(0.0),
+            poller_count: s.opt_i64(20)?.unwrap_or(0),
         })
     }
 }
@@ -2751,6 +2761,20 @@ impl ToThrift for TaskListStatus {
             f.fields.push((60, Value::F64(self.new_tasks_per_second)));
         }
         f.obool(70, self.empty);
+        f.omap_str_struct(50, &Some(self.isolation_group_metrics.clone()));
+        f.finish()
+    }
+}
+
+impl ToThrift for IsolationGroupMetrics {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        if self.new_tasks_per_second != 0.0 {
+            f.fields.push((10, Value::F64(self.new_tasks_per_second)));
+        }
+        if self.poller_count != 0 {
+            f.fields.push((20, Value::I64(self.poller_count)));
+        }
         f.finish()
     }
 }
