@@ -14,7 +14,9 @@
 //! the 2.0s window, returns an empty poll, and rewrites the task. A rewritten task would then return
 //! `EventAlreadyStarted` against real history, so the started decision has no poller.
 //!
-//! The test is ignored until the parity gap is fixed. Production code is not changed here.
+//! Fixed: the long-poll window bounds only the wait for a task. Once a task is claimed, the
+//! history start and the wait for its response run under the caller's RPC deadline, as in Go.
+//! The activity twin below covers `RecordActivityTaskStarted` with the same schedule.
 use cadence_common::membership::Host;
 use cadence_matching::{
     grpc_matching::Matching, matching_history::MatchingHistoryClient,
@@ -46,6 +48,26 @@ impl h::history_api_server::HistoryApi for SlowStartingHistory {
         Ok(Response::new(h::RecordDecisionTaskStartedResponse {
             scheduled_event_id: request.schedule_id,
             started_event_id: request.schedule_id + 1,
+            ..Default::default()
+        }))
+    }
+
+    async fn record_activity_task_started(
+        &self,
+        request: Request<h::RecordActivityTaskStartedRequest>,
+    ) -> Result<Response<h::RecordActivityTaskStartedResponse>, Status> {
+        let request = request.into_inner();
+        tokio::time::sleep(self.delay).await;
+        Ok(Response::new(h::RecordActivityTaskStartedResponse {
+            scheduled_event: Some(p::HistoryEvent {
+                attributes: Some(p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+                    p::ActivityTaskScheduledEventAttributes {
+                        activity_id: request.schedule_id.to_string(),
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            }),
             ..Default::default()
         }))
     }
@@ -169,8 +191,24 @@ fn decision_poll(
     request
 }
 
+fn activity_poll(
+    domain: &str,
+    list: Option<p::TaskList>,
+    deadline: Duration,
+) -> Request<m::PollForActivityTaskRequest> {
+    let mut request = Request::new(m::PollForActivityTaskRequest {
+        domain_id: domain.into(),
+        request: Some(p::PollForActivityTaskRequest {
+            task_list: list,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    request.set_timeout(deadline);
+    request
+}
+
 #[tokio::test]
-#[ignore = "parity gap: Rust cuts an in-flight RecordDecisionTaskStarted at the 2s long-poll window; Go returns the started task"]
 async fn decision_started_after_long_poll_window_still_returns_task() {
     // Poll window 2s (matching.longPollExpirationInterval). Start answers 900ms after the
     // match, so the start ends at ~2.2s. Go's 1s per-attempt cap is not reached.
@@ -216,5 +254,52 @@ async fn decision_started_after_long_poll_window_still_returns_task() {
     assert_eq!(
         response.started_event_id, 92,
         "Go returns the started decision; the start is not bounded by the 2s long-poll window"
+    );
+}
+
+/// Activity twin: the same schedule through `RecordActivityTaskStarted`.
+#[tokio::test]
+async fn activity_started_after_long_poll_window_still_returns_task() {
+    let history = start_slow_history(Duration::from_millis(900)).await;
+    let (_dir, matching, domain) = fixture(
+        &history,
+        membership(PARENT, "127.0.0.1:9"),
+        Duration::from_secs(2),
+    );
+
+    let worker = matching.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move {
+        worker
+            .poll_for_activity_task(activity_poll(
+                &poll_domain,
+                task_list(PARENT, 1),
+                Duration::from_secs(10),
+            ))
+            .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(1_300)).await;
+    matching
+        .add_activity_task(Request::new(m::AddActivityTaskRequest {
+            domain_id: domain.clone(),
+            source_domain_id: domain.clone(),
+            workflow_execution: execution(),
+            task_list: task_list(PARENT, 1),
+            schedule_id: 91,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+    let response = tokio::time::timeout(Duration::from_secs(10), poll)
+        .await
+        .expect("poll returns before the request deadline")
+        .unwrap()
+        .unwrap()
+        .into_inner();
+    assert!(
+        !response.task_token.is_empty(),
+        "Go returns the started activity; the start is not bounded by the 2s long-poll window"
     );
 }

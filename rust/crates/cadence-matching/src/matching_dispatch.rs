@@ -10,7 +10,10 @@ use cadence_proto::{api as p, history as h, matching as m};
 use std::{
     future::Future,
     num::NonZeroU32,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{oneshot, Notify};
@@ -819,6 +822,8 @@ impl TaskDispatcher {
                 }
                 Some(lifecycle)
             });
+            // Forwarded delivery keeps the window bound, as Go's ForwardPoll
+            // runs the parent start under the forwarded poll's context.
             parent
                 .delivery_loop(
                     poll.for_parent(&parent_name),
@@ -827,6 +832,7 @@ impl TaskDispatcher {
                     lifecycle,
                     deadline,
                     poll_started,
+                    None,
                 )
                 .await;
             if let (Some(metrics), Some(context)) = (forward_metrics, forward_context.as_ref()) {
@@ -867,6 +873,7 @@ impl TaskDispatcher {
         self.poll_with_lifecycle(
             poll,
             expiration,
+            caller_deadline,
             move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
                 let domain = source_domain.unwrap_or_else(|| domain.clone());
@@ -881,18 +888,24 @@ impl TaskDispatcher {
         .await
     }
 
+    /// `caller_deadline` is the RPC deadline (Go's RPC context). It bounds the
+    /// history start and the wait once a task is claimed; `expiration` bounds
+    /// only the wait for a task. `None` falls back to the window.
     pub async fn poll_decision_with_poller(
         &self,
         poll: p::PollForDecisionTaskRequest,
         expiration: Duration,
         lifecycle: PollLifecycle,
+        caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<m::PollForDecisionTaskResponse, Status> {
         let history = self.history.clone();
         let domain = self.domain_id.clone();
-        let caller_deadline = tokio::time::Instant::now() + expiration;
+        let caller_deadline =
+            caller_deadline.unwrap_or_else(|| tokio::time::Instant::now() + expiration);
         self.poll_with_lifecycle(
             poll,
             expiration,
+            caller_deadline,
             move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
                 let domain = source_domain.unwrap_or_else(|| domain.clone());
@@ -980,6 +993,7 @@ impl TaskDispatcher {
         self.poll_with_lifecycle(
             poll,
             expiration,
+            caller_deadline,
             move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
                 let domain = source_domain.unwrap_or_else(|| domain.clone());
@@ -994,18 +1008,23 @@ impl TaskDispatcher {
         .await
     }
 
+    /// Activity twin of `poll_decision_with_poller`: `caller_deadline` is the
+    /// RPC deadline; `None` falls back to the long-poll window.
     pub async fn poll_activity_with_poller(
         &self,
         poll: p::PollForActivityTaskRequest,
         expiration: Duration,
         lifecycle: PollLifecycle,
+        caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<m::PollForActivityTaskResponse, Status> {
         let history = self.history.clone();
         let domain = self.domain_id.clone();
-        let caller_deadline = tokio::time::Instant::now() + expiration;
+        let caller_deadline =
+            caller_deadline.unwrap_or_else(|| tokio::time::Instant::now() + expiration);
         self.poll_with_lifecycle(
             poll,
             expiration,
+            caller_deadline,
             move |task, poll, source_domain: Option<String>| {
                 let history = history.clone();
                 let domain = source_domain.unwrap_or_else(|| domain.clone());
@@ -1032,9 +1051,11 @@ impl TaskDispatcher {
         F: FnMut(AllocatedTask, Q) -> Fut + Send + 'static,
         Fut: Future<Output = Result<R, Status>> + Send,
     {
+        let caller_deadline = tokio::time::Instant::now() + expiration;
         self.poll_with_lifecycle(
             poll,
             expiration,
+            caller_deadline,
             move |task, poll, _| deliver(task, poll),
             None,
         )
@@ -1044,6 +1065,7 @@ impl TaskDispatcher {
         &self,
         poll: Q,
         expiration: Duration,
+        caller_deadline: tokio::time::Instant,
         deliver: F,
         lifecycle: Option<PollLifecycle>,
     ) -> Result<R, Status>
@@ -1059,7 +1081,7 @@ impl TaskDispatcher {
         let released = self.blocked_pollers.notified();
         tokio::pin!(released);
         released.as_mut().enable();
-        let (sender, receiver) = oneshot::channel();
+        let (sender, mut receiver) = oneshot::channel();
         let timeout_metrics = lifecycle
             .as_ref()
             .and_then(|l| Some((l.metrics.clone(), l.metric_context.clone()?)));
@@ -1067,31 +1089,59 @@ impl TaskDispatcher {
         let worker = self.clone();
         let deadline = tokio::time::Instant::now() + expiration;
         let poll_started = tokio::time::Instant::now();
+        let claimed = Arc::new(AtomicBool::new(false));
+        let worker_claimed = claimed.clone();
+        tracing::debug!(
+            target: "matching::poll",
+            poller = lifecycle.as_ref().map_or("", |poll| poll.id.as_str()),
+            window_ms = expiration.as_millis() as u64,
+            "poll started"
+        );
         tokio::spawn(async move {
             worker
-                .delivery_worker(poll, sender, deliver, lifecycle, deadline, poll_started)
+                .delivery_worker(
+                    poll,
+                    sender,
+                    deliver,
+                    lifecycle,
+                    deadline,
+                    poll_started,
+                    Some(worker_claimed),
+                )
                 .await;
         });
-        let response = tokio::time::timeout(expiration, receiver);
-        tokio::pin!(response);
-        let response = tokio::select! {
-            biased;
-            response = &mut response => response,
-            _ = &mut released => {
-                // EndPoll precedes local History start. Failover disconnects
-                // blocked matcher polls, not delivery already in progress.
-                if blocked_poller.as_ref().is_some_and(|(manager, id)| {
-                    manager.lock().expect("poller history lock").contains_poll(id)
-                }) {
-                    return Ok(R::default());
-                }
-                response.await
-            },
+        // The long-poll window bounds only the wait for a task. Go runs the
+        // history start under the caller's context, so once a task is claimed
+        // the wait moves to the caller deadline instead of the window.
+        let response = {
+            let response = tokio::time::timeout(expiration, &mut receiver);
+            tokio::pin!(response);
+            tokio::select! {
+                biased;
+                response = &mut response => response,
+                _ = &mut released => {
+                    // EndPoll precedes local History start. Failover disconnects
+                    // blocked matcher polls, not delivery already in progress.
+                    if blocked_poller.as_ref().is_some_and(|(manager, id)| {
+                        manager.lock().expect("poller history lock").contains_poll(id)
+                    }) {
+                        return Ok(R::default());
+                    }
+                    response.await
+                },
+            }
+        };
+        let response = match response {
+            Err(_) if claimed.load(Ordering::SeqCst) => {
+                tokio::time::timeout_at(caller_deadline, &mut receiver).await
+            }
+            response => response,
         };
         match response {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(Status::unavailable("Matching delivery worker stopped.")),
             Err(_) => {
+                tracing::debug!(target: "matching::poll", "poll returned empty");
                 if let Some((metrics, context)) = timeout_metrics {
                     metrics.poll_timeout(&context);
                 }
@@ -1099,6 +1149,7 @@ impl TaskDispatcher {
             }
         }
     }
+    #[allow(clippy::too_many_arguments)]
     async fn delivery_worker<Q, R, F, Fut>(
         &self,
         poll: Q,
@@ -1107,6 +1158,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
         deadline: tokio::time::Instant,
         poll_started: tokio::time::Instant,
+        claimed: Option<Arc<AtomicBool>>,
     ) where
         Q: ForwardPollRequest<R>,
         R: Default + Send,
@@ -1131,6 +1183,7 @@ impl TaskDispatcher {
             lifecycle,
             deadline,
             poll_started,
+            claimed,
         )
         .await;
     }
@@ -1138,6 +1191,7 @@ impl TaskDispatcher {
     /// forwarded parent poll can deliver through this same poll: the parent
     /// claims from its own queue and this poll reports the parent's started
     /// task, exactly like Go's `ForwardPoll` returning a started task.
+    #[allow(clippy::too_many_arguments)]
     async fn delivery_loop<Q, R, F, Fut>(
         &self,
         poll: Q,
@@ -1146,6 +1200,7 @@ impl TaskDispatcher {
         lifecycle: Option<PollLifecycle>,
         deadline: tokio::time::Instant,
         poll_started: tokio::time::Instant,
+        claimed: Option<Arc<AtomicBool>>,
     ) where
         Q: ForwardPollRequest<R>,
         R: Default + Send,
@@ -1162,6 +1217,12 @@ impl TaskDispatcher {
             if !waiting_started {
                 if let Some(liveness) = &self.liveness {
                     liveness.mark_alive(now());
+                }
+                // The claim flag covers one delivery cycle. A discarded or
+                // retried start re-enters the wait, which is window-bounded
+                // again for a poll that has not yet timed out.
+                if let Some(claimed) = claimed.as_ref() {
+                    claimed.store(false, Ordering::SeqCst);
                 }
                 waiting = lifecycle.as_ref().map(PollLifecycle::begin);
                 waiting_started = true;
@@ -1295,6 +1356,18 @@ impl TaskDispatcher {
                 }
                 continue;
             };
+            // Set before any history start so the poll waits for this delivery
+            // under the caller deadline rather than cutting it at the window.
+            if let Some(claimed) = claimed.as_ref() {
+                claimed.store(true, Ordering::SeqCst);
+            }
+            tracing::debug!(
+                target: "matching::poll",
+                task_id = task.task.task_id,
+                sync = task.sync.is_some(),
+                forwarded = task.forwarded,
+                "poll claimed task"
+            );
             if let Some(lifecycle) = lifecycle.as_ref() {
                 if let Some(context) = lifecycle.metric_context.as_ref() {
                     lifecycle.metrics.poll_success(context, task.sync.is_some());
@@ -1333,6 +1406,7 @@ impl TaskDispatcher {
                     .await;
                 return;
             }
+            tracing::debug!(target: "matching::poll", task_id = task.task.task_id, "poll delivering task");
             let result = {
                 let closed = async {
                     match sender.as_mut() {
@@ -1756,6 +1830,7 @@ mod tests {
             .poll_with_lifecycle(
                 (),
                 Duration::from_millis(10),
+                tokio::time::Instant::now() + Duration::from_millis(10),
                 |_, _, _| -> std::future::Ready<Result<m::PollForDecisionTaskResponse, Status>> {
                     panic!("empty poll must not deliver")
                 },
@@ -1814,6 +1889,7 @@ mod tests {
             .poll_with_lifecycle(
                 (),
                 Duration::from_millis(10),
+                tokio::time::Instant::now() + Duration::from_millis(10),
                 move |_, _, _| {
                     copy.fetch_add(1, Ordering::Relaxed);
                     std::future::ready(Ok(m::PollForActivityTaskResponse::default()))
@@ -1890,6 +1966,7 @@ mod tests {
             .poll_with_lifecycle(
                 (),
                 Duration::from_secs(2),
+                tokio::time::Instant::now() + Duration::from_secs(2),
                 move |_, _, _| {
                     let mut manager = manager.lock().unwrap();
                     assert!(
@@ -2014,6 +2091,7 @@ mod tests {
                 .poll_with_lifecycle(
                     p::PollForDecisionTaskRequest::default(),
                     Duration::from_secs(2),
+                    tokio::time::Instant::now() + Duration::from_secs(2),
                     |_, _, _| std::future::ready(Ok(m::PollForDecisionTaskResponse::default())),
                     Some(lifecycle),
                 )
@@ -2426,6 +2504,7 @@ mod tests {
         let mut poll = tokio::spawn(async move {
             worker.poll_with_lifecycle(
                 (), Duration::from_secs(60),
+                tokio::time::Instant::now() + Duration::from_secs(60),
                 move |_, _, _| {
                     let started = started.clone();
                     let complete = complete.clone();
@@ -2470,7 +2549,7 @@ mod tests {
         let worker = dispatcher.clone();
         let poll = tokio::spawn(async move {
             worker.poll_decision_with_poller(
-                p::PollForDecisionTaskRequest::default(), Duration::from_secs(60), lifecycle,
+                p::PollForDecisionTaskRequest::default(), Duration::from_secs(60), lifecycle, None,
             ).await
         });
         tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
