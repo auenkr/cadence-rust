@@ -498,7 +498,13 @@ if args.matching_idle_check_seconds is not None:
     )
 if args.probe_list_partitions:
     # Go engine.go getAllPartitions reads this key to build the ListTaskListPartitions answer.
-    dynamic_text += '\nmatching.numTasklistWritePartitions:\n  - value: 3\nmatching.numTasklistReadPartitions:\n  - value: 3\n'
+    # Only the listing fixture needs three partitions. A global override also
+    # routes crash/restart workflows to random child partitions while their
+    # persistence checkpoints deliberately observe the root owner.
+    for key in ('matching.numTasklistWritePartitions', 'matching.numTasklistReadPartitions'):
+        dynamic_text += f'\n{key}:\n'
+        for task_list in ('probe-list-partitions-root', 'probe-list-partitions-child'):
+            dynamic_text += f'  - value: 3\n    constraints: {{taskListName: {task_list}}}\n'
 if args.probe_auto_config_hint:
     # go/config/dynamicconfig/development.yaml sets matching.enableClientAutoConfig to true; the probe asserts false,
     # so override the shipped value for this run (both Go and Rust read dynamic_text).
