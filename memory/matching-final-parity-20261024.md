@@ -42,3 +42,13 @@ Scope: current Matching service only. Read-only code/evidence audit; no Cargo or
 ## Handoff to orchestrator
 
 Prioritize OpenFeature deployment compatibility, semaphore input/pagination/startup semantics, non-durable queue-status behavior, and current-head mixed-cluster acceptance. Also close partition-owner ordering and metrics evidence. Recheck the Rust-only fault-injection alias before release. No concrete small code bug was fixed here; this was an evidence-backed audit, and no implementation was made to avoid overlap.
+
+## Orchestrator corrections after checking primary source
+
+The initial audit's blocker 3 is incorrect: `matching.errorInjectionRate` is a canonical Go key, NOT a Rust-only alias. See `go/common/dynamicconfig/dynamicproperties/constants.go` entries `MatchingErrorInjectionRate` and `go/client/clientfactory.go:183-185`, which read it once and wrap the Matching client. Rust's `matching_fault_injection.rs` documents this correctly. `system.persistenceErrorInjectionRate` controls a different persistence wrapper. Do not remove the Matching client key.
+
+Blocker 5's TChannel TLS question is resolved by primary Go source: `common/config/config.go` limits rpc.tls to gRPC, `common/rpc/factory.go` creates a plain TChannel transport, and HTTP TLS has separate configuration. Rust must preserve these modes; TChannel TLS is not a missing Go feature. See integrated nodiff-b evidence notes for exact source references.
+
+Blocker 4 describes the legacy non-durable test object, not a production Matching deployment. The launcher constructs MatchingRuntime for every `run_matching` path, and its configured source uses durable queues; even explicit embedded development uses a durable SQLite queue source. The fallback `Matching::new` is reached when no Matching runtime was requested. The ignored test still records a helper limitation, but it does not establish that deployed Rust Matching lacks lease/status behavior. Verify supported production sources in acceptance; do not invent range leases in the legacy frontend-state test object as a substitute.
+
+Fresh whole-workspace strict clippy/tests passed for 425f50562 in run 40073658725; evidence under `memory/evidence/matching-fresh-ci-20261024`. Later integration changes remain unverified. Semaphore validation, paging and startup changes now exist in the candidate; it is not yet merged to master. Candidate run 40073886465 failed three fixture assertions because a lifetime scan counter was mistaken for a page index across replacement manager loads; fix 8bc884e58 separates these counters while retaining token assertions. No production behavior was changed to hide these failures.

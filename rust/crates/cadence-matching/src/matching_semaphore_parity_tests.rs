@@ -16,6 +16,7 @@ struct ScriptStore {
     writes: Mutex<Vec<(i32, String)>>,
     read_tokens: Mutex<Vec<i32>>,
     scans: std::sync::atomic::AtomicUsize,
+    next_page_index: std::sync::atomic::AtomicUsize,
     block_scan: bool,
     /// Delay before every grant write returns, to let a caller's deadline pass mid-write.
     write_delay: std::time::Duration,
@@ -42,6 +43,7 @@ impl ScriptStore {
             writes: Mutex::new(Vec::new()),
             read_tokens: Mutex::new(Vec::new()),
             scans: std::sync::atomic::AtomicUsize::new(0),
+            next_page_index: std::sync::atomic::AtomicUsize::new(0),
             block_scan: false,
             write_delay: std::time::Duration::ZERO,
             scanning: Notify::new(),
@@ -97,7 +99,15 @@ impl SemaphorePersistence for ScriptStore {
         next_page_token: Option<&[u8]>,
     ) -> Result<SemaphoreBucketPage, AcquireError> {
         request(domain, name, bucket);
-        let index = self.scans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.scans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Each manager load starts a fresh paging sequence; scans counts calls
+        // across loads, including retries and replacement managers.
+        let index = if next_page_token.is_none() {
+            self.next_page_index.store(1, std::sync::atomic::Ordering::SeqCst);
+            0
+        } else {
+            self.next_page_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        };
         // Go expectScan: the first page starts with no token, and each later page is
         // requested with the token the previous page returned.
         match next_page_token {
