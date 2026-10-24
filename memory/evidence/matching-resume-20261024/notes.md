@@ -61,3 +61,16 @@ PostgreSQL diagnostic rerun: https://github.com/auenkr/cadence-rust/actions/runs
 
 Current-source inspection also confirms root load-time partition notifications are implemented around matching_registry.rs:1510-1565, including notify_read_partitions; the ignored partial-upgrade-e start-push comment is stale and must not be treated as proof of a missing production behavior. The remaining final audit must map this to meaningful runtime evidence.
 Final repository-polling gate: https://github.com/auenkr/cadence-rust/actions/runs/40083481620 completed `success` for tested source SHA `086a938c6ddd22cbcfd680c915c7c6ce7cc5a7cb`. It used `package=cadence-service-core` and fresh uncached `/home/runner/work/_temp/cargo-target-final`; formatting, Clippy (`clippy.exit=0`) and tests (`test.exit=0`) all passed. Test log: service-core 143 passed, 0 failed; cadence-matching dependency tests 27 passed, 0 failed. The three new tests (Tokio runtime lifecycle, deterministic bootstrap/refresh + URL/header/query + HTTP/invalid JSON cache retention, and in-flight `FeatureProvider::shutdown`) all passed. The CI-resolved `rust/Cargo.lock` was committed at this SHA, so reqwest and transitive dependencies are pinned. No local Cargo commands were run. Branch remains `t3/repository-polling-tests`; pushed commits include merged prior branch and this continuation, with no parent/master push and no merge claim. Evaluation/variants/payload parity remains unimplemented.
+
+## Configstore deployment continuation
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40085504501 failed in
+the ring-convergence probe before reading the secondary's owner view:
+ECONNREFUSED 127.0.0.1:29915. Secondary log later confirms its gRPC/TChannel
+listeners bound successfully (configstore startup completed after initial
+primary discovery). Existing Promise.all let transient UNAVAILABLE escape the
+bounded convergence loop. Fix1fc9ee1fd retries only UNAVAILABLE within the
+existing30s deadline and checks secondary process liveness, preserving owner
+agreement checks. Node syntax passed. Rerun:
+https://github.com/auenkr/cadence-rust/actions/runs/40086025472 (pending).
+Full failed artifacts: /tmp/matching-production-40085504501.
