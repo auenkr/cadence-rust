@@ -347,9 +347,32 @@ async fn refresh_workflow_tasks_already_completed_is_propagated() {
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Go passes an already-canceled context.Context; Rust refresh_workflow_tasks takes an optional caller deadline and no cancellation token, so a canceled-context error cannot be produced through the public API"]
 async fn refresh_workflow_tasks_canceled_context_is_propagated() {
-    unimplemented!("Rust refresh_workflow_tasks has no context parameter");
+    // Go: the History error (context.Canceled here) is returned unchanged. Cancelled is a
+    // retryable code, so this retries until the policy ends, like the internal-status case.
+    let (client, _) = refresh_history_client(Some(Status::cancelled("context canceled"))).await;
+    let err = client
+        .refresh_workflow_tasks("test-domain-id", &allocated_task())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::Cancelled);
+    assert_eq!(err.message(), "context canceled");
+
+    // Go: an already-cancelled caller context makes the engine return context.Canceled.
+    // Rust returns the same status before the History call is made, so no request is seen.
+    let (client, seen) = refresh_history_client(None).await;
+    let err = client
+        .refresh_workflow_tasks_until(
+            "test-domain-id",
+            &allocated_task(),
+            None,
+            std::future::ready(()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::Cancelled);
+    assert_eq!(err.message(), "context canceled");
+    assert!(seen.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -365,9 +388,33 @@ async fn refresh_workflow_tasks_empty_domain_id_is_forwarded() {
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Go accepts a nil WorkflowExecution; Rust AllocatedTask always carries a workflow_id and run_id, so no public input can produce a nil execution"]
 async fn refresh_workflow_tasks_nil_execution_is_forwarded() {
-    unimplemented!("AllocatedTask cannot represent a nil execution");
+    // Go's engine call sites run only when task.Event is set, so task.WorkflowExecution() is
+    // never nil there; it is {Event.WorkflowID, Event.RunID}, with an empty RunID stored as
+    // an absent run. Rust therefore forwards an absent run as "" and an empty workflow id as is.
+    let (client, seen) = refresh_history_client(None).await;
+    let mut no_run = allocated_task();
+    no_run.data.run_id = None;
+    client
+        .refresh_workflow_tasks("test-domain-id", &no_run)
+        .await
+        .unwrap();
+    let mut empty = allocated_task();
+    empty.data.workflow_id = String::new();
+    empty.data.run_id = None;
+    client
+        .refresh_workflow_tasks("", &empty)
+        .await
+        .unwrap();
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    let first = requests[0].workflow_execution.as_ref().unwrap();
+    assert_eq!(first.workflow_id, "test-workflow-id");
+    assert_eq!(first.run_id, "");
+    let second = requests[1].workflow_execution.as_ref().unwrap();
+    assert_eq!(second.workflow_id, "");
+    assert_eq!(second.run_id, "");
+    assert_eq!(requests[1].domain_id, "");
 }
 
 // ---------------------------------------------------------------------------

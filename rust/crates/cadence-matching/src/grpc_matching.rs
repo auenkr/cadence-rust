@@ -163,6 +163,27 @@ fn semaphore_now() -> i64 {
         .map(|time| time.as_nanos() as i64)
         .unwrap_or_default()
 }
+/// Go `ctx.Err()` for a semaphore caller: cancellation or an expired deadline, with
+/// the error text Go reports. Cancellation wins when both have ended.
+fn caller_ended(
+    deadline: Option<tokio::time::Instant>,
+    cancelled: Option<&tokio::sync::watch::Receiver<bool>>,
+) -> Option<&'static str> {
+    if cancelled.is_some_and(|cancelled| *cancelled.borrow()) {
+        return Some("context canceled");
+    }
+    deadline
+        .filter(|deadline| tokio::time::Instant::now() >= *deadline)
+        .map(|_| "context deadline exceeded")
+}
+
+/// Caller cancellation for the semaphore handler. tonic never tells a handler that
+/// its caller went away (the future is dropped), so a cancelled Go context is
+/// supplied in-process as a request extension that no wire client can set.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone)]
+pub(crate) struct CallerCancel(pub(crate) tokio::sync::watch::Receiver<bool>);
+
 /// Map a semaphore manager error to the Go-compatible gRPC status.
 fn semaphore_status(error: crate::matching_semaphore::ManagerError) -> Status {
     use crate::matching_semaphore::ManagerError;
@@ -1044,7 +1065,7 @@ impl Matching {
         tokio::pin!(shutdown);
         loop {
             let queues = match &self.queues {
-                Some(queues) => queues.unload_non_owned(matching_now()).await,
+                Some(queues) => queues.unload_non_owned(matching_now()).await.map(|_| ()),
                 None => Ok(()),
             };
             // Do not let a SQL cleanup failure prevent semaphore cleanup.
@@ -2903,6 +2924,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 async {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::AcquireSemaphore, Some(&request.get_ref().domain_id), None)?;
                     let deadline = crate::matching_sync::request_deadline(&request);
+                    let cancelled = request.extensions().get::<CallerCancel>().map(|cancel| cancel.0.clone());
                     let result: Result<Response<m::AcquireSemaphoreResponse>, Status> = async {
                     use crate::matching_semaphore::Identifier;
                     use cadence_api::enums::SemaphoreAcquireOutcome;
@@ -2951,9 +2973,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                             .await.map_err(semaphore_status)?
                     };
                     // Go's grant checks the caller's context before its first write, so an
-                    // expired caller returns without claiming a slot.
-                    if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
-                        return Err(Status::internal("context deadline exceeded"));
+                    // ended caller returns without claiming a slot.
+                    if let Some(ended) = caller_ended(deadline, cancelled.as_ref()) {
+                        return Err(Status::internal(ended));
                     }
                     let result = manager.acquire(&r.owner_id, deadline).await.map_err(semaphore_status)?;
                     let outcome = match result.outcome {
@@ -2968,22 +2990,25 @@ impl m::matching_api_server::MatchingApi for Matching {
                     }))
                     }
                     .await;
-                    // Go `AcquireSemaphore`: an error after the caller's deadline is
-                    // counted and returned as an InternalServiceError.
+                    // Go `AcquireSemaphore`: an error after the caller's context ended is
+                    // counted and returned as an InternalServiceError carrying ctx.Err().
                     match result {
-                        Err(_) if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) => {
-                            self.metrics.semaphore_context_timeout(
-                                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                                    .as_deref(),
-                                request.get_ref().semaphore_name.as_str(),
-                                Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                                    request.metadata(),
-                                    "grpc",
-                                )),
-                            );
-                            Err(Status::internal("context deadline exceeded"))
-                        }
-                        other => other,
+                        Err(error) => match caller_ended(deadline, cancelled.as_ref()) {
+                            Some(ended) => {
+                                self.metrics.semaphore_context_timeout(
+                                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                                        .as_deref(),
+                                    request.get_ref().semaphore_name.as_str(),
+                                    Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                        request.metadata(),
+                                        "grpc",
+                                    )),
+                                );
+                                Err(Status::internal(ended))
+                            }
+                            None => Err(error),
+                        },
+                        ok => ok,
                     }
                 },
             )

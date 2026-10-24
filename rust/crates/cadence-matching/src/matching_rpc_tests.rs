@@ -1500,10 +1500,37 @@ async fn matching_rpc_semaphore_rejects_new_buckets_while_shutting_down() {
 }
 
 // Go `AcquireSemaphore` turns any engine error after the caller's context ends, cancel or deadline, into InternalServiceError.
-#[ignore = "parity gap: Rust maps only deadline-expired errors to InternalServiceError; cancellation is not observed. go/service/matching/handler/handler.go:550"]
+// Go handler.go:550 reports ctx.Err() ("context canceled"). The caller's cancellation reaches the handler as a request
+// extension; a dropped wire RPC is never answered in either implementation, so only this in-process view is observable.
 #[tokio::test]
 async fn matching_rpc_semaphore_cancelled_context_is_internal_error() {
-    panic!("parity gap: tonic drops cancelled handler futures, so no Go-equivalent context check exists");
+    let (_dir, _store, matching, _key) = fixture();
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false,
+        "system.enableDistributedSemaphore", vec![bool_config(true, Some("domain"))]);
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    matching.frontend.state.executions.create_semaphore("domain", "sem", 2, 2).unwrap();
+    // The caller's context is already cancelled when the grant is reached.
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    cancel.send(true).unwrap();
+    let mut gone = semaphore_request(&domain, "sem", 0, "1:w:r0:1");
+    gone.extensions_mut().insert(crate::grpc_matching::CallerCancel(cancelled));
+    let error = MatchingApi::acquire_semaphore(&matching, gone).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert_eq!(error.message(), "context canceled");
+    // Both slots are still free: two live owners are granted and a third is refused.
+    for owner in ["1:w:r1:1", "1:w:r2:1"] {
+        let granted = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, owner))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(granted.outcome, 1);
+    }
+    let refused = MatchingApi::acquire_semaphore(&matching, semaphore_request(&domain, "sem", 0, "1:w:r3:1"))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(refused.outcome, 2);
 }
 
 fn scaler_config_value(matching: &Matching, property: &str, json: &[u8]) {

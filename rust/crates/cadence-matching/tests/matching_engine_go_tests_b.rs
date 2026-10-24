@@ -363,9 +363,34 @@ fn is_shutting_down_is_false_until_stop() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "parity gap: Go getNonOwnedTasklistsLocked returns the non-owned TaskListManagers; Rust QueueRegistry::unload_non_owned detaches them in place and returns Result<(), Status>, so the list is not observable. The ownership decision is asserted through the cache in shut_down_tasklists_not_owned_unloads_only_moved_owner"]
 async fn get_tasklists_not_owned_returns_only_non_owned_managers() {
-    unimplemented!("unload_non_owned exposes no list of non-owned managers");
+    // Same ring setup as shut_down_tasklists_not_owned_unloads_only_moved_owner: two
+    // names stay with self, and one moves to host456 when membership changes.
+    let probe = Membership::new("self", vec![host("self"), host("host456")]);
+    let names: Vec<String> = (1..=64).map(|i| format!("tl{i}")).collect();
+    let owned: Vec<&String> = names
+        .iter()
+        .filter(|name| probe.owns(name.as_str()).unwrap())
+        .collect();
+    let moved: Vec<&String> = names
+        .iter()
+        .filter(|name| !probe.owns(name.as_str()).unwrap())
+        .collect();
+    let (stays_one, moves, stays_two) = (owned[0], moved[0], owned[1]);
+
+    let membership = Membership::new("self", vec![host("self")]);
+    let durable = durable_with(AppState::default(), Some(membership.clone()));
+    for name in [stays_one, moves, stays_two] {
+        durable
+            .queues
+            .get(key(domain_id(), name, 0), 0, now_nanos())
+            .await
+            .unwrap();
+    }
+    membership.replace(vec![host("self"), host("host456")]);
+    // Go returns [tl2m]: exactly the managers the ring no longer assigns to this host.
+    let not_owned = durable.queues.unload_non_owned(now_nanos()).await.unwrap();
+    assert_eq!(not_owned, vec![moves.to_string()]);
 }
 
 // ---------------------------------------------------------------------------

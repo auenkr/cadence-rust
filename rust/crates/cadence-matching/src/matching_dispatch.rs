@@ -1388,15 +1388,23 @@ impl TaskDispatcher {
                                 None,
                             );
                         }
+                        // Go passes the poll's context here, which ends when the poller goes away.
+                        let caller_gone = async {
+                            match sender.as_mut() {
+                                Some(sender) => sender.closed().await,
+                                None => std::future::pending().await,
+                            }
+                        };
                         if self
                             .history
-                            .refresh_workflow_tasks_with_deadline(
+                            .refresh_workflow_tasks_until(
                                 task.sync
                                     .as_ref()
                                     .map(|sync| sync.source_domain.as_str())
                                     .unwrap_or(&self.domain_id),
                                 &task.task,
                                 Some(deadline),
+                                caller_gone,
                             )
                             .await
                             .is_ok()

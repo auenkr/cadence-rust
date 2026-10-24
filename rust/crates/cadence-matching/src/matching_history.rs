@@ -563,14 +563,14 @@ impl MatchingHistoryClient {
         }
     }
     fn execution(task: &AllocatedTask) -> Result<p::WorkflowExecution, Status> {
-        let run = task
-            .data
-            .run_id
-            .as_deref()
-            .ok_or_else(|| Status::internal("Missing run ID in persisted matching task."))?;
-        let run_id = Uuid::from_slice(run)
-            .map_err(|_| Status::internal("Invalid run ID in persisted matching task."))?
-            .to_string();
+        // Go's task execution carries the stored RunID string, which is empty when
+        // the row has no run. An absent run is forwarded as "" rather than rejected.
+        let run_id = match task.data.run_id.as_deref() {
+            None | Some([]) => String::new(),
+            Some(run) => Uuid::from_slice(run)
+                .map_err(|_| Status::internal("Invalid run ID in persisted matching task."))?
+                .to_string(),
+        };
         Ok(p::WorkflowExecution {
             workflow_id: task.data.workflow_id.clone(),
             run_id,
@@ -623,6 +623,23 @@ impl MatchingHistoryClient {
             Ok(_) => Ok(()),
             Err(error) if missing_execution(&error) => Ok(()),
             Err(error) => Err(error),
+        }
+    }
+
+    /// Go `refreshWorkflowTasks(ctx, ...)`. `caller_gone` resolves once the caller's
+    /// context is done: the caller then gets `context canceled` and the History call
+    /// is abandoned, the same error Go's engine returns for a cancelled context.
+    pub async fn refresh_workflow_tasks_until(
+        &self,
+        domain_id: &str,
+        task: &AllocatedTask,
+        caller_deadline: Option<tokio::time::Instant>,
+        caller_gone: impl Future<Output = ()>,
+    ) -> Result<(), Status> {
+        tokio::select! {
+            biased;
+            _ = caller_gone => Err(Status::cancelled("context canceled")),
+            result = self.refresh_workflow_tasks_with_deadline(domain_id, task, caller_deadline) => result,
         }
     }
 
