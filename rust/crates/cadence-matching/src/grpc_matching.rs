@@ -349,6 +349,10 @@ pub struct Matching {
     pub(crate) poll_expiration: std::time::Duration,
     metrics: crate::matching_metrics::MatchingMetrics,
     domain_name_resolver: Option<DomainNameResolver>,
+    /// Test-only engine failure seam: `(rpc name, message)` makes that RPC's engine
+    /// call fail with `message`. See `injected_engine_fault`.
+    #[cfg(test)]
+    pub(crate) engine_fault: Arc<std::sync::Mutex<Option<(&'static str, String)>>>,
 }
 type DomainNameResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Runtime-provided ownership check. The cached flag is advisory and only
@@ -391,6 +395,18 @@ impl Matching {
             poll_expiration: std::time::Duration::from_secs(60),
             metrics: crate::matching_metrics::MatchingMetrics::default(),
             domain_name_resolver: None,
+            #[cfg(test)]
+            engine_fault: Default::default(),
+        }
+    }
+    /// Test-only: returns the injected engine error for `rpc`, mirroring a Go engine
+    /// call that returns `errors.New(msg)`. Go's `handleErr` default case maps that to
+    /// `InternalServiceError{Message: msg}`, which is `Status::internal(msg)` on the wire.
+    #[cfg(test)]
+    fn injected_engine_fault(&self, rpc: &str) -> Result<(), Status> {
+        match &*self.engine_fault.lock().expect("engine fault lock") {
+            Some((name, message)) if *name == rpc => Err(Status::internal(message.clone())),
+            _ => Ok(()),
         }
     }
     /// Install an optional inbound Matching metrics sink.
@@ -2971,6 +2987,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .map_err(|e| crate::grpc::domain_not_found(e.message))?;
                     // Go Identifier returns an untyped error, wrapped by handleErr.
                     let name = TaskListName::parse(&task_list.name).map_err(Status::internal)?;
+                    #[cfg(test)]
+                    self.injected_engine_fault("ListTaskListPartitions")?;
                     // Go getAllPartitions returns root first, then numbered write
                     // partitions, regardless of whether those managers are loaded.
                     let activity_task_list_partitions = self
@@ -3165,6 +3183,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                             "Only root partition's partition config can be updated.",
                         ));
                     }
+                    #[cfg(test)]
+                    self.injected_engine_fault("UpdateTaskListPartitionConfig")?;
                     if let Some(registry) = &self.queues {
                         let queue = self
                             .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
@@ -3531,6 +3551,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                     // untyped identifier errors become InternalServiceError.
                     TaskListName::parse(&task_list_name).map_err(Status::internal)?;
                     payload.domain = self.domain_name(&r.domain_id)?;
+                    #[cfg(test)]
+                    self.injected_engine_fault("DescribeTaskList")?;
                     if self.queues.is_some() {
                         let queue = self
                             .durable_queue(
