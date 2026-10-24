@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use cadence_api::admin::{DynamicConfigFilter, DynamicConfigValue};
+use cadence_persistence::dynamic_config::{PropertyValues, RuntimePropertyProvider, RuntimePropertyRead};
 
 fn yaml_value_to_json(value: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
     Ok(match value {
@@ -37,6 +38,7 @@ fn yaml_value_to_json(value: &serde_yaml::Value) -> anyhow::Result<serde_json::V
 pub struct DynamicConfigOverlay {
     normal: HashMap<String, Vec<DynamicConfigValue>>,
     operational: HashMap<String, Vec<DynamicConfigValue>>,
+    runtime_provider: Option<Arc<dyn RuntimePropertyProvider>>,
 }
 
 fn filters_match(value: &DynamicConfigValue, filters: &[DynamicConfigFilter]) -> bool {
@@ -164,8 +166,17 @@ impl DynamicConfigOverlay {
     }
 
     /// Ordered normal config entries for runtime property resolution.
-    pub fn property_values(&self, name: &str) -> &[DynamicConfigValue] {
-        self.normal.get(name).map(Vec::as_slice).unwrap_or(&[])
+    pub fn property_values(&self, name: &str) -> PropertyValues<'_> {
+        PropertyValues::snapshot(name, self.normal.get(name).map(Vec::as_slice).unwrap_or(&[]))
+            .with_runtime(self.runtime_provider.as_ref().map(|provider| {
+                RuntimePropertyRead::new(name, provider.clone())
+            }))
+    }
+
+    /// Enable live typed reads for OpenFeature while retaining ordered
+    /// snapshot behavior for file and config-store sources.
+    pub fn set_runtime_provider(&mut self, provider: Option<Arc<dyn RuntimePropertyProvider>>) {
+        self.runtime_provider = provider;
     }
 
     /// Replace the value list, mirroring the config-store client's update.

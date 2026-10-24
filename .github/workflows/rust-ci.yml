@@ -42,6 +42,15 @@ jobs:
         if: inputs.clean_target != true
         with:
           workspaces: rust
+      - name: Formatting
+        working-directory: rust
+        run: |
+          set +e
+          cargo fmt --all -- --check > fmt.log 2>&1
+          result=$?
+          echo "$result" > fmt.exit
+          cat fmt.log
+          exit "$result"
       - name: Clippy
         working-directory: rust
         run: |
@@ -75,6 +84,7 @@ jobs:
           retention-days: 3
           path: |
             rust/clippy.log
+            rust/fmt.log
             rust/test.log
             rust/*.exit
             rust/commit.txt

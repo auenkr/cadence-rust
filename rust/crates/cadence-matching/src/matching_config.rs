@@ -6,8 +6,7 @@
 //! (task_list_manager.go:1040-1062) but nothing in `service/matching` ever
 //! calls the resulting `TaskListConfig` fields, so these readers exist for
 //! config parity and gate no behavior; wiring them would change Go logic.
-use cadence_api::admin::DynamicConfigValue;
-use cadence_persistence::dynamic_config;
+use cadence_persistence::dynamic_config::{self, PropertyValueSource};
 
 /// Go `dynamicproperties.UnlimitedRPS` (`math.MaxInt32`).
 pub const UNLIMITED_RPS: i64 = i32::MAX as i64;
@@ -22,28 +21,28 @@ pub const DEFAULT_IDLE_TIME_NANOS: i64 = 5 * 60 * 1_000_000_000;
 pub const DEFAULT_ACTIVITY_SYNC_MATCH_WAIT_NANOS: i64 = 50_000_000;
 
 /// Go `MatchingUserRPS` (`matching.rps`).
-pub fn user_rps(values: &[DynamicConfigValue]) -> i64 {
+pub fn user_rps(values: impl PropertyValueSource) -> i64 {
     dynamic_config::integer(values, None, DEFAULT_USER_RPS)
 }
 
 /// Go `MatchingWorkerRPS` (`matching.workerrps`).
-pub fn worker_rps(values: &[DynamicConfigValue]) -> i64 {
+pub fn worker_rps(values: impl PropertyValueSource) -> i64 {
     dynamic_config::integer(values, None, UNLIMITED_RPS)
 }
 
 /// Go `MatchingDomainUserRPS` (`matching.domainrps`).
-pub fn domain_user_rps(values: &[DynamicConfigValue], domain: &str) -> i64 {
+pub fn domain_user_rps(values: impl PropertyValueSource, domain: &str) -> i64 {
     dynamic_config::integer(values, Some(domain), DEFAULT_DOMAIN_USER_RPS)
 }
 
 /// Go `MatchingDomainWorkerRPS` (`matching.domainworkerrps`).
-pub fn domain_worker_rps(values: &[DynamicConfigValue], domain: &str) -> i64 {
+pub fn domain_worker_rps(values: impl PropertyValueSource, domain: &str) -> i64 {
     dynamic_config::integer(values, Some(domain), UNLIMITED_RPS)
 }
 
 /// Go `MatchingEnableSyncMatch` (`matching.enableSyncMatch`), not consumed by Go.
 pub fn enable_sync_match(
-    values: &[DynamicConfigValue],
+    values: impl PropertyValueSource,
     domain: &str,
     task_list: &str,
     task_type: i32,
@@ -53,7 +52,7 @@ pub fn enable_sync_match(
 
 /// Go `MaxTasklistIdleTime` (`matching.maxTasklistIdleTime`), not consumed by Go.
 pub fn max_tasklist_idle_time(
-    values: &[DynamicConfigValue],
+    values: impl PropertyValueSource,
     domain: &str,
     task_list: &str,
     task_type: i32,
@@ -69,12 +68,12 @@ pub fn max_tasklist_idle_time(
 
 /// Go `MatchingActivityTaskSyncMatchWaitTime`
 /// (`matching.activityTaskSyncMatchWaitTime`, default 50ms), not consumed by Go.
-pub fn activity_task_sync_match_wait_time(values: &[DynamicConfigValue], domain: &str) -> i64 {
+pub fn activity_task_sync_match_wait_time(values: impl PropertyValueSource, domain: &str) -> i64 {
     dynamic_config::duration(values, Some(domain), DEFAULT_ACTIVITY_SYNC_MATCH_WAIT_NANOS)
 }
 
 /// Go `MatchingSemaphoreIdleTime` (`matching.semaphoreIdleTime`).
-pub fn semaphore_idle_time(values: &[DynamicConfigValue], domain: &str) -> i64 {
+pub fn semaphore_idle_time(values: impl PropertyValueSource, domain: &str) -> i64 {
     dynamic_config::duration(values, Some(domain), DEFAULT_IDLE_TIME_NANOS)
 }
 
@@ -94,6 +93,24 @@ pub fn persistence_task_list_type(api_type: i32) -> i32 {
 mod tests {
     use super::*;
     use serde_json::json;
+    use cadence_api::admin::DynamicConfigValue;
+    use cadence_persistence::dynamic_config::RuntimePropertyProvider;
+    use std::{collections::BTreeMap, sync::{Arc, Mutex}};
+
+    #[derive(Debug, Default)]
+    struct FakeRuntime(std::sync::RwLock<BTreeMap<(String, String, String), serde_json::Value>>,
+        Mutex<Vec<(String, serde_json::Value, BTreeMap<String, serde_json::Value>)>>);
+
+    impl RuntimePropertyProvider for FakeRuntime {
+        fn evaluate(&self, key: &str, default: serde_json::Value, filters: &BTreeMap<String, serde_json::Value>) -> Result<serde_json::Value, String> {
+            self.1.lock().unwrap().push((key.to_owned(), default.clone(), filters.clone()));
+            if key == "matching.runtimeFailure" { return Err("provider unavailable".into()); }
+            let domain = filters.get("domainName").and_then(|v| v.as_str()).unwrap_or("");
+            let task_list = filters.get("taskListName").and_then(|v| v.as_str()).unwrap_or("");
+            let task_type = filters.get("taskType").and_then(|v| v.as_i64()).unwrap_or(-1).to_string();
+            Ok(self.0.read().unwrap().get(&(key.to_owned(), domain.to_owned(), format!("{task_list}:{task_type}"))).cloned().unwrap_or(default))
+        }
+    }
 
     fn value(v: serde_json::Value) -> Vec<DynamicConfigValue> {
         vec![DynamicConfigValue {
@@ -145,5 +162,30 @@ mod tests {
         assert_eq!(persistence_task_list_type(0), 0);
         assert_eq!(persistence_task_list_type(9), 0);
         assert_eq!(persistence_task_list_type(-1), 0);
+    }
+
+    #[test]
+    fn openfeature_runtime_reads_keep_identity_filters_defaults_and_live_values() {
+        let fake = Arc::new(FakeRuntime::default());
+        fake.0.write().unwrap().insert(("matching.domainrps".into(), "alpha".into(), ":-1".into()), json!(31));
+        fake.0.write().unwrap().insert(("matching.domainrps".into(), "beta".into(), ":-1".into()), json!(47));
+        fake.0.write().unwrap().insert(("matching.enableSyncMatch".into(), "alpha".into(), "queue:0".into()), json!(false));
+        fake.0.write().unwrap().insert(("matching.enableSyncMatch".into(), "alpha".into(), "queue:1".into()), json!(true));
+        let mut overlay = crate::admin::DynamicConfigOverlay::default();
+        overlay.set_runtime_provider(Some(fake.clone()));
+
+        assert_eq!(domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"), 31);
+        assert_eq!(domain_user_rps(overlay.property_values("matching.domainrps"), "beta"), 47);
+        fake.0.write().unwrap().insert(("matching.domainrps".into(), "alpha".into(), ":-1".into()), json!(88));
+        assert_eq!(domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"), 88);
+        assert!(!enable_sync_match(overlay.property_values("matching.enableSyncMatch"), "alpha", "queue", 0));
+        assert!(enable_sync_match(overlay.property_values("matching.enableSyncMatch"), "alpha", "queue", 1));
+        assert_eq!(dynamic_config::integer(overlay.property_values("matching.runtimeFailure"), None, 19), 19);
+        fake.0.write().unwrap().insert(("matching.domainrps".into(), "wrong".into(), ":-1".into()), json!("not-an-int"));
+        assert_eq!(domain_user_rps(overlay.property_values("matching.domainrps"), "wrong"), 0);
+
+        let calls = fake.1.lock().unwrap();
+        assert!(calls.iter().any(|(key, default, filters)| key == "matching.domainrps" && default == &json!(0) && filters.get("domainName") == Some(&json!("alpha"))));
+        assert!(calls.iter().any(|(key, default, filters)| key == "matching.enableSyncMatch" && default == &json!(true) && filters.get("taskListName") == Some(&json!("queue")) && filters.get("taskType") == Some(&json!(0))));
     }
 }
