@@ -15,7 +15,9 @@ pub struct OpenFeatureRuntimeProvider {
 
 impl OpenFeatureRuntimeProvider {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { client: OpenFeatureClient::new() })
+        Arc::new(Self {
+            client: OpenFeatureClient::new(),
+        })
     }
 }
 
@@ -36,12 +38,23 @@ impl RuntimePropertyProvider for OpenFeatureRuntimeProvider {
                 error.map_or_else(|| Ok(Value::String(value)), |error| Err(error.to_string()))
             }
             Value::Number(default) if default.as_i64().is_some() => {
-                let (value, error) = self.client.get_int_value(key, default.as_i64().unwrap(), filters);
+                let (value, error) =
+                    self.client
+                        .get_int_value(key, default.as_i64().unwrap(), filters);
                 error.map_or_else(|| Ok(Value::from(value)), |error| Err(error.to_string()))
             }
             Value::Number(default) => {
-                let (value, error) = self.client.get_float_value(key, default.as_f64().unwrap_or_default(), filters);
-                error.map_or_else(|| Ok(serde_json::Number::from_f64(value).map(Value::Number).unwrap_or(Value::Null)), |error| Err(error.to_string()))
+                let (value, error) =
+                    self.client
+                        .get_float_value(key, default.as_f64().unwrap_or_default(), filters);
+                error.map_or_else(
+                    || {
+                        Ok(serde_json::Number::from_f64(value)
+                            .map(Value::Number)
+                            .unwrap_or(Value::Null))
+                    },
+                    |error| Err(error.to_string()),
+                )
             }
             Value::Array(default) => {
                 let (value, error) = self.client.get_list_value(key, default.clone(), filters);

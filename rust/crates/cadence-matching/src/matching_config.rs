@@ -92,23 +92,64 @@ pub fn persistence_task_list_type(api_type: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use cadence_api::admin::DynamicConfigValue;
     use cadence_persistence::dynamic_config::RuntimePropertyProvider;
-    use std::{collections::BTreeMap, sync::{Arc, Mutex}};
+    use serde_json::json;
+    use std::{
+        collections::BTreeMap,
+        sync::{Arc, Mutex},
+    };
 
     #[derive(Debug, Default)]
-    struct FakeRuntime(std::sync::RwLock<BTreeMap<(String, String, String), serde_json::Value>>,
-        Mutex<Vec<(String, serde_json::Value, BTreeMap<String, serde_json::Value>)>>);
+    struct FakeRuntime(
+        std::sync::RwLock<BTreeMap<(String, String, String), serde_json::Value>>,
+        Mutex<
+            Vec<(
+                String,
+                serde_json::Value,
+                BTreeMap<String, serde_json::Value>,
+            )>,
+        >,
+    );
 
     impl RuntimePropertyProvider for FakeRuntime {
-        fn evaluate(&self, key: &str, default: serde_json::Value, filters: &BTreeMap<String, serde_json::Value>) -> Result<serde_json::Value, String> {
-            self.1.lock().unwrap().push((key.to_owned(), default.clone(), filters.clone()));
-            if key == "matching.runtimeFailure" { return Err("provider unavailable".into()); }
-            let domain = filters.get("domainName").and_then(|v| v.as_str()).unwrap_or("");
-            let task_list = filters.get("taskListName").and_then(|v| v.as_str()).unwrap_or("");
-            let task_type = filters.get("taskType").and_then(|v| v.as_i64()).unwrap_or(-1).to_string();
-            Ok(self.0.read().unwrap().get(&(key.to_owned(), domain.to_owned(), format!("{task_list}:{task_type}"))).cloned().unwrap_or(default))
+        fn evaluate(
+            &self,
+            key: &str,
+            default: serde_json::Value,
+            filters: &BTreeMap<String, serde_json::Value>,
+        ) -> Result<serde_json::Value, String> {
+            self.1
+                .lock()
+                .unwrap()
+                .push((key.to_owned(), default.clone(), filters.clone()));
+            if key == "matching.runtimeFailure" {
+                return Err("provider unavailable".into());
+            }
+            let domain = filters
+                .get("domainName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let task_list = filters
+                .get("taskListName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let task_type = filters
+                .get("taskType")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1)
+                .to_string();
+            Ok(self
+                .0
+                .read()
+                .unwrap()
+                .get(&(
+                    key.to_owned(),
+                    domain.to_owned(),
+                    format!("{task_list}:{task_type}"),
+                ))
+                .cloned()
+                .unwrap_or(default))
         }
     }
 
@@ -142,7 +183,10 @@ mod tests {
         assert_eq!(user_rps(&value(json!(5))), 5);
         assert_eq!(worker_rps(&value(json!(7))), 7);
         assert!(!enable_sync_match(&value(json!(false)), "d", "tl", 0));
-        assert_eq!(semaphore_idle_time(&value(json!("30s")), "d"), 30_000_000_000);
+        assert_eq!(
+            semaphore_idle_time(&value(json!("30s")), "d"),
+            30_000_000_000
+        );
         assert_eq!(
             max_tasklist_idle_time(&value(json!("2m")), "d", "tl", 0),
             120_000_000_000
@@ -167,25 +211,85 @@ mod tests {
     #[test]
     fn openfeature_runtime_reads_keep_identity_filters_defaults_and_live_values() {
         let fake = Arc::new(FakeRuntime::default());
-        fake.0.write().unwrap().insert(("matching.domainrps".into(), "alpha".into(), ":-1".into()), json!(31));
-        fake.0.write().unwrap().insert(("matching.domainrps".into(), "beta".into(), ":-1".into()), json!(47));
-        fake.0.write().unwrap().insert(("matching.enableSyncMatch".into(), "alpha".into(), "queue:0".into()), json!(false));
-        fake.0.write().unwrap().insert(("matching.enableSyncMatch".into(), "alpha".into(), "queue:1".into()), json!(true));
+        fake.0.write().unwrap().insert(
+            ("matching.domainrps".into(), "alpha".into(), ":-1".into()),
+            json!(31),
+        );
+        fake.0.write().unwrap().insert(
+            ("matching.domainrps".into(), "beta".into(), ":-1".into()),
+            json!(47),
+        );
+        fake.0.write().unwrap().insert(
+            (
+                "matching.enableSyncMatch".into(),
+                "alpha".into(),
+                "queue:0".into(),
+            ),
+            json!(false),
+        );
+        fake.0.write().unwrap().insert(
+            (
+                "matching.enableSyncMatch".into(),
+                "alpha".into(),
+                "queue:1".into(),
+            ),
+            json!(true),
+        );
         let mut overlay = crate::admin::DynamicConfigOverlay::default();
         overlay.set_runtime_provider(Some(fake.clone()));
 
-        assert_eq!(domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"), 31);
-        assert_eq!(domain_user_rps(overlay.property_values("matching.domainrps"), "beta"), 47);
-        fake.0.write().unwrap().insert(("matching.domainrps".into(), "alpha".into(), ":-1".into()), json!(88));
-        assert_eq!(domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"), 88);
-        assert!(!enable_sync_match(overlay.property_values("matching.enableSyncMatch"), "alpha", "queue", 0));
-        assert!(enable_sync_match(overlay.property_values("matching.enableSyncMatch"), "alpha", "queue", 1));
-        assert_eq!(dynamic_config::integer(overlay.property_values("matching.runtimeFailure"), None, 19), 19);
-        fake.0.write().unwrap().insert(("matching.domainrps".into(), "wrong".into(), ":-1".into()), json!("not-an-int"));
-        assert_eq!(domain_user_rps(overlay.property_values("matching.domainrps"), "wrong"), 0);
+        assert_eq!(
+            domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"),
+            31
+        );
+        assert_eq!(
+            domain_user_rps(overlay.property_values("matching.domainrps"), "beta"),
+            47
+        );
+        fake.0.write().unwrap().insert(
+            ("matching.domainrps".into(), "alpha".into(), ":-1".into()),
+            json!(88),
+        );
+        assert_eq!(
+            domain_user_rps(overlay.property_values("matching.domainrps"), "alpha"),
+            88
+        );
+        assert!(!enable_sync_match(
+            overlay.property_values("matching.enableSyncMatch"),
+            "alpha",
+            "queue",
+            0
+        ));
+        assert!(enable_sync_match(
+            overlay.property_values("matching.enableSyncMatch"),
+            "alpha",
+            "queue",
+            1
+        ));
+        assert_eq!(
+            dynamic_config::integer(overlay.property_values("matching.runtimeFailure"), None, 19),
+            19
+        );
+        fake.0.write().unwrap().insert(
+            ("matching.domainrps".into(), "wrong".into(), ":-1".into()),
+            json!("not-an-int"),
+        );
+        assert_eq!(
+            domain_user_rps(overlay.property_values("matching.domainrps"), "wrong"),
+            0
+        );
 
         let calls = fake.1.lock().unwrap();
-        assert!(calls.iter().any(|(key, default, filters)| key == "matching.domainrps" && default == &json!(0) && filters.get("domainName") == Some(&json!("alpha"))));
-        assert!(calls.iter().any(|(key, default, filters)| key == "matching.enableSyncMatch" && default == &json!(true) && filters.get("taskListName") == Some(&json!("queue")) && filters.get("taskType") == Some(&json!(0))));
+        assert!(calls
+            .iter()
+            .any(|(key, default, filters)| key == "matching.domainrps"
+                && default == &json!(0)
+                && filters.get("domainName") == Some(&json!("alpha"))));
+        assert!(calls
+            .iter()
+            .any(|(key, default, filters)| key == "matching.enableSyncMatch"
+                && default == &json!(true)
+                && filters.get("taskListName") == Some(&json!("queue"))
+                && filters.get("taskType") == Some(&json!(0))));
     }
 }

@@ -255,7 +255,9 @@ impl MatchingRuntime {
         })?;
         let enabled = {
             let percentage = percentage_onboarded.clone();
-            Arc::new(move || crate::matching_shard_routing::shard_distributor_onboarded(percentage())) as Arc<dyn Fn() -> bool + Send + Sync>
+            Arc::new(move || {
+                crate::matching_shard_routing::shard_distributor_onboarded(percentage())
+            }) as Arc<dyn Fn() -> bool + Send + Sync>
         };
         let rpc = Arc::new(
             crate::matching_shard_distributor::TonicExecutorRpc::from_channel(channel.clone()),
@@ -578,12 +580,14 @@ impl MatchingRuntime {
                         if current > previous {
                             let (_, notified) = notified_failover_domains(
                                 previous,
-                                entries.iter().map(|entry| (
-                                    entry.info.uuid.clone(),
-                                    entry.is_global_domain,
-                                    entry.replication.is_active_active(),
-                                    entry.failover_notification_version,
-                                )),
+                                entries.iter().map(|entry| {
+                                    (
+                                        entry.info.uuid.clone(),
+                                        entry.is_global_domain,
+                                        entry.replication.is_active_active(),
+                                        entry.failover_notification_version,
+                                    )
+                                }),
                             );
                             if let Some(registry) = &registry {
                                 for domain in notified {
@@ -772,7 +776,9 @@ pub fn live_shutdown_drain_duration(overlay: Arc<Mutex<DynamicConfigOverlay>>) -
     Arc::new(move || {
         let config = overlay.lock().expect("admin dynamic config lock");
         let nanos = cadence_persistence::dynamic_config::duration(
-            config.property_values("matching.shutdownDrainDuration"), None, 0,
+            config.property_values("matching.shutdownDrainDuration"),
+            None,
+            0,
         );
         Duration::from_nanos(nanos.max(0) as u64)
     })
@@ -805,16 +811,20 @@ mod tests {
 
     #[test]
     fn failover_callback_selection_matches_go_and_advances_baseline() {
-        let (version, notified) = notified_failover_domains(10, [
-            ("global".into(), true, false, 11),
-            ("local".into(), false, false, 20),
-            ("active-active".into(), true, true, 30),
-            ("old".into(), true, false, 10),
-        ].into_iter());
+        let (version, notified) = notified_failover_domains(
+            10,
+            [
+                ("global".into(), true, false, 11),
+                ("local".into(), false, false, 20),
+                ("active-active".into(), true, true, 30),
+                ("old".into(), true, false, 10),
+            ]
+            .into_iter(),
+        );
         assert_eq!(version, 30);
         assert_eq!(notified, vec!["global"]);
-        let (same, notified) = notified_failover_domains(version,
-            [("global".into(), true, false, 11)].into_iter());
+        let (same, notified) =
+            notified_failover_domains(version, [("global".into(), true, false, 11)].into_iter());
         assert_eq!(same, 30);
         assert!(notified.is_empty());
     }
@@ -1046,7 +1056,8 @@ mod tests {
             MatchingRuntime::in_memory(crate::handlers::AppState::default(), duration);
         let (tx, rx) = tokio::sync::watch::channel(false);
         runtime.shard_distributor_drain = Some(tx);
-        let evict: EvictSelf = Arc::new(|| Box::pin(async { Err(anyhow::anyhow!("evict failed")) }));
+        let evict: EvictSelf =
+            Arc::new(|| Box::pin(async { Err(anyhow::anyhow!("evict failed")) }));
         let mut runtime = runtime.with_membership_evictor(evict);
         let during = Arc::new(Mutex::new(None));
         let observed = during.clone();
@@ -1058,7 +1069,11 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(*during.lock().unwrap(), Some(false), "not draining during sleep");
+        assert_eq!(
+            *during.lock().unwrap(),
+            Some(false),
+            "not draining during sleep"
+        );
         assert!(*rx.borrow(), "draining once the sleep is over");
     }
 
