@@ -202,7 +202,6 @@ impl UnleashRepository {
             ("Authorization", config.api_token.clone()),
             ("Unleash-SDK", "unleash-client-go:4.5.0".into()),
             ("Unleash-Connection-Id", connection_id.clone()),
-            ("Content-Type", "application/json".into()),
         ];
         let mut shared_headers = headers.clone();
         if let Some((_, value)) = shared_headers
@@ -248,9 +247,8 @@ impl UnleashRepository {
                             if let Ok(body) = response.json::<Value>() {
                                 *state.write().unwrap_or_else(|p| p.into_inner()) =
                                     feature_map(body);
-                                if let Some(tag) = new_etag {
-                                    *poll_etag.lock().unwrap_or_else(|p| p.into_inner()) = tag;
-                                }
+                                *poll_etag.lock().unwrap_or_else(|p| p.into_inner()) =
+                                    new_etag.unwrap_or_default();
                             }
                         }
                     }
@@ -295,10 +293,16 @@ impl UnleashRepository {
             for (name,value) in &shared_headers { if !value.is_empty() { req = req.header(*name,value); } }
             let _ = req.send();
             let mut next = std::time::Instant::now() + metrics_interval;
+            let mut errors = 0u8;
+            let mut skips = 0u8;
             while !report_stop.load(Ordering::Acquire) {
                 while !report_stop.load(Ordering::Acquire) && std::time::Instant::now() < next { std::thread::sleep(Duration::from_millis(10).min(next.saturating_duration_since(std::time::Instant::now()))); }
                 if report_stop.load(Ordering::Acquire) { break; }
                 next = std::time::Instant::now() + metrics_interval;
+                if skips > 0 {
+                    skips -= 1;
+                    continue;
+                }
                 let mut bucket = report_metrics.lock().unwrap_or_else(|p| p.into_inner());
                 if bucket.toggles.is_empty() { continue; }
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
@@ -308,10 +312,27 @@ impl UnleashRepository {
                 let payload = serde_json::json!({"appName":app_name,"instanceId":instance_id,"connectionId":connection_id,"bucket":{"start":start,"stop":now,"toggles":toggles},"platformVersion":format!("{} {}",std::env::consts::OS,std::env::consts::ARCH),"platformName":"rust","yggdrasilVersion":null,"sdkVersion":"unleash-client-go:4.5.0","specVersion":"4.3.1"});
                 let mut req = client.post(report_url.clone()).json(&payload);
                 for (name,value) in &shared_headers { if !value.is_empty() { req = req.header(*name,value); } }
-                if !matches!(req.send(), Ok(response) if response.status().is_success()) {
+                let post_result = req.send();
+                let failed_status = post_result
+                    .as_ref()
+                    .ok()
+                    .map(reqwest::blocking::Response::status)
+                    .filter(|status| !status.is_success());
+                if post_result.is_err() || failed_status.is_some() {
+                    if let Some(status) = failed_status {
+                        if matches!(status, reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND) {
+                            errors = 10;
+                        } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                            errors = (errors + 1).min(10);
+                        }
+                        skips = errors;
+                    }
                     let mut bucket = report_metrics.lock().unwrap_or_else(|p| p.into_inner());
                     for (name, counts) in toggles { let current = bucket.toggles.entry(name).or_insert_with(|| serde_json::json!({"yes":0,"no":0,"variants":{}})); for field in ["yes","no"] { current[field] = Value::from(current[field].as_i64().unwrap_or(0) + counts[field].as_i64().unwrap_or(0)); } for (variant, count) in counts["variants"].as_object().into_iter().flatten() { let variants = current["variants"].as_object_mut().expect("variants map"); variants.insert(variant.clone(), Value::from(variants.get(variant).and_then(Value::as_i64).unwrap_or(0) + count.as_i64().unwrap_or(0))); } }
                     bucket.start.get_or_insert(start);
+                } else {
+                    errors = errors.saturating_sub(1);
+                    skips = errors;
                 }
             }
         }).map_err(|e| anyhow!("failed to start unleash metrics sender: {e}"))?;
@@ -832,11 +853,11 @@ mod tests {
                 return ("200 OK", "{}");
             }
             match get_count {
-                0 => (
+                1 => (
                     "200 OK",
                     r#"{"features":[{"name":"refreshed","enabled":true}]}"#,
                 ),
-                1 => ("503 Service Unavailable", "{}"),
+                2 => ("503 Service Unavailable", "{}"),
                 _ => ("200 OK", "not-json"),
             }
         });
@@ -970,8 +991,8 @@ mod tests {
                 }
                 let raw = String::from_utf8_lossy(&request).into_owned();
                 tx.send(raw).unwrap();
-                let body = if index == 0 {
-                    r#"{"features":[{"name":"flag","enabled":true,"strategies":[{"name":"default"}]}]}"#
+                let body = if request.starts_with(b"GET ") {
+                    r#"{"features":[{"name":"flag","enabled":true,"strategies":[{"name":"default"}],"variants":[{"name":"blue","weight":100}]}]}"#
                 } else {
                     "{}"
                 };
@@ -1019,11 +1040,61 @@ mod tests {
         };
         let result = provider.resolve("flag", FlagValue::Bool(false), &Default::default());
         assert_eq!(result.value, FlagValue::Bool(true));
+        let _ = provider.resolve(
+            "flag",
+            FlagValue::String("fallback".into()),
+            &Default::default(),
+        );
         let metrics = rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(metrics.starts_with("POST /api/client/metrics"), "{metrics}");
         assert!(metrics.contains("\"flag\":{"), "{metrics}");
-        assert!(metrics.contains("\"yes\":1"), "{metrics}");
+        assert!(metrics.contains("\"yes\":2"), "{metrics}");
+        assert!(metrics.contains("\"blue\":1"), "{metrics}");
         provider.shutdown();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn etag_304_retains_snapshot_and_sends_if_none_match() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let mut feature_requests = 0;
+            for _ in 0..4 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 4096];
+                let n = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..n]).into_owned();
+                let is_features = request.starts_with("GET ");
+                if is_features {
+                    feature_requests += 1;
+                }
+                tx.send(request).unwrap();
+                if !is_features {
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").unwrap();
+                } else if feature_requests == 1 {
+                    let body = r#"{"features":[{"name":"retained","enabled":true}]}"#;
+                    write!(stream, "HTTP/1.1 200 OK\r\nETag: \"rev-1\"\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                } else {
+                    write!(stream, "HTTP/1.1 304 Not Modified\r\nETag: \"rev-1\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                }
+            }
+        });
+        let repository = UnleashRepository::new(UnleashConfig {
+            url: format!("http://{address}/api"), app_name: "etag-test".into(),
+            refresh_interval_nanos: 20_000_000, metrics_interval_nanos: 60_000_000_000,
+            ..Default::default()
+        }, None).unwrap();
+        wait_for_feature(&repository, "retained");
+        let mut requests = Vec::new();
+        for _ in 0..4 { requests.push(rx.recv_timeout(Duration::from_secs(2)).unwrap()); }
+        assert_eq!(requests.iter().filter(|r| r.starts_with("GET ")).count(), 3);
+        assert!(requests.iter().any(|r| r.contains("if-none-match: \"rev-1\"")), "{requests:?}");
+        assert!(repository.snapshot().get("retained").is_some());
+        repository.shutdown();
         server.join().unwrap();
     }
 }
