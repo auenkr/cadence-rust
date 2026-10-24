@@ -14,9 +14,11 @@ dynamic config); the default grpc keeps today's gRPC path.
 """
 import argparse
 import base64
+import errno
 import gzip
 import json
 import os
+import secrets
 from pathlib import Path
 import re
 import shlex
@@ -535,8 +537,26 @@ if args.shard_distributor:
         keys.append('SD_ETCD_PORT')
 reservations = [socket.socket() for _ in keys]
 try:
+    # Keep service listeners outside Linux's ephemeral source-port range.
+    # After reservations close, Go startup opens many outbound connections;
+    # bind(port=0) could let one consume a future Rust listener's port.
+    ephemeral_start = 32768
+    port_range = Path('/proc/sys/net/ipv4/ip_local_port_range')
+    if port_range.exists():
+        ephemeral_start = int(port_range.read_text().split()[0])
+    listener_upper = min(30000, ephemeral_start)
+    if listener_upper <= 10000:
+        raise RuntimeError('no test listener range below ephemeral source ports')
     for listener in reservations:
-        listener.bind(('127.0.0.1', 0))
+        for attempt in range(1000):
+            try:
+                listener.bind(('127.0.0.1', 10000 + secrets.randbelow(listener_upper - 10000)))
+                break
+            except OSError as error:
+                if error.errno != errno.EADDRINUSE:  # EADDRINUSE: choose another test listener.
+                    raise
+        else:
+            raise RuntimeError('could not reserve a test listener port')
     ports = {key: str(listener.getsockname()[1]) for key, listener in zip(keys, reservations)}
 finally:
     for listener in reservations:
