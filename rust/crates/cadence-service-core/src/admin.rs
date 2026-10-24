@@ -1189,7 +1189,8 @@ mod tests {
         std::fs::write(&path, include_str!("../tests/fixtures/dynamic-config-go-null.yaml")).unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
         for key in ["missingValue", "explicitNull"] {
-            let value = overlay.property_values(key)[0].value.as_ref().unwrap();
+            let values = overlay.property_values(key);
+            let value = values[0].value.as_ref().unwrap();
             assert_eq!(serde_json::from_slice::<serde_json::Value>(&value.data).unwrap(), serde_json::Value::Null);
         }
         assert!(overlay.property_values("nullConstraints")[0].filters.is_empty());
