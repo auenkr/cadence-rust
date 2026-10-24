@@ -260,6 +260,46 @@ async function autoConfigHint(ctx) {
   return { result: 'passed', decisionHint, activityHint };
 }
 
+// CADENCE_PROBE_ACTIVE_OFFER: register a real Rust Matching decision poller first,
+// then ask Go Frontend/History to create a workflow task on that list. Delivery
+// with no task row proves the active offer reached the waiter instead of falling
+// back to the durable queue.
+async function activeOffer(ctx) {
+  const taskList = { name: `active-offer-${ctx.id}` };
+  const identity = `active-offer-poller-${ctx.id}`;
+  const pendingPoll = ownerRpc(ctx, 'PollForDecisionTask', {
+    domainId: ctx.domainId, pollerId: randomUUID(),
+    request: { domain: ctx.domain, taskList, identity },
+  });
+  const deadline = Date.now() + 30000;
+  let poller;
+  do {
+    const described = await ownerRpc(ctx, 'DescribeTaskList', {
+      domainId: ctx.domainId,
+      request: { taskList, taskListType: 'TASK_LIST_TYPE_DECISION' },
+    });
+    poller = described.pollers.find(entry => entry.identity === identity);
+    if (!poller && Date.now() > deadline) throw new Error('active-offer decision poller was not registered');
+    if (!poller) await sleep(20);
+  } while (!poller);
+
+  const workflowId = `active-offer-workflow-${ctx.id}`;
+  const started = await ctx.call('WorkflowAPI', 'StartWorkflowExecution', {
+    ...ctx.startRequest, workflowId, taskList, requestId: randomUUID(),
+  });
+  assert(started.runId, 'Go History did not return a workflow run id');
+  const task = await pendingPoll;
+  assert(task.taskToken?.length, 'Go History decision task was not delivered to the waiting poller');
+  assert.equal(task.workflowExecution.workflowId, workflowId, 'poller received a different workflow task');
+  assert.equal(task.workflowExecution.runId, started.runId, 'poller received a different workflow run');
+  const persistedRows = ctx.durableTaskCount(ctx.domainId, taskList.name, 0, undefined);
+  assert.equal(persistedRows.status, 0, `could not check active-offer task rows: ${persistedRows.stderr}`);
+  assert.equal(Number(String(persistedRows.stdout).trim()), 0, 'active-offered task unexpectedly used persisted-queue fallback');
+  await ctx.call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: task.taskToken, decisions: [] });
+  return { result: 'passed', taskList: taskList.name, pollerIdentity: identity, workflowId, runId: started.runId,
+    historyScheduledTaskDelivered: true, taskTokenDelivered: true, persistedTaskRows: 0 };
+}
+
 async function runScenario(name, flag, fn, ctx, results) {
   if (process.env[flag] !== '1') { results[name] = 'not requested'; return; }
   results[name] = await fn(ctx);
@@ -273,6 +313,7 @@ async function runProbeScenarios(ctx) {
   await runScenario('listTaskListPartitions', 'CADENCE_PROBE_LIST_PARTITIONS', listPartitions, ctx, results);
   await runScenario('durableRestartDrain', 'CADENCE_PROBE_DURABLE_RESTART', durableRestart, ctx, results);
   await runScenario('autoConfigHint', 'CADENCE_PROBE_AUTO_CONFIG_HINT', autoConfigHint, ctx, results);
+  await runScenario('activeOffer', 'CADENCE_PROBE_ACTIVE_OFFER', activeOffer, ctx, results);
   return results;
 }
 

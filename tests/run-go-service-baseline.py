@@ -69,6 +69,7 @@ parser.add_argument('--probe-query-standby', action='store_true', help='probe sc
 parser.add_argument('--probe-list-partitions', action='store_true', help='probe scenario: ListTaskListPartitions/DescribeTaskList compared with Go semantics on every Rust node and through the Go Frontend; sets matching.numTasklistWritePartitions=3 (requires --rust-services matching)')
 parser.add_argument('--probe-durable-restart', action='store_true', help='probe scenario: stop Rust Matching with multi-partition backlog rows, restart, drain every partition (requires --rust-services matching)')
 parser.add_argument('--probe-auto-config-hint', action='store_true', help='probe scenario: decision and activity polls through Go Frontend carry autoConfigHint with enableAutoConfig=false; sets matching.enableClientAutoConfig=false in the dynamic config (requires --rust-services matching, not with --matching-configstore)')
+parser.add_argument('--probe-active-offer', action='store_true', help='probe active decision-task offer: wait for a real Rust Matching poller, then schedule via Go Frontend/History and require task-token delivery without persisted fallback')
 parser.add_argument('--evidence-dir', type=Path, help='copy the selected run evidence into this directory before the artifacts directory is removed')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
@@ -1056,7 +1057,8 @@ try:
                     if args.matching_backlog_forward:
                         probe_environment['CADENCE_MATCHING_BACKLOG_FORWARD'] = '1'
                     for flag, name in ((args.probe_pg_gc_domain, 'CADENCE_PROBE_PG_GC_DOMAIN'), (args.probe_query_standby, 'CADENCE_PROBE_QUERY_STANDBY'),
-                                       (args.probe_list_partitions, 'CADENCE_PROBE_LIST_PARTITIONS'), (args.probe_durable_restart, 'CADENCE_PROBE_DURABLE_RESTART'), (args.probe_auto_config_hint, 'CADENCE_PROBE_AUTO_CONFIG_HINT')):
+                                       (args.probe_list_partitions, 'CADENCE_PROBE_LIST_PARTITIONS'), (args.probe_durable_restart, 'CADENCE_PROBE_DURABLE_RESTART'), (args.probe_auto_config_hint, 'CADENCE_PROBE_AUTO_CONFIG_HINT'),
+                                       (args.probe_active_offer, 'CADENCE_PROBE_ACTIVE_OFFER')):
                         if flag:
                             probe_environment[name] = '1'
                     if args.matching_configstore:
