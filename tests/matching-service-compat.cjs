@@ -1140,6 +1140,37 @@ async function run() {
   // the shared limiter, so later backlog dispatches are paced. The first
   // dispatch may still use the pre-report burst, so only assert the last poll.
   const pacedList = { name: `paced-${id}` };
+  // The rate lives in the owner's in-memory limiter. If the two Rust members
+  // disagree on the owner (or the ring moves between the poll and the describe),
+  // the describe can be answered by a second owner with a fresh default limiter.
+  // Check ring agreement around the window and report that instead of the rate.
+  const pacedOwnerPeers = process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT ? {
+    primary: directMatchingClient(`127.0.0.1:${rustGrpcPort}`),
+    secondary: directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`),
+  } : null;
+  const pacedOwnerLog = [];
+  async function observePacedOwners(label) {
+    if (!pacedOwnerPeers) return null;
+    const [primaryOwner, secondaryOwner] = await Promise.all([
+      directPartitionOwner(pacedOwnerPeers.primary, domain, pacedList.name),
+      directPartitionOwner(pacedOwnerPeers.secondary, domain, pacedList.name),
+    ]);
+    const observed = { label, primaryOwner, secondaryOwner, agree: primaryOwner === secondaryOwner };
+    pacedOwnerLog.push(observed);
+    console.log(JSON.stringify({ pacedListOwner: observed }));
+    fs.writeFileSync(path.join(work, 'paced-owner.json'), JSON.stringify(pacedOwnerLog, null, 2) + '\n');
+    return observed;
+  }
+  const pacedOwnershipBefore = await (async () => {
+    const deadline = Date.now() + 30000;
+    let observed = await observePacedOwners('before-paced-poll');
+    while (observed && !observed.agree && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      observed = await observePacedOwners('before-paced-poll');
+    }
+    if (observed) assert(observed.agree, `paced list owners did not agree before the poll: ${JSON.stringify(observed)}`);
+    return observed;
+  })();
   const pacedStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
     ...startRequest, workflowId: `paced-${id}`, taskList: pacedList, requestId: randomUUID(),
   });
@@ -1164,7 +1195,19 @@ async function run() {
   // cumulative pacing delayed the later backlog deliveries (the wait may land on any poll after the first).
   assert.deepEqual(pacedInputs.slice().sort(), ['paced-0', 'paced-1', 'paced-2']);
   assert(pacedLatency.slice(1).reduce((a, b) => a + b, 0) >= 500, `paced activity dispatch was not rate limited: ${JSON.stringify(pacedLatency)}`);
+  const pacedOwnerChanged = (before, after) => !after.agree || after.primaryOwner !== before.primaryOwner || after.secondaryOwner !== before.secondaryOwner;
+  const pacedOwnershipAtDescribe = await observePacedOwners('before-paced-describe');
+  if (pacedOwnershipBefore && pacedOwnershipAtDescribe && pacedOwnerChanged(pacedOwnershipBefore, pacedOwnershipAtDescribe)) {
+    throw new Error(`paced list owner changed between poll and describe: ${JSON.stringify({ beforePoll: pacedOwnershipBefore, beforeDescribe: pacedOwnershipAtDescribe })}`);
+  }
   const pacedDescribe = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: pacedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true });
+  if (pacedDescribe.taskListStatus.ratePerSecond !== 1 && pacedOwnershipBefore) {
+    // A wrong rate with a changed owner is an ownership split, not a limiter bug.
+    const pacedOwnershipAfter = await observePacedOwners('after-paced-describe');
+    if (pacedOwnerChanged(pacedOwnershipBefore, pacedOwnershipAfter)) {
+      throw new Error(`paced list owner changed between poll and describe: ${JSON.stringify({ beforePoll: pacedOwnershipBefore, afterDescribe: pacedOwnershipAfter, ratePerSecond: pacedDescribe.taskListStatus.ratePerSecond })}`);
+    }
+  }
   assert.equal(pacedDescribe.taskListStatus.ratePerSecond, 1, 'DescribeTaskList must report the reported backing rate');
   if (process.env.CADENCE_MATCHING_CONFIGSTORE_POLL_MS) {
     // configstore lane: matching.longPollExpirationInterval was seeded into Go's cluster_config row
