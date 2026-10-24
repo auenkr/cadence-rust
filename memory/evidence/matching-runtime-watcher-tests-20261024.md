@@ -50,3 +50,15 @@ CI attempt 4 (head `b7a92e4e5`): run
 https://github.com/auenkr/cadence-rust/actions/runs/40106652359 stopped at runtime formatting because the chained `.with_dynamic_config_file` indentation needed one more indent level. Corrected before the next CI attempt.
 CI attempt 5 (head `1e57f3621`): run
 https://github.com/auenkr/cadence-rust/actions/runs/40107402285 passed formatting but Clippy found an unnecessary `mut` on the initial `AppState` binding. Removed it; no watcher or test logic issue was reported.
+
+Successful validation for implementation head
+`11f13b791e2f25cf0b19f35f5b96b4ff78bdab37`:
+
+- Focused fresh-target Matching run:
+  https://github.com/auenkr/cadence-rust/actions/runs/40107592237 — success.
+  Clippy and formatting passed; `dynamic_config_file_watcher_reloads_retains_last_good_and_stops_on_shutdown`
+  passed; Matching library unit tests reported 686 passed, 0 failed, 4 ignored.
+- Fresh uncached workspace run, Clippy followed by workspace tests:
+  https://github.com/auenkr/cadence-rust/actions/runs/40108030889 — success.
+  Workflow reported head SHA above and used `$RUNNER_TEMP/cargo-target-final`.
+- All Cargo validation ran on GitHub Actions; no local Cargo commands were run.
