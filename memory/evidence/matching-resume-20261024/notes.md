@@ -33,3 +33,11 @@ Recovered saved worker code2629578df into candidate f1f576915 after its model en
 Two overly broad worker tasks returned research-only with no changes (metrics round1, Unleash engine round1). Not counted as implementation. Rescheduled metrics implementation explicitly and split Unleash into repository polling/lifecycle first, evaluation next. Preserve complete scope: even once repository exists, provider and Matching filter-aware evaluations are still required. No completion claim.
 
 Current runtime config seam: cadence-service-core/admin.rs DynamicConfigOverlay::property_values returns borrowed snapshot slices; 57 Matching source occurrences consume this API through persistence/dynamic_config typed helpers. OpenFeature must evaluate per lookup with property-specific typed default and domainName/taskListName/taskType/clusterName attributes. A snapshot polling approximation cannot preserve filter-specific arbitrary property evaluations. Future integration should introduce a typed provider abstraction used by runtime readers rather than pretending an evaluated snapshot is equivalent.
+
+## Cassandra acceptance and next deployment lane
+
+Reviewed and merged Cassandra CI/evidence branch to master6a9a2ae37. Run40079714508 PASSED with acceptanceEligible=true, Go Matching absent, binary6276cb36698e1b1e7c178cf2e5d058a421dbd26f86c83da66a8fffae84f9fa95, source2432047f861f4ab68735e3b0d91c0a82303fb7d0. This is historical source-bound evidence, not a pass for subsequent master implementations. Node syntax check passed on merged probe. Probe fixes retain original assertions; owner observations detect rate-test ownership churn explicitly.
+
+Started fresh-target PostgreSQL deployment lane against master6a9a2ae37: https://github.com/auenkr/cadence-rust/actions/runs/40080485161. Includes PG GC/domain, query standby, partition listing, durable restart/drain, AutoConfigHint and restart/failure recovery. No pass claimed yet. Do not start another deployment lane until it ends.
+
+Current workers: metrics migration implementation (correcting mode/default/rollup review findings); Unleash repository lifecycle/tests (evaluation still separate); new live OpenFeature runtime read integration (recording fake provider and all consumers). All Luna medium/default speed. Read-only/research-only earlier results were not counted as implementation.
