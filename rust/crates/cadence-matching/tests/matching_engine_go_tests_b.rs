@@ -22,6 +22,7 @@ use cadence_matching::{
     matching_membership::Membership,
     matching_query::{query_outcome, QueryOutcome, WorkerAnswer},
     matching_registry::QueueRegistry,
+    matching_runtime::MatchingRuntime,
 };
 use cadence_persistence::{
     matching_blob::BlobEncoding,
@@ -352,10 +353,12 @@ fn wait_for_query_result_unknown_query_result_is_internal_error() {
 // TestIsShuttingDown
 // ---------------------------------------------------------------------------
 
-#[test]
-#[ignore = "parity gap: Go isShuttingDown reads the engine's shutdown channel after Start/Stop on matchingEngineImpl; Rust MatchingRuntime::shutdown exposes no public shutting-down state to observe before and after"]
-fn is_shutting_down_is_false_until_stop() {
-    unimplemented!("no public seam for the Rust shutdown state");
+#[tokio::test]
+async fn is_shutting_down_is_false_until_stop() {
+    let mut runtime = MatchingRuntime::in_memory(AppState::default(), Arc::new(|| Duration::ZERO));
+    assert!(!runtime.is_shutting_down());
+    runtime.shutdown().await.unwrap();
+    assert!(runtime.is_shutting_down());
 }
 
 // ---------------------------------------------------------------------------

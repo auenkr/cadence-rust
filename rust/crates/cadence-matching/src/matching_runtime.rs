@@ -204,6 +204,11 @@ impl MatchingRuntime {
         &self.matching
     }
 
+    /// Go `matchingEngineImpl.isShuttingDown`: false until the drain completes.
+    pub fn is_shutting_down(&self) -> bool {
+        self.matching.is_shutting_down()
+    }
+
     /// Attach shard-distributor ownership checks to both the RPC acquisition
     /// path and registry publication/unload lifecycle. Runtime construction
     /// owns these dependencies so handlers and processors share one policy.
@@ -591,6 +596,7 @@ impl MatchingRuntime {
         // Go closes the engine's shutdown channel (ownership checks answer "not
         // known", the shard-distributor executor stops) only in handler.Stop,
         // i.e. after EvictSelf and the drain sleep.
+        self.matching.begin_shutdown();
         if let Some(drain) = &self.shard_distributor_drain {
             let _ = drain.send(true);
         }
@@ -652,6 +658,8 @@ impl MatchingRuntime {
         } else {
             Ok(())
         };
+        // Go Stop also stops every semaphore bucket, not only the ones the ring moved away.
+        self.matching.stop_semaphores();
         let membership_result = if let Some(maintenance) = self.membership_maintenance.take() {
             maintenance
                 .await

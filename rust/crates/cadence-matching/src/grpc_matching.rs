@@ -318,6 +318,8 @@ pub struct Matching {
     scaler_config: Option<crate::matching_registry::ScalerConfigProvider>,
     /// Go `semaphoreRegistry`: one manager per semaphore bucket, in-memory.
     semaphores: crate::matching_semaphore::Registry,
+    /// Go `matchingEngineImpl.shutdown`, shared by every clone of this handler.
+    shutting_down: Arc<std::sync::atomic::AtomicBool>,
     membership: Option<crate::matching_membership::Membership>,
     shard_router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
     task_list_ownership: Option<TaskListOwnershipCheck>,
@@ -359,6 +361,7 @@ impl Matching {
             partition_count: None,
             scaler_config: None,
             semaphores,
+            shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             membership: None,
             shard_router: None,
             task_list_ownership: None,
@@ -1031,6 +1034,46 @@ impl Matching {
         }
         self
     }
+    /// Go `Stop` closes the engine's shutdown channel. Set by the runtime once the drain has run.
+    pub(crate) fn begin_shutdown(&self) {
+        self.shutting_down
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Go `Stop` stops every semaphore bucket. Each stopped manager unregisters itself.
+    pub(crate) fn stop_semaphores(&self) {
+        for manager in self.semaphores.all_managers() {
+            manager.stop();
+        }
+    }
+
+    /// Go `errIfSemaphoreOwnershipLost` for a bucket that has no manager yet. Once the
+    /// engine shuts down, the bucket is refused before any load.
+    fn check_semaphore_ownership(
+        &self,
+        id: &crate::matching_semaphore::Identifier,
+    ) -> Result<(), Status> {
+        if self.is_shutting_down() {
+            let my_identity = self
+                .membership
+                .as_ref()
+                .map_or("", |membership| membership.identity());
+            return Err(crate::matching_membership::semaphore_not_owned_status(
+                "not known",
+                my_identity,
+                id.to_log_string(),
+            ));
+        }
+        match &self.membership {
+            Some(membership) => membership.check_semaphore(id),
+            None => Ok(()),
+        }
+    }
+
     /// The service owns this future and cancels it during shutdown. Watch
     /// coalescing is safe: cleanup always consults the latest complete ring.
     pub async fn maintain_membership_until<F>(&self, shutdown: F) -> Result<(), Status>
@@ -2944,9 +2987,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         if !enabled {
                             return Err(Status::invalid_argument("distributed semaphore is not enabled for this domain"));
                         }
-                        if let Some(membership) = &self.membership {
-                            membership.check_semaphore(&identifier)?;
-                        }
+                        self.check_semaphore_ownership(&identifier)?;
                         self.semaphores.get_or_create_with_idle_ttl(identifier, idle_ttl)
                             .await.map_err(semaphore_status)?
                     };

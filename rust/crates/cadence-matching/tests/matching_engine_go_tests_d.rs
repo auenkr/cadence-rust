@@ -9,8 +9,9 @@
 //! plays the role of Go's `MockSemaphoreTokenManager`. The handler cases run
 //! through the public `MatchingApi::acquire_semaphore` on `Matching`, with the
 //! same store installed as `AppState::semaphore_persistence`. Go's engine
-//! shutdown channel, `Engine.Stop`, and the cancellable startup wait have no
-//! public Rust seam, so those cases are `#[ignore]` with the gap named.
+//! shutdown and `Engine.Stop` run through `MatchingRuntime::drain` and
+//! `MatchingRuntime::shutdown`. The cancellable startup wait has no public Rust
+//! seam, so that case stays `#[ignore]` with the gap named.
 //!
 //! Go's `testSelfHost` maps to Rust membership identity `local` and
 //! `testOtherHost` to `remote`. The domain ID is a UUID, because the handler
@@ -24,6 +25,7 @@ use cadence_common::{membership::Host, semaphore::Owner};
 use cadence_matching::{
     grpc_matching::Matching,
     matching_membership::Membership,
+    matching_runtime::MatchingRuntime,
     matching_semaphore::{Identifier, ManagerError, Registry},
 };
 use cadence_persistence::semaphores::{
@@ -238,7 +240,7 @@ fn install_store(state: &mut AppState, store: &Arc<SemaphoreStore>) {
 
 /// Go `newSemaphoreEngine` for the handler path: the domain exists and the
 /// flag is set for it, with every bucket scanned from `store`.
-fn semaphore_matching(store: &Arc<SemaphoreStore>, enabled: bool) -> Matching {
+fn semaphore_state(store: &Arc<SemaphoreStore>, enabled: bool) -> AppState {
     let mut state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     state
@@ -248,7 +250,11 @@ fn semaphore_matching(store: &Arc<SemaphoreStore>, enabled: bool) -> Matching {
         .unwrap()
         .update(false, ENABLE_SEMAPHORE, vec![bool_config(enabled, Some(DOMAIN))]);
     install_store(&mut state, store);
-    Matching::new(state)
+    state
+}
+
+fn semaphore_matching(store: &Arc<SemaphoreStore>, enabled: bool) -> Matching {
+    Matching::new(semaphore_state(store, enabled))
 }
 
 fn acquire_request(bucket: i32, owner: &str) -> Request<m::AcquireSemaphoreRequest> {
@@ -281,7 +287,6 @@ async fn get_or_create_semaphore_manager_second_request_reuses_built_manager() {
     assert_eq!(store.scan_count(), 1);
 }
 
-#[ignore = "parity gap: a request cancelled during the startup load leaves the Rust manager in Starting; Manager::start returns Ok for Starting without loading, so the next get_or_create never runs the scan and the bucket stays unloaded"]
 #[tokio::test]
 async fn get_or_create_semaphore_manager_starts_unstarted_registered_manager() {
     // The first request is cut off while its load is in flight, like a handler
@@ -306,9 +311,27 @@ async fn get_or_create_semaphore_manager_starts_unstarted_registered_manager() {
     );
 }
 
-#[ignore = "parity gap: Rust Matching has no engine shutdown state; acquire_semaphore has no Go-style check that refuses to load a new bucket while shutting down, so the bucket is always scanned and registered"]
 #[tokio::test]
-async fn get_or_create_semaphore_manager_refused_while_engine_shuts_down() {}
+async fn get_or_create_semaphore_manager_refused_while_engine_shuts_down() {
+    // No new buckets: loading one now would scan a partition this host is about to stop
+    // serving.
+    let store = SemaphoreStore::new();
+    let mut runtime = MatchingRuntime::in_memory(semaphore_state(&store, true), Arc::new(|| Duration::ZERO));
+    runtime.drain().await.unwrap();
+    assert!(runtime.is_shutting_down());
+
+    let status = MatchingApi::acquire_semaphore(runtime.matching(), acquire_request(0, &owner_id()))
+        .await
+        .unwrap_err();
+
+    assert_eq!(status.code(), Code::Aborted);
+    assert!(
+        status.message().contains("OwnedBy: not known"),
+        "the next owner is not settled yet: {}",
+        status.message()
+    );
+    assert_eq!(store.scan_count(), 0, "no bucket may load while the engine shuts down");
+}
 
 #[tokio::test]
 async fn get_or_create_semaphore_manager_domain_has_semaphores_disabled() {
@@ -462,9 +485,34 @@ async fn unload_semaphore_manager_stops_it_and_next_request_builds_fresh() {
 // TestStopSemaphoreManagers
 // ---------------------------------------------------------------------------
 
-#[ignore = "parity gap: Rust has no shutdown path that stops every semaphore manager; Matching::maintain_membership_until stops only buckets the ring no longer assigns to this host, and Registry exposes no stop-all"]
 #[tokio::test]
-async fn stop_semaphore_managers_stops_every_bucket_on_engine_stop() {}
+async fn stop_semaphore_managers_stops_every_bucket_on_engine_stop() {
+    // Shutdown reaches every bucket, not just the task lists beside them. A bucket left
+    // running keeps granting slots after the host has given up its work.
+    let store = SemaphoreStore::new();
+    for _ in 0..3 {
+        store.push_scan(Ok(free_tokens(3)));
+    }
+    let mut runtime = MatchingRuntime::in_memory(semaphore_state(&store, true), Arc::new(|| Duration::ZERO));
+    for bucket in 0..3 {
+        let granted = MatchingApi::acquire_semaphore(runtime.matching(), acquire_request(bucket, &owner_id()))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(granted.outcome, 1, "bucket {bucket} starts with a granted slot");
+    }
+
+    runtime.shutdown().await.unwrap();
+
+    // Refusing to serve is the only thing Stop is observable through: a stopped bucket is
+    // not in the registry, so the next request is refused rather than granted.
+    for bucket in 0..3 {
+        let status = MatchingApi::acquire_semaphore(runtime.matching(), acquire_request(bucket, &owner_id()))
+            .await
+            .unwrap_err();
+        assert_eq!(status.code(), Code::Aborted, "bucket {bucket} was left running");
+    }
+}
 
 // ---------------------------------------------------------------------------
 // TestAcquireSemaphore

@@ -150,6 +150,21 @@ struct Index {
 /// Go `onStopFn`: called once from `stop` with the manager being stopped.
 type OnStop = Box<dyn Fn(&Manager) + Send + Sync>;
 
+/// Stops a manager whose startup load was dropped before it returned, so the
+/// bucket is not left in `Starting` with nothing to finish the load.
+struct LoadInFlight<'a> {
+    manager: &'a Manager,
+    completed: bool,
+}
+
+impl Drop for LoadInFlight<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.manager.stop();
+        }
+    }
+}
+
 /// One bucket's manager, mirroring Go's `semaphoreManagerImpl`.
 pub struct Manager {
     id: Identifier,
@@ -204,7 +219,9 @@ impl Manager {
                 State::Stopped => return Err(ManagerError::NotReady),
             }
         }
+        let mut load = LoadInFlight { manager: self, completed: false };
         let loaded = self.load().await;
+        load.completed = true;
         if loaded.is_err() {
             self.stop();
         }
