@@ -2225,18 +2225,21 @@ mod tests {
             .unwrap();
         wake.notify_waiters();
         wait_read(&queue, 2).await;
-        let known = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a"))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(known.task_id, 1);
-        assert_eq!(dispatched_group(&known), "a");
+        // Drain the default poller first: `poll_group("a")` also selects on the shared default
+        // channel (Go matcher.Poll), so it could take task 2 before the default poller does.
+        // Only task 2 is ever on the shared channel, so this order is deterministic.
         let plain = tokio::time::timeout(Duration::from_secs(2), reader.poll())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(plain.task_id, 2);
         assert_eq!(dispatched_group(&plain), "");
+        let known = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(known.task_id, 1);
+        assert_eq!(dispatched_group(&known), "a");
         queue.complete(known.task_id).unwrap();
         queue.complete(plain.task_id).unwrap();
         assert_eq!(queue.levels().1, 2);
