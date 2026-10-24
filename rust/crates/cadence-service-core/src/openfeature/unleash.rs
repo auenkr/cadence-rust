@@ -133,6 +133,48 @@ impl MetricsBucket {
             );
         }
     }
+
+    fn reset(&mut self, next_start: String) -> (String, serde_json::Map<String, Value>) {
+        let start = self.start.take().unwrap_or_else(|| next_start.clone());
+        let toggles = std::mem::take(&mut self.toggles);
+        self.start = Some(next_start);
+        (start, toggles)
+    }
+
+    fn restore_failed(
+        &mut self,
+        start: String,
+        toggles: serde_json::Map<String, Value>,
+    ) {
+        for (name, counts) in toggles {
+            let current = self
+                .toggles
+                .entry(name)
+                .or_insert_with(|| serde_json::json!({"yes":0,"no":0,"variants":{}}));
+            for field in ["yes", "no"] {
+                current[field] = Value::from(
+                    current[field].as_i64().unwrap_or(0)
+                        + counts[field].as_i64().unwrap_or(0),
+                );
+            }
+            for (variant, count) in counts["variants"].as_object().into_iter().flatten() {
+                let variants = current["variants"].as_object_mut().expect("variants map");
+                variants.insert(
+                    variant.clone(),
+                    Value::from(
+                        variants
+                            .get(variant)
+                            .and_then(Value::as_i64)
+                            .unwrap_or(0)
+                            + count.as_i64().unwrap_or(0),
+                    ),
+                );
+            }
+        }
+        // Go's failed-post path moves the new bucket start back to the failed
+        // bucket boundary, so the retry covers the full retained interval.
+        self.start = Some(start);
+    }
 }
 fn default_instance_id() -> String {
     let user = std::env::var("USER")
@@ -285,7 +327,7 @@ impl UnleashRepository {
             "userWithId",
             "flexibleRollout",
         ];
-        let reporter = std::thread::Builder::new().name("unleash-metrics".into()).spawn(move || {
+        let reporter_result = std::thread::Builder::new().name("unleash-metrics".into()).spawn(move || {
             let Ok(client) = reqwest::blocking::Client::builder().timeout(Duration::from_millis(500)).build() else { return; };
             let started = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
             let register = serde_json::json!({"appName":app_name,"instanceId":instance_id,"connectionId":connection_id,"sdkVersion":"unleash-client-go:4.5.0","strategies":strategies,"started":started,"interval":metrics_interval.as_secs(),"platformVersion":format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),"platformName":"rust","yggdrasilVersion":null,"specVersion":"4.3.1"});
@@ -304,10 +346,9 @@ impl UnleashRepository {
                     continue;
                 }
                 let mut bucket = report_metrics.lock().unwrap_or_else(|p| p.into_inner());
-                if bucket.toggles.is_empty() { continue; }
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
-                let start = bucket.start.take().unwrap_or_else(|| now.clone());
-                let toggles = std::mem::take(&mut bucket.toggles);
+                let (start, toggles) = bucket.reset(now.clone());
+                if toggles.is_empty() { continue; }
                 drop(bucket);
                 let payload = serde_json::json!({"appName":app_name,"instanceId":instance_id,"connectionId":connection_id,"bucket":{"start":start,"stop":now,"toggles":toggles},"platformVersion":format!("{} {}",std::env::consts::OS,std::env::consts::ARCH),"platformName":"rust","yggdrasilVersion":null,"sdkVersion":"unleash-client-go:4.5.0","specVersion":"4.3.1"});
                 let mut req = client.post(report_url.clone()).json(&payload);
@@ -328,14 +369,21 @@ impl UnleashRepository {
                         skips = errors;
                     }
                     let mut bucket = report_metrics.lock().unwrap_or_else(|p| p.into_inner());
-                    for (name, counts) in toggles { let current = bucket.toggles.entry(name).or_insert_with(|| serde_json::json!({"yes":0,"no":0,"variants":{}})); for field in ["yes","no"] { current[field] = Value::from(current[field].as_i64().unwrap_or(0) + counts[field].as_i64().unwrap_or(0)); } for (variant, count) in counts["variants"].as_object().into_iter().flatten() { let variants = current["variants"].as_object_mut().expect("variants map"); variants.insert(variant.clone(), Value::from(variants.get(variant).and_then(Value::as_i64).unwrap_or(0) + count.as_i64().unwrap_or(0))); } }
-                    bucket.start.get_or_insert(start);
+                    bucket.restore_failed(start, toggles);
                 } else {
                     errors = errors.saturating_sub(1);
                     skips = errors;
                 }
             }
-        }).map_err(|e| anyhow!("failed to start unleash metrics sender: {e}"))?;
+        });
+        let reporter = match reporter_result {
+            Ok(reporter) => reporter,
+            Err(error) => {
+                stop.store(true, Ordering::Release);
+                let _ = poller.join();
+                return Err(anyhow!("failed to start unleash metrics sender: {error}"));
+            }
+        };
         Ok(Self {
             features,
             static_context,
@@ -443,12 +491,12 @@ impl FeatureProvider for UnleashProvider {
             };
         }
         let variant = unleash_engine::get_variant(&snapshot, flag, &context, 0);
+        self.repository
+            .metrics
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .count(flag, variant.feature_enabled, Some(&variant.name));
         if !variant.feature_enabled || variant.name == "disabled" {
-            self.repository
-                .metrics
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .count(flag, false, Some("disabled"));
             return Resolution {
                 value: default,
                 error: None,
@@ -962,7 +1010,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let server = std::thread::spawn(move || {
-            for index in 0..3 {
+            for index in 0..4 {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut request = Vec::new();
                 let mut chunk = [0u8; 1024];
@@ -992,7 +1040,7 @@ mod tests {
                 let raw = String::from_utf8_lossy(&request).into_owned();
                 tx.send(raw).unwrap();
                 let body = if request.starts_with(b"GET ") {
-                    r#"{"features":[{"name":"flag","enabled":true,"strategies":[{"name":"default"}],"variants":[{"name":"blue","weight":100}]}]}"#
+                    r#"{"features":[{"name":"flag","enabled":true,"strategies":[{"name":"default"}],"variants":[{"name":"blue","weight":100}]},{"name":"enabled-no-variants","enabled":true,"strategies":[{"name":"default"}]}]}"#
                 } else {
                     "{}"
                 };
@@ -1016,9 +1064,18 @@ mod tests {
             None,
         )
         .unwrap();
-        let first = rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(first.starts_with("GET /api/client/features"), "{first}");
-        let register = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut first = None;
+        let mut register = None;
+        while first.is_none() || register.is_none() {
+            let request = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            if request.starts_with("GET /api/client/features") {
+                first = Some(request);
+            } else if request.starts_with("POST /api/client/register") {
+                register = Some(request);
+            }
+        }
+        let first = first.unwrap();
+        let register = register.unwrap();
         assert!(
             register.starts_with("POST /api/client/register"),
             "{register}"
@@ -1038,6 +1095,7 @@ mod tests {
             repository,
             ready: AtomicBool::new(true),
         };
+        wait_for_feature(&provider.repository, "flag");
         let result = provider.resolve("flag", FlagValue::Bool(false), &Default::default());
         assert_eq!(result.value, FlagValue::Bool(true));
         let _ = provider.resolve(
@@ -1045,13 +1103,45 @@ mod tests {
             FlagValue::String("fallback".into()),
             &Default::default(),
         );
+        let _ = provider.resolve(
+            "enabled-no-variants",
+            FlagValue::String("fallback".into()),
+            &Default::default(),
+        );
         let metrics = rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(metrics.starts_with("POST /api/client/metrics"), "{metrics}");
         assert!(metrics.contains("\"flag\":{"), "{metrics}");
-        assert!(metrics.contains("\"yes\":2"), "{metrics}");
+        assert!(metrics.contains("\"yes\":3"), "{metrics}");
         assert!(metrics.contains("\"blue\":1"), "{metrics}");
+        assert!(metrics.contains("\"disabled\":1"), "{metrics}");
+        let retry = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(retry.starts_with("POST /api/client/metrics"), "{retry}");
+        assert!(retry.contains("\"yes\":3"), "{retry}");
+        assert!(retry.contains("\"blue\":1"), "{retry}");
+        assert!(retry.contains("\"disabled\":1"), "{retry}");
         provider.shutdown();
         server.join().unwrap();
+    }
+
+    #[test]
+    fn metrics_bucket_reset_advances_boundary_and_failed_post_restores_it() {
+        let mut bucket = MetricsBucket {
+            toggles: serde_json::Map::new(),
+            start: Some("start-0".into()),
+        };
+        bucket.count("flag", true, Some("blue"));
+        let (first_start, first_toggles) = bucket.reset("boundary-1".into());
+        assert_eq!(first_start, "start-0");
+        assert_eq!(first_toggles["flag"]["yes"], 1);
+        assert_eq!(bucket.start.as_deref(), Some("boundary-1"));
+
+        bucket.count("flag", false, Some("disabled"));
+        let (second_start, second_toggles) = bucket.reset("boundary-2".into());
+        assert_eq!(second_start, "boundary-1");
+        bucket.restore_failed(second_start, second_toggles);
+        assert_eq!(bucket.start.as_deref(), Some("boundary-1"));
+        assert_eq!(bucket.toggles["flag"]["no"], 1);
+        assert_eq!(bucket.toggles["flag"]["variants"]["disabled"], 1);
     }
 
     #[test]
