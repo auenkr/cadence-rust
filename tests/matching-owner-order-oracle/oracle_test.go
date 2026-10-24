@@ -27,6 +27,7 @@ type ownerOracle struct { Scenarios []ownerOracleScenario `json:"scenarios"` }
 func TestCadenceMatchingPartitionOwnerOrderOracle(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	provider := membership.NewMockPeerProvider(ctrl)
+	provider.EXPECT().WhoAmI().Return(membership.NewDetailedHostInfo("one:7935", "one", nil), nil).AnyTimes()
 	var members []membership.HostInfo
 	provider.EXPECT().GetMembers(service.Matching).DoAndReturn(func(string) ([]membership.HostInfo, error) { return append([]membership.HostInfo(nil), members...), nil }).AnyTimes()
 	provider.EXPECT().Subscribe(service.Matching, gomock.Any()).Return(nil).AnyTimes()
