@@ -396,7 +396,10 @@ pub fn record_persistence_host_latency(sink: &dyn MetricSink, host: &str, elapse
         kind: MetricKind::Histogram,
         value: MetricValue::Duration(elapsed),
         tags: BTreeMap::from([
-            (OPERATION_TAG.to_owned(), GO_PERSISTENCE_PER_HOST_OPERATION.to_owned()),
+            (
+                OPERATION_TAG.to_owned(),
+                GO_PERSISTENCE_PER_HOST_OPERATION.to_owned(),
+            ),
             (HOST_TAG.to_owned(), host.to_owned()),
         ]),
         histogram: Some(HistogramSpec::GoPersistenceLatency),
@@ -2109,7 +2112,7 @@ mod matcher_metric_tests {
             assert_eq!(event.value, MetricValue::Count(1));
             assert_eq!(event.tags[OPERATION_TAG], "TaskListMgr");
             assert_eq!(event.tags[DOMAIN_TAG], "domain-a");
-            assert_eq!(event.tags[TASK_LIST_TAG], "queue/a");
+            assert_eq!(event.tags[TASK_LIST_TAG], "queue_a");
             assert_eq!(event.tags[TASK_LIST_TYPE_TAG], "decision");
         }
     }
@@ -2176,7 +2179,10 @@ mod matcher_metric_tests {
         let events = sink.events();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].name, PERSISTENCE_EMPTY_RESPONSE);
-        assert_eq!(events[1].histogram, Some(HistogramSpec::GoPersistenceLatency));
+        assert_eq!(
+            events[1].histogram,
+            Some(HistogramSpec::GoPersistenceLatency)
+        );
         assert_eq!(
             events[0].tags,
             BTreeMap::from([
@@ -2189,7 +2195,10 @@ mod matcher_metric_tests {
         assert_eq!(
             events[1].tags,
             BTreeMap::from([
-                (OPERATION_TAG.to_owned(), "persistence_operations".to_owned()),
+                (
+                    OPERATION_TAG.to_owned(),
+                    "persistence_operations".to_owned()
+                ),
                 (HOST_TAG.to_owned(), "matching-1".to_owned()),
             ])
         );
@@ -2313,7 +2322,10 @@ mod persistence_histogram_contract_tests {
         assert_eq!(latency[10], 12_000_000);
         assert_eq!(*latency.last().unwrap(), 60_000_000_000);
         let rows = go_response_row_size_bounds();
-        assert_eq!((rows.len(), rows[0], rows[1], *rows.last().unwrap()), (18, 0, 1, 65_536));
+        assert_eq!(
+            (rows.len(), rows[0], rows[1], *rows.last().unwrap()),
+            (18, 0, 1, 65_536)
+        );
         let payload = go_response_payload_size_bounds();
         assert_eq!(
             (payload.len(), payload[1], *payload.last().unwrap()),

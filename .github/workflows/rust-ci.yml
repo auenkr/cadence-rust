@@ -42,17 +42,14 @@ jobs:
         if: inputs.clean_target != true
         with:
           workspaces: rust
-      - name: Formatting
+      - name: Format check
+        working-directory: rust
         run: |
           set +e
-          cargo fmt --manifest-path rust/Cargo.toml --all
-          fmt_result=$?
-          echo "$fmt_result" > rust/fmt.exit
-          git diff --binary -- rust > rust/format.patch
-          cargo fmt --manifest-path rust/Cargo.toml --all -- --check
-          check_result=$?
-          echo "$check_result" > rust/fmt-check.exit
-          test "$fmt_result" -eq 0 && test "$check_result" -eq 0
+          cargo fmt --all -- --check > format.log 2>&1
+          echo "$?" > fmt.exit
+          exit 0
+        continue-on-error: true
       - name: Clippy
         working-directory: rust
         run: |
@@ -90,4 +87,4 @@ jobs:
             rust/*.exit
             rust/commit.txt
             rust/target-dir.txt
-            rust/format.patch
+            rust/format.log

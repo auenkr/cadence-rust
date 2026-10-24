@@ -29,8 +29,10 @@ start 8, end 524288, 64 interior boundaries plus 0 and final bound.
 Default1ms100s: scale 2, start 1ms, end 17m28.576s, 80 interior boundaries.
 Go exponential histograms add `histogram_start,histogram_end,histogram_scale`.
 Timers have reporter-configured distributions, no exponential tags.
-Rollup names in defs.go emit at the root scope according to Go migration config;
-Rust rollup/migration configuration remains a gap.
+Rollup names in defs.go emit at the root scope according to Go migration config.
+Rust Matching now validates the Go histogram/gauge/counter migration allowlists,
+gates emitted events and rollups by name/default, and attaches the policy to the
+production metrics sink (see `memory/matching-metrics-migration-parity-20261024.md`).
 
 ## Metric inventory
 
@@ -303,8 +305,9 @@ local handoff. Membership `hashring_view_identifier` (Go UpdateGauge despite
 Counter catalog type) and `ring_resolver_error` are now wired. External
 shard-manager client/executor/spectator metrics are outside the direct Go
 `common/metrics/defs.go` inventory and need a separate upstream-client audit.
-Persistence retry tagging (`is_retry` always false) and rollup/migration-config
-handling remain incomplete. ListDomain payload bytes are approximate (see open-rows
+Persistence retry tagging (`is_retry` always false) remains incomplete. Go-equivalent
+rollup/migration filtering is now wired and covered by focused source tests; a full
+live exporter comparison remains outstanding. ListDomain payload bytes are approximate (see open-rows
 pass below). Row-count, payload-size, per-host and manual histograms are wired (gaps3). QPS rejections have Go
 request/error counters but still lack latency observations.
 

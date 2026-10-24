@@ -22,6 +22,15 @@ and CI formatting validation. No OpenFeature reader/evaluator source was taken.
   gates them by their rollup metric name. Matching persistence now submits the
   `persistence_latency_ns_rollup` candidate with Go `Default1ms100s` bucket
   tags; the migration sink suppresses it by default and allows it when enabled.
+- Production source inventory from `MetricDefs[Matching]` has 93 definitions;
+  84 have a non-test Go Matching callsite (41 counters, 11 gauges, 16 timers,
+  16 histograms), and all 84 names are present in Rust. The remaining nine
+  definitions are catalog-only in Go (three buffer-isolation redirect names
+  and six forward call/error names), with no Go Matching production callsite.
+  Reproduce the name/kind/callsite inventory with
+  `python3 rust/tools/audit-matching-metrics.py`; the existing metric matrix
+  records each definition's Go/Rust references, kind, tags, histogram buckets,
+  and callsite status.
 
 ## Production Matching comparison
 
@@ -29,9 +38,11 @@ and CI formatting validation. No OpenFeature reader/evaluator source was taken.
   4042-4086) pairs `syncmatch_latency_per_tl` (Timer) with
   `syncmatch_latency_per_tl_ns` (Histogram, `Low1ms100s`). Rust uses those exact
   names/kinds/spec in `matching_metrics.rs::handler_sync_match_latency` and the
-  production matcher path. A focused Rust test now asserts default timer-only
-  output and configured dual emission while preserving operation, domain,
-  tasklist, tasklistType, and histogram bucket tags through the migration sink.
+  production handler path. A focused Rust test exercises that emitter through
+  the migration filter: default policy emits only the timer; `both` emits both
+  kinds, preserving Go request tags (`operation`, `domain`, sanitized
+  `tasklist`, `caller`, `transport`). Histogram bucket tags are added by the
+  exporter after migration filtering.
 - Go's task-list manager scope adds `operation=TaskListMgr`; `NewPerTaskListScope`
   adds `domain` and `tasklist`; manager metrics add `tasklistType=decision|activity`
   (`go/service/matching/tasklist/task_list_manager.go`). Rust's manager tag
@@ -52,11 +63,16 @@ and CI formatting validation. No OpenFeature reader/evaluator source was taken.
 Requested reference run: https://github.com/auenkr/cadence-rust/actions/runs/40082857956
 
 - Source SHA: `5fa032ef187f3cc13d6fa1f9a311bd0329461d61`
-- At inspection time (2026-10-24): clippy succeeded; workspace tests were still
-  running; run conclusion was pending.
-- The current branch adds CI-hosted `cargo fmt --all`/`cargo fmt --all -- --check`
-  before clippy and tests. The format patch is uploaded as a short-retention
-  artifact so formatting can be applied from CI without running Cargo locally.
-- Final run URL, source SHA, and per-job conclusion will be appended after the
-  current implementation is pushed and the fresh-target GitHub Actions run
-  completes.
+- Run `40082857956` completed failure: clippy passed; one rollup-order assertion
+  failed. The fix matches upstream commit `f9e410aa1`.
+- Run `40083501645` completed failure after clippy passed: the two test failures
+  were the same rollup-order issue and a histogram-tag assertion. The latter is
+  fixed with the upstream `545a2fbbe` approach: provide Go bucket tags on the
+  fixture and assert `histogram_scale=2`. Its formatter-generated patch was
+  applied only to Matching metric files; unrelated workspace formatting was
+  excluded.
+- Upstream focused run https://github.com/auenkr/cadence-rust/actions/runs/40083695239
+  at `545a2fbbe99d3828fbf83b65f61feb12e5159eaa` passed clippy and tests.
+- The current CI workflow follows master commit `49fa0bf81`: `cargo fmt --all
+  -- --check` runs on GitHub Actions without mutating checked-out source. The
+  final strict run will use fresh target storage and committed source only.
