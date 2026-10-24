@@ -654,7 +654,11 @@ pub async fn run(
                     register_provider(&feature.provider_name, feature.provider.as_ref())?;
                     openfeature_lifecycle = Some(OpenFeatureLifecycle);
                     runtime_property_provider = Some(
-                        cadence_service_core::openfeature::runtime::OpenFeatureRuntimeProvider::new(
+                        cadence_service_core::openfeature::runtime::OpenFeatureRuntimeProvider::with_cluster_name(
+                            cfg.cluster_metadata
+                                .as_ref()
+                                .map(|metadata| metadata.current_cluster_name.clone())
+                                .unwrap_or_default(),
                         ),
                     );
                     None

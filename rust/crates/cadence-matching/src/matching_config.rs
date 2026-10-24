@@ -451,7 +451,7 @@ mod tests {
         client::register_provider("matching-runtime-reader-integration-test", None).unwrap();
         let mut overlay = crate::admin::DynamicConfigOverlay::default();
         overlay.set_runtime_provider(Some(
-            cadence_service_core::openfeature::runtime::OpenFeatureRuntimeProvider::new(),
+            cadence_service_core::openfeature::runtime::OpenFeatureRuntimeProvider::with_cluster_name("cluster-a"),
         ));
 
         assert_eq!(
@@ -495,6 +495,14 @@ mod tests {
             vec!["gold"]
         );
         assert_eq!(
+            dynamic_config::duration(
+                overlay.property_values("matching.duration"),
+                None,
+                300_000_000_000,
+            ),
+            300_000_000_000,
+        );
+        assert_eq!(
             dynamic_config::integer(overlay.property_values("matching.runtimeFailure"), None, 17),
             17
         );
@@ -523,7 +531,15 @@ mod tests {
             .iter()
             .any(|(flag, default, attrs)| flag == "system.allIsolationGroups"
                 && *default == FlagValue::Object(json!([]))
-                && attrs.is_empty()));
+                && attrs.get("clusterName") == Some(&json!("cluster-a"))));
+        assert!(calls.iter().any(|(flag, default, attrs)| {
+            flag == "matching.duration"
+                && *default == FlagValue::String("5m0s".into())
+                && attrs.get("clusterName") == Some(&json!("cluster-a"))
+        }));
+        assert!(calls
+            .iter()
+            .all(|(_, _, attrs)| attrs.get("clusterName") == Some(&json!("cluster-a"))));
         drop(calls);
 
         client::deregister_provider();
