@@ -1101,6 +1101,7 @@ impl Matching {
     where
         F: std::future::Future<Output = ()> + Send,
     {
+        crate::matching_panic::capture::<(), Status>("membership change loop", async move {
         let Some(membership) = &self.membership else {
             return Ok(());
         };
@@ -1115,8 +1116,11 @@ impl Matching {
             for manager in self.semaphores.all_managers() {
                 match membership.owns(&manager.identifier().ring_key()) {
                     Ok(false) => {
-                        manager.stop();
+                        let stopped = crate::matching_panic::capture_sync("semaphore manager stop", || manager.stop());
                         self.semaphores.unregister(&manager);
+                        if let Err(message) = stopped {
+                            eprintln!("Matching semaphore unload failed: {message}");
+                        }
                     }
                     Ok(true) => {}
                     Err(error) => {
@@ -1133,6 +1137,10 @@ impl Matching {
                 result = changes.changed() => if result.is_err() { return Ok(()); },
             }
         }
+
+        })
+        .await
+        .unwrap_or(Ok(()))
     }
     fn poll_rate(
         &self,
@@ -1712,6 +1720,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::PollForDecisionTaskResponse>, Status>("poll_for_decision_task", async move {
         self.metrics.matching_request(
             "PollForDecisionTask",
             self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
@@ -1941,11 +1950,16 @@ impl m::matching_api_server::MatchingApi for Matching {
             ..Default::default()
         }))
             }).await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn poll_for_activity_task(
         &self,
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::PollForActivityTaskResponse>, Status>("poll_for_activity_task", async move {
         self.metrics.matching_request(
             "PollForActivityTask",
             self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
@@ -2145,11 +2159,16 @@ impl m::matching_api_server::MatchingApi for Matching {
             ..Default::default()
         }))
             }).await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn add_decision_task(
         &self,
         request: Request<m::AddDecisionTaskRequest>,
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::AddDecisionTaskResponse>, Status>("add_decision_task", async move {
         self.metrics
             .matching_request(
                 "AddDecisionTask",
@@ -2364,11 +2383,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn add_activity_task(
         &self,
         request: Request<m::AddActivityTaskRequest>,
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::AddActivityTaskResponse>, Status>("add_activity_task", async move {
         self.metrics
             .matching_request(
                 "AddActivityTask",
@@ -2577,11 +2601,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn query_workflow(
         &self,
         request: Request<m::QueryWorkflowRequest>,
     ) -> Result<Response<m::QueryWorkflowResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::QueryWorkflowResponse>, Status>("query_workflow", async move {
         self.metrics
             .matching_request(
                 "QueryWorkflow",
@@ -2844,11 +2873,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn get_task_lists_by_domain(
         &self,
         request: Request<m::GetTaskListsByDomainRequest>,
     ) -> Result<Response<m::GetTaskListsByDomainResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::GetTaskListsByDomainResponse>, Status>("get_task_lists_by_domain", async move {
         self.metrics
             .matching_request(
                 "GetTaskListsByDomain",
@@ -2898,11 +2932,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn list_task_list_partitions(
         &self,
         request: Request<m::ListTaskListPartitionsRequest>,
     ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::ListTaskListPartitionsResponse>, Status>("list_task_list_partitions", async move {
         self.metrics
             .matching_request(
                 "ListTaskListPartitions",
@@ -2947,11 +2986,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn acquire_semaphore(
         &self,
         request: Request<m::AcquireSemaphoreRequest>,
     ) -> Result<Response<m::AcquireSemaphoreResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::AcquireSemaphoreResponse>, Status>("acquire_semaphore", async move {
         self.metrics
             .matching_request(
                 "AcquireSemaphore",
@@ -3054,11 +3098,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn update_task_list_partition_config(
         &self,
         request: Request<m::UpdateTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::UpdateTaskListPartitionConfigResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::UpdateTaskListPartitionConfigResponse>, Status>("update_task_list_partition_config", async move {
         self.metrics
             .matching_request(
                 "UpdateTaskListPartitionConfig",
@@ -3194,11 +3243,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn refresh_task_list_partition_config(
         &self,
         request: Request<m::RefreshTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::RefreshTaskListPartitionConfigResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::RefreshTaskListPartitionConfigResponse>, Status>("refresh_task_list_partition_config", async move {
         self.metrics
             .matching_request(
                 "RefreshTaskListPartitionConfig",
@@ -3278,11 +3332,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn cancel_outstanding_poll(
         &self,
         request: Request<m::CancelOutstandingPollRequest>,
     ) -> Result<Response<m::CancelOutstandingPollResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::CancelOutstandingPollResponse>, Status>("cancel_outstanding_poll", async move {
         self.metrics
             .matching_request(
                 "CancelOutstandingPoll",
@@ -3335,11 +3394,16 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn respond_query_task_completed(
         &self,
         request: Request<m::RespondQueryTaskCompletedRequest>,
     ) -> Result<Response<m::RespondQueryTaskCompletedResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::RespondQueryTaskCompletedResponse>, Status>("respond_query_task_completed", async move {
         self.metrics.matching_request(
             "RespondQueryTaskCompleted",
             self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
@@ -3427,11 +3491,16 @@ impl m::matching_api_server::MatchingApi for Matching {
         .await?;
         Ok(Response::new(m::RespondQueryTaskCompletedResponse {}))
             }).await
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn describe_task_list(
         &self,
         request: Request<m::DescribeTaskListRequest>,
     ) -> Result<Response<m::DescribeTaskListResponse>, Status> {
+        crate::matching_panic::capture::<Response<m::DescribeTaskListResponse>, Status>("describe_task_list", async move {
         self.metrics
             .matching_request(
                 "DescribeTaskList",
@@ -3600,7 +3669,11 @@ pub async fn serve(
 /// the mixed-service harness instead of the in-memory engine.
 pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyhow::Result<()> {
     serve_with_tls(addr, matching, None).await
-}
+
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
+    }
 
 #[tonic::async_trait]
 impl p::meta_api_server::MetaApi for Matching {
