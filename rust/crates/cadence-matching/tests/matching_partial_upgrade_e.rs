@@ -335,30 +335,32 @@ async fn go_manager_start_root_pushes_loaded_config_to_remote_child_without_upda
     // to this manager and at least one read partition resolves to the child.
     let (membership, remote_partition) = (0..1024)
         .find_map(|seed| {
+            let parent_identity = format!("parent-{seed}");
+            let child_identity = format!("child-{seed}");
             let membership = cadence_matching::matching_membership::Membership::new(
-                "parent",
+                parent_identity.clone(),
                 vec![
                     Host {
                         address: format!("parent-{seed}:7935"),
-                        identity: "parent".into(),
+                        identity: parent_identity.clone(),
                         grpc_address: "http://127.0.0.1:7835".into(),
                     },
                     Host {
                         address: format!("child-{seed}:7935"),
-                        identity: "child".into(),
+                        identity: child_identity.clone(),
                         grpc_address: format!("http://{child_grpc_addr}"),
                     },
                 ],
             );
             (membership
                 .owner(TASK_LIST)
-                .is_ok_and(|owner| owner.identity() == "parent"))
+                .is_ok_and(|owner| owner.identity() == parent_identity))
             .then(|| {
                 (1..128)
                     .find(|id| {
                         membership
                             .owner(&format!("/__cadence_sys/{TASK_LIST}/{id}"))
-                            .is_ok_and(|owner| owner.identity() == "child")
+                            .is_ok_and(|owner| owner.identity() == child_identity)
                     })
                     .map(|id| (membership, id))
             })
