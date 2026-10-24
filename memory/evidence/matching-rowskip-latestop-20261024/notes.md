@@ -76,6 +76,11 @@ Code head `071544885` (the commit that changes Rust code). Workflow `rust-ci.yml
 | 40065214498 | `package=cadence-matching` | success | `649 passed; 0 failed; 15 ignored`. Both un-ignored tests report `ok`: `matching_semaphore::parity_tests::matching_semaphore_scan_skips_nil_and_unknown_rows` and `...matching_semaphore_late_stop_unregisters_only_itself` |
 | 40065397912 | whole workspace | **failure** | clippy passed. Test step: `matching_reader::tests::matching_reader_dispatch_success_uses_known_or_default_group` and `matching_reader_pump_falls_back_to_default_for_unknown_isolation_group` failed (`left: 2, right: 1` at `matching_reader.rs:2232` and `:2273`) |
 | 40065610715 | whole workspace (rerun, same head) | success | green |
+| 40065862331 | whole workspace, head `cf1623c80` | failure | same reader race, `matching_reader.rs:2273` |
+| 40066080101 | `package=cadence-matching`, head `c2a773b48` | success | reader race fixed |
+| 40066282011 | whole workspace, head `c2a773b48` | **success** | final green run for the code head |
+
+Final code head: `c2a773b48`. The only later commit is this notes file.
 
 The two reader failures are a pre-existing flake, not this change. The same test
 (`matching_reader_dispatch_success_uses_known_or_default_group`, `matching_reader.rs:2232`) failed on
