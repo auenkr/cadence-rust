@@ -211,21 +211,20 @@ audit trigger while scheduling. It requires zero matching inserts as well as
 zero remaining task rows, then removes the trigger and audit table. The ignored
 Go-shaped unit test was not edited or enabled.
 
-- Mixed CI run: <https://github.com/auenkr/cadence-rust/actions/runs/40091676082>
+- Mixed CI run: <https://github.com/auenkr/cadence-rust/actions/runs/40104204435>
 - Conclusion: `success`; source/head:
-  `f638a7b3c622dfeac25795cb964beed2ec5857a1`.
+  `c1426544dba42035122ba925a18c1e90534e8f5a`.
 - The run used a fresh runner target and built
   `cadence-matching`; binary SHA256:
-  `83ba7341f85c62e4aca900ab8ee6f6944cb9e26f4432c37fb51b7950c5078860`.
+  `1a369ac12b60dc5d1a5e8dc035b6e1a1e22109bb54cfee1d7a276f780ab9a640`.
 - Artifact topology says Go Matching was not started; Go Frontend, History,
   and Worker were running with Rust Matching through production Ringpop. The
   `activeOffer.json` result passed for workflow
-  `active-offer-workflow-607508c5-f59d-4f11-a452-b8d6285e2619`, run
-  `e9fbaa13-b317-4866-a1c3-06f8b4e084d0`: history-scheduled task delivered,
-  task token delivered, and `persistedTaskRows: 0`. The initial run predates
-  the insert audit strengthening below; the replacement run records the
-  `persistedTaskInsertAttempts` assertion and is the final evidence for this
-  row.
+  `active-offer-workflow-c5c78e70-ee54-4753-b63e-6b07e7456313`, run
+  `57fe82a8-f67f-4c3f-94fd-aa93ee03cbd7`: history-scheduled task delivered,
+  task token delivered, `persistedTaskRows: 0`, and
+  `persistedTaskInsertAttempts: 0` while the scoped `BEFORE INSERT` trigger was
+  active.
 - The legacy SDK mixed workflow in the same gate also completed (`probeExitCode:
   0`). The gate's full command and logs are retained in the run artifact.
 
