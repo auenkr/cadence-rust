@@ -52,6 +52,16 @@ jobs:
           result=${PIPESTATUS[0]}
           echo "$result" > clippy.exit
           exit "$result"
+      - name: Formatting
+        working-directory: rust
+        run: |
+          set +e
+          if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--all"; fi
+          cargo fmt $SEL -- --check > fmt.log 2>&1
+          result=$?
+          echo "$result" > fmt.exit
+          cat fmt.log
+          exit "$result"
       - name: Test
         working-directory: rust
         run: |
@@ -75,6 +85,7 @@ jobs:
           retention-days: 3
           path: |
             rust/clippy.log
+            rust/fmt.log
             rust/test.log
             rust/*.exit
             rust/commit.txt
