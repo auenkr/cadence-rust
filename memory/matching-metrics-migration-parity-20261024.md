@@ -77,3 +77,35 @@ Requested reference run: https://github.com/auenkr/cadence-rust/actions/runs/400
 - The current CI workflow follows master commit `49fa0bf81`: `cargo fmt --all
   -- --check` runs on GitHub Actions without mutating checked-out source. The
   final strict run will use fresh target storage and committed source only.
+
+## Merged-branch follow-up validation
+
+- Merged `origin/master` at `ae8dc7c48170ef2fc22ccaabf68bea6c6ec262d7` into
+  `t3/matching-metrics-parity`. Master’s already-green migration implementation,
+  fixture and CI workflow are authoritative. The merge exposed that master
+  already contained the sync-match production name/kind/tag test and exhaustive
+  allowlist default/`both` test; the duplicated copies were removed, retaining
+  the master versions and the pre-existing condition-failed/forward-throttle
+  event assertion in `matching_metrics.rs`.
+- A fresh uncached final run passed at source SHA
+  `93468d6c25e87867673083ed48eb299b07c480dc`: [run 40085764731](https://github.com/auenkr/cadence-rust/actions/runs/40085764731).
+  Workspace clippy passed, followed by workspace tests; both recorded exit 0.
+  The runner used `/home/runner/work/_temp/cargo-target-final`.
+- Formatting ran as non-mutating `cargo fmt --all -- --check`; it returned 1
+  because unrelated existing workspace formatting debt remains (first reported
+  differences are in `cadence-api/src/admin.rs`). No formatting mutation was
+  applied. The matching metric changes were committed as source before CI.
+- The earlier merged follow-up run [40085561048](https://github.com/auenkr/cadence-rust/actions/runs/40085561048)
+  stopped at clippy due solely to duplicate test-module definitions introduced
+  during reconciliation; that duplicate was removed in `93468d6c2`, and the
+  clean-target retry above passed.
+- Operator emission coverage: source inventory finds 93 Matching definitions,
+  84 with production Go callsites and matching Rust names; the nine remaining
+  Go definitions are catalog-only, with no Go Matching emission site to
+  compare. Source inventory is reproducible with
+  `python3 rust/tools/audit-matching-metrics.py`. The automated event-level
+  comparisons exercise the sync-match timer/histogram pair and its request and
+  histogram tags, plus condition-failed and forward-throttle counter identity
+  and manager tags. Other production emitters are covered by the row-level
+  name/kind/tag/bucket inventory, not by a live Go-vs-Rust exporter capture;
+  that live exporter comparison remains an evidence gap.
