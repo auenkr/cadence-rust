@@ -2225,16 +2225,18 @@ mod tests {
             .unwrap();
         wake.notify_waiters();
         wait_read(&queue, 2).await;
-        let known = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a"))
-            .await
-            .unwrap()
-            .unwrap();
+        // The store read is not a buffer fill: a poller on group "a" also takes from the default
+        // buffer, so a lone poll_group("a") can get task 2 first. Two pollers take one task each,
+        // so the routing check does not depend on which buffer fills first.
+        let (first, second) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a")),
+            tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a")),
+        );
+        let mut tasks = [first.unwrap().unwrap(), second.unwrap().unwrap()];
+        tasks.sort_by_key(|task| task.task_id);
+        let [known, plain] = tasks;
         assert_eq!(known.task_id, 1);
         assert_eq!(dispatched_group(&known), "a");
-        let plain = tokio::time::timeout(Duration::from_secs(2), reader.poll())
-            .await
-            .unwrap()
-            .unwrap();
         assert_eq!(plain.task_id, 2);
         assert_eq!(dispatched_group(&plain), "");
         queue.complete(known.task_id).unwrap();
@@ -2266,16 +2268,17 @@ mod tests {
             .unwrap();
         wake.notify_waiters();
         wait_read(&queue, 2).await;
-        let known = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a"))
-            .await
-            .unwrap()
-            .unwrap();
+        // Same shape as the test above: two pollers on group "a", so the buffer that fills first
+        // does not decide which poller gets which task.
+        let (first, second) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a")),
+            tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a")),
+        );
+        let mut tasks = [first.unwrap().unwrap(), second.unwrap().unwrap()];
+        tasks.sort_by_key(|task| task.task_id);
+        let [known, fallback] = tasks;
         assert_eq!(known.task_id, 1);
         assert_eq!(dispatched_group(&known), "a");
-        let fallback = tokio::time::timeout(Duration::from_secs(2), reader.poll())
-            .await
-            .unwrap()
-            .unwrap();
         assert_eq!(fallback.task_id, 2);
         assert_eq!(dispatched_group(&fallback), "");
         queue.complete(known.task_id).unwrap();

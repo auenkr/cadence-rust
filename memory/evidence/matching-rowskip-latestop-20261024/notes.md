@@ -80,9 +80,17 @@ Code head `071544885` (the commit that changes Rust code). Workflow `rust-ci.yml
 The two reader failures are a pre-existing flake, not this change. The same test
 (`matching_reader_dispatch_success_uses_known_or_default_group`, `matching_reader.rs:2232`) failed on
 origin/master run 40064723413 (head `e7285da4f`), which is this branch's base. The reader code is
-untouched here, and the reader tests do not touch semaphores. The flake is out of scope and is not fixed
-here. The reader fixture's dispatch order between the group buffer and the default buffer varies
-with timing; a fix belongs with the partial-upgrade-c owner.
+untouched here, and the reader tests do not touch semaphores.
+
+Root cause (test race, not production): `TaskReader::poll_group("a")` selects over the `a` buffer and
+the default buffer (`matching_reader.rs`, `poll_group`). The tests waited only for the store read count
+(`wait_read(&queue, 2)`), not for dispatch into buffers. So a lone `poll_group("a")` could take task 2
+from the default buffer, and the assertion `known.task_id == 1` failed (`left: 2, right: 1`). This was
+seen again on the final head, run 40065862331 (`matching_reader_pump_falls_back_to_default_for_unknown_isolation_group`, `:2273`).
+
+Fix (test-only, both tests): two pollers on `poll_group("a")` each take one task, then sort by
+`task_id`. Each poller selects over both buffers, so the two tasks are delivered in either order. The
+assertions (task 1 stamped `"a"`, task 2 stamped `""`) are unchanged. No production code changed for this.
 
 ## Remaining ignores in the two areas
 
