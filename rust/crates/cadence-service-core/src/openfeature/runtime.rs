@@ -36,7 +36,7 @@ impl RuntimePropertyProvider for OpenFeatureRuntimeProvider {
         if let Some(cluster_name) = &self.cluster_name {
             context.entry("clusterName".to_owned()).or_insert_with(|| Value::String(cluster_name.clone()));
         }
-        let result = match &default {
+        match &default {
             Value::Bool(default) => {
                 let (value, error) = self.client.get_bool_value(key, *default, &context);
                 error.map_or_else(|| Ok(Value::Bool(value)), |error| Err(error.to_string()))
@@ -62,7 +62,6 @@ impl RuntimePropertyProvider for OpenFeatureRuntimeProvider {
                 error.map_or_else(|| Ok(Value::Object(value)), |error| Err(error.to_string()))
             }
             Value::Null => return Err("null has no OpenFeature property type".into()),
-        };
-        result
+        }
     }
 }
