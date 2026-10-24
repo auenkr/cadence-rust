@@ -65,4 +65,5 @@ File: `rust/crates/cadence-matching/tests/matching_longpoll_expiry_parity.rs`
   — success. Clippy `--all-targets -D warnings` passed. `matching_longpoll_expiry_parity.rs`: `2 passed; 0 ignored`
   (decision test un-ignored and the activity twin both pass).
 - Whole-workspace run, head `4baa03060` (notes-only commit on top of `cc147f32f`; code identical):
-  https://github.com/auenkr/cadence-rust/actions/runs/40066410068 — pending
+  https://github.com/auenkr/cadence-rust/actions/runs/40066410068 — success. Clippy and tests passed across the
+  workspace with no failures. Both parity tests ran `ok`. The flaky reader test passed, so no rerun was needed.
