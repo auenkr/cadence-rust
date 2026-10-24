@@ -1,0 +1,10 @@
+{
+  "goBinary": {
+    "path": "/mnt/storage/service/gate-runs/gatefinal3/build/cadence-server",
+    "sha256": "86e67bb94809d87bc81bcba6a61f35f77e1f79b9fd34f55add55e44938af818e"
+  },
+  "rustProductionBinary": {
+    "path": "/mnt/storage/service/cargo-target-final/debug/cadence-matching",
+    "sha256": "59d8eb8f97bdf63d627baac24293a12ab5030d63773c77811fef1b1723b5ddfa"
+  }
+}
