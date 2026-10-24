@@ -3676,6 +3676,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
             )
             .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
 }
 
@@ -3691,11 +3694,7 @@ pub async fn serve(
 /// the mixed-service harness instead of the in-memory engine.
 pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyhow::Result<()> {
     serve_with_tls(addr, matching, None).await
-
-        })
-        .await
-        .unwrap_or_else(|message| Err(Status::unknown(message)))
-    }
+}
 
 #[tonic::async_trait]
 impl p::meta_api_server::MetaApi for Matching {
