@@ -10,8 +10,10 @@ use std::time::Duration;
 
 const WINDOW: usize = 700;
 
+/// Production text ends at the first top-level `#[cfg(test)]` (the test modules). Indented
+/// `#[cfg(test)]` items are test-only fields, statements, and methods inside production items.
 fn production(source: &'static str) -> &'static str {
-    source.split("#[cfg(test)]").next().unwrap()
+    source.split("\n#[cfg(test)]").next().unwrap()
 }
 
 fn assert_default(source: &'static str, key: &str, expected: &str) {
