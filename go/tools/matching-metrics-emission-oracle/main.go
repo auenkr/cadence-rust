@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"sort"
@@ -9,7 +10,12 @@ import (
 	"time"
 
 	"github.com/uber-go/tally"
+	"github.com/uber/cadence/common/config"
+	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/metrics"
+	"github.com/uber/cadence/common/persistence"
+	"github.com/uber/cadence/common/persistence/wrappers/metered"
+	"github.com/uber/cadence/common/types"
 )
 
 type row struct {
@@ -17,6 +23,19 @@ type row struct {
 	Kind  string            `json:"kind"`
 	Tags  map[string]string `json:"tags"`
 	Count int64             `json:"count,omitempty"`
+}
+
+type fixtureTaskManager struct {
+	persistence.TaskManager
+	calls int
+}
+
+func (m *fixtureTaskManager) GetTasks(context.Context, *persistence.GetTasksRequest) (*persistence.GetTasksResponse, error) {
+	m.calls++
+	if m.calls == 1 {
+		return &persistence.GetTasksResponse{}, nil
+	}
+	return nil, &types.BadRequestError{Message: "metrics-oracle-failure"}
 }
 
 func main() {
@@ -37,6 +56,13 @@ func main() {
 	}
 	root := tally.NewTestScope("", nil)
 	client := metrics.NewClient(root, metrics.Matching, migration)
+	if mode == "persistence" {
+		manager := metered.NewTaskManager(&fixtureTaskManager{}, client, log.NewNoop(), &config.Persistence{})
+		_, _ = manager.GetTasks(context.Background(), &persistence.GetTasksRequest{})
+		_, _ = manager.GetTasks(context.Background(), &persistence.GetTasksRequest{})
+		emit(root)
+		return
+	}
 	ctx := client.Scope(metrics.MatchingTaskListMgrScope, metrics.DomainTag("domain-a"), metrics.TaskListTag("queue-a"), metrics.TaskListTypeTag("decision"))
 	ctx.IncCounter(metrics.PollSuccessPerTaskListCounter)
 	ctx.IncCounter(metrics.PollTimeoutPerTaskListCounter)
@@ -55,6 +81,10 @@ func main() {
 	persistence.RecordHistogramValue(metrics.PersistenceResponseRowSize, 3)
 	persistence.RecordHistogramValue(metrics.PersistenceResponsePayloadSize, 4096)
 
+	emit(root)
+}
+
+func emit(root tally.TestScope) {
 	s := root.Snapshot()
 	rows := []row{}
 	for _, v := range s.Counters() {

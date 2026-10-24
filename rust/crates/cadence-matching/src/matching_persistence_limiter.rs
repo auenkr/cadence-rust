@@ -887,3 +887,84 @@ mod metered_task_tests {
         assert!(events.iter().filter(|e| e.name.ends_with("_rollup") && e.kind != MetricKind::Histogram).all(|e| e.tags.is_empty()));
     }
 }
+
+#[cfg(test)]
+mod go_metered_emission_oracle_tests {
+    use super::*;
+    use crate::matching_metrics::{MetricEvent, MetricKind, MetricSink, RecordingMetricSink};
+    use crate::matching_metrics_migration::{MigrationMetricSink, MigrationPolicy};
+    use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
+    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeSet;
+
+    #[derive(Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+    struct Series {
+        name: String,
+        kind: String,
+        tags: std::collections::BTreeMap<String, String>,
+    }
+
+    fn kind_name(kind: MetricKind) -> &'static str {
+        match kind {
+            MetricKind::Counter => "counter",
+            MetricKind::Timer => "timer",
+            MetricKind::Histogram => "histogram",
+            MetricKind::Gauge => "gauge",
+        }
+    }
+
+    fn rust_series(events: Vec<MetricEvent>) -> BTreeSet<Series> {
+        events
+            .into_iter()
+            .map(|event| Series {
+                name: event.name.to_owned(),
+                kind: kind_name(event.kind).to_owned(),
+                tags: event.tags,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rust_metered_task_outcomes_match_go_wrapper_tally_when_ci_fixture_is_present() {
+        let Ok(path) = std::env::var("MATCHING_GO_PERSISTENCE_ORACLE") else {
+            return;
+        };
+        let go: BTreeSet<Series> = serde_json::from_slice(
+            &std::fs::read(path).expect("read Go metered persistence snapshot"),
+        )
+        .expect("decode Go metered persistence snapshot");
+
+        let recording = Arc::new(RecordingMetricSink::default());
+        let migration: Arc<dyn MetricSink> = Arc::new(MigrationMetricSink::new(
+            recording.clone(),
+            MigrationPolicy::default(),
+        ));
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        limiter.with_metric_sink(migration);
+        let elapsed = std::time::Duration::from_millis(2);
+        limiter.record_task_call(
+            "GetTasks",
+            None,
+            elapsed,
+            &Ok::<_, MatchingTaskStoreError>(()),
+        );
+        limiter.record_list_response("GetTasks", 0, 0);
+        limiter.record_task_call(
+            "GetTasks",
+            None,
+            elapsed,
+            &Err::<(), _>(MatchingTaskStoreError::Backend {
+                kind: BackendErrorKind::BadRequest,
+                message: "metrics-oracle-failure".into(),
+            }),
+        );
+        let rust = rust_series(recording.events());
+        if let Ok(path) = std::env::var("MATCHING_RUST_PERSISTENCE_ORACLE") {
+            std::fs::write(path, serde_json::to_vec(&rust).unwrap()).unwrap();
+        }
+        assert_eq!(rust, go);
+    }
+}

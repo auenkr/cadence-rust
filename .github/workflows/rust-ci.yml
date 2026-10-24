@@ -48,6 +48,14 @@ jobs:
       - name: Select fresh final target
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"
+      - name: Capture Go metered persistence wrapper output
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/matching-metrics-emission"
+          mkdir -p "$evidence"
+          (cd go && go run ./tools/matching-metrics-emission-oracle persistence) > "$evidence/go-persistence-wrapper.json"
+          echo "MATCHING_GO_PERSISTENCE_ORACLE=$evidence/go-persistence-wrapper.json" >> "$GITHUB_ENV"
+          echo "MATCHING_RUST_PERSISTENCE_ORACLE=$evidence/rust-persistence-wrapper.json" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         if: inputs.clean_target != true
         with:
