@@ -35,7 +35,9 @@ async fn engine_partition_owners_and_order_match_executable_go_handler_oracle() 
             identity: host["identity"].as_str().unwrap().into(),
             grpc_address: host["grpc_address"].as_str().unwrap().into(),
         }).collect();
-        membership.replace(hosts);
+        // Feed snapshots through the production refresh boundary. Like Go's
+        // Ring.Refresh, identity-only changes at existing addresses are ignored.
+        membership.replace_if_addresses_changed(hosts);
         for (field, name) in [("root", "queue"), ("child", "/__cadence_sys/queue/9"), ("empty", "")] {
             let response = matching.list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
                 domain: "domain".into(), task_list: Some(p::TaskList { name: name.into(), ..Default::default() }),
