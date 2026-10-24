@@ -1,6 +1,6 @@
 //! Matching-only Go-compatible metric migration policies. Allow-lists mirror go/common/metrics/config.go.
 use serde::{Deserialize, Serialize};
-use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 use crate::matching_metrics::{MetricEvent, MetricKind, MetricSink};
 
 pub const HISTOGRAM_MIGRATION_NAMES: &[&str] = &[
