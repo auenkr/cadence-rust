@@ -48,7 +48,7 @@ replaces the tracker with a gomock that returns 42.5.
 | Run | Ref / head | Scope | Result |
 |-----|-----------|-------|--------|
 | [40067817472](https://github.com/auenkr/cadence-rust/actions/runs/40067817472) | 52f682860 | `-f package=cadence-matching` | success (clippy-test). `matching_reader::tests::go_get_tasks_batch_size_returns_raw_non_positive_values ... ok`, `matching_registry::tests::loaded_owner_reports_mocked_tracker_qps_after_arrivals ... ok`, `656 passed; 0 failed; 11 ignored` |
-| pending | final code head | whole workspace (no package input) | pending |
+| [40068042256](https://github.com/auenkr/cadence-rust/actions/runs/40068042256) | 86339c35e | whole workspace (no package input) | success (clippy-test). Code identical to 52f682860. |
 
 The package run's push-triggered twin (40067811577) was cancelled by the concurrency group,
 which is expected. Only 40067817472 counts as evidence.
