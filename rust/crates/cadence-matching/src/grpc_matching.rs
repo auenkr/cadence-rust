@@ -1863,7 +1863,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 }
                 result=async {
                     if active {
-                        queue.dispatcher.poll_decision_with_poller(payload, expiration, lifecycle).await
+                        queue.dispatcher.poll_decision_with_poller(payload, expiration, lifecycle, incoming_deadline).await
                     } else {
                         // Go standby getTask polls only queryTaskC, never the
                         // durable backlog or forwarded workflow tasks.
@@ -2059,7 +2059,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let active = self.frontend.state.domains.is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
                         .map_err(|error| crate::grpc::domain_not_found(error.message))?;
                     if active {
-                        queue.dispatcher.poll_activity_with_poller(payload, expiration, lifecycle).await
+                        queue.dispatcher.poll_activity_with_poller(payload, expiration, lifecycle, incoming_deadline).await
                     } else {
                         let _wait = lifecycle.begin();
                         tokio::time::sleep(expiration).await;

@@ -28,6 +28,8 @@ crc32fast = "1"
 crc32c = "0.6"
 anyhow = "1"
 thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = { version = "0.8", features = ["json"] }
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
