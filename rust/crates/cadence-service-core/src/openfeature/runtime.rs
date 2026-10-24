@@ -61,7 +61,7 @@ impl RuntimePropertyProvider for OpenFeatureRuntimeProvider {
                 let (value, error) = self.client.get_map_value(key, default.clone(), &context);
                 error.map_or_else(|| Ok(Value::Object(value)), |error| Err(error.to_string()))
             }
-            Value::Null => return Err("null has no OpenFeature property type".into()),
+            Value::Null => Err("null has no OpenFeature property type".into()),
         }
     }
 }
