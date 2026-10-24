@@ -2306,7 +2306,11 @@ mod go_scope_parity_tests {
         metrics.poller_count(&context, 2);
         metrics.partition_scale_change(&context, true);
         metrics.async_match_local(&context, Some(3), Duration::from_millis(1));
-        let events = task_list_events(sink.events());
+        let events = sink
+            .events()
+            .into_iter()
+            .filter(|event| event.tags.contains_key(DOMAIN_TAG))
+            .collect::<Vec<_>>();
         assert_eq!(events[0].name, "poller_count_per_tl");
         assert_eq!(
             events[0].tags,
