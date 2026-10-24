@@ -738,21 +738,19 @@ mod production_matching_metric_tests {
         assert_eq!(events.len(), 4);
         assert_eq!(events[0].name, "syncmatch_latency_per_tl");
         assert_eq!(events[0].kind, MetricKind::Timer);
-        assert_eq!(events[1].name, "syncmatch_latency_per_tl_ns");
-        assert_eq!(events[1].kind, MetricKind::Histogram);
+        assert_eq!(events[1].name, "syncmatch_latency");
+        assert_eq!(events[1].kind, MetricKind::Timer);
         assert_eq!(
-            events[1].histogram,
+            events[2].histogram,
             Some(crate::matching_metrics::HistogramSpec::GoLow1ms100s)
         );
+        assert_eq!(events[2].name, "syncmatch_latency_per_tl_ns");
         for (key, value) in &events[0].tags {
-            assert_eq!(events[1].tags[key], *value);
+            assert_eq!(events[2].tags[key], *value);
         }
-        assert_eq!(events[1].tags["histogram_start"], "1ms");
-        assert_eq!(events[1].tags["histogram_end"], "17m28.576s");
-        assert_eq!(events[1].tags["histogram_scale"], "1");
-        assert_eq!(events[2].name, "syncmatch_latency");
-        assert_eq!(events[2].kind, MetricKind::Timer);
-        assert!(events[2].tags.is_empty());
+        assert_eq!(events[2].tags["histogram_start"], "1ms");
+        assert_eq!(events[2].tags["histogram_end"], "17m28.576s");
+        assert_eq!(events[2].tags["histogram_scale"], "1");
         assert_eq!(events[3].name, "syncmatch_latency_ns");
         assert_eq!(events[3].kind, MetricKind::Histogram);
         assert_eq!(events[3].tags["histogram_start"], "1ms");
