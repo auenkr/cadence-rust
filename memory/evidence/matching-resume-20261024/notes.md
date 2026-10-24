@@ -56,3 +56,7 @@ Integrated polling/lifecycle tests in master 34deee93f. Run https://github.com/a
 PostgreSQL production run https://github.com/auenkr/cadence-rust/actions/runs/40080485161 failed at matching-service-compat.cjs:712: the crash-recovery workflow task never appeared as a persisted row within 20 seconds (queued_rows=0, range_id=2). The preceding direct owner probe completed; this is not a build failure. Downloaded full artifact to /tmp/matching-production-40080485161 for investigation. Do not weaken the queued-before-crash assertion or claim acceptance.
 
 Three recovery tasks are confirmed running through task_status: live-reader-resume-v2, unleash-engine-resume-v2, metrics-resume-v2 (Codex Luna, medium/default). Their original worktrees were clean when inspected. No local Cargo command ran.
+
+PostgreSQL diagnostic rerun: https://github.com/auenkr/cadence-rust/actions/runs/40083288791, source 9d56f0567. Added history and DescribeTaskList snapshots only on the strict pre-crash persistence timeout; Node syntax check passed. Still awaiting CI result. Service-core exact-source fresh run https://github.com/auenkr/cadence-rust/actions/runs/40083216641 uses 49fa0bf81.
+
+Current-source inspection also confirms root load-time partition notifications are implemented around matching_registry.rs:1510-1565, including notify_read_partitions; the ignored partial-upgrade-e start-push comment is stale and must not be treated as proof of a missing production behavior. The remaining final audit must map this to meaningful runtime evidence.
