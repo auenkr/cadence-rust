@@ -2269,18 +2269,20 @@ mod tests {
             .unwrap();
         wake.notify_waiters();
         wait_read(&queue, 2).await;
-        let known = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a"))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(known.task_id, 1);
-        assert_eq!(dispatched_group(&known), "a");
+        // Drain the default poller first (same race as the test above): `poll_group("a")` also
+        // selects on the shared default channel and could take the fallback task.
         let fallback = tokio::time::timeout(Duration::from_secs(2), reader.poll())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(fallback.task_id, 2);
         assert_eq!(dispatched_group(&fallback), "");
+        let known = tokio::time::timeout(Duration::from_secs(2), reader.poll_group("a"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(known.task_id, 1);
+        assert_eq!(dispatched_group(&known), "a");
         queue.complete(known.task_id).unwrap();
         queue.complete(fallback.task_id).unwrap();
         assert_eq!(queue.levels().1, 2);
