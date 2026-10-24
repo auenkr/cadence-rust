@@ -1,0 +1,1673 @@
+   Compiling cadence-common v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-proto)
+   Compiling cadence-api v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-api)
+   Compiling cadence-thrift v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-thrift)
+   Compiling cadence-persistence v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-persistence)
+   Compiling cadence-service-core v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-service-core)
+   Compiling cadence-matching v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-matching)
+   Compiling cadence-frontend v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-frontend)
+   Compiling cadence-history v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-history)
+   Compiling cadence-worker v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-worker)
+   Compiling cadence-server v0.1.0 (/mnt/storage/service/github/cadence-rust/.claude/worktrees/agent-a281c330e260fde50/rust/crates/cadence-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11m 15s
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_api-3264f108eba968a5)
+
+running 40 tests
+test domain::tests::config_update_request_matrix ... ok
+test domain::tests::failover_version_lookup_and_missing ... ok
+test domain::tests::get_all_clusters_sorted_dedup ... ok
+test domain::tests::is_active_active_matches_go_table ... ok
+test enums::tests::decision_type_values_match_go ... ok
+test enums::tests::display_matches_go_string_output ... ok
+test enums::tests::enums_serialize_as_thrift_ints ... ok
+test enums::tests::event_type_values_match_go_iota_order ... ok
+test enums::tests::failover_type_explicit_discriminants ... ok
+test enums::tests::parse_accepts_names_and_numbers ... ok
+test errors::tests::error_display_matches_go_behavior ... ok
+test errors::tests::retry_task_v2_json_round_trip ... ok
+test history_request::tests::cron_backoff_uses_next_firing ... ok
+test history_request::tests::cron_with_delay_adds_delay ... ok
+test history_request::tests::delay_start_only ... ok
+test history_request::tests::first_run_at_timestamp_wins ... ok
+test history_request::tests::invalid_cron_is_an_error ... ok
+test history_request::tests::retry_expiration_adds_backoff ... ok
+test search_attributes::tests::system_keys_match_go ... ok
+test service_types::tests::describe_domain_request_names_match_go ... ok
+test service_types::tests::execution_info_type_key_is_go_literal ... ok
+test service_types::tests::history_event_names_match_go ... ok
+test tasks::tests::decision_names_match_go ... ok
+test tasks::tests::poll_response_token_is_base64_like_go_bytes ... ok
+test tasktoken::tests::go_produced_token_deserializes ... ok
+test tasktoken::tests::query_token_round_trip ... ok
+test tasktoken::tests::task_token_json_field_names_match_go ... ok
+test tasktoken::tests::task_token_round_trip ... ok
+test tests::compat_version_is_set ... ok
+test types::tests::data_blob_json_names_match_go_tags ... ok
+test types::tests::failure_category_defaults_to_standard ... ok
+test types::tests::retry_policy_retriable_reasons ... ok
+test types::tests::task_list_kind_defaults_to_normal ... ok
+test validation::tests::archived_request_validation_matches_go ... ok
+test validation::tests::check_execution_matches_go ... ok
+test validation::tests::failover_request_validation_matches_go ... ok
+test validation::tests::retry_policy_validation_matches_go_messages ... ok
+test validation::tests::semaphore_validation_matches_go ... ok
+test validation::tests::start_request_happy_path ... ok
+test validation::tests::start_request_rejects_missing_fields ... ok
+
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/go_compat.rs (/mnt/storage/service/cargo-target-shared/debug/deps/go_compat-4e2de4115201d062)
+
+running 4 tests
+test go_enum_int_encoding ... ok
+test go_data_blob_fixture ... ok
+test go_workflow_execution_fixture ... ok
+test go_task_token_fixture_deserializes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_common-ea448540442cc7da)
+
+running 72 tests
+test backoff::tests::backoff_grows_and_caps_at_maximum ... ok
+test backoff::tests::negative_initial_interval_is_done ... ok
+test backoff::tests::respects_maximum_attempts ... ok
+test backoff::tests::retrier_increments_attempts ... ok
+test backoff::tests::stops_after_expiration ... ok
+test ack_manager::tests::matching_ack_go_fixtures ... ok
+test cluster::tests::cluster_metadata_go_fixtures ... ok
+test cluster::tests::cluster_config_go_fixtures ... ok
+test cron::tests::descriptors_parse ... ok
+test cron::tests::buffer_one_policy_starts_immediately ... ok
+test cron::tests::in_seconds_helper_matches_go ... ok
+test cron::tests::go_cron_table_matches ... ok
+test cron::tests::invalid_spec_is_rejected ... ok
+test cron::tests::jitter_adds_bounded_noise ... ok
+test cron::tests::next_times_follow_the_spec ... ok
+test cron::tests::skipped_policy_skips_missed_runs ... ok
+test cron::tests::named_time_zones_and_dst ... ok
+test jitter::tests::jitter_stays_in_range ... ok
+test jitter::tests::invalid_coefficient_panics - should panic ... ok
+test jitter::tests::zero_coefficient_or_input_is_identity ... ok
+test liveness::tests::original_go_liveness_fixtures ... ok
+test membership::fingerprint_tests::go_fingerprint32_matches_signed_short_byte_vectors ... ok
+test membership::fingerprint_tests::go_hash32_matches_go_farm_vectors ... ok
+test membership::fingerprint_tests::replacement_rune_has_go_ring_owner ... ok
+test matching_rate::tests::matching_rate_original_go_report_sequences ... ok
+test membership::golden_tests::explicit_identity_ring_uses_hash_separator_like_go_hashring ... ok
+test membership::golden_tests::address_identity_ring_matches_go_hashring_golden_vectors ... ok
+test membership::tests::matching_membership_go_ring_oracle ... ok
+test poller::tests::history_size_counts_unique_identities_and_evicts_expired_entries ... ok
+test qps::tests::ema_tracker_attributes_arrivals_to_their_bucket ... ok
+test qps::tests::ema_tracker_groups ... ok
+test qps::tests::ema_tracker_multiple_report_cycles ... ok
+test qps::tests::ema_tracker_reports_first_window_then_averages ... ok
+test rate_limiter::tests::clock_rate_original_go_operations ... ok
+test retry::tests::stops_on_non_retryable_error ... ok
+test retry::tests::succeeds_after_retries ... ok
+test ringpop_member::tests::aggregate_sorts_and_excludes_tombstones ... ok
+test ringpop_member::tests::labels_are_utf8_byte_encoded_order_independent_and_signed ... ok
+test ringpop_member::tests::lower_precedence_rejects_gossip_even_with_higher_signed_label_checksum ... ok
+test ringpop_member::tests::merge_precedence_and_incarnation_rules ... ok
+test ringpop_memberlist::tests::insertion_position_clamps_to_go_random_range_excluding_end ... ok
+test ringpop_memberlist::tests::local_refutation_uses_new_incarnation_and_local_member_fields ... ok
+test ringpop_memberlist::tests::local_updates_merge_labels_bump_incarnation_and_refresh_checksum ... ok
+test ringpop_memberlist::tests::memberlist_iterator_returns_none_when_only_local_and_non_pingable_members_exist ... ok
+test ringpop_memberlist::tests::memberlist_iterator_shuffles_and_visits_pingable_members_once_per_round ... ok
+test ringpop_memberlist::tests::remote_acceptance_refutation_tombstone_and_checksum ... ok
+test ringpop_memberlist::tests::removing_remote_member_reindexes_and_keeps_local ... ok
+test ringpop_memberlist::tests::single_remote_iterator_round_matches_pinned_go_trace ... ok
+test ringpop_memberlist::tests::update_processes_complete_batch_larger_than_sixty_four ... ok
+test ringpop_state_transitions::tests::cancellation_disable_enable_local_and_nonpositive_timeouts ... ok
+test ringpop_state_transitions::tests::captures_subject_and_retains_fired_timer_until_canceled_or_replaced ... ok
+test ringpop_state_transitions::tests::pinned_go_oracle_trace_matches_core ... ok
+test ringpop_wire::tests::change_normalization_matches_go ... ok
+test ringpop_wire::tests::empty_labels_serialize_as_omitted ... ok
+test ringpop_wire::tests::go_wire_fixture_application_error ... ok
+test ringpop_wire::tests::go_wire_fixture_change ... ok
+test ringpop_wire::tests::go_wire_fixture_join ... ok
+test ringpop_wire::tests::go_wire_fixture_member ... ok
+test ringpop_wire::tests::go_wire_fixture_ping ... ok
+test ringpop_wire::tests::labels_empty_roundtrip_normalizes_to_none ... ok
+test ringpop_wire::tests::nil_vs_empty_slices_preserved ... ok
+test ringpop_wire::tests::timestamp_null_and_custom_unmarshal_match_go ... ok
+test ringpop_wire::tests::timestamp_zero_matches_go ... ok
+test semaphore::tests::length_prefix_counts_bytes ... ok
+test semaphore::tests::owner_string_round_trip_matches_go ... ok
+test semaphore::tests::parse_owner_rejects_malformed ... ok
+test task_isolation::tests::go_get_isolation_group_for_task_table ... ok
+test task_isolation::tests::original_go_isolation_policy_fixtures ... ok
+test task_isolation::tests::selection_preserves_go_leak_causes ... ok
+test task_list::tests::matching_identifier_go_fixtures ... ok
+test task_list::tests::matching_partition_mapper_go_fixtures ... ok
+test poller::tests::original_go_poller_state_snapshots ... ok
+
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/ringpop_bootstrap_selection_oracle.rs (/mnt/storage/service/cargo-target-shared/debug/deps/ringpop_bootstrap_selection_oracle-64a6d516bae6c321)
+
+running 4 tests
+test capture_host_matches_go_split_host_port_matrix ... ok
+test go_int64_group_cap_wraps_and_partial_round_exhausts_exactly ... ok
+test requested_size_is_capped_and_exhausted_round_restarts ... ok
+test rust_selector_consumes_pinned_original_go_selection_cases ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ringpop_disseminator.rs (/mnt/storage/service/cargo-target-shared/debug/deps/ringpop_disseminator-4e4ec56da8a552de)
+
+running 2 tests
+test replacement_sender_success_failure_and_bound ... ok
+test receiver_suppresses_sender_and_selects_full_sync_only_without_deltas ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ringpop_disseminator_oracle.rs (/mnt/storage/service/cargo-target-shared/debug/deps/ringpop_disseminator_oracle-5ff1c8bb372022c8)
+
+running 1 test
+test pinned_ringpop_dissemination_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ringpop_member_oracle.rs (/mnt/storage/service/cargo-target-shared/debug/deps/ringpop_member_oracle-7d5d33125cedcabc)
+
+running 1 test
+test pinned_ringpop_member_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ringpop_memberlist_update_oracle.rs (/mnt/storage/service/cargo-target-shared/debug/deps/ringpop_memberlist_update_oracle-3cb24ceea2a9ab55)
+
+running 1 test
+test pinned_ringpop_memberlist_update_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_frontend-faf779dbebbafc4c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_frontend-75a032f453ee668d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_history-7b5b67bb5aa2a8b0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_history-394244f94232d3c6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-e4110ee419372943)
+
+running 667 tests
+test grpc_convert::tests::query_completed_maps_proto_result_types ... ok
+test grpc_convert::tests::reserved_and_unknown_enums_do_not_panic ... ok
+test grpc_convert::tests::timestamp_conversion_normalizes_negative_time_and_preserves_nanos ... ok
+test grpc_convert::tests::duration_validation_rejects_overflow_and_bad_signs ... ok
+test grpc_matching::durable_tests::domain_not_found_status_carries_entity_not_exists_detail ... ok
+test grpc_matching::durable_tests::durable_queue_preserves_typed_not_owned_error_from_shutdown_policy ... ok
+test grpc_matching::durable_tests::durable_queue_runs_ownership_preflight_before_registry_and_propagates_transient_error ... ok
+test grpc_matching::durable_tests::engine_apis_describe_identifier_errors_precede_domain_lookup_like_go ... ok
+test grpc_matching::durable_tests::engine_apis_durable_describe_and_domain_listing_share_go_manager_fields ... ok
+test grpc_matching::durable_tests::engine_apis_partition_order_owners_and_lookup_errors_match_go ... ok
+test grpc_matching::durable_tests::engine_apis_partition_spectator_failure_is_empty_owner_like_go ... ok
+test grpc_matching::durable_tests::engine_apis_poller_groups_and_list_info_match_go_boundaries ... ok
+test grpc_matching::durable_tests::go_engine_add_then_poll_decision_tasks_delivers_each_task_and_drains_store ... ok
+test grpc_matching::durable_tests::go_handler_acquire_semaphore_rate_limited_returns_service_busy ... ok
+test grpc_matching::durable_tests::go_handler_describe_task_list_engine_error_is_internal_service_error ... ignored, parity gap: Rust Matching has no injectable engine failure, so the Go mock error (errors.New(msg) -> InternalServiceError{Message: msg}) cannot be reproduced for describe_task_list
+test grpc_matching::durable_tests::go_handler_describe_task_list_rate_limited_returns_service_busy ... ok
+test grpc_matching::durable_tests::go_handler_describe_task_list_success_returns_response ... ok
+test grpc_matching::durable_tests::go_handler_list_task_list_partitions_engine_error_is_internal_service_error ... ignored, parity gap: Rust Matching has no injectable engine failure, so the Go mock error (errors.New(msg) -> InternalServiceError{Message: msg}) cannot be reproduced for list_task_list_partitions
+test grpc_matching::durable_tests::go_handler_list_task_list_partitions_rate_limited_returns_service_busy ... ok
+test grpc_matching::durable_tests::go_handler_refresh_partition_config_engine_error_is_internal_service_error ... ignored, parity gap: Rust Matching has no injectable engine failure, so the Go mock error (errors.New(msg) -> InternalServiceError{Message: msg}) cannot be reproduced for refresh_task_list_partition_config
+test grpc_matching::durable_tests::go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_normal_kinds ... ok
+test grpc_matching::durable_tests::go_handler_update_task_list_partition_config_engine_error_is_internal_service_error ... ignored, parity gap: Rust Matching has no injectable engine failure, so the Go mock error (errors.New(msg) -> InternalServiceError{Message: msg}) cannot be reproduced for update_task_list_partition_config
+test grpc_matching::durable_tests::go_handler_update_task_list_partition_config_rate_limited_returns_service_busy ... ok
+test grpc_matching::durable_tests::matching_cancel_loads_unknown_partition_without_cancelling_other_partition ... ok
+test grpc_matching::durable_tests::matching_cancel_outstanding_forwarded_parent_poll ... ok
+test grpc_matching::durable_tests::matching_domain_listing_filters_kinds_and_collapses_partition_roots ... ok
+test grpc_matching::durable_tests::matching_failover_callback_disconnects_sticky_decision_and_keeps_manager ... ok
+test grpc_matching::durable_tests::matching_failover_callback_excludes_sticky_activity_and_other_domains ... ok
+test grpc_matching::durable_tests::matching_grpc_listener_registers_meta_health_and_gates_startup ... ok
+test grpc_matching::durable_tests::matching_long_polls_reject_missing_transport_deadlines_with_bad_request ... ok
+test grpc_matching::durable_tests::matching_long_polls_with_nearly_expired_deadline_return_internal_like_go ... ok
+test grpc_matching::durable_tests::matching_meta_health_waits_for_start_on_both_transports ... ok
+test grpc_matching::durable_tests::matching_partition_update_fans_out_to_fast_peer_while_slow_peer_uses_caller_deadline ... ok
+test grpc_matching::durable_tests::matching_remote_adds_and_query_reach_go_yarpc_through_production_handlers ... ok
+test grpc_matching::durable_tests::matching_remote_routing_propagates_spectator_failure_without_ring_fallback ... ok
+test grpc_matching::durable_tests::go_engine_add_decision_and_activity_tasks_persist_every_task ... ok
+test grpc_matching::durable_tests::matching_rpc_cancel_outstanding_poll_checks_task_list_ownership ... ok
+test grpc_matching::durable_tests::matching_rpc_cancel_without_matching_poll_returns_ok ... ok
+test grpc_matching::durable_tests::matching_rpc_cancelled_forwarded_poll_unregisters_parent_waiter ... ok
+test grpc_matching::durable_tests::matching_rpc_child_add_sync_matches_parent_without_duplicate_persistence ... ok
+test grpc_matching::durable_tests::matching_rpc_child_partition_add_falls_back_to_local_persist ... ok
+test grpc_matching::durable_tests::matching_rpc_child_poll_forwards_to_parent_backlog ... ok
+test grpc_matching::durable_tests::matching_rpc_child_poll_receives_parent_query_and_preserves_completion_partition ... ok
+test grpc_matching::durable_tests::matching_rpc_child_query_completes_on_the_accepting_partition ... ok
+test grpc_matching::durable_tests::matching_rpc_child_query_forwards_to_parent_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_cross_host_poll_add_and_cancellation ... ok
+test grpc_matching::durable_tests::matching_rpc_cross_host_query_completes_on_accepting_host ... ok
+test grpc_matching::durable_tests::matching_rpc_decision_poll_preserves_isolation_group_history ... ok
+test grpc_matching::durable_tests::matching_rpc_delivers_query_to_decision_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_domain_failover_releases_blocked_polls ... ok
+test grpc_matching::durable_tests::matching_rpc_domain_listing_uses_loaded_matching_managers ... ok
+test grpc_matching::durable_tests::matching_rpc_duplicate_poller_id_replaces_entry_without_cancelling_first ... ok
+test grpc_matching::durable_tests::matching_rpc_durable_activity_preserves_source_domain_and_type ... ok
+test grpc_matching::durable_tests::matching_rpc_durable_add_does_not_require_local_workflow_state ... ok
+test grpc_matching::durable_tests::matching_rpc_durable_cancel_unregisters_waiting_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_durable_describe_tracks_activity_poller_and_queue_status ... ok
+test grpc_matching::durable_tests::matching_rpc_empty_polls_reserve_tailroom_and_read_live_expiration ... ok
+test grpc_matching::durable_tests::matching_rpc_forward_task_limits_reload_and_rate_zero_blocks ... ok
+test grpc_matching::durable_tests::matching_rpc_forwarded_add_never_persists_and_reports_remote_failure ... ok
+test grpc_matching::durable_tests::matching_rpc_forwarded_root_backlog_waits_for_late_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_forwarder_max_children_below_one_clamps_to_one ... ok
+test grpc_matching::durable_tests::matching_rpc_forwarding_disabled_keeps_parent_backlog_untouched ... ok
+test grpc_matching::durable_tests::matching_rpc_in_memory_empty_polls_reserve_tailroom ... ok
+test grpc_matching::durable_tests::matching_rpc_isolation_policy_rechecks_drains_and_poller_recency ... ok
+test grpc_matching::durable_tests::matching_rpc_isolation_toggle_returns_empty_poll_and_replaces_owner ... ok
+test grpc_matching::durable_tests::matching_rpc_isolation_toggle_stops_owner_before_admitting_add ... ok
+test grpc_matching::durable_tests::matching_rpc_lists_configured_write_partitions ... ok
+test grpc_matching::durable_tests::matching_rpc_live_gc_batch_config_is_filtered_and_resampled ... ok
+test grpc_matching::durable_tests::matching_rpc_live_reader_limits_build_fresh_owners ... ok
+test grpc_matching::durable_tests::matching_rpc_live_rps_override_matches_go_precedence ... ok
+test grpc_matching::durable_tests::matching_rpc_live_writer_config_is_filtered_and_resampled ... ok
+test grpc_matching::durable_tests::matching_rpc_local_parent_poll_applies_its_own_expiration_and_tailroom ... ok
+test grpc_matching::durable_tests::matching_rpc_local_poll_wait_delays_forwarding_and_reloads ... ok
+test grpc_matching::durable_tests::matching_rpc_manual_partition_update_rejected_while_scaler_enabled ... ok
+test grpc_matching::durable_tests::matching_rpc_native_partition_cache_controls_dispatch_rate_and_drained_admission ... ok
+test grpc_matching::durable_tests::matching_rpc_native_partition_cache_updates_refreshes_and_recovers ... ok
+test grpc_matching::durable_tests::matching_rpc_native_partition_concurrent_versions_and_fencing ... ok
+test grpc_matching::durable_tests::matching_rpc_non_durable_describe_lists_pollers_per_task_list_and_type ... ok
+test grpc_matching::durable_tests::matching_rpc_non_durable_describe_reports_isolation_group_metrics ... ok
+test grpc_matching::durable_tests::matching_rpc_non_durable_describe_reports_poller_rate ... ok
+test grpc_matching::durable_tests::matching_rpc_non_durable_describe_reports_task_id_block_and_empty ... ignored, parity gap: non-durable status has no ack manager, so task_id_block and empty stay unset; Go derives both
+test grpc_matching::durable_tests::matching_rpc_partition_config_kind_gate_matches_go ... ok
+test grpc_matching::durable_tests::matching_rpc_partition_update_refreshes_remote_read_owner_and_ignores_write_only_owner ... ok
+test grpc_matching::durable_tests::matching_rpc_poll_auto_config_hint_matches_go_scoping ... ok
+test grpc_matching::durable_tests::matching_rpc_query_without_poller_waits_for_deadline ... ok
+test grpc_matching::durable_tests::matching_rpc_quotas_classify_shared_protocol_handlers_and_preserve_count_only_calls ... ok
+test grpc_matching::durable_tests::matching_rpc_remote_query_sync_match_error_falls_back_to_local_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_remote_query_sync_match_forwards_to_parent_and_returns_answer ... ok
+test grpc_matching::durable_tests::matching_rpc_report_limit_does_not_hold_the_admin_overlay ... ok
+test grpc_matching::durable_tests::matching_rpc_reports_arrival_qps_by_isolation_group ... ok
+test grpc_matching::durable_tests::matching_rpc_reports_load_balancer_hints_only_for_old_task_lists ... ok
+test grpc_matching::durable_tests::matching_rpc_scopes_partition_counts_to_task_list_and_type ... ok
+test grpc_matching::durable_tests::matching_rpc_semaphore_acquire_grants_and_reports_no_slot ... ok
+test grpc_matching::durable_tests::matching_rpc_semaphore_cancelled_context_is_internal_error ... ignored, parity gap: Rust maps only deadline-expired errors to InternalServiceError; cancellation is not observed. go/service/matching/handler/handler.go:550
+test grpc_matching::durable_tests::matching_rpc_semaphore_disabled_message_matches_go ... ok
+test grpc_matching::durable_tests::matching_rpc_semaphore_domain_not_found_matches_go ... ok
+test grpc_matching::durable_tests::matching_rpc_semaphore_expired_deadline_claims_no_slot ... ok
+test grpc_matching::durable_tests::matching_rpc_semaphore_identifier_errors_match_go_text ... ok
+test grpc_matching::durable_tests::matching_rpc_semaphore_owner_errors_match_go_text ... ok
+test grpc_matching::durable_tests::matching_rpc_semaphore_rejects_new_buckets_while_shutting_down ... ignored, parity gap: Rust ownership check has no shutdown branch; Go rejects with SemaphoreNotOwnedByHostError owned-by "not known" while shutting down. go/service/matching/handler/engine.go:1675
+test grpc_matching::durable_tests::matching_rpc_sql_semaphore_matches_go_unsupported_backend_error ... ok
+test grpc_matching::durable_tests::matching_rpc_standby_child_query_poll_receives_parent_query ... ok
+test grpc_matching::durable_tests::matching_rpc_standby_completes_started_tasks_without_worker_poll ... ok
+test grpc_matching::durable_tests::matching_rpc_standby_polls_leave_durable_backlog_unclaimed ... ok
+test grpc_matching::durable_tests::matching_rpc_sticky_partition_query_reaches_only_the_sticky_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_sticky_partition_query_without_any_sticky_poller_fails_fast ... ok
+test grpc_matching::durable_tests::matching_rpc_sticky_partition_query_without_parked_poller_never_forwards ... ok
+test grpc_matching::durable_tests::matching_rpc_sticky_task_list_requires_a_recent_poller ... ok
+test grpc_matching::durable_tests::matching_rpc_strong_query_rejects_a_worker_without_consistent_query ... ok
+test grpc_matching::durable_tests::matching_rpc_sync_forward_parent_other_error_does_not_count_throttle_metric ... ok
+test grpc_matching::durable_tests::matching_rpc_sync_forward_parent_service_busy_counts_throttle_metric ... ok
+test grpc_matching::durable_tests::matching_rpc_sync_offer_forward_sends_go_forwarder_fields_to_parent ... ok
+test grpc_matching::durable_tests::matching_rpc_sync_success_without_partition_metadata_does_not_persist ... ok
+test grpc_matching::durable_tests::matching_rpc_task_list_type_non_activity_maps_to_decision ... ok
+test grpc_matching::durable_tests::matching_rpc_two_partition_backlog_forward_finishes_child_without_parent_row ... ok
+test grpc_matching::durable_tests::matching_semaphore_domain_filter_and_ring_admission_precede_creation ... ok
+test grpc_matching::durable_tests::matching_thrift_has_no_partition_config_procedure ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_busy_parent_keeps_query_for_local_poller ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_expired_deadline_never_forwards ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_forwards_go_forwarder_fields_to_parent ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_parent_error_is_returned_without_local_wait ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_repeated_forwards_are_not_rate_limited ... ok
+test grpc_matching::query_forward_family_tests::query_forward_family_sticky_list_never_forwards_and_waits_for_local_poller ... ok
+test launcher::matching_http_listener_tests::configured_listener_uses_bind_policy ... ok
+test launcher::matching_http_listener_tests::history_outbound_selector_uses_last_unfiltered_global_value ... ok
+test launcher::matching_http_listener_tests::http_mutual_tls_and_permissive_round_trips ... ok
+test launcher::matching_http_listener_tests::rejects_invalid_configuration_and_detects_enabled_tls ... ok
+test launcher::matching_http_listener_tests::tls_handshake_timeout_is_injectable ... ok
+test launcher::matching_http_listener_tests::validates_tls_mode_and_certificate_configuration ... ok
+test matching_blocking::tests::blocking_store_wait_keeps_timer_live_and_orders_shutdown ... ok
+test matching_config::tests::activity_sync_match_wait_defaults_to_go_50ms ... ok
+test matching_config::tests::configured_values_override_defaults ... ok
+test matching_config::tests::go_defaults_when_unset ... ok
+test matching_config::tests::non_activity_task_list_type_maps_to_decision ... ok
+test matching_config::tests::wrong_type_falls_back_to_default ... ok
+test matching_dispatch::tests::matching_accepted_backlog_second_hop_keeps_source_domain ... ok
+test matching_dispatch::tests::matching_backlog_forward_remote_fields_busy_and_rate_limit ... ok
+test matching_dispatch::tests::matching_backlog_offer_prefers_local_poller_before_forwarding ... ok
+test matching_dispatch::tests::matching_dispatch_background_timeout_unregisters_wait_before_next_task ... ok
+test matching_dispatch::tests::matching_dispatch_cancelled_poll_rewrites_claim_before_worker_exits ... ok
+test matching_dispatch::tests::matching_dispatch_empty_long_poll_expires_without_delivery ... ok
+test matching_dispatch::tests::matching_dispatch_empty_wait_does_not_refresh_liveness_repeatedly ... ok
+test matching_dispatch::tests::matching_dispatch_non_blocking_poll_with_no_tasks_returns_immediately ... ok
+test matching_dispatch::tests::matching_dispatch_poller_wait_ends_before_history_and_restarts_after_failure ... ok
+test matching_dispatch::tests::matching_dispatch_records_poll_events_from_claimed_task_and_real_poll_context ... ok
+test matching_dispatch::tests::matching_dispatch_sync_offer_delivers_without_durable_claim ... ok
+test matching_dispatch::tests::matching_dispatch_transient_failure_rewrites_before_successful_redelivery ... ok
+test matching_dispatch::tests::matching_dispatch_typed_terminal_error_drops_without_rewrite ... ok
+test matching_dispatch::tests::matching_dispatch_writer_rewrite_retries_sql_before_acknowledging_original ... ok
+test matching_dispatch::tests::matching_failover_keeps_local_history_delivery_after_end_poll ... ok
+test matching_dispatch::tests::matching_failover_releases_active_forward_resolver_and_poller_registration ... ok
+test matching_dispatch::tests::matching_forward_activity_task_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_decision_task_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_poll_for_activity_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_poll_for_decision_fields_match_go_forwarder ... ok
+test matching_dispatch::tests::matching_forward_task_error_is_no_parent_or_task_list_kind ... ok
+test matching_dispatch::tests::matching_forward_task_rate_exceeded_after_two_forwards ... ok
+test matching_dispatch::tests::matching_forwarded_poll_rebuilds_parent_request ... ok
+test matching_dispatch::tests::matching_isolation_remote_sync_match_blocking_waits_for_root_poller ... ok
+test matching_dispatch::tests::matching_isolation_remote_sync_match_forwards_to_root_poller ... ok
+test matching_dispatch::tests::matching_remote_forward_reaches_go_yarpc_peer ... ok
+test matching_dispatch::tests::matching_remote_sync_match_blocking_waits_for_root_poller ... ok
+test matching_dispatch::tests::matching_remote_sync_match_forwards_to_root_poller ... ok
+test matching_dispatch::tests::matching_standby_query_failover_cancels_each_forward_wait ... ok
+test matching_dispatch::tests::matching_standby_query_failover_releases_wait_and_refreshes_for_next_poll ... ok
+test matching_dispatch::tests::matching_standby_query_poll_forwards_to_parent_without_claiming_backlog ... ok
+test matching_dispatch::tests::matching_sync_match_failure_reports_busy_without_matching ... ok
+test matching_dispatch::tests::queue_status_maps_throttling_to_service_busy_and_other_errors_to_internal ... ok
+test matching_domain_cache::tests::cache_misses_read_through_and_can_retry_after_domain_appears ... ok
+test matching_domain_cache::tests::cache_retains_independent_config_failover_versions_and_raw_nested_blobs ... ok
+test matching_domain_cache::tests::callback_catch_up_serializes_with_refresh_publication ... ok
+test matching_domain_cache::tests::catch_up_registration_observes_current_entries_after_callbacks_are_installed ... ok
+test matching_domain_cache::tests::duplicate_callback_registration_replaces_pair_and_refresh_pairs_prepare_with_change ... ok
+test matching_domain_cache::tests::failed_later_page_preserves_old_snapshot_and_retry_refreshes ... ok
+test matching_domain_cache::tests::joining_worker_from_its_own_thread_detaches_instead_of_panicking ... ok
+test matching_domain_cache::tests::lifecycle_start_stop_is_idempotent_and_stops_owned_worker ... ok
+test matching_domain_cache::tests::malformed_typed_domain_config_fails_cache_miss_without_loading_entry ... ok
+test matching_domain_cache::tests::metadata_first_pages_of_two_hundred_and_notification_cutoff_match_go_scan ... ok
+test matching_domain_cache::tests::mysql_persistence_timeouts_are_transient_for_domain_refresh ... ok
+test matching_domain_cache::tests::page_calls_inherit_remaining_metadata_refresh_deadline ... ok
+test matching_domain_cache::tests::production_source_uses_only_the_selected_sqlite_default_store ... ok
+test matching_domain_cache::tests::refresh_is_throttled_for_one_second_after_success_but_not_after_failure ... ok
+test matching_domain_cache::tests::retry_expiration_below_initial_interval_returns_previous_attempt_error ... ok
+test matching_domain_cache::tests::retryable_refresh_error_retries_and_returns_previous_error_if_retry_fails ... ok
+test matching_domain_cache::tests::sqlite_timeout_errors_follow_go_sql_error_conversion_retryability ... ok
+test matching_domain_cache::tests::trace_matches_pinned_go_domain_cache_scan_update_callback_error_and_misses ... ok
+test matching_domain_cache::tests::typed_domain_config_error_during_refresh_keeps_raw_cache_snapshot ... ok
+test matching_dyncfg_defaults_tests::reader_defaults_match_go_table ... ok
+test matching_dyncfg_defaults_tests::shared_default_constants_match_go ... ok
+test matching_dyncfg_defaults_tests::shutdown_drain_duration_defaults_to_zero ... ok
+test matching_fault_injection::tests::client_injection_skips_forwarding_for_busy_and_always_returns_fake ... ok
+test matching_fault_injection::tests::fake_error_selection_and_forwarding_follow_go ... ok
+test matching_fault_injection::tests::persistence_errors_map_to_retry_classes ... ok
+test matching_fault_injection::tests::task_store_injection_has_startup_grace_zero_rate_passthrough_and_always_errors ... ok
+test matching_forward::tests::matching_forward_classifies_service_busy_only ... ok
+test matching_forward::tests::matching_forward_config_update_resizes_generation ... ok
+test matching_forward::tests::matching_forward_max_outstanding_concurrency ... ok
+test matching_forward::tests::matching_forward_rate_refreshes_on_five_second_boundary ... ok
+test matching_forward::tests::matching_forward_tokens_replace_generation_without_inflation ... ok
+test matching_history::tests::caller_deadline_drops_the_redirect_rpc_future ... ok
+test matching_history::tests::history_caller_deadline_bounds_all_resource_retries ... ok
+test matching_history::tests::history_factory_deadline_error_is_not_retryable_by_resource_wrapper ... ok
+test matching_history::tests::history_metrics_do_not_count_an_unpolled_future ... ok
+test matching_history::tests::history_metrics_record_a_polled_cancellation_as_failure ... ok
+test matching_history::tests::history_metrics_record_deadline_as_failure ... ok
+test matching_history::tests::history_metrics_record_one_outer_call_with_go_names_and_tags ... ok
+test matching_history::tests::history_metrics_record_typed_error_as_failure ... ok
+test matching_history::tests::history_rpc_boundary_uses_caller_deadline_for_query_and_task_start_calls ... ok
+test matching_history::tests::history_rpc_timeout_resets_for_each_resource_retry ... ok
+test matching_history::tests::history_service_retry_classifier_matches_go_transient_and_terminal_cases ... ok
+test matching_history::tests::matching_history_record_started_timeout_reads_live_per_domain ... ok
+test matching_history::tests::matching_history_redirects_between_two_tonic_peers_on_typed_owner_loss ... ok
+test matching_history::tests::matching_history_retries_preserve_request_id_and_yarpc_metadata ... ok
+test matching_history::tests::matching_history_retry_classification_requires_cadence_error_type ... ok
+test matching_history::tests::matching_history_terminal_errors_and_cancellation_stop_retries ... ok
+test matching_history::tests::ownership_loss_decoder_obeys_go_status_and_first_detail_mapping ... ok
+test matching_history::tests::record_started_redirects_share_one_attempt_budget ... ok
+test matching_history::tests::record_started_retries_stop_at_caller_deadline ... ok
+test matching_history::tests::tchannel_redirect_uses_owner_endpoint_and_preserves_operation_deadline ... ok
+test matching_history_membership::tests::filters_go_reachable_history_members_and_maps_identity_and_grpc ... ok
+test matching_history_membership::tests::go_port_and_split_host_port_edge_cases_are_preserved ... ok
+test matching_history_membership::tests::grpc_has_no_address_port_fallback ... ok
+test matching_history_membership::tests::history_named_transports_come_from_the_same_ringpop_snapshot ... ok
+test matching_history_membership::tests::reads_membership_snapshot_again_after_member_changes ... ok
+test matching_history_peer_resolver::tests::address_redirect_and_all_members_use_selected_named_endpoint ... ok
+test matching_history_peer_resolver::tests::matching_history_placement_matches_accepted_go_peer_oracle ... ok
+test matching_history_peer_resolver::tests::shard_key_matches_go_rune_replacement_for_invalid_scalar ... ok
+test matching_history_peer_resolver::tests::two_peer_placement_refresh_and_owner_redirect_use_current_membership ... ok
+test matching_history_peer_resolver::tests::workflow_and_domain_share_go_hash_and_rune_shard_lookup ... ok
+test matching_history_tchannel::typed_codec_tests::describe_response_encodes_matching_decision_and_activity_fields ... ok
+test matching_history_tchannel::typed_codec_tests::describe_workflow_request_maps_query_consistency_enum_offset ... ok
+test matching_history_tchannel::typed_codec_tests::empty_container_types_survive_tchannel_codec_round_trip ... ok
+test matching_history_tchannel::typed_codec_tests::generated_go_history_server_accepts_native_tchannel_calls ... ignored, mixed Go/Rust wire gate; requires CADENCE_HISTORY_PEER_BIN
+test matching_history_tchannel::typed_codec_tests::go_history_tchannel_wire_oracle_consumes_reviewed_fixture ... ignored, enable after the pinned Go wire oracle output is generated and reviewed
+test matching_history_tchannel::typed_codec_tests::history_application_errors_keep_retry_and_redirect_details ... ok
+test matching_history_tchannel::typed_codec_tests::mutable_state_response_round_trips_all_used_schema_fields ... ok
+test matching_history_tchannel::typed_codec_tests::mutable_state_schema_preserves_go_zero_and_enum_mapping ... ok
+test matching_history_tchannel::typed_codec_tests::native_tchannel_peer_exercises_all_five_history_methods_and_wrappers ... ok
+test matching_history_tchannel::typed_codec_tests::refresh_workflow_tasks_matches_nested_thrift_request_fixture ... ok
+test matching_history_tchannel::typed_codec_tests::version_histories_uses_pinned_shared_thrift_ids_and_container_types ... ok
+test matching_host_limiter::tests::domain_limit_falls_back_to_global_when_not_positive ... ok
+test matching_host_limiter::tests::domain_token_is_returned_when_global_denies ... ok
+test matching_host_limiter::tests::global_burst_is_ceil_rps_then_denies ... ok
+test matching_host_limiter::tests::positive_domain_limit_is_enforced_per_domain ... ok
+test matching_host_limiter::tests::rps_change_applies_after_ttl ... ok
+test matching_host_limiter::tests::tokens_refill_with_time ... ok
+test matching_host_limiter::tests::zero_rps_denies_everything ... ok
+test matching_limiter::tests::cancelled_wait_restores_reserved_token ... ok
+test matching_limiter::tests::default_limit_and_report_divide_by_partitions ... ok
+test matching_limiter::tests::ratelimit_matrix_canceling_no_deadline_while_waiting_returns_stopped ... ok
+test matching_limiter::tests::ratelimit_matrix_canceling_while_waiting_with_deadline_stops_and_returns_unused_tokens ... ok
+test matching_limiter::tests::ratelimit_matrix_insufficient_deadline_stops_immediately ... ok
+test matching_limiter::tests::ratelimit_matrix_no_deadline_returns_immediately_if_available ... ok
+test matching_limiter::tests::ratelimit_matrix_no_deadline_waits_until_available ... ok
+test matching_limiter::tests::ratelimit_matrix_returns_immediately_if_canceled ... ok
+test matching_limiter::tests::ratelimit_matrix_sufficient_deadline_returns_immediately_if_available ... ok
+test matching_limiter::tests::ratelimit_matrix_sufficient_deadline_waits ... ok
+test matching_limiter::tests::report_divides_by_live_partition_count ... ok
+test matching_limiter::tests::report_limit_returns_go_rate_gauge_updates ... ok
+test matching_limiter::tests::stopped_signal_prevents_consuming_a_token ... ok
+test matching_limiter::tests::wait_paces_after_terminal_burst_until_tokens_replenish ... ok
+test matching_limiter::tests::zero_burst_reports_throttled_without_consuming ... ok
+test matching_membership::go_membership_port_tests::go_diff_cases_report_change_only_for_address_set_differences ... ok
+test matching_membership::go_membership_port_tests::go_hashring_view_identifier_matches_go_emit_vectors ... ok
+test matching_membership::go_membership_port_tests::go_lookup_and_refresh_race_never_observes_missing_owner ... ok
+test matching_membership::go_membership_port_tests::go_lookup_routes_key_on_two_member_ring ... ok
+test matching_membership::go_membership_port_tests::go_member_count_tracks_replaced_ring_hosts ... ok
+test matching_membership::go_membership_port_tests::go_subscribers_wake_only_when_placement_addresses_change ... ok
+test matching_membership::lookup_error_parity_tests::empty_ring_ownership_errors_wrap_lookup_failure_like_go_engine ... ok
+test matching_membership::metric_parity_tests::changed_ring_view_uses_go_gauge_scope_once ... ok
+test matching_membership::metric_parity_tests::missing_address_uses_go_resolver_scope ... ok
+test matching_membership::tests::matching_membership_reuses_channels_and_evicts_removed_endpoints ... ok
+test matching_membership::tests::matching_membership_typed_errors_and_atomic_notifications ... ok
+test matching_membership_lifecycle::tests::cancelled_teardown_keeps_provider_stop_running ... ok
+test matching_membership_lifecycle::tests::cancelled_withdrawal_keeps_owned_eviction_running ... ok
+test grpc_matching::durable_tests::matching_rpc_adaptive_scaler_upscales_write_partitions_on_load ... ok
+test matching_membership_lifecycle::tests::dropping_lifecycle_aborts_a_stuck_snapshot_worker ... ok
+test matching_membership_lifecycle::tests::failed_and_unchanged_snapshots_preserve_go_refresh_timestamp ... ok
+test matching_membership_lifecycle::tests::failed_owner_lookup_asks_provider_to_refresh ... ok
+test matching_membership_lifecycle::tests::hint_inside_min_refresh_waits_for_two_second_ticker ... ok
+test matching_membership_lifecycle::tests::initial_snapshot_maps_role_status_identity_and_endpoint ... ok
+test matching_membership_lifecycle::tests::mapping_matches_go_port_and_identity_boundaries ... ok
+test matching_membership_lifecycle::tests::closed_event_stream_keeps_periodic_refresh_alive ... ok
+test matching_membership_lifecycle::tests::shutdown_self_evicts_before_stop_and_clears_placement ... ok
+test matching_membership_lifecycle::tests::startup_failures_stop_provider_and_start_is_idempotent ... ok
+test matching_partition::tests::matching_native_partition_updates_match_original_go_fixtures ... ok
+test matching_partition::tests::update_partition_config_cases_match_go_task_list_manager_test ... ok
+test matching_peer_provider::named_port_tests::malformed_present_tchannel_label_does_not_use_address_fallback ... ok
+test matching_peer_provider::named_port_tests::role_filter_and_named_ports_preserve_legacy_tchannel_fallback ... ok
+test matching_persistence::list_domain_metric_tests::empty_list_domains_emits_go_empty_count_and_envelope_payload ... ok
+test matching_persistence::list_domain_metric_tests::list_domains_byte_size_matches_go_metered_test_vector ... ok
+test matching_persistence_limiter::metered_task_tests::domain_wrapper_calls_use_overall_family_with_task_category_none ... ok
+test matching_persistence_limiter::metered_task_tests::empty_rows_and_host_latency_follow_go_metered_wrapper ... ok
+test matching_persistence_limiter::metered_task_tests::is_retry_tag_follows_go_retry_count_context ... ok
+test matching_persistence_limiter::metered_task_tests::manual_latency_histogram_is_opt_in_and_operation_tagged ... ok
+test matching_persistence_limiter::metered_task_tests::non_empty_list_emits_row_size_and_db_unavailable_and_bad_request_classes ... ok
+test matching_persistence_limiter::metered_task_tests::per_domain_task_calls_emit_go_rollups ... ok
+test matching_persistence_limiter::metered_task_tests::success_and_condition_failure_use_go_names_and_tags ... ok
+test matching_persistence_limiter::metered_task_tests::task_domain_family_omits_task_category_and_preserves_unknown_domain ... ok
+test matching_persistence_limiter::tests::persistence_rate_is_shared_live_and_uses_per_member_global_cap ... ok
+test matching_persistence_limiter::tests::zero_global_qps_falls_back_to_go_host_default ... ok
+test matching_persistence_limiter::tests::zero_rate_at_resource_construction_leaves_the_store_unwrapped ... ok
+test matching_query::tests::cancelled_query_poll_removes_waiter_and_cannot_accept_an_offer ... ok
+test matching_query::tests::completing_an_unknown_task_reports_not_found ... ok
+test matching_query::tests::failed_query_reports_the_worker_message ... ok
+test matching_query::tests::internal_error_fails_the_waiting_query ... ok
+test matching_query::tests::matching_query_forward_slow_down_only_for_service_busy ... ok
+test matching_query::tests::matching_query_registration_drop_withdraws_cancelled_offer ... ok
+test matching_query::tests::offer_is_delivered_once_and_completed_by_task_id ... ok
+test matching_query::tests::query_feature_versions_validate_full_release_syntax ... ok
+test matching_query::tests::registered_query_is_offered_exactly_once_to_a_parked_poller ... ok
+test matching_query::tests::sticky_query_requires_a_configured_list_and_a_supported_client ... ok
+test matching_query::tests::strong_consistency_requires_a_supported_worker ... ok
+test matching_query::tests::strong_query_rejects_a_worker_without_consistent_query ... ok
+test matching_query::tests::sync_match_non_blocking_query_poll_returns_queued_query_once ... ok
+test matching_query::tests::sync_match_query_hands_off_to_parked_poller ... ok
+test matching_query::tests::sync_match_queued_query_is_returned_to_next ... ok
+test matching_query::tests::withdraw_removes_an_abandoned_offer ... ok
+test matching_reader::tests::go_get_tasks_batch_size_positive_values_pass_through ... ok
+test matching_reader::tests::go_get_tasks_batch_size_returns_raw_non_positive_values ... ignored, parity gap: Rust has no raw GetTasksBatchSize accessor. The read path substitutes DEFAULT_TASKS_BATCH_SIZE (1000) for 0 and -5, where Go's Config returns the raw 0 / -5
+test matching_reader::tests::matching_reader_ack_timer_rereads_backlog_without_append_signal ... ok
+test matching_reader::tests::matching_reader_batch_size_fallback_sizes_group_buffer_like_go ... ok
+test matching_reader::tests::matching_reader_cancelled_offer_withdraws_before_handoff ... ok
+test matching_reader::tests::matching_reader_cancelled_wait_does_not_steal_later_task ... ok
+test matching_reader::tests::matching_reader_counts_unknown_dispatch_errors_but_not_not_started ... ok
+test matching_reader::tests::matching_reader_dispatch_expiry_distinguishes_active_and_passive_heads ... ok
+test matching_reader::tests::matching_reader_dispatch_success_uses_known_or_default_group ... ok
+test matching_reader::tests::matching_reader_dispatch_timeout_without_poller_keeps_row_unacked ... ok
+test matching_reader::tests::matching_reader_dispatch_timeout_without_token_never_forwards_or_acks ... ok
+test matching_reader::tests::matching_reader_dispatches_new_task_to_waiting_poller_then_acks ... ok
+test matching_reader::tests::matching_reader_drops_row_that_expired_behind_dispatch_head ... ok
+test matching_reader::tests::matching_reader_forward_error_then_stop_releases_token_without_ack ... ok
+test matching_membership_lifecycle::tests::mutable_provider_updates_coalesce_and_failures_preserve_last_good ... ok
+test matching_reader::tests::matching_reader_forward_failure_keeps_durable_row_until_local_match ... ok
+test matching_reader::tests::matching_reader_forwards_backlog_and_completes_durable_row ... ok
+test matching_reader::tests::matching_reader_full_buffer_does_not_occupy_blocking_pool ... ok
+test matching_reader::tests::matching_reader_isolation_buffers_avoid_cross_group_head_blocking ... ok
+test matching_reader::tests::matching_reader_isolation_enabled_only_with_groups ... ok
+test matching_reader::tests::matching_reader_isolation_timeout_reselects_without_rewriting_storage ... ok
+test matching_reader::tests::matching_reader_local_head_start_does_not_forward ... ok
+test matching_reader::tests::matching_reader_local_poller_wins_after_forward_error ... ok
+test matching_reader::tests::matching_reader_misconfigured_isolation_group_dispatches_to_default ... ok
+test matching_reader::tests::matching_reader_one_forward_per_token_while_forward_is_in_flight ... ok
+test matching_reader::tests::matching_reader_prefetch_backpressure_and_stop_preserve_unacked_rows ... ok
+test matching_reader::tests::matching_reader_pump_falls_back_to_default_for_unknown_isolation_group ... ok
+test matching_reader::tests::matching_reader_read_level_advances_past_expired_rows_without_ack ... ok
+test matching_reader::tests::matching_reader_rendezvous_offer_waits_for_actual_acceptance ... ok
+test matching_reader::tests::matching_reader_reports_go_ack_backlog_gauge ... ok
+test matching_reader::tests::matching_reader_restored_backlog_has_forwarder_before_pump_starts ... ok
+test matching_reader::tests::matching_reader_retries_throttled_dispatch_without_acking ... ok
+test matching_reader::tests::matching_reader_stop_cancels_inflight_forward_without_ack ... ok
+test matching_reader::tests::matching_reader_stop_disconnects_waiting_poll_and_joins_empty_pump ... ok
+test matching_reader::tests::matching_reader_without_forward_token_waits_for_local_poller ... ok
+test matching_reader::tests::reader_live_properties_match_go_reads ... ok
+test matching_reader::tests::stop_joins_pump_blocked_on_buffered_task_without_poller ... ok
+test matching_reader::tests::stop_joins_pump_waiting_on_exhausted_dispatch_limiter ... ok
+test matching_registry::tests::ack_condition_failure_unloads_owner_without_stop_signal ... ok
+test matching_registry::tests::append_after_writer_stop_fails_without_persisting ... ok
+test matching_registry::tests::append_after_writer_stop_reports_stopped_and_stays_refused ... ok
+test matching_registry::tests::assigned_eligible_owner_unloads_when_local_processor_snapshot_is_lost ... ok
+test matching_registry::tests::concurrent_load_acquires_one_lease_and_isolates_task_types ... ok
+test matching_registry::tests::describe_by_domain_lists_loaded_root_without_config_or_pollers ... ok
+test matching_registry::tests::describe_by_domain_reports_partition_config_like_go ... ok
+test matching_registry::tests::describe_by_domain_reports_recent_pollers_like_go ... ok
+test matching_registry::tests::describe_lookup_does_not_refresh_liveness_but_append_does ... ok
+test matching_registry::tests::excluded_cached_owner_skips_ring_check_but_new_owner_does_not ... ok
+test matching_registry::tests::fatal_owner_wakeup_does_not_wait_for_ack_interval ... ok
+test matching_registry::tests::fenced_owner_does_not_prevent_other_queues_from_flushing ... ok
+test matching_registry::tests::has_poller_after_reports_outstanding_or_finished_pollers ... ok
+test matching_registry::tests::idle_check_unloads_only_after_full_ttl_without_activity ... ok
+test matching_registry::tests::idle_tick_runs_without_waiting_for_ack_deadline ... ok
+test matching_registry::tests::idle_unload_retains_unacknowledged_tasks_for_recovery ... ok
+test matching_registry::tests::liveness_event_loop_noop_keeps_marked_owner_loaded ... ok
+test matching_registry::tests::liveness_event_loop_shutdown_unloads_owner_at_ttl ... ok
+test matching_registry::tests::liveness_idle_pump_unloads_owner_between_ttl_and_one_and_a_half_ttl ... ok
+test matching_registry::tests::loaded_owner_reports_mocked_tracker_qps_after_arrivals ... ignored, parity gap: Go mocks the owner QPS tracker to return exactly 42.5; Rust's owner tracker is a wall-clock EMA with no injection seam
+test matching_registry::tests::loaded_owner_reports_zero_qps_before_arrivals ... ok
+test matching_registry::tests::maintenance_deadlines_are_per_owner_and_reset_after_update ... ok
+test matching_registry::tests::maintenance_persists_live_ack_and_shutdown_stops_handles ... ok
+test matching_registry::tests::maintenance_uses_live_tasklist_ack_interval_provider ... ok
+test matching_registry::tests::matching_idle_interval_is_sampled_for_each_owner_only_at_creation ... ok
+test matching_registry::tests::matching_membership_guards_creation_and_unloads_moved_owners ... ok
+test matching_registry::tests::refresh_partition_config_from_request_ignores_older_versions ... ok
+test matching_registry::tests::registration_notification_reschedules_empty_controller ... ok
+test matching_registry::tests::registry_filters_by_domain_and_exact_name_like_go ... ok
+test matching_registry::tests::registry_register_lookup_and_unregister_matches_go ... ok
+test matching_registry::tests::release_blocked_pollers_wakes_waiting_decision_poll ... ok
+test matching_registry::tests::replacement_can_load_before_old_cleanup_and_keeps_its_lease ... ok
+test matching_registry::tests::scaled_partition_from_response_reads_owner_describe_like_go ... ok
+test matching_registry::tests::shard_policy_accepts_local_assignment_and_rechecks_before_publish ... ok
+test matching_registry::tests::shutdown_joins_readers_with_one_blocking_worker ... ok
+test matching_registry::tests::shutdown_persists_ack_and_stops_previously_returned_handles ... ok
+test matching_registry::tests::shutdown_tolerates_lost_task_list_ownership ... ok
+test matching_registry::tests::shutdown_wakes_blocked_dispatcher ... ok
+test matching_registry::tests::slow_startup_does_not_block_loaded_owner_or_shutdown ... ok
+test matching_registry::tests::stale_teardown_cannot_remove_replacement_owner ... ok
+test matching_registry::tests::stopped_writer_is_replaced_without_waiting_for_ack_timer ... ok
+test matching_registry::tests::task_list_manager_gauge_tracks_registry_lifecycle_not_get_calls ... ok
+test matching_registry::tests::unload_notifies_registry_once_and_second_unload_is_noop ... ok
+test matching_registry::tests::writer_owner_closure_keeps_registry_key_and_observes_provider_updates ... ok
+test matching_ringpop_provider::tests::advertised_ip_score_matches_go_listen_ip_up_and_loopback_rules ... ok
+test matching_ringpop_provider::tests::broadcast_address_matches_go_parse_ip_and_string_rendering ... ok
+test matching_ringpop_provider::tests::go_del_swaps_and_removes_all_duplicate_addresses ... ok
+test matching_ringpop_provider::tests::go_healer_expected_trace_covers_probability_candidate_and_retry_edges ... ok
+test matching_ringpop_provider::tests::healer_probability_keeps_go_previous_host_floor_and_includes_local_reachability ... ok
+test matching_ringpop_provider::tests::local_label_update_publishes_an_accepted_membership_change ... ok
+test matching_ringpop_provider::tests::provider_snapshot_retains_other_roles_and_only_known_ports ... ok
+test matching_ringpop_provider::tests::stop_waits_for_active_healer_join_response ... ok
+test matching_ringpop_provider::tests::two_shared_tchannel_providers_discover_roles_and_self_evict ... ok
+test matching_runtime::tests::drain_flag_flips_after_evict_and_sleep_and_evict_errors_are_ignored ... ok
+test matching_runtime::tests::durable_runtime_joins_maintenance_and_flushes_on_shutdown ... ok
+test matching_runtime::tests::failover_callback_selection_matches_go_and_advances_baseline ... ok
+test matching_runtime::tests::installed_shard_ownership_check_bypasses_ring_for_cached_excluded_and_wraps_negative_percent ... ok
+test matching_runtime::tests::installed_shard_ownership_check_matches_notfound_shutdown_and_transient_errors ... ok
+test matching_runtime::tests::shutdown_drain_provider_reads_live_unfiltered_value ... ok
+test matching_runtime::tests::shutdown_drain_runs_membership_evictor_before_live_drain_read ... ok
+test matching_runtime::tests::shutdown_uses_drain_duration_updated_after_runtime_startup ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_clamp_malformed_minimum_write_partitions_to_one_on_downscale ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_isolation_aggregate_metrics_to_scale_down ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_isolation_aggregate_metrics_to_scale_up ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_isolation_error_calling_describe_is_no_op ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_isolation_scale_group_down ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_isolation_scale_group_up ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_isolation_scale_partitions_down ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_lifecycle_start_stop_is_idempotent ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_no_op ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_overload_but_no_fluctuation ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_overload_fluctuate ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_overload_start ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_overload_sustained ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_production_drain_describes_trailing_partitions ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_set_minimum_write_partitions_from_dynamic_config ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_underload_start ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_underload_sustained ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_underload_sustained_then_drain ... ok
+test matching_scaler::go_tests::matching_adaptive_scaler_underload_sustained_then_drain_require_empty ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_decrease_minimum_partitions ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_ensure_minimum_partitions ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_ensure_minimum_single_pass_keeps_donor ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_fewer_active_groups_than_isolation_groups_per_partition ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_fewer_groups_than_partitions ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_fewer_partitions_than_groups ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_immediate_scale_up_on_new_partition ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_immediate_scale_up_on_new_partition_multiple ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_increase_minimum_partitions ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_initial_balance ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_initial_balance_from_one_partition ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_initial_balance_from_one_partition_skewed ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_new_partition_increase_partitions_per_group ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_new_partition_move_groups ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_new_partition_move_groups_from_multiple_partitions ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_one_partition_minimum ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_poller_added_then_removed ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_pollers_added ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_pollers_removed ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_require_pollers ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_scale_down_multiple_groups ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_scale_down_multiple_partition ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_scale_down_single_partition ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_scale_down_single_partition_left ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_scale_up_multiple_groups ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_scale_up_multiple_partition ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_scale_up_single_partition ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_scale_up_then_down ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_single_group ... ok
+test matching_scaler::go_tests::matching_isolation_balancer_single_partition ... ok
+test matching_scaler::tests::matching_scaler_group_without_sustained_pollers_gets_no_partitions ... ok
+test matching_scaler::tests::matching_scaler_new_group_spreads_across_partitions ... ok
+test matching_scaler::tests::matching_scaler_read_drain_stops_at_first_live_partition ... ok
+test matching_scaler::tests::matching_scaler_single_partition_with_groups_resets_assignments ... ok
+test matching_scaler::tests::matching_scaler_sustain_holds_for_the_full_duration ... ok
+test matching_scaler::tests::matching_scaler_write_count_uses_sustained_thresholds ... ok
+test matching_scaler::tests::matching_scaler_write_map_rebuilds_dense_preserving_groups ... ok
+test matching_semaphore::parity_tests::matching_semaphore_acquire_before_bucket_usable ... ok
+test matching_semaphore::parity_tests::matching_semaphore_acquire_honors_deadline_while_starting ... ok
+test matching_semaphore::parity_tests::matching_semaphore_acquire_passes_through_grant_result ... ok
+test matching_semaphore::parity_tests::matching_semaphore_acquire_refreshes_idle_time ... ok
+test matching_semaphore::parity_tests::matching_semaphore_acquire_surfaces_failed_grant ... ok
+test matching_semaphore::parity_tests::matching_semaphore_already_held_without_token_is_internal_error ... ok
+test matching_semaphore::parity_tests::matching_semaphore_concurrent_grants_are_distinct ... ok
+test matching_semaphore::parity_tests::matching_semaphore_confirming_read_failure_is_preserved ... ok
+test matching_semaphore::parity_tests::matching_semaphore_drop_stale_hold_only_returns_proven_free_slot ... ok
+test matching_semaphore::parity_tests::matching_semaphore_failed_load_unregisters_and_allows_fresh_retry ... ok
+test matching_semaphore::parity_tests::matching_semaphore_failed_writes_do_not_drain_free_set ... ok
+test matching_semaphore::parity_tests::matching_semaphore_free_set_survives_concurrent_reserve_unreserve ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_gives_up_after_max_attempts ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_on_free_slot_records_request_and_hold ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_rejects_unknown_write_outcome ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_retries_different_slot_when_taken ... ok
+test matching_semaphore::parity_tests::matching_semaphore_grant_stops_retrying_at_deadline ... ok
+test matching_semaphore::parity_tests::matching_semaphore_late_stop_leaves_replacement_registered ... ok
+test matching_semaphore::parity_tests::matching_semaphore_late_stop_unregisters_only_itself ... ok
+test matching_semaphore::parity_tests::matching_semaphore_lifecycle_under_concurrent_grants ... ok
+test matching_semaphore::parity_tests::matching_semaphore_new_manager_validates_params ... ignored, parity gap: Rust Manager::new clamps invalid TTL and lacks Go parameter validation. Go go/service/matching/semaphore/semaphore_manager_test.go:136
+test matching_semaphore::parity_tests::matching_semaphore_scan_failure_leaves_indexes_untouched ... ok
+test matching_semaphore::parity_tests::matching_semaphore_scan_skips_nil_and_unknown_rows ... ok
+test matching_semaphore::parity_tests::matching_semaphore_scan_threads_page_tokens ... ignored, parity gap: scan returns Vec without page tokens; cannot assert page threading. Go go/service/matching/semaphore/semaphore_manager_test.go:180
+test matching_semaphore::parity_tests::matching_semaphore_second_start_does_not_wait_for_scan ... ok
+test matching_semaphore::parity_tests::matching_semaphore_second_start_is_noop ... ok
+test matching_semaphore::parity_tests::matching_semaphore_stale_reverse_index_free_taken_and_missing ... ok
+test matching_semaphore::parity_tests::matching_semaphore_start_builds_free_and_held_indexes ... ok
+test matching_semaphore::parity_tests::matching_semaphore_start_excludes_owner_claim_even_when_token_is_free ... ok
+test matching_semaphore::parity_tests::matching_semaphore_start_skips_malformed_known_rows ... ok
+test matching_semaphore::parity_tests::matching_semaphore_write_already_held_returns_reserved_slot ... ok
+test matching_semaphore::tests::matching_semaphore_all_managers_is_a_snapshot ... ok
+test matching_semaphore::tests::matching_semaphore_concurrent_callers_share_one_manager ... ok
+test matching_semaphore::tests::matching_semaphore_confirm_hold_drops_stale_index_entry ... ok
+test matching_semaphore::tests::matching_semaphore_grants_until_full_then_reports_no_slot ... ok
+test matching_semaphore::tests::matching_semaphore_identifier_is_usable_as_a_map_key ... ok
+test matching_semaphore::tests::matching_semaphore_identifier_matches_go_validation ... ok
+test matching_semaphore::tests::matching_semaphore_load_rebuilds_index_from_persisted_holds ... ok
+test matching_semaphore::tests::matching_semaphore_missing_semaphore_is_not_ready_after_scan ... ok
+test matching_semaphore::tests::matching_semaphore_registry_register_lookup_and_unregister ... ok
+test matching_semaphore::tests::matching_semaphore_registry_shares_one_manager_per_bucket ... ok
+test matching_semaphore::tests::matching_semaphore_rejects_empty_owner_without_touching_free_set ... ok
+test matching_semaphore::tests::matching_semaphore_ring_key_separates_buckets ... ok
+test matching_semaphore::tests::matching_semaphore_sweep_unloads_idle_buckets ... ok
+test matching_semaphore::tests::matching_semaphore_unregister_ignores_a_stale_manager ... ok
+test matching_semaphore::tests::matching_semaphore_unreserve_is_idempotent ... ok
+test matching_shard_distributor::tests::executor_shutdown_before_start_is_terminal ... ok
+test matching_shard_distributor::tests::go_executor_ttl_and_jitter_boundaries_are_preserved ... ok
+test matching_reader::tests::matching_reader_forward_errors_retry_only_after_two_second_child_context ... ok
+test matching_shard_distributor::tests::pinned_executor_heartbeat_assignment_and_drain_contract ... ok
+test matching_shard_distributor::tests::spectator_fake_tonic_peer_covers_snapshot_fallback_and_terminal_shutdown ... ok
+test matching_shard_distributor::tests::spectator_shutdown_before_start_is_terminal_and_wakes_waiters ... ok
+test matching_shard_distributor::tests::spectator_waits_for_initial_snapshot_and_returns_cached_owner ... ok
+test matching_shard_distributor::tests::spectator_initial_snapshot_wait_obeys_caller_deadline ... ok
+test matching_shard_processor::tests::shard_processor_factory_rejects_empty_shard_key ... ok
+test matching_shard_processor::tests::shard_processor_initial_report_is_ready_with_zero_load ... ok
+test matching_shard_processor::tests::shard_processor_set_status_is_reflected_in_report ... ok
+test matching_shard_processor::tests::report_has_strict_ttl_and_recomputes_qps_after_original_deadline ... ok
+test matching_shard_routing::metric_parity_tests::failed_ring_lookup_still_records_go_routing_dimensions ... ok
+test matching_shard_routing::tests::eligible_route_uses_spectator_and_parses_named_ports_and_ipv6 ... ok
+test matching_shard_routing::tests::empty_ring_returns_typed_hash_ring_error ... ok
+test matching_shard_routing::tests::excluded_and_missing_spectator_routes_use_live_ring_snapshot ... ok
+test matching_shard_routing::tests::go_farmhash_percentage_and_uuid_exclusion_vectors ... ok
+test matching_shard_routing::tests::invalid_ports_are_omitted_and_tchannel_address_defaults_to_zero ... ok
+test matching_shard_routing::tests::lookup_n_and_address_conversion_always_delegate_to_ring ... ok
+test matching_shard_routing::tests::policy_is_read_per_lookup_and_uuid_exclusion_precedes_spectator ... ok
+test matching_shard_routing::tests::spectator_errors_and_missing_host_ip_do_not_fall_back ... ok
+test matching_shard_processor::tests::start_is_noop_and_stop_is_exact_name_across_domain_and_type ... ok
+test matching_shard_routing::tests::spectator_peer_cache_refreshes_use_and_evicts_at_ttl ... ok
+test matching_standby::tests::go_activity_not_started_when_pending_scheduled ... ok
+test matching_standby::tests::go_complete_activity_no_matching_pending_activity ... ok
+test matching_standby::tests::go_complete_activity_started ... ok
+test matching_standby::tests::go_complete_decision_equal_and_started ... ok
+test matching_standby::tests::go_complete_decision_no_pending_decision ... ok
+test matching_standby::tests::go_complete_decision_schedule_less_than_pending ... ok
+test matching_standby::tests::go_complete_task_workflow_closed ... ok
+test matching_standby::tests::go_activity_not_started_is_not_completed ... ok
+test matching_standby::tests::go_decision_not_started_when_same_schedule_id_not_started ... ok
+test matching_standby::tests::go_decision_not_started_when_schedule_id_greater_than_pending ... ok
+test matching_standby::tests::go_domain_active_is_not_completed ... ok
+test matching_standby::tests::go_error_no_workflow_execution_info ... ok
+test matching_standby::tests::go_error_task_type_not_supported ... ok
+test matching_standby::tests::go_missing_execution_older_than_24h_completes ... ok
+test matching_standby::tests::go_missing_execution_result_older_than_24h_completes ... ok
+test matching_standby::tests::go_decision_not_started_is_not_completed ... ok
+test matching_standby::tests::go_missing_execution_younger_than_24h_waits ... ok
+test matching_standby::tests::go_young_missing_execution_counts_completion_failure ... ok
+test matching_standby::tests::go_young_missing_execution_returns_wait_error ... ok
+test matching_standby::tests::matching_standby_original_go_completion_decisions ... ok
+test matching_standby::tests::standby_activity_requires_started_or_absent_activity ... ok
+test matching_standby::tests::standby_cancelled_checker_counts_one_completion_failure ... ok
+test matching_standby::tests::standby_completion_failure_excludes_not_started_but_counts_young_missing ... ok
+test matching_standby::tests::standby_decision_uses_schedule_order_and_started_state ... ok
+test matching_sync::tests::sync_match_cancellation_and_history_failure_allow_persistence_fallback ... ok
+test matching_sync::tests::sync_match_child_context_preserves_parent_tailroom ... ok
+test matching_sync::tests::sync_match_does_not_deliver_to_other_or_unknown_groups ... ok
+test matching_sync::tests::sync_match_invalid_isolation_group_poll_falls_back_to_default_group ... ok
+test matching_sync::tests::sync_match_isolation_group_hands_off_within_its_group ... ok
+test matching_sync::tests::sync_match_isolation_group_mismatch_does_not_match ... ok
+test matching_sync::tests::sync_match_isolation_queued_offer_is_returned_to_its_group ... ok
+test matching_sync::tests::sync_match_local_match_hands_off_to_waiting_poller ... ok
+test matching_sync::tests::sync_match_local_timeout_reports_no_match_when_poller_finishes_late ... ok
+test matching_sync::tests::sync_match_non_blocking_isolated_poll_returns_queued_offer_without_waiting ... ok
+test matching_sync::tests::sync_match_non_blocking_poll_returns_queued_offer_without_waiting ... ok
+test matching_sync::tests::sync_match_offer_deadline_before_poll_withdraws_offer ... ok
+test matching_sync::tests::sync_match_offer_without_waiting_poller_is_not_queued ... ok
+test matching_sync::tests::sync_match_poll_after_stop_returns_no_task ... ok
+test matching_sync::tests::sync_match_preserves_only_the_transient_forwarded_request_signal ... ok
+test matching_sync::tests::sync_match_queued_offer_is_returned_to_poll ... ok
+test matching_sync::tests::sync_match_stop_while_parked_releases_poller_without_task ... ok
+test matching_sync::tests::sync_match_waits_for_history_completion_and_preserves_original_metadata ... ok
+test matching_sync::tests::sync_match_zero_local_wait_hands_off_to_waiting_poller ... ok
+test matching_sync::tests::sync_match_zero_wait_claims_registered_poller_and_timeouts_withdraw_offers ... ok
+test matching_task_info_log::tests::info_requires_debug_mode_and_domain_id_flag_otherwise_dropped ... ok
+test matching_task_store::tests::cassandra_config_ignores_disabled_tls_and_rejects_unsupported_proto ... ok
+test matching_task_store::tests::cassandra_config_maps_go_options ... ok
+test matching_task_store::tests::configured_default_store_applies_go_sqlite_defaults ... ok
+test matching_task_store::tests::configured_default_store_keeps_go_sqlite_writer_options ... ok
+test matching_task_store::tests::configured_sql_shards_validate_go_endpoint_count_and_endpoint_fields ... ok
+test matching_task_store::tests::explicit_production_config_wins_over_data_dir_but_embedded_mode_keeps_it ... ok
+test matching_task_store::tests::rejects_unimplemented_persistence_shapes_and_attributes ... ok
+test matching_throttled_logger::tests::default_rate_starts_with_twenty_tokens_and_is_shared_by_both_polls ... ok
+test matching_throttled_logger::tests::zero_rate_blocks_initial_logs_and_new_rate_is_sampled_only_after_five_seconds ... ok
+test matching_writer::tests::matching_writer_batches_follow_live_dynamic_config_without_recreation ... ok
+test matching_writer::tests::matching_writer_cancelled_caller_does_not_withdraw_durable_append ... ok
+test matching_writer::tests::matching_writer_enqueue_and_response_timeouts_are_distinct ... ok
+test matching_writer::tests::matching_writer_original_go_batches ... ok
+test matching_writer::tests::matching_writer_resamples_live_append_timeout_for_saturated_enqueues ... ok
+test matching_writer::tests::matching_writer_rewrite_retry_uses_original_go_outcomes ... ok
+test matching_standby::tests::go_missing_execution_younger_than_24h_is_not_completed ... ok
+test matching_writer::tests::matching_writer_zero_capacity_times_out_unaccepted_and_keeps_accepted_write_on_stop ... ok
+test matching_writer::tests::zero_capacity_handoffs_are_fifo_and_never_overwrite_waiters ... ok
+test matching_writer::tests::zero_capacity_unaccepted_cancellation_removes_published_offer ... ok
+test ringpop_provider::tests::accepted_suspect_cascades_through_faulty_tombstone_and_eviction ... ok
+test matching_writer::tests::matching_writer_samples_signed_capacity_once_and_preserves_zero ... ok
+test ringpop_provider::tests::exponential_join_delayer_matches_go_window_and_cap ... ok
+test ringpop_provider::tests::exponential_join_delayer_matches_zero_and_negative_duration_edges ... ok
+test ringpop_provider::tests::go_duration_string_preserves_fractional_precision ... ok
+test ringpop_provider::tests::go_heal_partition_reincarnates_overriding_faulty_winner_before_merge ... ok
+test ringpop_provider::tests::handler_dispatches_only_registered_go_method_names_and_stop_preserves_ready ... ok
+test ringpop_provider::tests::indirect_ping_runs_helpers_concurrently_and_keeps_late_work_alive ... ok
+test ringpop_provider::tests::join_addjoinlist_matches_original_go_refutation_fixtures ... ok
+test ringpop_provider::tests::join_cluster_checks_success_before_deadline_and_keeps_negative_threshold ... ok
+test ringpop_provider::tests::join_cluster_deadline_is_strict_and_checked_after_each_group ... ok
+test ringpop_provider::tests::join_cluster_deadline_retains_partial_success ... ok
+test ringpop_provider::tests::join_cluster_discards_partial_success_when_destroyed_between_groups ... ok
+test ringpop_provider::tests::join_cluster_distinguishes_destroyed_from_stopped ... ok
+test ringpop_provider::tests::join_cluster_retry_sleep_yields_and_is_cancelled_on_drop ... ok
+test ringpop_provider::tests::join_group_drop_cancels_children_and_stop_blocks_late_merge ... ok
+test ringpop_provider::tests::join_group_waits_for_mixed_outcomes_and_merges_successful_membership ... ok
+test ringpop_provider::tests::join_rejects_unknown_app_self_join_and_malformed_body_with_pinned_messages ... ok
+test ringpop_provider::tests::join_returns_go_shaped_membership_and_checksum_without_setting_ready ... ok
+test ringpop_provider::tests::join_snapshot_preserves_member_labels_and_tombstone_wire_normalization ... ok
+test ringpop_provider::tests::original_go_handler_json_fixture_matches_join_and_ping_responses ... ok
+test ringpop_provider::tests::outbound_join_empty_nil_failure_malformed_and_deadline_leave_state_unchanged ... ok
+test ringpop_provider::tests::outbound_join_refutes_local_equal_and_newer_suspect_or_faulty_changes ... ok
+test ringpop_provider::tests::outbound_join_response_after_stop_is_not_applied ... ok
+test ringpop_provider::tests::outbound_ping_applies_only_decoded_response_and_bumps_only_successful_sends ... ok
+test ringpop_provider::tests::outbound_ping_req_merges_false_responses_and_bumps_only_failed_sends ... ok
+test ringpop_provider::tests::owned_timer_loop_applies_due_transition_and_cascades_eviction ... ok
+test ringpop_provider::tests::partition_heal_joins_two_live_protocol_peers_and_converges_membership ... ok
+test ringpop_provider::tests::ping_app_errors_match_ringpop_and_malformed_json_is_rejected ... ok
+test ringpop_provider::tests::ping_local_refutation_uses_injected_incarnation_in_response_and_full_state ... ok
+test ringpop_provider::tests::ping_req_direct_failures_do_not_advance_sender_or_merge_target_changes ... ok
+test ringpop_provider::tests::ping_req_empty_null_and_trailing_values_match_tchannel_json_decode ... ok
+test ringpop_provider::tests::ping_req_stopped_and_destroyed_nodes_still_relay_without_memberlist_updates ... ok
+test ringpop_provider::tests::ping_request_selection_excludes_local_target_and_dead_and_zero_still_selects_one ... ok
+test ringpop_provider::tests::ping_requires_readiness_then_merges_and_returns_receiver_checksum ... ok
+test ringpop_provider::tests::production_ping_req_handler_relays_direct_ping_and_returns_ping_response ... ok
+test ringpop_provider::tests::protocol_delay_matches_go_target_and_floor ... ok
+test ringpop_provider::tests::protocol_rate_uses_go_sample_percentile_and_minimum_floor ... ok
+test ringpop_provider::tests::receiver_full_sync_starts_reverse_join_and_converges_two_live_peers ... ok
+test ringpop_provider::tests::start_stop_restart_destroy_own_both_runtime_tasks_without_changing_ready ... ok
+test ringpop_runtime::tests::direct_success_does_not_launch_indirect_helpers ... ok
+test ringpop_runtime::tests::empty_indirect_pool_falls_through_to_suspect_for_nonzero_configuration ... ok
+test ringpop_runtime::tests::inconclusive_guard_uses_configured_size_not_sparse_helper_pool ... ok
+test ringpop_runtime::tests::indirect_positive_after_prior_helper_error_keeps_member_alive ... ok
+test ringpop_runtime::tests::stop_and_wait_finishes_inflight_probe_before_returning ... ok
+test ringpop_runtime::tests::stop_and_wait_is_cancel_safe_and_stop_before_start_disables_transitions ... ok
+test tchannel::tests::application_error_details_truncate_like_yarpc ... ok
+test tchannel::tests::checksum_algorithms_match_standard_reference_vectors ... ok
+test tchannel::tests::checksum_corruption_is_rejected ... ok
+test tchannel::tests::empty_argument_markers_and_fragment_boundaries_round_trip ... ok
+test tchannel::tests::matching_tchannel_dispatch_uses_reserved_cn_as_caller ... ok
+test tchannel::tests::truncated_lengths_fail_without_panicking ... ok
+test thrift_matching::tests::dedicated_http_listener_applies_configured_procedure_allowlist ... ok
+test thrift_matching::tests::dedicated_http_listener_enforces_tls_handshake ... ok
+test thrift_matching::tests::matching_inbound_metrics_count_native_and_thrift_dispatch_once_each ... ok
+test thrift_matching::tests::matching_thrift_exceptions_fill_required_fields_like_go_mapper ... ok
+test thrift_matching::tests::matching_thrift_forwarded_sync_miss_and_failed_query_use_go_exception_types ... ok
+test thrift_matching::tests::matching_thrift_preserves_nanos_and_internal_decision_field_ids ... ok
+test thrift_matching::tests::matching_thrift_task_list_omits_empty_base_name_like_go_mapper ... ok
+test thrift_matching::tests::matching_thrift_uses_each_methods_exception_field_ids ... ok
+test ringpop_provider::tests::alive_cancels_timer_and_stop_restart_does_not_restore_cleared_timer ... ok
+
+test result: ok. 654 passed; 0 failed; 13 ignored; 0 measured; 0 filtered out; finished in 25.37s
+
+     Running unittests src/main.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_matching-13a97eb51ef02cbc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_delivery.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_delivery-1ed2303b7379ed0f)
+
+running 1 test
+test matching_delivery_go_history ... ignored, requires original Go History; run tests/run-go-service-baseline.py --matching-delivery
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_engine_go_tests.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_engine_go_tests-c7199bb011027113)
+
+running 14 tests
+test cancel_outstanding_poll_invalid_tasklist_name_is_error ... ok
+test err_if_shard_ownership_lost_go_subtests_not_reproduced ... ignored, parity gap: Go errIfShardOwnershipLost is one engine method that a unit test calls with a mock executor, resolver, and shutdown channel; Rust ownership is the private closure shard_task_list_ownership_check in matching_runtime.rs, reachable only through a live shard distributor, so the 8 Go subtests (SD ProcessNotFound, nil process, shutdown, excluded owner changed/same, non-excluded UUID name) cannot run against production code from tests/
+test get_task_lists_by_domain_domain_cache_error_is_not_found ... ok
+test cancel_outstanding_poll_success ... ok
+test get_task_lists_by_domain_success_all_kinds_includes_sticky ... ok
+test get_task_lists_by_domain_success_reports_poller_identity ... ignored, parity gap: Go describes mock managers with scripted pollers (Identity "test-poller-decision0"); Rust describes queues whose poller history is only populated by live long-poll traffic, and no public seam injects poller identities
+test is_excluded_from_shard_distributor_go_cases ... ok
+test list_task_list_partitions_domain_cache_error_is_not_found ... ok
+test get_task_lists_by_domain_success_lists_normal_kinds ... ok
+test list_task_list_partitions_success_owner_hosts_match_go_lookups ... ignored, parity gap: Go resolves each partition owner through a scripted membership Lookup (addr0..addr3, with one lookup error yielding an empty owner); Rust resolves owners from the real hash ring, so the scripted owner names cannot be reproduced through the public API
+test list_task_list_partitions_invalid_tasklist_name_is_error ... ok
+test list_task_list_partitions_success_returns_root_then_write_partitions ... ok
+test respond_query_task_completed_query_task_not_found_is_error ... ok
+test respond_query_task_completed_success_delivers_answer_to_waiter ... ok
+
+test result: ok. 11 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/matching_engine_go_tests_b.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_engine_go_tests_b-5cf4ce81e6b39015)
+
+running 20 tests
+test get_tasklists_not_owned_returns_only_non_owned_managers ... ignored, parity gap: Go getNonOwnedTasklistsLocked returns the non-owned TaskListManagers; Rust QueueRegistry::unload_non_owned detaches them in place and returns Result<(), Status>, so the list is not observable. The ownership decision is asserted through the cache in shut_down_tasklists_not_owned_unloads_only_moved_owner
+test is_shutting_down_is_false_until_stop ... ignored, parity gap: Go isShuttingDown reads the engine's shutdown channel after Start/Stop on matchingEngineImpl; Rust MatchingRuntime::shutdown exposes no public shutting-down state to observe before and after
+test query_workflow_failed_to_dispatch_query_task_is_error ... ignored, parity gap: Go injects a DispatchQueryTask error through a gomock TaskListManager; Rust has no seam to fail dispatch, and a non-sticky query with no poller waits for the deadline instead of erroring
+test query_workflow_invalid_tasklist_name_is_error ... ok
+test query_workflow_sticky_worker_unavailable_is_error ... ok
+test query_workflow_success_reports_partition_config ... ok
+test query_workflow_success_returns_worker_answer ... ok
+test update_task_list_partition_config_invalid_tasklist_name_is_error ... ok
+test update_task_list_partition_config_manual_update_rejected_when_scaler_enabled ... ok
+test shut_down_tasklists_not_owned_unloads_only_moved_owner ... ok
+test update_task_list_partition_config_nil_partition_config_is_error ... ok
+test update_task_list_partition_config_non_root_partition_is_error ... ok
+test update_task_list_partition_config_sticky_kind_is_error ... ok
+test update_task_list_partition_config_tasklist_manager_error ... ignored, parity gap: Go injects a TaskListManager.UpdateTaskListPartitionConfig error through a gomock; Rust has no seam to make the durable partition update fail
+test wait_for_query_result_internal_error_is_passed_through ... ok
+test wait_for_query_result_query_task_failed ... ok
+test wait_for_query_result_strong_consistency_version_unsupported ... ok
+test wait_for_query_result_success_query_task_completed ... ok
+test wait_for_query_result_unknown_query_result_is_internal_error ... ok
+test update_task_list_partition_config_success ... ok
+
+test result: ok. 16 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/matching_engine_go_tests_c.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_engine_go_tests_c-3a2a9f44e828cf5b)
+
+running 20 tests
+test domain_change_callback_updates_failover_version_and_releases_eligible_pollers ... ignored, parity gap: Go domainChangeCallback is a matchingEngineImpl method that updates engine.failoverNotificationVersion and calls ReleaseBlockedPollers on each eligible mock manager; Rust folds the same logic into the private closure in matching_runtime.rs start_domain_cache, which exposes neither the version nor a released-poller count
+test refresh_task_list_partition_config_manager_error_is_propagated ... ignored, parity gap: Go injects an error through tasklist.MockManager.RefreshTaskListPartitionConfig; Rust refreshes the SQLite-durable queue registry directly, and no public seam injects a failure into that call
+test refresh_task_list_partition_config_invalid_tasklist_name_is_invalid_argument ... ok
+test refresh_task_list_partition_config_root_with_partition_config_is_invalid_argument ... ok
+test refresh_task_list_partition_config_sticky_kind_is_invalid_argument ... ok
+test refresh_workflow_tasks_already_completed_is_propagated ... ignored, parity gap: Go returns a typed WorkflowExecutionAlreadyCompletedError from the history mock; the typed wire detail needs the crate-private grpc::detailed_status helper, which tests/ cannot call
+test refresh_workflow_tasks_canceled_context_is_propagated ... ignored, parity gap: Go passes an already-canceled context.Context; Rust refresh_workflow_tasks takes an optional caller deadline and no cancellation token, so a canceled-context error cannot be produced through the public API
+test refresh_task_list_partition_config_success_accepts_partitioned_normal_list ... ok
+test refresh_workflow_tasks_entity_not_exists_returns_ok ... ignored, parity gap: Go returns a typed EntityNotExistsError from the history mock and expects nil; Rust recognizes it only from a wire detail, and the crate-private grpc::detailed_status helper that builds that detail cannot be called from tests/
+test refresh_workflow_tasks_empty_domain_id_is_forwarded ... ok
+test refresh_workflow_tasks_generic_error_is_propagated ... ok
+test refresh_workflow_tasks_nil_execution_is_forwarded ... ignored, parity gap: Go accepts a nil WorkflowExecution; Rust AllocatedTask always carries a workflow_id and run_id, so no public input can produce a nil execution
+test refresh_workflow_tasks_success_sends_domain_and_execution ... ok
+test register_domain_failover_callback_catch_up_advances_version_to_highest ... ignored, parity gap: Go registerDomainFailoverCallback is a private engine method that registers a catch-up function with a domainCache mock; Rust registers the equivalent catch-up inside the private start_domain_cache in matching_runtime.rs, and the registered callback is not reachable from tests/
+test register_domain_failover_callback_catch_up_without_updates_keeps_version ... ignored, parity gap: Go registerDomainFailoverCallback is a private engine method that registers a catch-up function with a domainCache mock; Rust registers the equivalent catch-up inside the private start_domain_cache in matching_runtime.rs, and the registered callback is not reachable from tests/
+test setup_executor_with_empty_config_installs_noop_executor ... ignored, parity gap: Go setupExecutor installs a no-op executor and taskListsFactory on matchingEngineImpl and the test asserts on both; Rust has no setupExecutor or executor field. Its nearest analog, MatchingShardRouting without a spectator, resolves from the ring but exposes no executor to assert on
+test shard_distributor_onboarded_full_excludes_no_task_list ... ok
+test shard_distributor_onboarded_partial_percentage_is_engine_wide ... ignored, parity gap: Go shardDistributorOnboarded is one engine-wide boolean (percentage > 0); Rust gates per task list by fingerprint bucket and exposes no engine-wide predicate, so at percentage 1 Go's onboarded=true has no public Rust equivalent
+test shard_distributor_onboarded_zero_excludes_every_task_list ... ok
+test refresh_workflow_tasks_internal_status_is_propagated ... ok
+
+test result: ok. 10 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 30.06s
+
+     Running tests/matching_engine_go_tests_d.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_engine_go_tests_d-2574ce5a2bf77308)
+
+running 14 tests
+test acquire_semaphore_full_bucket_answers_no_slot_rather_than_error ... ok
+test acquire_semaphore_free_slot_is_granted_and_named_in_response ... ok
+test acquire_semaphore_request_during_load_gives_up_at_its_own_deadline ... ignored, parity gap: Rust Manager::acquire waits for the startup load with no deadline, and the handler applies the gRPC deadline only after acquire returns, so a request arriving during a slow load waits until that load ends
+test acquire_semaphore_undecodable_owner_is_refused_before_any_store_call ... ok
+test get_or_create_semaphore_manager_bucket_is_owned_by_another_host ... ok
+test get_or_create_semaphore_manager_domain_has_semaphores_disabled ... ok
+test get_or_create_semaphore_manager_domain_lookup_fails ... ok
+test get_or_create_semaphore_manager_failed_start_is_not_left_registered ... ok
+test get_or_create_semaphore_manager_refused_while_engine_shuts_down ... ignored, parity gap: Rust Matching has no engine shutdown state; acquire_semaphore has no Go-style check that refuses to load a new bucket while shutting down, so the bucket is always scanned and registered
+test get_or_create_semaphore_manager_load_runs_outside_creation_lock ... ok
+test get_or_create_semaphore_manager_starts_unstarted_registered_manager ... ignored, parity gap: a request cancelled during the startup load leaves the Rust manager in Starting; Manager::start returns Ok for Starting without loading, so the next get_or_create never runs the scan and the bucket stays unloaded
+test stop_semaphore_managers_stops_every_bucket_on_engine_stop ... ignored, parity gap: Rust has no shutdown path that stops every semaphore manager; Matching::maintain_membership_until stops only buckets the ring no longer assigns to this host, and Registry exposes no stop-all
+test get_or_create_semaphore_manager_second_request_reuses_built_manager ... ok
+test unload_semaphore_manager_stops_it_and_next_request_builds_fresh ... ok
+
+test result: ok. 10 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_forward_poll_fallback.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_forward_poll_fallback-096e2e23ebf83fb6)
+
+running 2 tests
+test forwarded_decision_poll_failure_delivers_later_local_add ... ok
+test root_and_sticky_decision_polls_never_call_parent ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+     Running tests/matching_partial_upgrade_a.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_a-90c4c5f8f220ea89)
+
+running 4 tests
+test go_handle_err_passes_typed_errors_through_unchanged ... ignored, parity gap: Rust has no generic handleErr. Go returns each of 14 typed errors (and their %w-wrapped forms) unchanged; Rust converts each RPC's errors to tonic::Status at its own call site, so identity pass-through cannot hold
+test go_handler_start_calls_engine_start_once_and_stop_calls_engine_stop_once ... ignored, parity gap: Rust has no Handler object with Start/Stop. Lifecycle is spread over the gRPC listener and registry shutdown paths, and there is no engine start/stop call counter to assert against
+test go_new_config_every_field_has_a_rust_reader ... ignored, parity gap: Rust has no NewConfig equivalent. Go asserts all 66 Config fields (RangeSize, HostName, RPCConfig, TaskDispatchRPS, AllIsolationGroups, ...) against one key table; Rust reads each key inside its own module, so no single table covers them
+test go_new_config_readers_return_go_test_values ... ok
+
+test result: ok. 1 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_b.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_b-612f69f5a0159689)
+
+running 15 tests
+test go_handler_add_decision_task_rate_limited_returns_service_busy ... ok
+test go_handler_add_activity_task_rate_limited_returns_service_busy ... ok
+test go_handler_long_polls_without_deadline_return_context_timeout_not_set ... ok
+test go_handler_poll_for_activity_task_rate_limited_returns_service_busy ... ok
+test go_handler_poll_for_decision_task_rate_limited_returns_service_busy ... ok
+test poller_cancel_invokes_registered_callback_per_poll ... ok
+test poller_cancel_reports_whether_the_poll_is_known ... ignored, parity gap: cadence_common::poller::Manager::cancel returns () while Go CancelPoll returns bool (true for a known poll, false for an unknown one) (manager_test.go:58)
+test poller_count_by_group_matches_go_cases ... ok
+test poller_count_keeps_expired_entries_like_go_size ... ok
+test poller_has_after_matches_go_cases ... ok
+test poller_has_group_after_matches_go_cases ... ok
+test poller_history_callback_fires_on_start_and_end_with_identity ... ignored, parity gap: cadence_common::poller::Manager has no history-change callback; Go calls historyCallback on StartPoll and EndPoll with an identity (manager_test.go:38)
+test poller_list_info_matches_go_cases ... ok
+test poller_start_without_identity_records_no_history ... ok
+test go_handler_poll_for_activity_task_returns_added_task_token ... ok
+
+test result: ok. 13 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/matching_partial_upgrade_c.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_c-22e2fb364e18f958)
+
+running 1 test
+test matching_dispatch_timeout_matches_go_get_dispatch_timeout_table ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_d.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_d-e534a572ae753105)
+
+running 1 test
+test task_list_limiter_matches_go_limit_table ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/matching_partial_upgrade_e.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_e-bc4ecf9066d70c66)
+
+running 10 tests
+test go_dispatch_task_active_offer_without_error_reaches_poller ... ignored, parity gap: with a waiting decision poller, AddDecisionTask returns Ok but the poller is not handed the task; it ends at its ~7s wait with an empty response (auto_config_hint poller_wait_time_in_ms 6995). Go hands the task to MustOffer. Suspected cause, unverified: this fixture's History peer is unreachable (127.0.0.1:1), so delivery may depend on History StartWorkflow
+test go_manager_start_root_adopts_persisted_partition_config ... ok
+test go_manager_start_root_pushes_config_to_child_partitions ... ignored, parity gap: Go root Start pushes its leased partition config to child owners via MatchingClient.RefreshTaskListPartitionConfig (task_list_manager_test.go:1762); Rust has no start-time push, and the only RefreshTaskListPartitionConfigRequest sender is the update path (matching_registry.rs:1959). Needs two owner processes to observe, so no in-process body is possible
+test go_manager_start_non_root_reads_root_partition_config ... ok
+test go_refresh_partition_config_from_database_replaces_cache ... ok
+test go_refresh_partition_config_from_request_ignores_older_version ... ok
+test go_thrift_handler_internal_error_maps_to_internal_service_error ... ignored, parity gap: Go TestThriftHandler fails each handler method with InternalServiceError{Message:"test"} through a mock Handler and asserts the Thrift exception and zero-value response defaults; Rust dispatch() takes a concrete Matching with no injectable handler, so no public call can produce that failure
+test go_refresh_partition_config_concurrency_keeps_highest_version ... ok
+test go_thrift_handler_routes_each_tested_method ... ok
+test go_update_partition_config_concurrency_advances_once_per_update ... ok
+
+test result: ok. 7 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.37s
+
+     Running tests/shard_distributor_go_interop.rs (/mnt/storage/service/cargo-target-shared/debug/deps/shard_distributor_go_interop-a3c0a93172540cbe)
+
+running 1 test
+test rust_executor_and_spectator_interoperate_with_pinned_go_handlers ... ignored, mixed Go/Rust wire gate; requires Go dependency cache and serialized validation lane
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_persistence-a9f43dda3a9b91af)
+
+running 303 tests
+test cassandra::blocking_session_tests::dedicated_runtime_shutdown_does_not_block_rpc_runtime ... ok
+test cassandra::session_config_tests::cassandra_defaults_and_explicit_options_match_go ... ok
+test cassandra::session_config_tests::configured_authenticator_allowlist_is_preserved ... ok
+test cassandra::session_config_tests::hostpool_failure_backoff_doubles_after_each_expired_probe ... ok
+test cassandra::session_config_tests::hostpool_latency_buckets_expire_after_the_rolling_window ... ok
+test cassandra::session_config_tests::round_robin_and_hostpool_policies_are_supported ... ok
+test cassandra::session_config_tests::cassandra_rejects_protocol_versions_the_driver_cannot_speak ... ok
+test config_store::tests::empty_data_is_empty_blob_and_unknown_encoding_errors ... ok
+test config_store::tests::decodes_thriftrw_blob_with_filters_in_order ... ok
+test config_store::tests::go_default_two_nanosecond_fetch_timeout_always_times_out ... ok
+test config_store::tests::no_row_at_startup_leaves_no_snapshot_and_first_error_fails_creation ... ok
+test config_store::tests::go_seeded_blob_with_preamble_decodes ... ok
+test config_store::tests::snappy_blob_decodes ... ok
+test config_store::tests::snappy_blob_without_preamble_is_rejected_like_go ... ok
+test config_store::tests::thriftrw_blob_without_preamble_is_rejected_like_go ... ok
+test config_store::tests::update_replaces_snapshot_and_keeps_it_on_failure_or_missing_row ... ok
+test config_store::tests::sqlite_fetcher_returns_latest_version_with_sign_restored ... ok
+test domain_replication::tests::active_active_go_fixtures ... ok
+test domains::delete_tests::delete_removes_domain ... ok
+test domains::page_tests::name_cursor_is_stable_when_an_earlier_domain_is_inserted ... ok
+test domains::snapshot_tests::domain_snapshot_round_trip ... ok
+test domains::tests::create_describe_round_trip ... ok
+test domains::tests::deprecate_flips_status ... ok
+test domains::tests::duplicate_create_fails_like_go ... ok
+test domains::tests::failover_moves_global_active_cluster_and_audits ... ok
+test domains::tests::failover_notifications_track_only_eligible_domain_changes ... ok
+test domains::tests::failover_rejects_local_wrong_destination_and_history_pages ... ok
+test domains::tests::matching_domain_activity_follows_local_failover_and_attribute_rules ... ok
+test domains::tests::matching_metadata_refresh_updates_full_domain_state_and_publishes_failover ... ok
+test domains::tests::update_only_touches_set_fields ... ok
+test dynamic_config::tests::domain_id_filtered_boolean_and_plain_float_readers ... ok
+test dynamic_config::tests::isolation_group_list_rejects_partial_decoding_and_filtered_entries ... ok
+test dynamic_config::tests::scoped_duration_and_invalid_values_fall_back_without_skipping_matches ... ok
+test dynamic_config::tests::task_list_filters_require_every_constraint_and_preserve_entry_order ... ok
+test domain_update::tests::domain_update_go_fixtures ... ok
+test executions::activity_ext_tests::activity_start_and_completion_buffer_and_receive_linked_durable_ids ... ok
+test executions::activity_ext_tests::buffered_signal_prevents_workflow_completion_until_replayed ... ok
+test executions::activity_ext_tests::buffered_signal_snapshot_restores_dedup_and_private_id_sequence ... ok
+test executions::activity_ext_tests::external_termination_drops_unhandled_buffered_events ... ok
+test executions::activity_ext_tests::cancel_activity_appends_event ... ok
+test executions::activity_ext_tests::force_request_creates_another_decision ... ok
+test executions::activity_ext_tests::heartbeat_reports_cancel_requested ... ok
+test executions::activity_ext_tests::history_pagination_pages_and_validates_tokens ... ok
+test executions::activity_ext_tests::scheduling_activity_does_not_create_an_extra_decision ... ok
+test executions::advanced_tests::async_requests_are_consumed_into_runs ... ok
+test executions::advanced_tests::cancel_unknown_timer_records_typed_failure ... ok
+test executions::advanced_tests::cancel_timer_consumes_buffered_fire_and_can_complete_workflow ... ok
+test executions::advanced_tests::child_workflow_started_and_parent_notified_on_close ... ok
+test executions::advanced_tests::maintain_healthy_run_deletes_nothing ... ok
+test executions::advanced_tests::continue_as_new_spawns_successor ... ok
+test executions::advanced_tests::matching_partition_refresh_versions_and_recovery ... ok
+test executions::advanced_tests::mutable_state_view_reports_run_facts ... ok
+test executions::advanced_tests::matching_partition_go_fixtures ... ok
+test executions::advanced_tests::parent_terminate_cascades_per_close_policy ... ok
+test executions::advanced_tests::partition_config_round_trips_through_store ... ok
+test executions::advanced_tests::query_on_closed_execution_rejects ... ok
+test executions::advanced_tests::query_buffers_and_answers_through_decision ... ok
+test executions::advanced_tests::query_task_completed_answers_by_token ... ok
+test executions::advanced_tests::query_task_completed_failure_and_unknown_tokens ... ok
+test executions::advanced_tests::raw_history_pages_by_event_id ... ok
+test executions::advanced_tests::reapply_signals_appends_and_dedups ... ok
+test executions::advanced_tests::record_activity_started_paths ... ok
+test executions::advanced_tests::record_decision_started_paths ... ok
+test executions::advanced_tests::record_child_completed_paths ... ok
+test executions::advanced_tests::refresh_tasks_requeues_lost_queue_entries ... ok
+test executions::advanced_tests::request_cancel_external_delivers ... ok
+test executions::advanced_tests::requeue_activity_task_restores_queue_entry ... ok
+test executions::advanced_tests::requeue_decision_task_restores_queue_entry ... ok
+test executions::advanced_tests::reset_can_skip_signal_reapply ... ok
+test executions::advanced_tests::reset_forks_history_at_decision_boundary ... ok
+test executions::advanced_tests::reset_rejects_bad_points_and_runs ... ok
+test executions::advanced_tests::restart_closed_run_starts_fresh ... ok
+test executions::advanced_tests::restart_unknown_execution_is_invalid ... ok
+test executions::advanced_tests::restart_terminates_open_run_and_starts_new ... ok
+test executions::advanced_tests::schedule_and_remove_signal_round_trip ... ok
+test executions::advanced_tests::sync_activity_updates_known_activities ... ok
+test executions::advanced_tests::task_lists_reports_known_queues ... ok
+test executions::advanced_tests::signal_external_delivers_or_fails ... ok
+test executions::advanced_tests::upsert_search_attributes_merges ... ok
+test executions::advanced_tests::timers_fire_and_schedule_decisions ... ok
+test executions::history_cursor_tests::continuation_without_run_id_keeps_original_run_after_reuse ... ok
+test executions::namespace_tests::child_references_use_uuid_keys_and_domain_names_in_history ... ok
+test executions::namespace_tests::completed_cron_workflow_continues_with_last_completion_result ... ok
+test executions::namespace_tests::cron_recurrence_preserves_internal_jitter_metadata ... ok
+test executions::namespace_tests::cron_schedule_records_the_computed_backoff ... ok
+test executions::namespace_tests::delayed_start_defers_the_first_decision_task ... ok
+test executions::namespace_tests::failed_workflow_retries_and_preserves_failure_metadata ... ok
+test executions::namespace_tests::legacy_snapshot_namespace_and_signal_dedup_are_restored ... ok
+test executions::namespace_tests::recreating_domain_isolates_runs_idempotency_and_task_tokens ... ok
+test executions::namespace_tests::retry_policy_continues_as_new_attempts ... ok
+test executions::namespace_tests::signal_wakes_idle_workflow_and_duplicate_request_does_not_add_history ... ok
+test executions::namespace_tests::timed_out_cron_run_continues_as_new ... ok
+test executions::namespace_tests::timed_out_run_without_retry_or_cron_closes_as_timed_out ... ok
+test executions::namespace_tests::uuid_shaped_domain_name_cannot_alias_another_domain_namespace ... ok
+test executions::namespace_tests::workflow_retry_can_back_off_longer_than_one_day ... ok
+test executions::namespace_tests::zero_backoff_still_schedules_immediately ... ok
+test executions::retry_tests::activity_retry_policy_is_validated_before_history_mutation ... ok
+test executions::retry_tests::activity_timeout_retries_are_transient_and_old_tokens_expire ... ok
+test executions::retry_tests::fatal_and_exhausted_failures_record_failed_event ... ok
+test executions::retry_tests::heartbeat_deadline_moves_and_preserves_details ... ok
+test executions::retry_tests::queued_activity_timeouts_have_no_started_event_and_skip_stale_queue_entries ... ok
+test executions::retry_tests::retry_backoff_and_overrides_match_go_policy ... ok
+test executions::retry_tests::retryable_failure_reschedules_without_failed_event ... ok
+test executions::scoped_namespace_tests::resolved_namespace_stays_pinned_across_recreation_and_uuid_shaped_alias ... ok
+test executions::snapshot_tests::execution_snapshot_round_trip ... ok
+test executions::tests::activity_poll_respond_flow ... ok
+test executions::tests::bad_decisions_rejected_without_state_change ... ok
+test executions::tests::decision_poll_complete_close_flow ... ok
+test executions::tests::duplicate_start_rejected ... ok
+test executions::tests::fail_decision_retries_with_incremented_attempt ... ok
+test executions::tests::request_id_idempotency ... ok
+test executions::tests::signal_and_cancel_append_events ... ok
+test executions::tests::signal_with_start_signals_open_or_starts_new ... ok
+test executions::tests::start_describe_lifecycle ... ok
+test executions::tests::terminate_closes_and_appends_history ... ok
+test executions::tests::terminate_if_running_policy ... ok
+test executions::transient_decision_tests::buffered_events_during_transient_failure_reset_attempt ... ok
+test executions::transient_decision_tests::expired_sticky_ttl_is_checked_before_new_event_refreshes_last_update ... ok
+test executions::transient_decision_tests::failed_sticky_task_retries_on_normal_queue_with_full_history ... ok
+test executions::transient_decision_tests::inline_force_task_is_atomic_and_does_not_consume_another_workflow ... ok
+test executions::history_cursor_tests::worker_history_pages_freeze_before_signals_arriving_during_replay ... ok
+test executions::transient_decision_tests::inline_sticky_task_removes_its_actual_sticky_queue_entry ... ok
+test executions::transient_decision_tests::new_events_before_transient_poll_reset_attempt ... ok
+test executions::transient_decision_tests::inline_history_pages_begin_after_the_previous_started_event ... ok
+test executions::transient_decision_tests::repeated_failures_materialize_only_the_successful_retry ... ok
+test executions::transient_decision_tests::repeated_timeouts_are_transient_and_stale_tokens_are_not_found ... ok
+test executions::transient_decision_tests::reset_sticky_preserves_pending_transfer_but_restores_full_history ... ok
+test executions::transient_decision_tests::return_new_task_flag_alone_does_not_schedule_an_idle_task ... ok
+test executions::transient_decision_tests::sticky_poll_routes_to_owner_and_returns_incremental_history ... ok
+test executions::transient_decision_tests::transient_snapshot_restores_retry_and_timestamps ... ok
+test executions::transient_decision_tests::unhandled_closing_command_can_return_the_replay_task_inline ... ok
+test executions::transient_decision_tests::unpolled_sticky_task_times_out_and_falls_back_to_normal_queue ... ok
+test executions::version_state_tests::version_state_buffer_flush_and_transient_decisions_advance_only_committed_tips ... ok
+test executions::version_state_tests::version_state_legacy_zero_version_snapshots_keep_their_recorded_stream ... ok
+test executions::version_state_tests::version_state_local_and_global_starts_have_committed_branch_tips ... ok
+test executions::version_state_tests::version_state_reset_forks_ancestry_and_snapshot_preserves_tokens ... ok
+test executions::workflow_timeout_tests::workflow_timeout_closes_once_and_rejects_stale_task_completion ... ok
+test matching_blob::tests::dynamic_encoding_source_is_sampled_per_write_like_go_parser ... ok
+test matching_blob::tests::matching_blob_create_expiry_matches_go_sql ... ok
+test matching_blob::tests::matching_blob_original_go_fixtures ... ok
+test matching_blob::tests::matching_blob_unknown_fields_and_malformed_input ... ok
+test matching_cassandra::recording_tests::go_delete_task_list_not_applied_is_condition_failure ... ok
+test executions::transient_decision_tests::paged_worker_history_appends_frozen_transient_events_on_final_page ... ok
+test matching_cassandra::recording_tests::go_delete_task_list_statement_values_and_consistency ... ok
+test matching_cassandra::recording_tests::go_delete_task_list_retries_at_default_consistency_when_all_unavailable ... ok
+test matching_cassandra::recording_tests::go_get_tasks_count_statement_and_values ... ok
+test matching_cassandra::recording_tests::go_insert_task_list_not_applied_is_condition_failure ... ok
+test matching_cassandra::recording_tests::go_insert_task_list_statement_and_values ... ok
+test matching_cassandra::recording_tests::go_insert_tasks_batch_members_and_fence ... ok
+test matching_cassandra::recording_tests::go_insert_tasks_not_applied_is_condition_failure ... ok
+test matching_cassandra::recording_tests::go_lease_task_list_update_statement_and_values ... ok
+test matching_cassandra::recording_tests::go_range_delete_all_consistency_retries_at_local_quorum ... ok
+test matching_cassandra::recording_tests::go_range_delete_non_unavailable_error_is_not_retried ... ok
+test matching_cassandra::recording_tests::go_range_delete_tasks_statement_and_values ... ok
+test matching_cassandra::recording_tests::go_select_task_list_missing_row_is_not_found ... ok
+test matching_cassandra::recording_tests::go_select_task_list_statement_and_values ... ok
+test matching_cassandra::recording_tests::go_select_tasks_statement_and_values ... ok
+test matching_cassandra::recording_tests::go_update_task_list_not_applied_is_condition_failure ... ok
+test matching_cassandra::recording_tests::go_update_task_list_statement_and_values ... ok
+test matching_cassandra::recording_tests::go_update_task_list_with_ttl_batch_statements_and_values ... ok
+test matching_cassandra::tests::cassandra_task_row_constants_match_go ... ok
+test matching_cassandra::tests::cassandra_task_statements_have_go_shape ... ok
+test matching_cassandra::tests::cassandra_task_ttl_is_not_promoted_to_matching_task_expiry ... ok
+test matching_cassandra::tests::delete_fallback_consistency_is_go_constant_local_quorum ... ok
+test matching_cassandra::tests::cassandra_cql_matches_go_tasks_cql ... ok
+test matching_cassandra::tests::go_seed_rust_write_restart_go_verify ... ignored, requires tests/run-matching-cassandra-interop.py
+test matching_cassandra::tests::go_insert_tasks_batch_ttl_variants_and_fence ... ok
+test matching_cassandra::tests::task_list_partition_udt_round_trips_go_field_values ... ok
+test matching_cassandra::tests::task_udt_literals_escape_go_strings_and_match_ttl_rounding ... ok
+test matching_domain_metadata::tests::active_active_blob_suppresses_current_cluster_default ... ok
+test matching_domain_metadata::tests::cassandra_domain_udts_follow_go_domain_metadata_conversion ... ok
+test matching_domain_metadata::tests::decodes_nested_blobs_emitted_by_go_payload_serializer ... ok
+test matching_domain_metadata::tests::go_domain_store_database_interop ... ignored, requires CADENCE_MATCHING_SQLITE_DB produced by the Go SQLite domain-store oracle
+test matching_domain_metadata::tests::duplicate_fields_use_last_correctly_typed_value ... ok
+test matching_domain_metadata::tests::nested_thriftrw_blob_requires_and_strips_go_codec_version ... ok
+test matching_domain_metadata::tests::malformed_page_token_is_passed_to_sqlite_without_length_validation ... ok
+test matching_domain_metadata::tests::reads_go_domain_metadata_and_pages_by_raw_uuid ... ok
+test matching_domain_metadata::tests::read_only_uri_modes_and_configured_busy_timeout_are_preserved ... ok
+test matching_domain_metadata::tests::trailing_bytes_after_struct_match_go_thrift_reader_behavior ... ok
+test matching_domain_metadata::tests::wrong_collection_duplicate_clears_previous_collection ... ok
+test matching_domain_metadata::tests::wrong_collection_element_types_are_skipped_like_go_decoder ... ok
+test matching_domain_metadata::tests::wrong_type_known_field_is_skipped_like_go_decoder ... ok
+test matching_gc::tests::matching_gc_original_go_fixtures ... ok
+test matching_gc::tests::matching_gc_time_boundary_is_strict_and_failure_defers_small_retry ... ok
+test matching_gc::tests::signed_batch_provider_is_sampled_under_lock_and_reaches_delete_unchanged ... ok
+test matching_gc::tests::zero_and_negative_batches_keep_go_error_and_repeat_boundaries_bounded ... ok
+test matching_mysql::tests::connectivity_errors_poison_only_their_connection_lease ... ok
+test matching_mysql::tests::farmhash_32_uses_go_compatible_fingerprint ... ok
+test matching_mysql::tests::go_tcp_connect_addresses_default_missing_port_to_3306 ... ok
+test matching_domain_metadata::tests::sqlite_lock_wait_past_deadline_maps_to_operation_timeout ... ok
+test matching_mysql::tests::mysql_async_options_apply_go_socket_timeout_attributes ... ok
+test matching_mysql::tests::mysql_async_tls_uses_go_socket_timeout_options ... ignored, requires the opt-in MySQL interoperability server with TLS enabled
+test matching_mysql::tests::mysql_driver_errors_keep_go_retry_categories ... ok
+test matching_mysql::tests::mysql_matching_schema_contract_matches_go_v8_primary_keys ... ok
+test matching_mysql::tests::mysql_physical_database_follows_go_logical_shard_index ... ok
+test matching_mysql::tests::mysql_timeout_duration_matches_go_composite_and_boundary_forms ... ok
+test matching_mysql::tests::matching_mysql_sql_matches_go_task_go ... ok
+test matching_mysql::tests::query_runtime_can_be_dropped_from_a_tokio_context ... ok
+test matching_mysql::tests::timed_domain_query_bounds_a_stalled_socket_read ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_bounds_connect_failure_and_releases_slot ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::query_runtime_final_owner_can_drop_on_its_worker ... ok
+test matching_mysql::tests::timed_domain_query_cancels_only_its_dedicated_connection ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_cancels_while_draining_a_slow_result_set ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_completes_before_deadline_and_disconnects ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_releases_single_pool_slot_after_cancellation ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::timed_domain_query_resets_read_timeout_for_each_socket_operation ... ignored, requires the opt-in MySQL interoperability server
+test matching_mysql::tests::unsupported_mysql_connect_attributes_fail_closed ... ok
+test matching_postgres::tests::matching_postgres_sql_matches_go_task_go ... ok
+test matching_postgres::tests::postgres_address_parser_matches_host_port_requirements ... ok
+test matching_postgres::tests::postgres_config_requires_matching_physical_shard_count ... ok
+test matching_postgres::tests::postgres_schema_matches_go_task_table_keys ... ok
+test matching_postgres::tests::postgres_sslmode_matches_libpq_driver_modes ... ok
+test matching_postgres::tests::postgres_tls_connect_attributes_are_accepted ... ok
+test matching_postgres::tests::postgres_tls_inline_attributes_follow_libpq_ssl_inline_contract ... ok
+test matching_postgres::tests::postgres_tls_live_oracle ... ignored, live TLS oracle; run against the labelled disposable PostgreSQL instance
+test matching_queue::tests::matching_queue_cancelled_admission_leaves_later_batch_rows_unread ... ok
+test matching_queue::tests::matching_queue_concurrent_reads_claim_each_task_once ... ok
+test matching_queue::tests::matching_queue_cross_domain_rows_keep_source_key_and_target_fence ... ok
+test matching_queue::tests::matching_queue_empty_reads_advance_ack_over_renewed_ranges ... ok
+test matching_queue::tests::matching_queue_expired_half_fixture_leaves_go_remaining_counts ... ok
+test matching_queue::tests::matching_queue_expiry_boundaries_and_scan_budget ... ok
+test matching_queue::tests::matching_queue_expiry_clock_advances_between_row_admissions ... ok
+test matching_queue::tests::matching_queue_failure_rewrite_is_durable_before_ack ... ok
+test matching_queue::tests::matching_queue_gc_thresholds_drive_stored_row_counts ... ok
+test matching_queue::tests::matching_queue_get_task_batch_bounds_follow_read_range ... ok
+test matching_queue::tests::matching_queue_get_task_batch_done_only_at_max_read_level ... ok
+test matching_queue::tests::matching_queue_get_task_batch_row_count_after_ten_acks_matches_go ... ok
+test matching_mysql::tests::timed_domain_query_cancels_a_stalled_mysql_handshake ... ok
+test matching_queue::tests::matching_queue_lease_backoff_allows_durable_reads_and_ack_updates ... ok
+test matching_queue::tests::matching_queue_live_gc_batch_provider_is_used_for_each_attempt ... ok
+test matching_queue::tests::matching_queue_original_go_blocked_admission_fixtures ... ok
+test matching_queue::tests::matching_queue_original_go_expiry_fixtures ... ok
+test matching_queue::tests::matching_queue_original_go_reader_fixtures ... ok
+test matching_queue::tests::matching_queue_owned_turn_retains_unadmitted_rows_across_threads ... ok
+test matching_queue::tests::matching_queue_partition_metadata_survives_ack_rollover_and_reopen ... ok
+test matching_queue::tests::matching_queue_partition_storage_failure_keeps_previous_metadata ... ok
+test matching_queue::tests::matching_queue_partition_update_fences_stale_owner_without_publishing ... ok
+test matching_queue::tests::matching_queue_range_id_renews_per_block_and_fences_stale_writer ... ok
+test matching_queue::tests::matching_queue_ranges_out_of_order_ack_and_recovery ... ok
+test matching_queue::tests::matching_queue_lease_retries_sql_failure_and_stops_on_terminal_renewal ... ok
+test matching_queue::tests::matching_queue_reader_size_and_lag_gauges_follow_ack_levels ... ok
+test matching_queue::tests::matching_queue_reports_condition_failed_for_writer_and_ack_not_partition_update ... ok
+test matching_queue::tests::matching_queue_stop_does_not_wait_for_inflight_state_lock ... ok
+test matching_queue::tests::matching_reader_turn_reports_initially_expired_rows ... ok
+test matching_retry::tests::matching_retry_original_go_outcomes ... ok
+test matching_sqlite::interop_tests::matching_sqlite_go_database_interop ... ignored, requires original-Go SQLite seed; run tests/run-matching-storage-compat.py
+test matching_sqlite::tests::configured_go_sqlite_open_rejects_incompatible_queue_keys ... ok
+test matching_sqlite::tests::configured_go_sqlite_open_rejects_read_only_task_store_mode ... ok
+test matching_sqlite::tests::configured_go_sqlite_open_uses_shared_schema_and_writer_options ... ok
+test matching_sqlite::tests::go_suite_complete_task_removes_each_row ... ok
+test matching_sqlite::tests::go_suite_complete_tasks_less_than_limits_delete_lowest_first ... ok
+test matching_sqlite::tests::go_suite_get_tasks_paging_is_ascending_and_exclusive ... ok
+test matching_sqlite::tests::go_suite_lease_and_update_task_list_range_conditions ... ok
+test matching_sqlite::tests::go_suite_sticky_and_ephemeral_kinds_lease_and_update ... ok
+test matching_sqlite::tests::go_suite_task_list_size_counts_above_ack_level ... ok
+test matching_sqlite::tests::matching_sqlite_atomic_batches_bounds_expiry_and_deletes ... ok
+test matching_sqlite::tests::matching_sqlite_leases_fence_writes_and_survive_reopen ... ok
+test matching_sqlite::tests::matching_sqlite_namespaces_and_task_types_are_isolated ... ok
+test matching_sqlite::tests::matching_sqlite_preserves_go_signed_limit_behavior ... ok
+test matching_sqlite::tests::matching_sqlite_schema_matches_go ... ok
+test matching_task_store::tests::db_shard_id_matches_go_farm_hash32_vectors ... ok
+test matching_queue::tests::matching_queue_reader_retries_transient_query_without_losing_task ... ok
+test matching_writer_actor::tests::cancellation_after_acceptance_keeps_write_and_fanout_nonblocking ... ok
+test matching_writer_actor::tests::accepted_timeout_does_not_cancel_the_fake_persistence_write ... ok
+test matching_writer_actor::tests::cancellation_while_waiting_for_rendezvous_admission_is_observed ... ok
+test matching_writer_actor::tests::dropping_actor_does_not_join_a_blocked_handler ... ok
+test matching_writer_actor::tests::consumes_original_go_trace_fixture ... ok
+test matching_writer_actor::tests::full_queue_timeout_routes_to_service_busy ... ok
+test matching_writer_actor::tests::handler_response_count_mismatch_is_reported ... ok
+test matching_writer_actor::tests::stop_returns_while_handler_is_blocked_and_join_is_explicit ... ok
+test matching_writer_actor::tests::zero_capacity_is_rendezvous_and_cancellation_keeps_accepted_work ... ok
+test schedules::tests::backfill_executes_range_and_tracks_progress ... ok
+test schedules::tests::backfill_includes_endpoints_and_respects_spec ... ok
+test schedules::tests::catch_up_override_survives_batches_and_snapshot_restart ... ok
+test schedules::tests::catch_up_policy_matches_go ... ok
+test schedules::tests::catch_up_skips_advance_watermark_without_live_replay ... ok
+test schedules::tests::crud_pause_unpause_delete_flow ... ok
+test schedules::tests::fire_ids_and_request_ids_match_go ... ok
+test schedules::tests::firing_starts_target_workflows_with_skip_overlap ... ok
+test schedules::tests::old_snapshot_schedule_fields_default_without_unpausing ... ok
+test schedules::tests::restored_schedule_applies_configured_policy_to_downtime ... ok
+test schedules::tests::scheduler_backfill_fixtures ... ok
+test schedules::tests::scheduler_boundary_fixtures ... ok
+test schedules::tests::scheduler_buffer_caps_and_policy_change_count_dropped_fires ... ok
+test schedules::tests::scheduler_buffer_preserves_trigger_after_restart_and_drain ... ok
+test matching_writer_actor::tests::stop_does_not_interrupt_an_append_already_waiting_for_capacity ... ok
+test schedules::tests::scheduler_fire_accounting_fixtures ... ok
+test schedules::tests::scheduler_identity_limits_fixtures ... ok
+test schedules::tests::scheduler_missing_action_is_not_retried_by_next_tick ... ok
+test schedules::tests::scheduler_overlap_fixtures ... ok
+test schedules::tests::scheduler_tick_after_end_preserves_inclusive_fires ... ok
+test semaphores::tests::acquire_grants_slots_then_reports_no_slot ... ok
+test semaphores::tests::acquire_rejects_bad_identifiers_and_unknown_semaphores ... ok
+test semaphores::tests::create_validates_and_dedups ... ok
+test semaphores::tests::sql_backend_matches_go_unsupported_error_for_metadata_and_token_operations ... ok
+test version_history::tests::version_history_go_fixtures ... ok
+test visibility::page_tests::cursor_does_not_repeat_a_page_when_a_new_execution_is_inserted ... ok
+test visibility::page_tests::legacy_time_filter_keeps_sub_millisecond_boundaries ... ok
+test visibility::tests::boolean_status_and_missing_filters_match_cadence_queries ... ok
+test visibility::tests::like_is_case_insensitive_prefix_matching_in_go_visibility ... ok
+test visibility::tests::time_literals_use_go_nanoseconds_and_sort_nulls_last ... ok
+test visibility::tests::unsupported_or_invalid_queries_fail_on_empty_domains_too ... ok
+test schedules::tests::scheduler_catch_up_fixtures ... ok
+
+test result: ok. 291 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 1.21s
+
+     Running tests/matching_mysql_interop.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_mysql_interop-4efd466029c0cc87)
+
+running 1 test
+test mysql_interop_harness ... ignored, requires tests/run-matching-mysql-interop.py and an ephemeral MySQL 8 server
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_proto-a5080592e93ddcb0)
+
+running 4 tests
+test task_list_partition::tests::partition_map_default_values_have_explicit_presence_on_both_apis ... ok
+test task_list_status::tests::populated_status_and_duplicate_map_entries_round_trip ... ok
+test task_list_status::tests::zero_metrics_encode_explicit_message_presence ... ok
+test service_schema_tests::descriptor_contains_every_upstream_service_and_rpc ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_server-99a50c2a07aefe34)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_server-63d74de4bdf9e3c5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_service_core-bc02844712efb23e)
+
+running 105 tests
+test admin::tests::config_store_snapshot_keeps_entry_value_order ... ok
+test admin::tests::file_based_yaml_preserves_order_and_constraints ... ok
+test admin::tests::file_based_yaml_matches_go_null_and_map_key_conversion ... ok
+test admin::tests::overlay_get_update_restore_list ... ok
+test admin::tests::parses_the_go_filebased_client_fixture ... ok
+test config::tests::dynamic_config_modern_client_takes_precedence_and_legacy_is_supported ... ok
+test config::tests::dynamic_config_provider_selection_matches_dynamicconfigfx ... ok
+test config::tests::canonical_and_legacy_cluster_keys_use_go_precedence ... ok
+test config::tests::env_expansion_follows_go_uber_config ... ok
+test config::tests::env_expansion_skips_yaml_comments_but_not_quoted_hashes ... ok
+test config::tests::embedded_defaults_match_go_development_config ... ok
+test config::tests::metrics_configuration_preserves_single_reporter_selection ... ok
+test config::tests::layered_config_merges_base_env_and_zone_like_go_loader ... ok
+test config::tests::parses_cassandra_csv_hosts ... ok
+test config::tests::parses_go_env_templated_ports ... ok
+test config::tests::parses_go_sql_pool_and_tls_config_for_matching ... ok
+test config::tests::parses_go_style_config ... ok
+test config::tests::parses_real_go_base_config_subset ... ok
+test config::tests::persistence_validation_follows_go_validate ... ok
+test config::tests::rejects_negative_shards ... ok
+test config::tests::ringpop_configuration_maps_defaults_validation_and_signed_values ... ok
+test config::tests::shard_distributor_config_matches_go_names_and_duration_semantics ... ok
+test config::tests::shard_distributor_matching_validation_handles_zero_one_and_multiple_namespaces ... ok
+test config::tests::shard_distributor_rejects_invalid_namespace_and_heartbeat_interval ... ok
+test config::tests::parses_real_go_development_config ... ok
+test grpc_shard::tests::namespace_state_tracks_owners_and_executors ... ok
+test grpc_shard::tests::metadata_limits_match_upstream ... ok
+test grpc_tls::tests::disabled_rpc_tls_stays_plaintext ... ok
+test grpc_tls::tests::ca_files_and_ca_file_are_both_trusted ... ok
+test grpc_tls::tests::lone_client_cert_file_is_not_loaded_like_go ... ok
+test grpc_tls::tests::missing_ca_file_fails_tls_load_like_go ... ok
+test grpc_tls::tests::host_verification_checks_chain_and_server_name ... ok
+test grpc_tls::tests::rpc_tls_parses_go_yaml_names ... ok
+test grpc_tls::tests::server_tls_requires_a_matching_certificate_and_key ... ok
+test matching_metrics::go_scope_parity_tests::engine_counter_inherits_rpc_scope_instead_of_manager_tags ... ok
+test matching_metrics::go_scope_parity_tests::manager_scaler_and_histogram_dimensions_match_go ... ok
+test matching_metrics::inbound_tests::add_task_counter_matches_go_dimensions_and_exclusions ... ok
+test matching_metrics::inbound_tests::inbound_cancelled_future_records_latency_without_failure ... ok
+test matching_metrics::inbound_tests::inbound_request_context_is_isolated_between_concurrent_calls ... ok
+test matching_metrics::inbound_tests::inbound_rpc_classifies_typed_query_failure ... ok
+test matching_metrics::inbound_tests::inbound_rpc_records_request_latency_and_failure_once ... ok
+test matching_metrics::inbound_tests::inbound_rpc_success_has_no_failure_event ... ok
+test matching_metrics::inbound_tests::inbound_task_list_scope_masks_sticky_name_and_unknown_domain ... ok
+test matching_metrics::matcher_metric_tests::async_local_handoff_emits_attempt_counter_and_go_integer_histogram ... ok
+test matching_metrics::matcher_metric_tests::async_match_handler_latency_uses_poll_rpc_scope ... ok
+test matching_metrics::matcher_metric_tests::async_match_latency_emits_timer_and_histogram ... ok
+test matching_metrics::matcher_metric_tests::condition_failed_and_async_forward_throttle_are_tasklist_counters ... ok
+test matching_metrics::matcher_metric_tests::handler_sync_match_latency_uses_request_scope_tags ... ok
+test matching_metrics::matcher_metric_tests::persistence_empty_response_and_host_latency_use_go_tags ... ok
+test matching_metrics::matcher_metric_tests::poll_match_latency_carries_manager_scope_tags ... ok
+test matching_metrics::matcher_metric_tests::poll_match_latency_emits_go_timer_and_histogram_pairs ... ok
+test matching_metrics::matcher_metric_tests::poller_gauge_uses_go_task_list_dimensions ... ok
+test matching_metrics::matcher_metric_tests::respond_query_failed_uses_go_name ... ok
+test matching_metrics::matcher_metric_tests::semaphore_context_timeout_counts_on_request_scope ... ok
+test matching_metrics::persistence_histogram_contract_tests::go_bucket_contracts_match_defs_go ... ok
+test matching_metrics::persistence_histogram_contract_tests::response_size_histograms_use_operation_and_task_category_only ... ok
+test matching_metrics::persistence_qps_metric_tests::qps_rejection_exports_dedicated_counter_and_go_busy_scope_once ... ok
+test matching_metrics::persistence_qps_metric_tests::semaphore_qps_rejection_keeps_its_native_scope ... ok
+test matching_metrics_m3::tests::compact_batch_starts_with_go_v2_oneway_envelope ... ok
+test matching_metrics_m3::tests::low_histogram_ranges_use_tally_ids_and_duration_tags ... ok
+test matching_metrics_m3::tests::m3_capacity_one_queue_drains_without_losing_metrics_at_flush ... ok
+test matching_metrics_m3::tests::m3_scope_aggregates_counters_and_latest_gauges_but_keeps_timer_samples ... ok
+test matching_metrics_m3::tests::m3_udp_fans_out_to_hosts_and_drop_flushes_pending_metrics ... ok
+test matching_metrics_m3::tests::tally_internal_metrics_include_cached_tag_and_batch_counters ... ok
+test matching_metrics_prometheus::tests::custom_summary_objective_is_emitted ... ok
+test matching_metrics_prometheus::tests::explicit_histogram_timer_type_is_preserved ... ok
+test matching_metrics_prometheus::tests::go_low_buckets_match_source_boundaries_and_prometheus_units ... ok
+test matching_metrics_prometheus::tests::omitted_timer_type_uses_go_default_summary ... ok
+test matching_metrics_prometheus::tests::renders_cadence_labels_prefix_and_histograms_in_seconds ... ok
+test matching_metrics_runtime::tests::empty_statsd_host_uses_the_go_noop_scope ... ok
+test matching_metrics_runtime::tests::empty_statsd_scope_allows_prometheus_fallback ... ok
+test matching_metrics_runtime::tests::prometheus_listener_is_owned_and_stopped_by_runtime ... ok
+test matching_metrics_statsd::tests::config_accepts_go_statsd_duration_and_integer_packet_limit ... ok
+test grpc_tls::tests::mutual_tls_admits_only_clients_signed_by_the_configured_ca ... ok
+test matching_metrics_statsd::tests::go_duration_strings_and_low_bucket_selection_match_tally ... ok
+test matching_metrics_statsd::tests::sends_sorted_tag_suffixes_with_both_prefixes_and_statsd_counter_type ... ok
+test matching_quota::tests::go_handler_method_classes_and_exemptions_are_preserved ... ok
+test matching_quota::tests::hard_rejection_emits_one_classified_metric_event_but_count_only_does_not ... ok
+test matching_quota::tests::host_and_domain_reservations_follow_go_order_and_return_domain_token_on_host_reject ... ok
+test matching_quota::tests::refreshing_rate_does_not_refill_at_the_configuration_refresh_instant ... ok
+test matching_quota::tests::user_and_worker_buckets_are_independent_and_refresh_live_values ... ok
+test matching_quota::tests::zero_domain_rate_falls_back_to_host_and_count_only_calls_are_admitted ... ok
+test ringpop_discovery::tests::dns_provider_matches_go_cache_errors_and_host_port_formatting ... ok
+test ringpop_discovery::tests::dns_provider_relooks_up_between_hosts_calls_and_propagates_bad_inputs ... ok
+test ringpop_discovery::tests::dns_srv_provider_caches_by_service_only_and_requeries_each_call ... ok
+test ringpop_discovery::tests::dns_srv_provider_preserves_targets_ipv6_and_trailing_dot_domain ... ok
+test ringpop_discovery::tests::file_matches_go_string_replacement_and_number_type_errors ... ok
+test ringpop_discovery::tests::file_reads_each_time_and_preserves_array_contents ... ok
+test ringpop_discovery::tests::malformed_utf8_outside_strings_remains_json_syntax_error ... ok
+test ringpop_discovery::tests::matches_actual_go_provider_oracle_fixture ... ok
+test ringpop_discovery::tests::missing_file_is_io_error_and_config_selects_supported_provider ... ok
+test ringpop_discovery::tests::split_and_join_host_port_match_go_ipv6_and_string_port_rules ... ok
+test ringpop_discovery::tests::static_hosts_preserve_order_duplicates_and_strings ... ok
+test ringpop_discovery::tests::system_dns_literal_fast_path_matches_go_without_normalizing ... ok
+test ringpop_discovery::tests::system_lookup_matches_go_system_oracle ... ok
+test ringpop_discovery::tests::system_resolver_can_be_initialized_and_dropped_inside_tokio ... ok
+test ringpop_discovery::tests::system_srv_ordering_keeps_priority_and_rfc2782_weight_groups ... ok
+test service::tests::health_json_matches_go_field_names ... ok
+test service::tests::registry_tracks_service_health ... ok
+test service::tests::service_name_parsing ... ok
+test tchannel_json_client::adversarial_tests::accumulated_crc32_and_crc32c_accept_multiple_tcp_fragments ... ok
+test tchannel_json_client::adversarial_tests::call_ttl_subtracts_connect_and_init_elapsed_time ... ok
+test tchannel_json_client::adversarial_tests::every_truncated_call_res_fixed_header_is_an_error ... ok
+test tchannel_json_client::adversarial_tests::malformed_ids_types_boundaries_and_checksums_are_rejected ... ok
+test matching_metrics_statsd::tests::counters_and_histogram_buckets_aggregate_while_gauges_keep_latest_value ... ok
+
+test result: ok. 105 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+     Running tests/e2e.rs (/mnt/storage/service/cargo-target-shared/debug/deps/e2e-061d096096985781)
+
+running 27 tests
+test admin_and_visibility_routes ... ok
+test activity_heartbeat_cancel_and_paged_history ... ok
+test admin_cluster_config_and_workflow_maintenance ... ok
+test admin_isolation_and_async_config_flow ... ok
+test admin_reapply_replication_dlq_and_cross_cluster ... ok
+test archived_visibility_reports_unconfigured ... ok
+test admin_shard_queue_history_and_maintain_flow ... ok
+test async_start_is_consumed_into_a_run ... ok
+test child_workflow_runs_and_parent_closes ... ok
+test domain_crud_round_trip ... ok
+test describe_task_list_reports_pollers ... ok
+test failover_moves_global_domain_and_lists_history ... ok
+test empty_poll_returns_no_content ... ok
+test health_reports_ok ... ok
+test full_workflow_lifecycle ... ok
+test query_flow_answers_through_worker ... ok
+test query_task_completed_answers_direct_query ... ok
+test reset_workflow_forks_at_decision_boundary ... ok
+test restart_workflow_starts_new_run ... ok
+test schedule_crud_and_firing_flow ... ok
+test semaphore_create_and_gate_flow ... ok
+test signal_with_start_starts_or_signals ... ok
+test task_list_discovery_reports_queues ... ok
+test timer_decision_fires_without_worker ... ok
+test unknown_domain_is_404 ... ok
+test worker_simulation_drives_workflow_to_completion ... ok
+test refresh_tasks_and_diagnose_behave ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.18s
+
+     Running tests/matching_partial_upgrade_e.rs (/mnt/storage/service/cargo-target-shared/debug/deps/matching_partial_upgrade_e-31c5fd86ae5ffc20)
+
+running 1 test
+test file_based_oracle_poll_reload_observes_rewritten_file ... ignored, parity gap: Go FileBasedClient re-reads the YAML on every poll when the file changes (file_based_oracle_test.go TestFileBasedOraclePollReload, 7s deadline); Rust DynamicConfigOverlay::from_file is a one-shot snapshot with no poller, so an existing overlay never observes a rewritten file
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_thrift-d3b80fd2e805e70e)
+
+running 24 tests
+test convert::tests::archived_visibility_round_trip ... ok
+test convert::tests::async_start_round_trip ... ok
+test convert::tests::errors_round_trip ... ok
+test convert::tests::failover_round_trip ... ok
+test convert::tests::primitives_round_trip ... ok
+test convert::tests::history_event_round_trip ... ok
+test convert::tests::query_task_completed_round_trip ... ok
+test convert::tests::refresh_and_diagnose_round_trip ... ok
+test convert::tests::requests_round_trip ... ok
+test convert::tests::reset_round_trip ... ok
+test convert::tests::restart_round_trip ... ok
+test convert::tests::schedule_round_trip ... ok
+test convert::tests::semaphore_round_trip ... ok
+test convert::timeout_wire_tests::cancel_timer_failure_uses_original_thrift_history_field ... ok
+test convert::tests::task_list_discovery_round_trip ... ok
+test convert::timeout_wire_tests::initial_decision_attempt_zero_is_present_on_the_wire ... ok
+test convert::timeout_wire_tests::timeout_attributes_preserve_pinned_thrift_fields_and_opaque_bytes ... ok
+test protocol::tests::primitives_round_trip ... ok
+test protocol::tests::skip_unknown_struct_fields ... ok
+test protocol::tests::strict_envelope_round_trip ... ok
+test protocol::tests::truncated_is_an_error ... ok
+test service::tests::no_argument_and_visibility_methods_use_upstream_exception_ids ... ok
+test value::tests::empty_containers_encode_cleanly ... ok
+test value::tests::struct_round_trip ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/go_fixtures.rs (/mnt/storage/service/cargo-target-shared/debug/deps/go_fixtures-ee58aaad7b82b7c4)
+
+running 7 tests
+test active_active_zero_version_matches_go_mapper ... ok
+test go_declared_exception_decode ... ok
+test go_signal_args_decode ... ok
+test go_poll_response_decode ... ok
+test go_start_args_decode ... ok
+test go_start_reply_decode ... ok
+test persistence_history_blob_matches_go ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running unittests src/lib.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_worker-97b7be46a18e952b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/mnt/storage/service/cargo-target-shared/debug/deps/cadence_worker-caa73e9d5f433f17)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_api
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_common
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_frontend
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_history
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_matching
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_persistence
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_proto
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_service_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_thrift
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cadence_worker
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
