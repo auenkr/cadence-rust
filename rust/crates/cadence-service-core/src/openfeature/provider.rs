@@ -93,6 +93,13 @@ pub trait FeatureProvider: Send + Sync {
     fn resolve(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext) -> Resolution;
 }
 
+impl fmt::Debug for dyn FeatureProvider {
+    /// Needed so `Result<Arc<dyn FeatureProvider>, _>` supports `unwrap_err`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("FeatureProvider")
+    }
+}
+
 /// Go `openfeatureprovider.Constructor`. The config is the provider's own
 /// `provider:` block; `None` is Go's nil `*yaml.Node`.
 pub type Constructor = Arc<
