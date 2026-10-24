@@ -85,3 +85,4 @@ jobs:
             rust/commit.txt
             rust/target-dir.txt
             rust/format.patch
+            rust/Cargo.lock
