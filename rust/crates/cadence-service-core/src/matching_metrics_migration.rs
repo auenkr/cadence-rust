@@ -718,7 +718,8 @@ mod production_matching_metric_tests {
         assert_eq!(timer[0].tags["transport"], "grpc");
         assert_eq!(timer[1].name, "syncmatch_latency");
         assert_eq!(timer[1].kind, MetricKind::Timer);
-        assert!(timer[1].tags.is_empty());
+        assert_eq!(timer[1].tags["operation"], "AddDecisionTask");
+        assert_eq!(timer[1].tags.len(), 1);
 
         let mut both = MigrationPolicy::default();
         both.histograms.default = "both".into();
@@ -753,6 +754,7 @@ mod production_matching_metric_tests {
         assert_eq!(events[2].tags["histogram_scale"], "1");
         assert_eq!(events[3].name, "syncmatch_latency_ns");
         assert_eq!(events[3].kind, MetricKind::Histogram);
+        assert_eq!(events[3].tags["operation"], "AddDecisionTask");
         assert_eq!(events[3].tags["histogram_start"], "1ms");
         assert_eq!(events[3].tags["histogram_end"], "17m28.576s");
         assert_eq!(events[3].tags["histogram_scale"], "1");
