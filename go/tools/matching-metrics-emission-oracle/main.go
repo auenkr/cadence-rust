@@ -63,6 +63,7 @@ func main() {
 		manager := metered.NewTaskManager(&fixtureTaskManager{}, client, log.NewNoop(), &config.Persistence{})
 		_, _ = manager.GetTasks(context.Background(), &persistence.GetTasksRequest{})
 		_, _ = manager.GetTasks(context.Background(), &persistence.GetTasksRequest{})
+		_, _ = manager.GetTasks(context.Background(), &persistence.GetTasksRequest{})
 		emit(root)
 		return
 	}
