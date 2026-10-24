@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -35,9 +35,30 @@ use cadence_persistence::{
 };
 use serde::Deserialize;
 
-/// Recently seen pollers: (task-list, identity, kind) -> last-seen millis.
+/// Recently seen pollers: (task-list, identity, kind) -> poll record.
 /// Mirrors the poller list Go's matching service reports.
-type PollerMap = std::collections::HashMap<(String, String, String, String), i64>;
+type PollerMap = std::collections::HashMap<(String, String, String, String), PollerRecord>;
+
+/// Carries a poll's isolation group from matching to the frontend poll and
+/// from the worker's HTTP request, like Go's `cadence-worker-isolation-group`.
+pub const ISOLATION_GROUP_HEADER: &str = "cadence-worker-isolation-group";
+
+/// Go `TaskDispatchRPS` default, used for a poller without a worker rate.
+const TASK_DISPATCH_RPS: f64 = 100_000.0;
+
+/// Go `persistence.TaskListTypeDecision` and `TaskListTypeActivity`.
+pub const DECISION_TASK_TYPE: i32 = 0;
+pub const ACTIVITY_TASK_TYPE: i32 = 1;
+
+/// Go `poller.historicalPoller` for one identity: the latest poll's rate and
+/// isolation group, its last start or end time, and whether it is outstanding.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PollerRecord {
+    pub seen_millis: i64,
+    pub outstanding: bool,
+    pub rate_per_second: f64,
+    pub isolation_group: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -177,25 +198,90 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// Go `getTask` rate: the matching override wins, then the worker's
+/// `maxTasksPerSecond`, and a missing or negative rate falls back to the
+/// dispatch default.
+pub fn poller_rate(
+    state: &AppState,
+    domain: &str,
+    task_list: &str,
+    task_type: i32,
+    worker_rate: Option<f64>,
+) -> f64 {
+    let override_rate = {
+        let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+        cadence_persistence::dynamic_config::task_list_float(
+            overlay.property_values("matching.overrideTaskListRps"),
+            Some(domain),
+            task_list,
+            task_type,
+            0.0,
+        )
+    };
+    let rate = if override_rate > 0.0 {
+        Some(override_rate)
+    } else {
+        worker_rate
+    };
+    rate.filter(|rate| *rate >= 0.0).unwrap_or(TASK_DISPATCH_RPS)
+}
+
+/// Go `StartPoll`: records the identity's poll as outstanding. Dropping the
+/// returned guard is Go `EndPoll`, which clears outstanding and refreshes time.
 pub fn note_poller(
     state: &AppState,
     domain: &str,
     task_list: &str,
     identity: &str,
     kind: &str,
-) {
+    rate_per_second: f64,
+    isolation_group: &str,
+) -> Option<PollerGuard> {
     if task_list.is_empty() || identity.is_empty() {
-        return;
+        return None;
     }
-    state.pollers.lock().expect("poller lock").insert(
-        (
-            domain.to_owned(),
-            task_list.to_string(),
-            identity.to_string(),
-            kind.to_string(),
-        ),
-        now_millis(),
+    let key = (
+        domain.to_owned(),
+        task_list.to_string(),
+        identity.to_string(),
+        kind.to_string(),
     );
+    state.pollers.lock().expect("poller lock").insert(
+        key.clone(),
+        PollerRecord {
+            seen_millis: now_millis(),
+            outstanding: true,
+            rate_per_second,
+            isolation_group: isolation_group.to_owned(),
+        },
+    );
+    Some(PollerGuard {
+        pollers: state.pollers.clone(),
+        key,
+    })
+}
+
+/// Ends one poll when the handler returns or its future is dropped.
+pub struct PollerGuard {
+    pollers: Arc<std::sync::Mutex<PollerMap>>,
+    key: (String, String, String, String),
+}
+
+impl Drop for PollerGuard {
+    fn drop(&mut self) {
+        if let Some(record) = self.pollers.lock().expect("poller lock").get_mut(&self.key) {
+            record.outstanding = false;
+            record.seen_millis = now_millis();
+        }
+    }
+}
+
+/// Reads the worker's isolation group header; absent means no group.
+fn isolation_group_header(headers: &HeaderMap) -> &str {
+    headers
+        .get(ISOLATION_GROUP_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -1081,6 +1167,7 @@ where
 async fn poll_decision_task(
     State(state): State<Arc<AppState>>,
     Query(q): Query<PollQuery>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::tasks::PollForDecisionTaskRequest>,
 ) -> Response {
     if let Some(e) = require_domain(&state, &req.domain).await {
@@ -1099,12 +1186,15 @@ async fn poll_decision_task(
         .as_ref()
         .map(|t| t.name.clone())
         .unwrap_or_default();
-    note_poller(
+    let rate = poller_rate(&state, &req.domain, &task_list, DECISION_TASK_TYPE, None);
+    let _poller = note_poller(
         &state,
         executions.namespace_id().expect("scoped domain"),
         &task_list,
         &req.identity,
         "decision",
+        rate,
+        isolation_group_header(&headers),
     );
     long_poll(q.timeout_secs, || {
         executions.poll_decision(&req.domain, &task_list, &req.identity)
@@ -1153,6 +1243,7 @@ async fn respond_decision_task_failed(
 async fn poll_activity_task(
     State(state): State<Arc<AppState>>,
     Query(q): Query<PollQuery>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::tasks::PollForActivityTaskRequest>,
 ) -> Response {
     if let Some(e) = require_domain(&state, &req.domain).await {
@@ -1170,12 +1261,19 @@ async fn poll_activity_task(
         .as_ref()
         .map(|t| t.name.clone())
         .unwrap_or_default();
-    note_poller(
+    let worker_rate = req
+        .task_list_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.max_tasks_per_second);
+    let rate = poller_rate(&state, &req.domain, &task_list, ACTIVITY_TASK_TYPE, worker_rate);
+    let _poller = note_poller(
         &state,
         executions.namespace_id().expect("scoped domain"),
         &task_list,
         &req.identity,
         "activity",
+        rate,
+        isolation_group_header(&headers),
     );
     long_poll(q.timeout_secs, || {
         executions.poll_activity(&req.domain, &task_list, &req.identity)
@@ -2065,39 +2163,93 @@ pub fn describe_task_list_response(
     } else {
         "decision"
     };
+    let task_type = if kind == "activity" {
+        ACTIVITY_TASK_TYPE
+    } else {
+        DECISION_TASK_TYPE
+    };
     let domain_id = match executions.namespace_id() {
         Some(id) => id.to_owned(),
         None => {
             return Err(DomainGone);
         }
     };
-    let mut pollers: Vec<cadence_api::types::PollerInfo> = state
-        .pollers
-        .lock()
-        .expect("poller lock")
+    // Go `DescribeTaskList` counts pollers per configured isolation group,
+    // over outstanding polls and polls seen within the poller window.
+    let (groups, window) = if req.include_task_list_status {
+        let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+        (
+            cadence_persistence::dynamic_config::string_list(
+                overlay.property_values("system.allIsolationGroups"),
+            ),
+            cadence_persistence::dynamic_config::task_list_duration(
+                overlay.property_values("matching.taskIsolationPollerWindow"),
+                Some(req.domain.as_str()),
+                &task_list_name,
+                task_type,
+                2_000_000_000,
+            ),
+        )
+    } else {
+        (Vec::new(), 0)
+    };
+    let pollers_map = state.pollers.lock().expect("poller lock");
+    let mut pollers: Vec<cadence_api::types::PollerInfo> = pollers_map
         .iter()
         .filter(|((domain, tl, _, poll_kind), _)| {
             domain == &domain_id && tl == &task_list_name && poll_kind == kind
         })
-        .filter(|(_, seen)| **seen >= cutoff)
+        .filter(|(_, record)| record.seen_millis >= cutoff)
         .map(
-            |((_, _, identity, _), seen)| cadence_api::types::PollerInfo {
+            |((_, _, identity, _), record)| cadence_api::types::PollerInfo {
                 identity: identity.clone(),
-                last_access_time: Some(*seen),
-                rate_per_second: 0.0,
+                last_access_time: Some(record.seen_millis),
+                rate_per_second: record.rate_per_second,
             },
         )
         .collect();
     pollers.sort_by(|a, b| a.identity.cmp(&b.identity));
     pollers.dedup_by(|a, b| a.identity == b.identity);
+    let task_list_status = if req.include_task_list_status {
+        // Window is configured in nanoseconds; `seen_millis` is milliseconds.
+        let window_start = now_millis() - window / 1_000_000;
+        let mut poller_counts: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        for ((domain, tl, _, poll_kind), record) in pollers_map.iter() {
+            if domain == &domain_id
+                && tl == &task_list_name
+                && poll_kind == kind
+                && !record.isolation_group.is_empty()
+                && (record.outstanding || record.seen_millis > window_start)
+            {
+                *poller_counts.entry(record.isolation_group.clone()).or_default() += 1;
+            }
+        }
+        let isolation_group_metrics = groups
+            .into_iter()
+            .map(|group| {
+                let poller_count = poller_counts.get(&group).copied().unwrap_or_default();
+                (
+                    group,
+                    cadence_api::types::IsolationGroupMetrics {
+                        poller_count,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        Some(cadence_api::types::TaskListStatus {
+            backlog_count_hint: backlog as i64,
+            isolation_group_metrics,
+            ..Default::default()
+        })
+    } else {
+        None
+    };
+    drop(pollers_map);
     Ok(cadence_api::tasks::DescribeTaskListResponse {
         pollers,
-        task_list_status: req.include_task_list_status.then(|| {
-            cadence_api::types::TaskListStatus {
-                backlog_count_hint: backlog as i64,
-                ..Default::default()
-            }
-        }),
+        task_list_status,
         task_list: req.task_list.clone(),
     })
 }

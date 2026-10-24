@@ -165,15 +165,29 @@ impl Frontend {
         path: &str,
         input: &T,
     ) -> Result<R, Status> {
+        self.call_with_headers(method, path, input, &[]).await
+    }
+
+    pub(crate) async fn call_with_headers<T: Serialize, R: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        input: &T,
+        headers: &[(&str, &str)],
+    ) -> Result<R, Status> {
         let body = if method == Method::GET {
             Vec::new()
         } else {
             serde_json::to_vec(input).map_err(|e| Status::internal(e.to_string()))?
         };
-        let request = Request::builder()
+        let mut builder = Request::builder()
             .method(method)
             .uri(path)
-            .header("content-type", "application/json")
+            .header("content-type", "application/json");
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let request = builder
             .body(Body::from(body))
             .map_err(|e| Status::internal(e.to_string()))?;
         let response = crate::handlers::router(self.state.clone())
@@ -233,6 +247,27 @@ impl Frontend {
             .execution_store(name)
             .map_err(|e| Status::not_found(e.message))
     }
+}
+
+/// Go `ContextWithIsolationGroup`: the matching poll's isolation group rides
+/// to the frontend poll as request metadata, like the worker header does.
+pub(crate) fn with_isolation_group<T>(payload: T, isolation_group: &str) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(payload);
+    if let Ok(value) = tonic::metadata::AsciiMetadataValue::try_from(isolation_group) {
+        request
+            .metadata_mut()
+            .insert(crate::handlers::ISOLATION_GROUP_HEADER, value);
+    }
+    request
+}
+
+fn isolation_group_metadata<T>(request: &tonic::Request<T>) -> String {
+    request
+        .metadata()
+        .get(crate::handlers::ISOLATION_GROUP_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn page(
@@ -1674,6 +1709,7 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::PollForDecisionTaskRequest>,
     ) -> Result<Response<p::PollForDecisionTaskResponse>, Status> {
+        let isolation_group = isolation_group_metadata(&request);
         let r = request.into_inner();
         let input = cadence_api::tasks::PollForDecisionTaskRequest {
             domain: r.domain,
@@ -1682,7 +1718,12 @@ impl p::worker_api_server::WorkerApi for Frontend {
             binary_checksum: r.binary_checksum,
         };
         let v: Option<cadence_api::tasks::PollForDecisionTaskResponse> = self
-            .call(Method::POST, "/api/v1/tasks/poll-decision", &input)
+            .call_with_headers(
+                Method::POST,
+                "/api/v1/tasks/poll-decision",
+                &input,
+                &[(crate::handlers::ISOLATION_GROUP_HEADER, isolation_group.as_str())],
+            )
             .await?;
         Ok(Response::new(
             v.map(cv::decision_task).transpose()?.unwrap_or_default(),
@@ -1692,6 +1733,7 @@ impl p::worker_api_server::WorkerApi for Frontend {
         &self,
         request: tonic::Request<p::PollForActivityTaskRequest>,
     ) -> Result<Response<p::PollForActivityTaskResponse>, Status> {
+        let isolation_group = isolation_group_metadata(&request);
         let r = request.into_inner();
         let input = cadence_api::tasks::PollForActivityTaskRequest {
             domain: r.domain,
@@ -1702,7 +1744,12 @@ impl p::worker_api_server::WorkerApi for Frontend {
             }),
         };
         let v: Option<cadence_api::tasks::PollForActivityTaskResponse> = self
-            .call(Method::POST, "/api/v1/tasks/poll-activity", &input)
+            .call_with_headers(
+                Method::POST,
+                "/api/v1/tasks/poll-activity",
+                &input,
+                &[(crate::handlers::ISOLATION_GROUP_HEADER, isolation_group.as_str())],
+            )
             .await?;
         Ok(Response::new(v.map(cv::activity_task).unwrap_or_default()))
     }
