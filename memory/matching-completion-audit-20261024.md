@@ -86,12 +86,34 @@ must use a fresh target (`clean_target=true`), run clippy before tests, and
 record head SHA and conclusion. Mixed gates must additionally record the
 candidate Matching binary SHA256.
 
+### Focused completion branch CI
+
+- Matching package run
+  <https://github.com/auenkr/cadence-rust/actions/runs/40090630855> passed on
+  head `4e88d36b7e10900834fdd13403f83b3d4448f0bf`. The workflow used
+  `package=cadence-matching`, `clean_target=true`; strict clippy, formatting,
+  and package tests all passed. The new loaded-root startup-to-child test passed
+  as part of `matching_partial_upgrade_e.rs`.
+- Earlier attempts on `e39cd8d5c` and `c94781a18` failed only in the new test's
+  topology fixture: first the root resolved to the child (correct ownership
+  rejection), then a test searched placement addresses while Ringpop virtual
+  points are keyed by identity. The fixture now varies both identities and
+  placement addresses to obtain parent-owned root and child-owned partition;
+  this passed run 40090630855. No production code was altered for those test
+  failures.
+- Fresh workspace validation was dispatched as
+  <https://github.com/auenkr/cadence-rust/actions/runs/40090951826> on the same
+  code head `4e88d36b7e10900834fdd13403f83b3d4448f0bf`, with
+  `clean_target=true`; conclusion `success`. Workspace strict clippy and then
+  workspace tests passed on a fresh uncached runner target.
+
 ## Current ignored tests: stale mock cases versus actual gaps
 
 The old count of 41 ignored tests is obsolete. A scoped scan of the current
-Matching crate and `cadence-service-core/tests/matching_partial_upgrade_e.rs`
-found 28 `#[ignore]` attributes; this includes mixed oracle/gate skips, not 28
-production gaps. The startup notification placeholder has been replaced by an active behavior test and is no longer in this ignored set.
+Matching crate and Matching-related service-core test found 24 `#[ignore]`
+attributes; this includes mixed oracle/gate skips, not 24 production gaps. The
+startup notification placeholder has been replaced by an active behavior test
+and is no longer in this ignored set.
 
 ### Behavior gaps or unclosed behavior evidence
 
@@ -108,12 +130,13 @@ production gaps. The startup notification placeholder has been replaced by an ac
   limited to legacy non-durable `Matching::new`; production launcher paths use
   durable queues. Do not treat this as a production gap absent a supported
   deployed non-durable source.
-- `matching_semaphore_*` ignored validation/page-token cases in
-  `src/matching_semaphore_parity_tests.rs`, the shutdown-admission test in
-  `src/matching_rpc_tests.rs`, and acquire-during-load in
-  `tests/matching_engine_go_tests_d.rs` require a fresh source-level review.
-  Existing grant/deadline, lifecycle and Cassandra tests do not automatically
-  prove these semantics. Implement only behavior confirmed missing.
+- Semaphore parameter validation, paging, shutdown admission, and
+  acquire-during-load semantics are not ignored in this checkout. Their current
+  tests include `matching_semaphore_parity_tests.rs`,
+  `matching_rpc_semaphore_rejects_new_buckets_while_shutting_down`, and
+  `acquire_semaphore_request_during_load_gives_up_at_its_own_deadline`; keep
+  these in the final CI and mixed backend evidence review rather than carrying
+  forward stale ignored-test claims.
 - `go_get_tasks_batch_size_returns_raw_non_positive_values` in
   `src/matching_reader.rs` may be a real config accessor discrepancy; establish
   whether any production path observes raw nonpositive values before accepting
