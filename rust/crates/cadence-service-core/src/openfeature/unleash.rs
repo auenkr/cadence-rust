@@ -779,7 +779,7 @@ mod tests {
         std::thread::JoinHandle<()>,
     )
     where
-        F: FnMut(usize) -> (&'static str, &'static str) + Send + 'static,
+        F: FnMut(usize, &str) -> (&'static str, &'static str) + Send + 'static,
     {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -787,7 +787,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
-            for index in 0..4 {
+            for index in 0..5 {
                 let Ok((mut stream, _)) = listener.accept() else {
                     break;
                 };
@@ -795,7 +795,7 @@ mod tests {
                 let size = stream.read(&mut request).unwrap_or(0);
                 tx.send(String::from_utf8_lossy(&request[..size]).into_owned())
                     .unwrap();
-                let (status, body) = respond(index);
+                let (status, body) = respond(index, &String::from_utf8_lossy(&request));
                 let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
             }
         });
@@ -817,14 +817,21 @@ mod tests {
     fn polling_bootstraps_refreshes_uses_go_url_and_headers_and_keeps_cache_on_errors() {
         let (release_first_response, wait_for_release) = std::sync::mpsc::channel();
         let (release_final_response, wait_for_final_release) = std::sync::mpsc::channel();
-        let (base, requests, server) = local_server(move |index| {
-            if index == 0 {
+        let mut get_count = 0usize;
+        let (base, requests, server) = local_server(move |_index, request| {
+            if request.starts_with("GET ") {
+                get_count += 1;
+            }
+            if request.starts_with("GET ") && get_count == 1 {
                 wait_for_release.recv().unwrap();
             }
-            if index == 3 {
+            if request.starts_with("GET ") && get_count == 4 {
                 wait_for_final_release.recv().unwrap();
             }
-            match index {
+            if request.starts_with("POST ") {
+                return ("200 OK", "{}");
+            }
+            match get_count {
                 0 => (
                     "200 OK",
                     r#"{"features":[{"name":"refreshed","enabled":true}]}"#,
@@ -848,7 +855,14 @@ mod tests {
         )
         .unwrap();
         assert!(repository.snapshot().get("bootstrapped").is_some());
-        let first = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+        let mut observed = Vec::new();
+        let first = loop {
+            let request = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+            if request.starts_with("GET ") {
+                break request;
+            }
+            observed.push(request);
+        };
         assert!(
             first.starts_with("GET /api/client/features?project=project%20blue HTTP/1.1"),
             "{first}"
@@ -870,9 +884,9 @@ mod tests {
                 "missing {expected} in {first}"
             );
         }
-        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
-        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
-        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
+        while observed.len() < 4 {
+            observed.push(requests.recv_timeout(Duration::from_secs(1)).unwrap());
+        }
         assert!(repository.snapshot().get("refreshed").is_some());
         release_final_response.send(()).unwrap();
         let provider = UnleashProvider {
