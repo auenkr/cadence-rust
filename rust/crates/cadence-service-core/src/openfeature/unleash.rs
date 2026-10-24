@@ -373,7 +373,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
-            for index in 0..3 {
+            for index in 0..4 {
                 let Ok((mut stream, _)) = listener.accept() else {
                     break;
                 };
@@ -401,13 +401,23 @@ mod tests {
 
     #[test]
     fn polling_bootstraps_refreshes_uses_go_url_and_headers_and_keeps_cache_on_errors() {
-        let (base, requests, server) = local_server(|index| match index {
-            0 => (
-                "200 OK",
-                r#"{"features":[{"name":"refreshed","enabled":true}]}"#,
-            ),
-            1 => ("503 Service Unavailable", "{}"),
-            _ => ("200 OK", "not-json"),
+        let (release_first_response, wait_for_release) = std::sync::mpsc::channel();
+        let (release_final_response, wait_for_final_release) = std::sync::mpsc::channel();
+        let (base, requests, server) = local_server(move |index| {
+            if index == 0 {
+                wait_for_release.recv().unwrap();
+            }
+            if index == 3 {
+                wait_for_final_release.recv().unwrap();
+            }
+            match index {
+                0 => (
+                    "200 OK",
+                    r#"{"features":[{"name":"refreshed","enabled":true}]}"#,
+                ),
+                1 => ("503 Service Unavailable", "{}"),
+                _ => ("200 OK", "not-json"),
+            }
         });
         let bootstrap = serde_json::json!({"features":[{"name":"bootstrapped","enabled":true}]});
         let repository = UnleashRepository::new(
@@ -424,12 +434,10 @@ mod tests {
         )
         .unwrap();
         assert!(repository.snapshot().get("bootstrapped").is_some());
-        wait_for_feature(&repository, "refreshed");
         let first = requests.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert!(
-            first.starts_with("GET /api/client/features?project=project%20blue HTTP/1.1"),
-            "{first}"
-        );
+        assert!(first.starts_with("GET /api/client/features?project=project%20blue HTTP/1.1"), "{first}");
+        release_first_response.send(()).unwrap();
+        wait_for_feature(&repository, "refreshed");
         for expected in [
             "UNLEASH-APPNAME: cadence-test",
             "UNLEASH-INSTANCEID: instance-7",
@@ -447,7 +455,9 @@ mod tests {
         }
         assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
         assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
         assert!(repository.snapshot().get("refreshed").is_some());
+        release_final_response.send(()).unwrap();
         let provider = UnleashProvider { repository };
         provider.shutdown();
         server.join().unwrap();
@@ -480,7 +490,8 @@ mod tests {
         .unwrap();
         rx.recv_timeout(Duration::from_secs(1)).unwrap();
         let started = std::time::Instant::now();
-        repository.shutdown();
+        let provider = UnleashProvider { repository };
+        provider.shutdown();
         assert!(started.elapsed() < Duration::from_secs(2));
         server.join().unwrap();
     }
