@@ -163,11 +163,13 @@ fn enabled(snapshot: &FeatureResponse, name: &str, ctx: &Context, depth: usize) 
             && !dep.variants.as_ref().unwrap().contains(&parent_variant.name) { return false; }
     }
     if feature.strategies.is_empty() { return true; }
-    let segments: HashMap<i64, &Segment> = snapshot.segments.iter().map(|s| (s.id, s)).collect();
-    feature.strategies.iter().any(|s| {
-        let seg_ok = s.segments.iter().all(|id| segments.get(id).is_some_and(|seg| constraints(ctx, &seg.constraints)));
-        seg_ok && constraints(ctx, &s.constraints) && strategy_enabled(&s.name, &s.parameters, ctx)
-    })
+    feature.strategies.iter().any(|s| strategy_matches(snapshot, s, ctx))
+}
+
+fn strategy_matches(snapshot: &FeatureResponse, s: &Strategy, ctx: &Context) -> bool {
+    let segments: HashMap<i64, &Segment> = snapshot.segments.iter().map(|seg| (seg.id, seg)).collect();
+    let seg_ok = s.segments.iter().all(|id| segments.get(id).is_some_and(|seg| constraints(ctx, &seg.constraints)));
+    seg_ok && constraints(ctx, &s.constraints) && strategy_enabled(&s.name, &s.parameters, ctx)
 }
 
 fn strategy_enabled(name: &str, p: &Map<String, Value>, c: &Context) -> bool {
@@ -247,7 +249,7 @@ pub fn get_variant(snapshot: &FeatureResponse, name: &str, ctx: &Context, depth:
     let Some(f) = snapshot.features.iter().find(|f| f.name == name) else { return disabled() };
     if !enabled(snapshot, name, ctx, depth) { return disabled(); }
     for s in &f.strategies {
-        if strategy_enabled(&s.name, &s.parameters, ctx) && constraints(ctx, &s.constraints) && !s.variants.is_empty() {
+        if strategy_matches(snapshot, s, ctx) && !s.variants.is_empty() {
             if let Some(v) = choose_variant(&s.variants, s.parameters.get("groupId").and_then(Value::as_str).unwrap_or(""), ctx) { return v; }
         }
     }
