@@ -643,6 +643,20 @@ pub struct TaskListStatus {
     pub new_tasks_per_second: f64,
     #[serde(rename = "empty", default)]
     pub empty: bool,
+    #[serde(
+        rename = "isolationGroupMetrics",
+        default,
+        skip_serializing_if = "std::collections::HashMap::is_empty"
+    )]
+    pub isolation_group_metrics: std::collections::HashMap<String, IsolationGroupMetrics>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct IsolationGroupMetrics {
+    #[serde(rename = "newTasksPerSecond", default)]
+    pub new_tasks_per_second: f64,
+    #[serde(rename = "pollerCount", default)]
+    pub poller_count: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

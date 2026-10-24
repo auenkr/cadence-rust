@@ -953,7 +953,6 @@ async fn matching_rpc_non_durable_describe_lists_pollers_per_task_list_and_type(
 }
 
 #[tokio::test]
-#[ignore = "parity gap: non-durable poll history does not store TaskListMetadata.max_tasks_per_second; Go reports it as poller RatePerSecond"]
 async fn matching_rpc_non_durable_describe_reports_poller_rate() {
     let (matching, domain) = non_durable_fixture();
     let mut poll = Request::new(m::PollForActivityTaskRequest {
@@ -980,7 +979,6 @@ async fn matching_rpc_non_durable_describe_reports_poller_rate() {
 }
 
 #[tokio::test]
-#[ignore = "parity gap: non-durable describe does not track isolation groups; Go lists every configured group with its poller count"]
 async fn matching_rpc_non_durable_describe_reports_isolation_group_metrics() {
     let (matching, domain) = non_durable_fixture();
     matching.frontend.state.admin.dynamic_config.lock().unwrap().update(false, "system.allIsolationGroups", vec![cadence_api::admin::DynamicConfigValue {
