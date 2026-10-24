@@ -100,17 +100,17 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
+    type RuntimeCall = (
+        String,
+        RuntimePropertyType,
+        serde_json::Value,
+        BTreeMap<String, serde_json::Value>,
+    );
+
     #[derive(Debug, Default)]
     struct FakeRuntime(
         std::sync::RwLock<BTreeMap<(String, String, String), serde_json::Value>>,
-        Mutex<
-            Vec<(
-                String,
-                RuntimePropertyType,
-                serde_json::Value,
-                BTreeMap<String, serde_json::Value>,
-            )>,
-        >,
+        Mutex<Vec<RuntimeCall>>,
     );
 
     impl RuntimePropertyProvider for FakeRuntime {
