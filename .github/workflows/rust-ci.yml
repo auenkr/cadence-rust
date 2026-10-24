@@ -43,11 +43,16 @@ jobs:
         with:
           workspaces: rust
       - name: Formatting
-        working-directory: rust
         run: |
-          cargo fmt --all
+          set +e
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          fmt_result=$?
+          echo "$fmt_result" > rust/fmt.exit
           git diff --binary -- rust > rust/format.patch
-          cargo fmt --all -- --check
+          cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+          check_result=$?
+          echo "$check_result" > rust/fmt-check.exit
+          test "$fmt_result" -eq 0 && test "$check_result" -eq 0
       - name: Clippy
         working-directory: rust
         run: |
