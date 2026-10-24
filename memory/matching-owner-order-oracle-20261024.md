@@ -28,3 +28,17 @@ The Go oracle runs before clippy and the Matching crate tests. Ordinary Rust
 unit-test runs without the `CADENCE_MATCHING_OWNER_ORACLE` environment variable
 skip only this cross-language comparison. Validation and evidence: pending
 GitHub Actions run.
+
+## Recovery checkpoint
+
+Worker v7 failed on provider usage limit after committing180bb8875. Parent
+recovered that implementation, preserved an explicit empty JSON host array
+(instead of null) and added the generated Go response artifact. Integrated
+sourcea2579ee22 is dispatched to fresh Matching CI:
+https://github.com/auenkr/cadence-rust/actions/runs/40104239210 .
+Result pending; implementation is not yet validated. A workflow artifact-path
+indentation mistake in486e758a7 was corrected bya2579ee22 before dispatch.
+
+Corrected Unleash backoff/identity integratione4d9720a0 passed fresh workspace
+run40092051935. Metrics, active-offer and runtime file-watcher workers were
+previously active; their own results must be checked before integration.
