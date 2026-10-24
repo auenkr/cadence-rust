@@ -113,22 +113,39 @@ pub struct UnleashRepository {
 }
 
 #[derive(Default)]
-struct MetricsBucket { toggles: serde_json::Map<String, Value>, start: Option<String> }
+struct MetricsBucket {
+    toggles: serde_json::Map<String, Value>,
+    start: Option<String>,
+}
 impl MetricsBucket {
     fn count(&mut self, name: &str, enabled: bool, variant: Option<&str>) {
-        let toggle = self.toggles.entry(name.to_owned()).or_insert_with(|| serde_json::json!({"yes":0,"no":0,"variants":{}}));
+        let toggle = self
+            .toggles
+            .entry(name.to_owned())
+            .or_insert_with(|| serde_json::json!({"yes":0,"no":0,"variants":{}}));
         let key = if enabled { "yes" } else { "no" };
         toggle[key] = Value::from(toggle[key].as_i64().unwrap_or(0) + 1);
         if let Some(variant) = variant {
             let variants = toggle["variants"].as_object_mut().expect("variants map");
-            variants.insert(variant.to_owned(), Value::from(variants.get(variant).and_then(Value::as_i64).unwrap_or(0) + 1));
+            variants.insert(
+                variant.to_owned(),
+                Value::from(variants.get(variant).and_then(Value::as_i64).unwrap_or(0) + 1),
+            );
         }
     }
 }
 fn default_instance_id() -> String {
-    let user = std::env::var("USER").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| format!("generated-{}", std::process::id()));
-    match std::fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()) {
-        Some(host) => format!("{user}-{host}"), None => user,
+    let user = std::env::var("USER")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("generated-{}", std::process::id()));
+    match std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+    {
+        Some(host) => format!("{user}-{host}"),
+        None => user,
     }
 }
 impl UnleashRepository {
@@ -165,8 +182,16 @@ impl UnleashRepository {
         if !config.project_name.is_empty() {
             endpoint.set_query(Some(&format!("project={}", config.project_name)));
         }
-        let instance_id = if config.instance_id.is_empty() { default_instance_id() } else { config.instance_id.clone() };
-        let metrics_interval = if config.metrics_interval_nanos > 0 { Duration::from_nanos(config.metrics_interval_nanos as u64) } else { Duration::from_secs(60) };
+        let instance_id = if config.instance_id.is_empty() {
+            default_instance_id()
+        } else {
+            config.instance_id.clone()
+        };
+        let metrics_interval = if config.metrics_interval_nanos > 0 {
+            Duration::from_nanos(config.metrics_interval_nanos as u64)
+        } else {
+            Duration::from_secs(60)
+        };
         let connection_id = uuid::Uuid::new_v4().to_string();
         let headers = vec![
             ("UNLEASH-APPNAME", config.app_name.clone()),
@@ -180,7 +205,12 @@ impl UnleashRepository {
             ("Content-Type", "application/json".into()),
         ];
         let mut shared_headers = headers.clone();
-        if let Some((_, value)) = shared_headers.iter_mut().find(|(name, _)| *name == "Unleash-Interval") { *value = metrics_interval.as_millis().to_string(); }
+        if let Some((_, value)) = shared_headers
+            .iter_mut()
+            .find(|(name, _)| *name == "Unleash-Interval")
+        {
+            *value = metrics_interval.as_millis().to_string();
+        }
         let etag = Arc::new(Mutex::new(String::new()));
         let poll_etag = etag.clone();
         let state = features.clone();
@@ -204,15 +234,23 @@ impl UnleashRepository {
                         }
                     }
                     let tag = poll_etag.lock().unwrap_or_else(|p| p.into_inner()).clone();
-                    if !tag.is_empty() { request = request.header("If-None-Match", tag); }
+                    if !tag.is_empty() {
+                        request = request.header("If-None-Match", tag);
+                    }
                     if let Ok(response) = request.send() {
-                        if response.status() == reqwest::StatusCode::NOT_MODIFIED { }
-                        else if response.status().is_success() {
-                            let new_etag = response.headers().get(reqwest::header::ETAG).and_then(|v| v.to_str().ok()).map(str::to_owned);
+                        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+                        } else if response.status().is_success() {
+                            let new_etag = response
+                                .headers()
+                                .get(reqwest::header::ETAG)
+                                .and_then(|v| v.to_str().ok())
+                                .map(str::to_owned);
                             if let Ok(body) = response.json::<Value>() {
                                 *state.write().unwrap_or_else(|p| p.into_inner()) =
                                     feature_map(body);
-                                if let Some(tag) = new_etag { *poll_etag.lock().unwrap_or_else(|p| p.into_inner()) = tag; }
+                                if let Some(tag) = new_etag {
+                                    *poll_etag.lock().unwrap_or_else(|p| p.into_inner()) = tag;
+                                }
                             }
                         }
                     }
@@ -226,13 +264,29 @@ impl UnleashRepository {
                 }
             })
             .map_err(|e| anyhow!("failed to start unleash poller: {e}"))?;
-        let metrics = Arc::new(Mutex::new(MetricsBucket { toggles: serde_json::Map::new(), start: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)) }));
+        let metrics = Arc::new(Mutex::new(MetricsBucket {
+            toggles: serde_json::Map::new(),
+            start: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)),
+        }));
         let report_metrics = metrics.clone();
         let report_stop = stop.clone();
-        let report_url = url.join("./client/metrics").map_err(|e| anyhow!("invalid unleash url: {e}"))?;
-        let register_url = url.join("./client/register").map_err(|e| anyhow!("invalid unleash url: {e}"))?;
+        let report_url = url
+            .join("./client/metrics")
+            .map_err(|e| anyhow!("invalid unleash url: {e}"))?;
+        let register_url = url
+            .join("./client/register")
+            .map_err(|e| anyhow!("invalid unleash url: {e}"))?;
         let app_name = config.app_name.clone();
-        let strategies = vec!["default", "applicationHostname", "gradualRollout/random", "gradualRollout/sessionId", "gradualRollout/userId", "remoteAddress", "userWithId", "flexibleRollout"];
+        let strategies = vec![
+            "default",
+            "applicationHostname",
+            "gradualRollout/random",
+            "gradualRollout/sessionId",
+            "gradualRollout/userId",
+            "remoteAddress",
+            "userWithId",
+            "flexibleRollout",
+        ];
         let reporter = std::thread::Builder::new().name("unleash-metrics".into()).spawn(move || {
             let Ok(client) = reqwest::blocking::Client::builder().timeout(Duration::from_millis(500)).build() else { return; };
             let started = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
@@ -281,7 +335,14 @@ impl UnleashRepository {
         if let Some(task) = self.poller.lock().unwrap_or_else(|p| p.into_inner()).take() {
             let _ = task.join();
         }
-        if let Some(task) = self.reporter.lock().unwrap_or_else(|p| p.into_inner()).take() { let _ = task.join(); }
+        if let Some(task) = self
+            .reporter
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            let _ = task.join();
+        }
     }
 }
 impl Drop for UnleashRepository {
@@ -345,24 +406,38 @@ impl FeatureProvider for UnleashProvider {
                 FlagValue::Bool(value) => *value,
                 _ => unreachable!(),
             };
-            let enabled =
-                    if snapshot.features.iter().any(|feature| feature.name == flag) {
-                        unleash_engine::is_enabled(&snapshot, flag, &context)
-                    } else {
-                        fallback
-                    };
-            self.repository.metrics.lock().unwrap_or_else(|p| p.into_inner()).count(flag, enabled, None);
-            return Resolution { value: FlagValue::Bool(enabled), error: None };
+            let enabled = if snapshot.features.iter().any(|feature| feature.name == flag) {
+                unleash_engine::is_enabled(&snapshot, flag, &context)
+            } else {
+                fallback
+            };
+            self.repository
+                .metrics
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .count(flag, enabled, None);
+            return Resolution {
+                value: FlagValue::Bool(enabled),
+                error: None,
+            };
         }
         let variant = unleash_engine::get_variant(&snapshot, flag, &context, 0);
         if !variant.feature_enabled || variant.name == "disabled" {
-            self.repository.metrics.lock().unwrap_or_else(|p| p.into_inner()).count(flag, false, Some("disabled"));
+            self.repository
+                .metrics
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .count(flag, false, Some("disabled"));
             return Resolution {
                 value: default,
                 error: None,
             };
         }
-        self.repository.metrics.lock().unwrap_or_else(|p| p.into_inner()).count(flag, true, Some(&variant.name));
+        self.repository
+            .metrics
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .count(flag, true, Some(&variant.name));
         let payload = variant.payload.value;
         let fallback = default.clone();
         match default {
@@ -858,33 +933,76 @@ mod tests {
                 let mut chunk = [0u8; 1024];
                 loop {
                     let n = stream.read(&mut chunk).unwrap_or(0);
-                    if n == 0 { break; }
+                    if n == 0 {
+                        break;
+                    }
                     request.extend_from_slice(&chunk[..n]);
                     let text = String::from_utf8_lossy(&request);
-                    if let Some(length) = text.to_ascii_lowercase().split("content-length: ").nth(1).and_then(|s| s.split("\r\n").next()).and_then(|s| s.parse::<usize>().ok()) {
-                        if let Some(body) = text.split("\r\n\r\n").nth(1) { if body.len() >= length { break; } }
-                    } else if text.contains("\r\n\r\n") { break; }
+                    if let Some(length) = text
+                        .to_ascii_lowercase()
+                        .split("content-length: ")
+                        .nth(1)
+                        .and_then(|s| s.split("\r\n").next())
+                        .and_then(|s| s.parse::<usize>().ok())
+                    {
+                        if let Some(body) = text.split("\r\n\r\n").nth(1) {
+                            if body.len() >= length {
+                                break;
+                            }
+                        }
+                    } else if text.contains("\r\n\r\n") {
+                        break;
+                    }
                 }
                 let raw = String::from_utf8_lossy(&request).into_owned();
                 tx.send(raw).unwrap();
-                let body = if index == 0 { r#"{"features":[{"name":"flag","enabled":true,"strategies":[{"name":"default"}]}]}"# } else { "{}" };
-                let status = if index == 2 { "500 Internal Server Error" } else { "200 OK" };
+                let body = if index == 0 {
+                    r#"{"features":[{"name":"flag","enabled":true,"strategies":[{"name":"default"}]}]}"#
+                } else {
+                    "{}"
+                };
+                let status = if index == 2 {
+                    "500 Internal Server Error"
+                } else {
+                    "200 OK"
+                };
                 write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             }
         });
-        let repository = UnleashRepository::new(UnleashConfig {
-            url: format!("http://{address}/api"), app_name: "cadence-test".into(),
-            instance_id: "instance-test".into(), refresh_interval_nanos: 60_000_000_000,
-            metrics_interval_nanos: 40_000_000, ..Default::default()
-        }, None).unwrap();
+        let repository = UnleashRepository::new(
+            UnleashConfig {
+                url: format!("http://{address}/api"),
+                app_name: "cadence-test".into(),
+                instance_id: "instance-test".into(),
+                refresh_interval_nanos: 60_000_000_000,
+                metrics_interval_nanos: 40_000_000,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
         let first = rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(first.starts_with("GET /api/client/features"), "{first}");
         let register = rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(register.starts_with("POST /api/client/register"), "{register}");
-        assert!(register.to_ascii_lowercase().contains("content-type: application/json"));
-        assert!(register.contains("\"instanceId\":\"instance-test\""), "{register}");
-        assert!(register.contains("\"sdkVersion\":\"unleash-client-go:4.5.0\""), "{register}");
-        let provider = UnleashProvider { repository, ready: AtomicBool::new(true) };
+        assert!(
+            register.starts_with("POST /api/client/register"),
+            "{register}"
+        );
+        assert!(register
+            .to_ascii_lowercase()
+            .contains("content-type: application/json"));
+        assert!(
+            register.contains("\"instanceId\":\"instance-test\""),
+            "{register}"
+        );
+        assert!(
+            register.contains("\"sdkVersion\":\"unleash-client-go:4.5.0\""),
+            "{register}"
+        );
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(true),
+        };
         let result = provider.resolve("flag", FlagValue::Bool(false), &Default::default());
         assert_eq!(result.value, FlagValue::Bool(true));
         let metrics = rx.recv_timeout(Duration::from_secs(2)).unwrap();
