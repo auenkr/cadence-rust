@@ -299,7 +299,8 @@ fn rollout(id: &str, group: &str, percentage: Option<f64>) -> bool {
     if id.is_empty() {
         return false;
     }
-    percentage.is_some_and(|p| p > 0.0 && normalized(&format!("{group}:{id}"), 0) as f64 <= p)
+    let bucket = normalized(&format!("{group}:{id}"), 0) % 100 + 1;
+    percentage.is_some_and(|p| p > 0.0 && f64::from(bucket) <= p)
 }
 
 /// MurmurHash3 x86 32-bit, matching github.com/twmb/murmur3 SeedNew32.
@@ -537,6 +538,31 @@ mod tests {
     #[test]
     fn go_hash_rollout_fixture() {
         assert_eq!(normalized("gr1:123", 86_028_157) % 100 + 1, 96);
+        assert_eq!(normalized("gr1:123", 0) % 100 + 1, 73);
+        assert_eq!(normalized("groupX:999", 0) % 100 + 1, 25);
+    }
+
+    #[test]
+    fn rollout_buckets_match_go_across_percentage_boundaries_and_ids() {
+        let fixtures = [("123", 73_u32), ("999", 25), ("alice", 13), ("bob", 37)];
+        for (id, bucket) in fixtures {
+            for (percentage, expected) in [
+                (0.0, false),
+                (1.0, bucket <= 1),
+                (50.0, bucket <= 50),
+                (100.0, true),
+            ] {
+                assert_eq!(
+                    rollout(
+                        id,
+                        if id == "999" { "groupX" } else { "gr1" },
+                        Some(percentage)
+                    ),
+                    expected,
+                    "id={id}, bucket={bucket}, percentage={percentage}"
+                );
+            }
+        }
     }
     #[test]
     fn user_rollout_and_disabled_default() {
