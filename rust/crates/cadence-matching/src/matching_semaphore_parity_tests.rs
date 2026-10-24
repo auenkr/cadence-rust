@@ -662,10 +662,25 @@ fn matching_semaphore_scan_threads_page_tokens() {
     panic!("SemaphorePersistence has no page-token input/output; Go requires page-1 then page-2");
 }
 
-#[test]
-#[ignore = "parity gap: SemaphoreRow cannot represent nil/unknown rows; Cassandra rejects unknown row types. Go go/service/matching/semaphore/semaphore_manager_test.go:227"]
-fn matching_semaphore_scan_skips_nil_and_unknown_rows() {
-    panic!("Go skips nil and unknown rows; typed Rust scan cannot inject them");
+// TestStartSkipsRowsItCannotClassify (227). Go's nil, zero-value, and type-7 rows
+// all reach the Rust load as `SemaphoreRow::Unknown`; the load must step over each.
+#[tokio::test]
+async fn matching_semaphore_scan_skips_nil_and_unknown_rows() {
+    let store = ScriptStore::new(
+        vec![
+            token(1, ""),
+            SemaphoreRow::Unknown,
+            SemaphoreRow::Unknown,
+            SemaphoreRow::Unknown,
+            token(0, ""),
+            owner("owner-x", 0),
+            owner("", 3),
+        ],
+        vec![],
+    );
+    let manager = started(&store).await;
+    assert_eq!(manager.index.lock().unwrap().free_list, vec![1]);
+    assert!(manager.index.lock().unwrap().held.is_empty());
 }
 
 #[tokio::test]
@@ -719,7 +734,7 @@ async fn matching_semaphore_grant_rejects_unknown_write_outcome() {
 }
 
 // TestALateStopUnregistersOnlyItself (1028), the replacement-stays-registered
-// assertion. The self-unregister half (Go OnStopFn) is the test below.
+// assertion. The self-unregister half is the test below.
 #[tokio::test]
 async fn matching_semaphore_late_stop_leaves_replacement_registered() {
     let store = ScriptStore::new(free(&[1]), vec![]);
@@ -737,6 +752,7 @@ async fn matching_semaphore_late_stop_leaves_replacement_registered() {
     replacement.stop();
 }
 
+// TestALateStopUnregistersOnlyItself (1028), the self-unregister half (Go OnStopFn).
 #[tokio::test]
 async fn matching_semaphore_late_stop_unregisters_only_itself() {
     let store = ScriptStore::new(free(&[1]), vec![]);

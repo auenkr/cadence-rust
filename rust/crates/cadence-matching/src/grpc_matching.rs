@@ -1880,7 +1880,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
         let poll_started = std::time::Instant::now();
         let v = tokio::select! {
-            result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForDecisionTaskResponse::default() },
+            result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,crate::grpc::with_isolation_group(payload, &r.isolation_group)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForDecisionTaskResponse::default() },
             // Go returns an empty poll response (nil error) when a poll is cancelled.
             _=guard.cancel.notified()=>return Ok(Response::new(m::PollForDecisionTaskResponse {
                 auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
@@ -2085,7 +2085,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
         let poll_started = std::time::Instant::now();
         let v = tokio::select! {
-            result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForActivityTaskResponse::default() },
+            result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,crate::grpc::with_isolation_group(payload, &r.isolation_group)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForActivityTaskResponse::default() },
             // Go returns an empty poll response (nil error) when a poll is cancelled.
             _=guard.cancel.notified()=>return Ok(Response::new(m::PollForActivityTaskResponse {
                 auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),

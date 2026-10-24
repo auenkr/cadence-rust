@@ -1,0 +1,28 @@
+package main
+
+import (
+	"fmt"
+
+	farm "github.com/dgryski/go-farm"
+)
+
+func main() {
+	inputs := [][]byte{
+		{},
+		{0x00},
+		{0x7f},
+		{0x80},
+		{0xff},
+		{0x61, 0x62},
+		{0xef, 0xbf, 0xbd},
+		{0x80, 0xff, 0xef, 0xbf},
+		{0xef, 0xbf, 0xbd, 0x01},
+		{0x80, 0x00, 0xff, 0x7f},
+		[]byte("hello"),
+		{0x80, 0xff, 0xef, 0xbf, 0xbd},
+		[]byte("hello world"),
+	}
+	for _, in := range inputs {
+		fmt.Printf("%x len=%d Hash32=%d Fingerprint32=%d\n", in, len(in), farm.Hash32(in), farm.Fingerprint32(in))
+	}
+}

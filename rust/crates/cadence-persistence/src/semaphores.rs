@@ -41,6 +41,9 @@ pub struct SemaphoreHold {
 pub enum SemaphoreRow {
     Token { token_id: i32, holder: String },
     Owner { owner_id: String, held_token: i32 },
+    /// A row whose type this version cannot classify. Go's scan returns it
+    /// and the manager's load skips it, so an unknown row never fails the load.
+    Unknown,
 }
 
 /// Outcome of a conditional grant, mirroring Go's `SemaphoreGrant*` outcomes.

@@ -1162,6 +1162,80 @@ mod tests {
         assert!(!next.tasks.is_empty() && next.tasks.len() <= 10);
         assert!(next.finished);
     }
+    // Go: TestTaskListManagerGetTaskBatch (task_list_manager_test.go:1030-1096) row counts. Go
+    // expects 1200 persisted rows, then 1190 after ten GetTask+Finish calls and a delete pass
+    // (defaultTestConfig sets MaxTaskDeleteBatchSize=1). The batch assertions are in the test above.
+    #[test]
+    fn matching_queue_get_task_batch_row_count_after_ten_acks_matches_go() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let rows = |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 2000).unwrap().len();
+        let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(10), 1).unwrap();
+        queue.append(&vec![data(); 1200], 2).unwrap();
+        assert_eq!(rows(&store), 1200);
+        let mut acked = 0;
+        for _ in 0..100 {
+            if acked == 10 {
+                break;
+            }
+            for task in queue.read_batch(5, n(1), 3).unwrap().tasks {
+                if acked < 10 {
+                    queue.complete(task.task_id).unwrap();
+                    acked += 1;
+                }
+            }
+        }
+        assert_eq!(acked, 10);
+        assert_eq!(queue.run_garbage_collection(true).unwrap(), 10);
+        assert_eq!(rows(&store), 1190);
+        // The restarted manager reads from the acknowledged level: a non-empty batch of at most ten.
+        let next = scan_batch(store.as_ref(), &key(), queue.levels().1, 1200, 5, n(1000)).unwrap();
+        assert!(!next.tasks.is_empty() && next.tasks.len() <= 10);
+        assert!(next.finished);
+    }
+    // Go: TestTaskExpiryAndCompletion (task_list_manager_test.go:1241), expired-half fixture. Twenty
+    // tasks, every even one already expired. Each round polls five live tasks, and Go expects 10
+    // rows to remain after round one and none after round two.
+    #[test]
+    fn matching_queue_expired_half_fixture_leaves_go_remaining_counts() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let rows = |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 2000).unwrap().len();
+        let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(10), 1).unwrap();
+        let tasks: Vec<TaskData> = (0..20)
+            .map(|i| TaskData {
+                expiry_nanos: if i % 2 == 0 { 1 } else { 0 },
+                ..data()
+            })
+            .collect();
+        queue.append(&tasks, 2).unwrap();
+        assert_eq!(rows(&store), 20);
+        let mut remaining = 20;
+        for _ in 0..2 {
+            let mut polled = 0;
+            for _ in 0..100 {
+                if polled == 5 {
+                    break;
+                }
+                for task in queue.read_batch(5, n(1), 3).unwrap().tasks {
+                    if polled < 5 {
+                        queue.complete(task.task_id).unwrap();
+                        polled += 1;
+                    }
+                }
+            }
+            assert_eq!(polled, 5);
+            remaining -= 10;
+            queue.run_garbage_collection(true).unwrap();
+            assert_eq!(rows(&store), remaining);
+        }
+    }
     // Go: TestTaskListManagerGetTaskBatch_ReadBatchDone (task_list_manager_test.go:1196). With no
     // rows, a scan covers at most ten ranges per call and is only done at max read level.
     #[test]
