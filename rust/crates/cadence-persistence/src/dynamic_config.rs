@@ -119,10 +119,38 @@ fn runtime_typed<T>(result: Result<Value, String>, _default: T, property_type: &
 
 fn duration_default(nanos: i64) -> String {
     if nanos == 0 { return "0s".into(); }
-    if nanos % 1_000_000_000 == 0 { return format!("{}s", nanos / 1_000_000_000); }
-    if nanos % 1_000_000 == 0 { return format!("{}ms", nanos / 1_000_000); }
-    if nanos % 1_000 == 0 { return format!("{}µs", nanos / 1_000); }
-    format!("{nanos}ns")
+    let magnitude = nanos.unsigned_abs();
+    let body = if magnitude < 1_000_000_000 {
+        let (unit, precision) = if magnitude < 1_000 {
+            ("ns", 0)
+        } else if magnitude < 1_000_000 {
+            ("µs", 3)
+        } else {
+            ("ms", 6)
+        };
+        let (fraction, whole) = duration_fraction(magnitude, precision);
+        format!("{whole}{fraction}{unit}")
+    } else {
+        let (fraction, seconds) = duration_fraction(magnitude, 9);
+        let mut text = format!("{}{fraction}s", seconds % 60);
+        let minutes = seconds / 60;
+        if minutes > 0 {
+            text = format!("{}m{text}", minutes % 60);
+            let hours = minutes / 60;
+            if hours > 0 { text = format!("{hours}h{text}"); }
+        }
+        text
+    };
+    if nanos < 0 { format!("-{body}") } else { body }
+}
+
+fn duration_fraction(value: u64, precision: u32) -> (String, u64) {
+    let scale = 10u64.pow(precision);
+    let whole = value / scale;
+    let remainder = value % scale;
+    if remainder == 0 { return (String::new(), whole); }
+    let digits = format!("{remainder:0width$}", width = precision as usize);
+    (format!(".{}", digits.trim_end_matches('0')), whole)
 }
 
 static READ_ERROR_COUNT: AtomicU64 = AtomicU64::new(0);

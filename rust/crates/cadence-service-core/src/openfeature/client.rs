@@ -951,6 +951,9 @@ mod tests {
                     };
                     return Resolution { value: FlagValue::Int(scoped), error: None };
                 }
+                if key == "matching.duration" {
+                    return Resolution { value: default, error: None };
+                }
                 let value = self.value.load(Ordering::SeqCst);
                 Resolution { value: FlagValue::Int(value), error: None }
             }
@@ -989,6 +992,9 @@ mod tests {
         assert_eq!(dynamic_config::task_list_integer(
             overlay.property_values("matching.contextValue"), Some("domain-b"), "queue-b", 1, 0,
         ), 43);
+        assert_eq!(dynamic_config::duration(
+            overlay.property_values("matching.duration"), None, 300_000_000_000,
+        ), 300_000_000_000);
 
         let calls = fake.calls.lock().unwrap();
         assert_eq!(calls[0].0, "matching.maxTaskBatchSize");
@@ -999,6 +1005,8 @@ mod tests {
         assert_eq!(calls[0].2.get("clusterName"), Some(&Value::String("cluster-a".into())));
         assert_eq!(calls[1].2.get("domainName"), Some(&Value::String("domain-b".into())));
         assert_eq!(calls[1].2.get("taskType"), Some(&Value::from(1)));
+        let duration_call = calls.iter().find(|call| call.0 == "matching.duration").unwrap();
+        assert_eq!(duration_call.1, FlagValue::String("5m0s".into()));
         drop(calls);
 
         fake.fail.store(true, Ordering::SeqCst);
