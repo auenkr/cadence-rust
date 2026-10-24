@@ -1,0 +1,14 @@
+{
+  "domain": "service-compat-08391714-c651-4c14-8812-a5fa97faeec6",
+  "domainId": "01a16d64-f29d-77c0-b1ee-80203a3ec3e2",
+  "workflowId": "08391714-c651-4c14-8812-a5fa97faeec6",
+  "runId": "2ee909e0-718e-445b-8d0a-5b9aa5463388",
+  "taskList": "tasks-08391714-c651-4c14-8812-a5fa97faeec6",
+  "completedEvents": 11,
+  "goMatchingPendingTask": {
+    "workflowId": "go-matching-consume-08391714-c651-4c14-8812-a5fa97faeec6",
+    "runId": "a21dbe1f-69cd-4c14-8c0f-af3d0e504e00",
+    "taskList": "go-matching-consume-tasks-08391714-c651-4c14-8812-a5fa97faeec6",
+    "taskRowsBeforeGoConsume": 1
+  }
+}

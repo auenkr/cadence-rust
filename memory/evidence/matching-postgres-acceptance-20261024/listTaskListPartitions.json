@@ -1,0 +1,71 @@
+{
+  "result": "passed",
+  "transport": "grpc",
+  "nodes": 2,
+  "lists": [
+    {
+      "requested": "probe-list-partitions-root",
+      "keys": [
+        "probe-list-partitions-root",
+        "/__cadence_sys/probe-list-partitions-root/1",
+        "/__cadence_sys/probe-list-partitions-root/2"
+      ],
+      "owners": [
+        "127.0.0.1:24903",
+        "127.0.0.1:10558",
+        "127.0.0.1:24903"
+      ],
+      "describes": [
+        {
+          "key": "probe-list-partitions-root",
+          "servedBy": "127.0.0.1:24903"
+        },
+        {
+          "key": "/__cadence_sys/probe-list-partitions-root/1",
+          "servedBy": "127.0.0.1:10558"
+        },
+        {
+          "key": "/__cadence_sys/probe-list-partitions-root/2",
+          "servedBy": "127.0.0.1:24903"
+        }
+      ],
+      "sources": [
+        "127.0.0.1:24903",
+        "127.0.0.1:10558",
+        "go-frontend"
+      ]
+    },
+    {
+      "requested": "/__cadence_sys/probe-list-partitions-child/2",
+      "keys": [
+        "probe-list-partitions-child",
+        "/__cadence_sys/probe-list-partitions-child/1",
+        "/__cadence_sys/probe-list-partitions-child/2"
+      ],
+      "owners": [
+        "127.0.0.1:24903",
+        "127.0.0.1:24903",
+        "127.0.0.1:10558"
+      ],
+      "describes": [
+        {
+          "key": "probe-list-partitions-child",
+          "servedBy": "127.0.0.1:24903"
+        },
+        {
+          "key": "/__cadence_sys/probe-list-partitions-child/1",
+          "servedBy": "127.0.0.1:24903"
+        },
+        {
+          "key": "/__cadence_sys/probe-list-partitions-child/2",
+          "servedBy": "127.0.0.1:10558"
+        }
+      ],
+      "sources": [
+        "127.0.0.1:24903",
+        "127.0.0.1:10558",
+        "go-frontend"
+      ]
+    }
+  ]
+}
