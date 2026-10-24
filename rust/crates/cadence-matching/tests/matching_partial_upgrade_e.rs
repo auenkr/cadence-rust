@@ -314,10 +314,110 @@ async fn go_manager_start_non_root_reads_root_partition_config() {
     );
 }
 
-#[test]
-#[ignore = "parity gap: Go root Start pushes its leased partition config to child owners via MatchingClient.RefreshTaskListPartitionConfig (task_list_manager_test.go:1762); Rust has no start-time push, and the only RefreshTaskListPartitionConfigRequest sender is the update path (matching_registry.rs:1959). Needs two owner processes to observe, so no in-process body is possible"]
-fn go_manager_start_root_pushes_config_to_child_partitions() {
-    unimplemented!("needs two Matching owner processes; see ignore reason")
+#[tokio::test]
+async fn go_manager_start_root_pushes_loaded_config_to_remote_child_without_update_api() {
+    use cadence_common::membership::Host;
+
+    let parent = durable();
+    let child = durable();
+    let child_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let child_grpc_addr = child_listener.local_addr().unwrap();
+    let child_service = child.matching.clone();
+    let child_server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(m::matching_api_server::MatchingApiServer::new(child_service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(child_listener))
+            .await
+            .unwrap();
+    });
+
+    // Select deterministic Ringpop placement addresses so the root resolves
+    // to this manager and at least one read partition resolves to the child.
+    let (membership, remote_partition) = (0..1024)
+        .find_map(|seed| {
+            let parent_identity = format!("parent-{seed}");
+            let child_identity = format!("child-{seed}");
+            let membership = cadence_matching::matching_membership::Membership::new(
+                parent_identity.clone(),
+                vec![
+                    Host {
+                        address: format!("parent-{seed}:7935"),
+                        identity: parent_identity.clone(),
+                        grpc_address: "http://127.0.0.1:7835".into(),
+                    },
+                    Host {
+                        address: format!("child-{seed}:7935"),
+                        identity: child_identity.clone(),
+                        grpc_address: format!("http://{child_grpc_addr}"),
+                    },
+                ],
+            );
+            (membership
+                .owner(TASK_LIST)
+                .is_ok_and(|owner| owner.identity() == parent_identity))
+            .then(|| {
+                (1..128)
+                    .find(|id| {
+                        membership
+                            .owner(&format!("/__cadence_sys/{TASK_LIST}/{id}"))
+                            .is_ok_and(|owner| owner.identity() == child_identity)
+                    })
+                    .map(|id| (membership, id))
+            })
+            .flatten()
+        })
+        .expect("a child-owned partition in the test ring");
+
+    // Persist a config naming the partition actually owned by the child.
+    let expected = StoredPartitionConfig {
+        version: 1,
+        read_partitions: [(0, Vec::new()), (remote_partition, Vec::new())].into(),
+        write_partitions: [(0, Vec::new())].into(),
+    };
+    let initial = parent
+        .queues
+        .get(key(TASK_LIST, 0), 0, now_nanos())
+        .await
+        .unwrap();
+    parent
+        .queues
+        .update_partition_config(key(TASK_LIST, 0), initial, expected.clone(), now_nanos())
+        .await
+        .unwrap();
+    let initial = parent
+        .queues
+        .get(key(TASK_LIST, 0), 0, now_nanos())
+        .await
+        .unwrap();
+    parent
+        .queues
+        .unload(key(TASK_LIST, 0), initial, now_nanos())
+        .await
+        .unwrap();
+
+    let restarted = registry(parent.store.clone()).with_membership(membership);
+    let _root = restarted.get(key(TASK_LIST, 0), 0, now_nanos()).await.unwrap();
+
+    // The real gRPC RefreshTaskListPartitionConfig handler on the child must
+    // load and cache the root's persisted config. No parent Update RPC occurs
+    // after the restarted root is loaded above.
+    let child_key = key(&format!("/__cadence_sys/{TASK_LIST}/{remote_partition}"), 0);
+    let child_handle = child.queues.get(child_key, 0, now_nanos()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if child_handle.partitions.get().is_some_and(|cached| {
+                cached.version == expected.version
+                    && cached.read_partitions == expected.read_partitions
+                    && cached.write_partitions == expected.write_partitions
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("root startup refresh reaches the child before the Go-compatible deadline");
+    child_server.abort();
 }
 
 // ---------------------------------------------------------------------------
