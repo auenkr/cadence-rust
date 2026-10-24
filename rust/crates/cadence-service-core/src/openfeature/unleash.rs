@@ -173,7 +173,11 @@ fn default_instance_id() -> String {
     // or Linux-specific files. Go's fallback username includes random entropy
     // as well as the PID, so separate processes do not share an identity.
     let user = current_username().unwrap_or_else(|| {
-        format!("generated-{}-{}", std::process::id(), uuid::Uuid::new_v4().simple())
+        format!(
+            "generated-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        )
     });
     match system_hostname().filter(|value| !value.is_empty()) {
         Some(host) => format!("{user}-{host}"),
@@ -187,28 +191,52 @@ fn current_username() -> Option<String> {
     // making another libc call and reject a null pointer.
     unsafe {
         let entry = libc::getpwuid(libc::geteuid());
-        if entry.is_null() || (*entry).pw_name.is_null() { return None; }
-        std::ffi::CStr::from_ptr((*entry).pw_name).to_str().ok().map(str::to_owned)
+        if entry.is_null() || (*entry).pw_name.is_null() {
+            return None;
+        }
+        std::ffi::CStr::from_ptr((*entry).pw_name)
+            .to_str()
+            .ok()
+            .map(str::to_owned)
     }
 }
 #[cfg(not(unix))]
-fn current_username() -> Option<String> { std::env::var("USERNAME").ok().filter(|s| !s.is_empty()) }
+fn current_username() -> Option<String> {
+    std::env::var("USERNAME").ok().filter(|s| !s.is_empty())
+}
 
 #[cfg(unix)]
 fn system_hostname() -> Option<String> {
     let mut name = [0 as libc::c_char; 256];
     // SAFETY: writable buffer and its exact size are supplied to gethostname.
-    if unsafe { libc::gethostname(name.as_mut_ptr(), name.len()) } != 0 { return None; }
-    unsafe { std::ffi::CStr::from_ptr(name.as_ptr()).to_str().ok().map(str::to_owned) }
+    if unsafe { libc::gethostname(name.as_mut_ptr(), name.len()) } != 0 {
+        return None;
+    }
+    unsafe {
+        std::ffi::CStr::from_ptr(name.as_ptr())
+            .to_str()
+            .ok()
+            .map(str::to_owned)
+    }
 }
 #[cfg(not(unix))]
-fn system_hostname() -> Option<String> { std::env::var("COMPUTERNAME").ok() }
+fn system_hostname() -> Option<String> {
+    std::env::var("COMPUTERNAME").ok()
+}
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-struct FetchBackoff { errors: u8, skips: u8 }
+struct FetchBackoff {
+    errors: u8,
+    skips: u8,
+}
 impl FetchBackoff {
     fn status_failure(&mut self, status: reqwest::StatusCode) {
-        if matches!(status, reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND) {
+        if matches!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED
+                | reqwest::StatusCode::FORBIDDEN
+                | reqwest::StatusCode::NOT_FOUND
+        ) {
             self.errors = 10;
             self.skips = 10;
         } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
@@ -216,8 +244,13 @@ impl FetchBackoff {
             self.skips = self.errors;
         }
     }
-    fn decoded_success(&mut self) { self.errors = self.errors.saturating_sub(1); self.skips = self.errors; }
-    fn delay(&self, interval: Duration) -> Duration { interval.saturating_mul(u32::from(self.skips) + 1) }
+    fn decoded_success(&mut self) {
+        self.errors = self.errors.saturating_sub(1);
+        self.skips = self.errors;
+    }
+    fn delay(&self, interval: Duration) -> Duration {
+        interval.saturating_mul(u32::from(self.skips) + 1)
+    }
 }
 impl UnleashRepository {
     fn new(config: UnleashConfig, bootstrap: Option<Value>) -> anyhow::Result<Self> {
@@ -673,23 +706,67 @@ mod tests {
         let interval = Duration::from_millis(25);
         let mut state = FetchBackoff::default();
         state.status_failure(reqwest::StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(state, FetchBackoff { errors: 1, skips: 1 });
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 1,
+                skips: 1
+            }
+        );
         assert_eq!(state.delay(interval), interval * 2);
         // Network errors, malformed JSON, and 304 do not enter either success
         // or status-failure transitions; the poller only calls these methods
         // after observing a classified HTTP status or decoding a body.
         state.status_failure(reqwest::StatusCode::NOT_MODIFIED);
-        assert_eq!(state, FetchBackoff { errors: 1, skips: 1 });
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 1,
+                skips: 1
+            }
+        );
         state.decoded_success();
-        assert_eq!(state, FetchBackoff { errors: 0, skips: 0 });
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 0,
+                skips: 0
+            }
+        );
         state.status_failure(reqwest::StatusCode::UNAUTHORIZED);
-        assert_eq!(state, FetchBackoff { errors: 10, skips: 10 });
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 10,
+                skips: 10
+            }
+        );
         state.decoded_success();
-        assert_eq!(state, FetchBackoff { errors: 9, skips: 9 });
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 9,
+                skips: 9
+            }
+        );
         state.status_failure(reqwest::StatusCode::BAD_REQUEST);
-        assert_eq!(state, FetchBackoff { errors: 9, skips: 9 });
-        for _ in 0..20 { state.status_failure(reqwest::StatusCode::TOO_MANY_REQUESTS); }
-        assert_eq!(state, FetchBackoff { errors: 10, skips: 10 });
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 9,
+                skips: 9
+            }
+        );
+        for _ in 0..20 {
+            state.status_failure(reqwest::StatusCode::TOO_MANY_REQUESTS);
+        }
+        assert_eq!(
+            state,
+            FetchBackoff {
+                errors: 10,
+                skips: 10
+            }
+        );
     }
 
     fn yaml(text: &str) -> serde_yaml::Value {
