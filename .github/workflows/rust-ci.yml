@@ -53,7 +53,7 @@ jobs:
         run: |
           set +e
           cargo fmt --all -- --check > format.log 2>&1
-          echo "$?" > fmt.exit
+          echo "$?" > workspace-format.exit
           exit 0
         continue-on-error: true
       - name: Clippy
@@ -104,3 +104,4 @@ jobs:
             rust/commit.txt
             rust/target-dir.txt
             rust/format.log
+            rust/Cargo.lock
