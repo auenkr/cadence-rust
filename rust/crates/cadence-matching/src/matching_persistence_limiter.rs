@@ -695,7 +695,7 @@ mod metered_task_tests {
         limiter.record_list_response("GetTasks", 5, 700);
         limiter.record_task_call(
             "GetTasks",
-            Some(uuid::Uuid::nil()),
+            None,
             std::time::Duration::from_millis(1),
             &Err::<(), _>(MatchingTaskStoreError::Backend {
                 kind: BackendErrorKind::DbUnavailable,
@@ -704,7 +704,7 @@ mod metered_task_tests {
         );
         limiter.record_task_call(
             "GetTasks",
-            Some(uuid::Uuid::nil()),
+            None,
             std::time::Duration::from_millis(1),
             &Err::<(), _>(MatchingTaskStoreError::Backend {
                 kind: BackendErrorKind::BadRequest,
@@ -802,7 +802,7 @@ mod metered_task_tests {
         limiter.with_metric_sink(sink.clone());
         limiter.record_task_call(
             "GetTasks",
-            Some(uuid::Uuid::nil()),
+            None,
             std::time::Duration::from_millis(3),
             &Ok::<_, MatchingTaskStoreError>(()),
         );
@@ -947,14 +947,14 @@ mod go_metered_emission_oracle_tests {
         let elapsed = std::time::Duration::from_millis(2);
         limiter.record_task_call(
             "GetTasks",
-            None,
+            Some(uuid::Uuid::nil()),
             elapsed,
             &Ok::<_, MatchingTaskStoreError>(()),
         );
         limiter.record_list_response("GetTasks", 0, 0);
         limiter.record_task_call(
             "GetTasks",
-            None,
+            Some(uuid::Uuid::nil()),
             elapsed,
             &Err::<(), _>(MatchingTaskStoreError::Backend {
                 kind: BackendErrorKind::BadRequest,
