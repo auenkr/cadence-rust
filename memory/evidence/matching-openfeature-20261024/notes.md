@@ -64,3 +64,12 @@ silently serve defaults, which is worse than the explicit bail.
 ## CI
 
 See the run log section below (filled in after each dispatch).
+
+## CI log
+
+- `40067696233` cadence-service-core on `2d398db9d`: clippy failed (test compile: `Debug` for `dyn FeatureProvider`).
+- `40067854462` cadence-service-core on `8be416d2f`: clippy failed (`approx_constant` on `3.14` fixture).
+- `40067944129` cadence-service-core on `fce70363c`: **success**.
+- `40068048379` whole workspace on `fce70363c`: failed in `cadence-matching` `matching_reader` test (`pump_falls_back_to_default_for_unknown_isolation_group`, left 2 right 1). Same `matching_reader` tests also failed on base `e7285da4f` (`40064723413`, `40066185225`) with different tests failing per run: pre-existing nondeterminism, not caused by this branch.
+- Merged `origin/master` (4424a3b4d) into the branch, head `6f9934010`.
+- `40069171737` whole workspace on `6f9934010`: **success** (final head is green).
