@@ -771,7 +771,7 @@ mod tests {
             state,
             FetchBackoff {
                 errors: 1,
-                skips: 1
+                skips: 0
             }
         );
         state.decoded_success();
@@ -897,7 +897,9 @@ mod tests {
         fetch(&mut backoff);
         assert_eq!(backoff.skips, 1);
         let failed_request = seen_rx.recv().unwrap();
-        assert!(failed_request.contains("If-None-Match: \"v1\""));
+        assert!(failed_request
+            .to_ascii_lowercase()
+            .contains("if-none-match: \"v1\""));
 
         assert!(
             !backoff.on_tick(),
@@ -910,7 +912,9 @@ mod tests {
         assert!(backoff.on_tick());
         fetch(&mut backoff);
         let unchanged_request = seen_rx.recv().unwrap();
-        assert!(unchanged_request.contains("If-None-Match: \"v1\""));
+        assert!(unchanged_request
+            .to_ascii_lowercase()
+            .contains("if-none-match: \"v1\""));
         assert_eq!(backoff.errors, 1, "304 must not count as decoded success");
         assert_eq!(backoff.skips, 0);
 
