@@ -19,3 +19,8 @@ Reviewed `origin/matching-openfeature-20261024` at `fe5e6c810`. That tip contain
 ## Validation
 
 Pending GitHub Actions runs for focused `cadence-matching` and a fresh clean-target workspace clippy + tests. Record run URLs, exact head SHA, and conclusions below before claiming validation.
+
+## CI attempts
+
+- Focused `cadence-matching` run [40078453096](https://github.com/auenkr/cadence-rust/actions/runs/40078453096), head `e3970cbfea24330382642a5faade876c49520900`: **success** (clippy and tests).
+- Fresh uncached workspace run [40078696805](https://github.com/auenkr/cadence-rust/actions/runs/40078696805), same head: **failure in Clippy test compilation**. `Result::unwrap_err` in the new OpenFeature Unleash tests required `Debug` on `dyn FeatureProvider`. Added the trait object Debug implementation; rerun fresh workspace validation after commit.
