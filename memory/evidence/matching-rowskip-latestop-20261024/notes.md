@@ -67,4 +67,27 @@ No local cargo (per brief). Verification is GitHub Actions only.
 
 ## Runs
 
-(pending)
+Code head `071544885` (the commit that changes Rust code). Workflow `rust-ci.yml`, branch
+`matching-rowskip-lateStop-20261024`.
+
+| Run | Input | Result | Evidence |
+|---|---|---|---|
+| 40065037785 | `package=cadence-persistence` | success | build, clippy and tests pass |
+| 40065214498 | `package=cadence-matching` | success | `649 passed; 0 failed; 15 ignored`. Both un-ignored tests report `ok`: `matching_semaphore::parity_tests::matching_semaphore_scan_skips_nil_and_unknown_rows` and `...matching_semaphore_late_stop_unregisters_only_itself` |
+| 40065397912 | whole workspace | **failure** | clippy passed. Test step: `matching_reader::tests::matching_reader_dispatch_success_uses_known_or_default_group` and `matching_reader_pump_falls_back_to_default_for_unknown_isolation_group` failed (`left: 2, right: 1` at `matching_reader.rs:2232` and `:2273`) |
+| 40065610715 | whole workspace (rerun, same head) | success | green |
+
+The two reader failures are a pre-existing flake, not this change. The same test
+(`matching_reader_dispatch_success_uses_known_or_default_group`, `matching_reader.rs:2232`) failed on
+origin/master run 40064723413 (head `e7285da4f`), which is this branch's base. The reader code is
+untouched here, and the reader tests do not touch semaphores. The flake is out of scope and is not fixed
+here. The reader fixture's dispatch order between the group buffer and the default buffer varies
+with timing; a fix belongs with the partial-upgrade-c owner.
+
+## Remaining ignores in the two areas
+
+- `matching_semaphore_new_manager_validates_params` (`semaphore_manager_test.go:136`): still ignored.
+  Out of scope here.
+- `matching_semaphore_scan_threads_page_tokens` (`:180`): still ignored. The persistence boundary returns a
+  single Vec with no page token.
+- Not ported: the Go warn log for skipped rows. See gap 1 above.
