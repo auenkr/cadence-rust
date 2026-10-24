@@ -60,7 +60,7 @@ func TestCadenceMatchingPartitionOwnerOrderOracle(t *testing.T) {
 		members = scenario.hosts
 		ts.Advance(2 * time.Second) // production hashring suppresses refreshes within one second
 		if err := ring.Refresh(); err != nil { t.Fatal(err) }
-		entry := ownerOracleScenario{Name: scenario.name}
+		entry := ownerOracleScenario{Name: scenario.name, Hosts: make([]ownerOracleHost, 0, len(members))}
 		for _, host := range members { entry.Hosts = append(entry.Hosts, ownerOracleHost{host.GetAddress(), host.Identity(), ""}) }
 		entry.Root = resp("queue")
 		entry.Child = resp("/__cadence_sys/queue/9")
