@@ -425,3 +425,57 @@ mod mode_matrix_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod production_matching_metric_tests {
+    use super::*;
+    use crate::matching_metrics::{MetricValue, RecordingMetricSink};
+    use std::time::Duration;
+
+    #[test]
+    fn sync_match_timer_histogram_names_tags_and_default_gating_match_go() {
+        // Go MetricDefs[Matching] and StartTimerWithExponentialHistogram use
+        // these paired names. The manager scope supplies the four base tags;
+        // the histogram adds Go's exponential bucket metadata.
+        let timer_tags = BTreeMap::from([
+            ("operation".into(), "TaskListMgr".into()),
+            ("domain".into(), "domain-a".into()),
+            ("tasklist".into(), "queue/a".into()),
+            ("tasklistType".into(), "decision".into()),
+        ]);
+        let mut histogram_tags = timer_tags.clone();
+        histogram_tags.extend([
+            ("histogram_start".into(), "1ms".into()),
+            ("histogram_end".into(), "17m28.576s".into()),
+            ("histogram_scale".into(), "1".into()),
+        ]);
+        let timer = MetricEvent {
+            name: "syncmatch_latency_per_tl",
+            kind: MetricKind::Timer,
+            value: MetricValue::Duration(Duration::from_millis(12)),
+            tags: timer_tags,
+            histogram: None,
+        };
+        let histogram = MetricEvent {
+            name: "syncmatch_latency_per_tl_ns",
+            kind: MetricKind::Histogram,
+            value: MetricValue::Duration(Duration::from_millis(12)),
+            tags: histogram_tags,
+            histogram: Some(crate::matching_metrics::HistogramSpec::GoLow1ms100s),
+        };
+
+        let recording = Arc::new(RecordingMetricSink::default());
+        let sink = MigrationMetricSink::new(recording.clone(), MigrationPolicy::default());
+        sink.record(timer.clone());
+        sink.record(histogram.clone());
+        assert_eq!(recording.events(), vec![timer.clone()]);
+
+        let mut both = MigrationPolicy::default();
+        both.histograms.default = "both".into();
+        let recording = Arc::new(RecordingMetricSink::default());
+        let sink = MigrationMetricSink::new(recording.clone(), both);
+        sink.record(timer.clone());
+        sink.record(histogram.clone());
+        assert_eq!(recording.events(), vec![timer, histogram]);
+    }
+}

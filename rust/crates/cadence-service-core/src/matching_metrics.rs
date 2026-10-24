@@ -2107,7 +2107,10 @@ mod matcher_metric_tests {
         for event in &events {
             assert_eq!(event.kind, MetricKind::Counter);
             assert_eq!(event.value, MetricValue::Count(1));
+            assert_eq!(event.tags[OPERATION_TAG], "TaskListMgr");
             assert_eq!(event.tags[DOMAIN_TAG], "domain-a");
+            assert_eq!(event.tags[TASK_LIST_TAG], "queue/a");
+            assert_eq!(event.tags[TASK_LIST_TYPE_TAG], "decision");
         }
     }
 

@@ -42,6 +42,12 @@ jobs:
         if: inputs.clean_target != true
         with:
           workspaces: rust
+      - name: Formatting
+        working-directory: rust
+        run: |
+          cargo fmt --all
+          git diff --binary -- rust > rust/format.patch
+          cargo fmt --all -- --check
       - name: Clippy
         working-directory: rust
         run: |
@@ -79,3 +85,4 @@ jobs:
             rust/*.exit
             rust/commit.txt
             rust/target-dir.txt
+            rust/format.patch

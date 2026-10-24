@@ -882,7 +882,7 @@ mod metered_task_tests {
         let names: Vec<_> = events.iter().filter(|e| e.name.ends_with("_rollup")).map(|e| e.name).collect();
         assert_eq!(
             names,
-            ["persistence_requests_rollup", "persistence_latency_rollup", "persistence_errors_condition_failed_rollup", "persistence_latency_ns_rollup"]
+            ["persistence_requests_rollup", "persistence_latency_rollup", "persistence_latency_ns_rollup", "persistence_errors_condition_failed_rollup"]
         );
         assert!(events.iter().filter(|e| e.name.ends_with("_rollup") && e.kind != MetricKind::Histogram).all(|e| e.tags.is_empty()));
     }
