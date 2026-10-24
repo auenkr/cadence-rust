@@ -36,7 +36,7 @@ Source branch: `t3/matching-runtime-provider-reads`.
 - Added a `FeatureProvider` integration test reached through the real OpenFeature client, runtime adapter, and Matching accessors. It records flag names, typed defaults, and flattened attributes; checks live domain changes, domain/task-list/task-type isolation, the isolation-group list, provider failures, type-mismatch fallback, and shutdown.
 - Repo-wide `cargo fmt --all -- --check` reports existing formatting debt, so CI keeps that check advisory and non-mutating, matching `origin/master`. A hard `rustfmt --check` step checks changed runtime source files before Clippy/tests; it does not rewrite the checkout.
 - After merging current `origin/master`, Matching package CI passed on source SHA `bb08503dc3eded7704410736ba70b86825c5248c`: https://github.com/auenkr/cadence-rust/actions/runs/40086417167 (`cadence-matching`, fresh dedicated target, changed-source formatting check, Clippy, tests).
-- Fresh whole-workspace CI is running on source SHA `bb08503dc3eded7704410736ba70b86825c5248c`: https://github.com/auenkr/cadence-rust/actions/runs/40086744572. Record its conclusion after completion.
+- Fresh whole-workspace CI passed on source SHA `bb08503dc3eded7704410736ba70b86825c5248c`: https://github.com/auenkr/cadence-rust/actions/runs/40086744572 (uncached dedicated target, workspace Clippy then workspace tests).
 
 ### Reconciliation with `t3/matching-live-reader`
 
