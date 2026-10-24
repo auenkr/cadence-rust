@@ -979,13 +979,16 @@ mod go_metered_emission_oracle_tests {
             _: i64,
         ) -> cadence_persistence::matching_task_store::Result<Vec<cadence_persistence::matching_task_store::AllocatedTask>> {
             use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
-            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
-                Ok(Vec::new())
-            } else {
-                Err(MatchingTaskStoreError::Backend {
+            match self.0.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(Vec::new()),
+                1 => Ok(vec![cadence_persistence::matching_task_store::AllocatedTask {
+                    task_id: 1,
+                    data: cadence_persistence::matching_blob::TaskData::default(),
+                }]),
+                _ => Err(MatchingTaskStoreError::Backend {
                     kind: BackendErrorKind::BadRequest,
                     message: "metrics-oracle-failure".into(),
-                })
+                }),
             }
         }
 
@@ -1053,6 +1056,7 @@ mod go_metered_emission_oracle_tests {
             task_type: 0,
         };
         assert!(wrapped.get_tasks(&key, 0, 0, 10).unwrap().is_empty());
+        assert_eq!(wrapped.get_tasks(&key, 0, 0, 10).unwrap().len(), 1);
         assert!(wrapped.get_tasks(&key, 0, 0, 10).is_err());
         let rust = rust_series(recording.events());
         if let Ok(path) = std::env::var("MATCHING_RUST_PERSISTENCE_ORACLE") {

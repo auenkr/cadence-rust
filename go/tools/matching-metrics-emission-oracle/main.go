@@ -35,6 +35,9 @@ func (m *fixtureTaskManager) GetTasks(context.Context, *persistence.GetTasksRequ
 	if m.calls == 1 {
 		return &persistence.GetTasksResponse{}, nil
 	}
+	if m.calls == 2 {
+		return &persistence.GetTasksResponse{Tasks: []*persistence.TaskInfo{{}}}, nil
+	}
 	return nil, &types.BadRequestError{Message: "metrics-oracle-failure"}
 }
 
