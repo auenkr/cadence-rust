@@ -1578,10 +1578,27 @@ async fn matching_rpc_membership_semaphore_stop_panic_is_contained() {
 }
 
 // Go `errIfSemaphoreOwnershipLost` answers "not known" as the owner once the engine is shutting down.
-#[ignore = "parity gap: Rust ownership check has no shutdown branch; Go rejects with SemaphoreNotOwnedByHostError owned-by \"not known\" while shutting down. go/service/matching/handler/engine.go:1675"]
 #[tokio::test]
 async fn matching_rpc_semaphore_rejects_new_buckets_while_shutting_down() {
-    panic!("parity gap: Membership has no shutdown state to model Go isShuttingDown");
+    let (_dir, _store, matching, _key) = fixture();
+    matching.frontend.state.admin.dynamic_config.lock().unwrap().update(
+        false,
+        "system.enableDistributedSemaphore",
+        vec![bool_config(true, Some("domain"))],
+    );
+    let domain = Uuid::from_u128(1).to_string();
+    matching.frontend.state.executions.register_domain("domain", &domain);
+    matching.frontend.state.executions.create_semaphore("domain", "sem", 2, 2).unwrap();
+    matching.begin_shutdown();
+
+    let error = MatchingApi::acquire_semaphore(
+        &matching,
+        semaphore_request(&domain, "sem", 0, "1:w:r0:1"),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Aborted);
+    assert!(error.message().contains("OwnedBy: not known"), "{}", error.message());
 }
 
 // Go `AcquireSemaphore` turns any engine error after the caller's context ends, cancel or deadline, into InternalServiceError.
