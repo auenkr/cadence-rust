@@ -3,6 +3,48 @@
 use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{collections::BTreeMap, sync::Arc};
+
+/// Runtime evaluation boundary for named dynamic properties. Keeping the flag
+/// name, JSON typed default and filter attributes together prevents a caller
+/// from accidentally turning a filter-aware read into a snapshot lookup.
+/// Implementations return an error for provider failures and type mismatches;
+/// callers then use the supplied default, as Go's typed collection does.
+pub trait RuntimePropertyProvider: Send + Sync + std::fmt::Debug {
+    fn evaluate(
+        &self,
+        key: &str,
+        default: Value,
+        filters: &BTreeMap<String, Value>,
+    ) -> Result<Value, String>;
+}
+
+/// An explicit key-preserving runtime read. File and config-store values stay
+/// in `DynamicConfigOverlay`; this small handle is only used when a Matching
+/// consumer performs a typed property read.
+#[derive(Clone)]
+pub struct RuntimePropertyRead {
+    key: String,
+    provider: Arc<dyn RuntimePropertyProvider>,
+}
+
+impl std::fmt::Debug for RuntimePropertyRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimePropertyRead").field("key", &self.key).finish()
+    }
+}
+
+impl RuntimePropertyRead {
+    pub fn new(key: impl Into<String>, provider: Arc<dyn RuntimePropertyProvider>) -> Self {
+        Self { key: key.into(), provider }
+    }
+
+    pub fn key(&self) -> &str { &self.key }
+
+    pub fn evaluate(&self, default: Value, filters: &BTreeMap<String, Value>) -> Result<Value, String> {
+        self.provider.evaluate(&self.key, default, filters)
+    }
+}
 
 static READ_ERROR_COUNT: AtomicU64 = AtomicU64::new(0);
 
