@@ -141,11 +141,7 @@ impl MetricsBucket {
         (start, toggles)
     }
 
-    fn restore_failed(
-        &mut self,
-        start: String,
-        toggles: serde_json::Map<String, Value>,
-    ) {
+    fn restore_failed(&mut self, start: String, toggles: serde_json::Map<String, Value>) {
         for (name, counts) in toggles {
             let current = self
                 .toggles
@@ -153,8 +149,7 @@ impl MetricsBucket {
                 .or_insert_with(|| serde_json::json!({"yes":0,"no":0,"variants":{}}));
             for field in ["yes", "no"] {
                 current[field] = Value::from(
-                    current[field].as_i64().unwrap_or(0)
-                        + counts[field].as_i64().unwrap_or(0),
+                    current[field].as_i64().unwrap_or(0) + counts[field].as_i64().unwrap_or(0),
                 );
             }
             for (variant, count) in counts["variants"].as_object().into_iter().flatten() {
@@ -162,10 +157,7 @@ impl MetricsBucket {
                 variants.insert(
                     variant.clone(),
                     Value::from(
-                        variants
-                            .get(variant)
-                            .and_then(Value::as_i64)
-                            .unwrap_or(0)
+                        variants.get(variant).and_then(Value::as_i64).unwrap_or(0)
                             + count.as_i64().unwrap_or(0),
                     ),
                 );
@@ -1077,7 +1069,9 @@ mod tests {
         let first = first.unwrap();
         let register = register.unwrap();
         assert!(first.starts_with("GET /api/client/features"), "{first}");
-        assert!(first.to_ascii_lowercase().contains("unleash-instanceid: instance-test"));
+        assert!(first
+            .to_ascii_lowercase()
+            .contains("unleash-instanceid: instance-test"));
         assert!(
             register.starts_with("POST /api/client/register"),
             "{register}"
@@ -1166,7 +1160,11 @@ mod tests {
                 }
                 tx.send(request).unwrap();
                 if !is_features {
-                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").unwrap();
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                    )
+                    .unwrap();
                 } else if feature_requests == 1 {
                     let body = r#"{"features":[{"name":"retained","enabled":true}]}"#;
                     write!(stream, "HTTP/1.1 200 OK\r\nETag: \"rev-1\"\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
@@ -1175,11 +1173,17 @@ mod tests {
                 }
             }
         });
-        let repository = UnleashRepository::new(UnleashConfig {
-            url: format!("http://{address}/api"), app_name: "etag-test".into(),
-            refresh_interval_nanos: 20_000_000, metrics_interval_nanos: 60_000_000_000,
-            ..Default::default()
-        }, None).unwrap();
+        let repository = UnleashRepository::new(
+            UnleashConfig {
+                url: format!("http://{address}/api"),
+                app_name: "etag-test".into(),
+                refresh_interval_nanos: 20_000_000,
+                metrics_interval_nanos: 60_000_000_000,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
         wait_for_feature(&repository, "retained");
         let mut requests = Vec::new();
         for _ in 0..4 { requests.push(rx.recv_timeout(Duration::from_secs(2)).unwrap()); }
