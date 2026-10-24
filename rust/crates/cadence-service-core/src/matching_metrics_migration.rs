@@ -516,9 +516,7 @@ mod tests {
 #[cfg(test)]
 mod sink_tests {
     use super::*;
-    use crate::matching_metrics::{
-        InboundMetricContext, MatchingMetrics, MetricValue, RecordingMetricSink,
-    };
+    use crate::matching_metrics::{MetricValue, RecordingMetricSink};
     use std::time::Duration;
 
     fn event(name: &'static str, kind: MetricKind) -> MetricEvent {
@@ -686,7 +684,7 @@ mod mode_matrix_tests {
 mod production_matching_metric_tests {
     use super::*;
     use crate::matching_metrics::{
-        InboundMetricContext, MatchingMetrics, MetricValue, RecordingMetricSink,
+        InboundMetricContext, MatchingMetrics, RecordingMetricSink,
     };
     use std::time::Duration;
 
