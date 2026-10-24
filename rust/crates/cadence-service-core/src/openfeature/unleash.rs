@@ -263,7 +263,7 @@ impl FeatureProvider for UnleashProvider {
         let context = merge_context(self.repository.static_context.clone(), context);
         let snapshot = match evaluation_snapshot(self.repository.snapshot()) {
             Ok(snapshot) => snapshot,
-            Err(error) => return failure(default, ErrorCode::General, error),
+            Err(error) => return failure(default, ErrorCode::General, error.to_string()),
         };
         if matches!(default, FlagValue::Bool(_)) {
             let fallback = match &default {
@@ -725,7 +725,10 @@ mod tests {
         assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
         assert!(repository.snapshot().get("refreshed").is_some());
         release_final_response.send(()).unwrap();
-        let provider = UnleashProvider { repository };
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(false),
+        };
         provider.shutdown();
         server.join().unwrap();
     }
@@ -757,7 +760,10 @@ mod tests {
         .unwrap();
         rx.recv_timeout(Duration::from_secs(1)).unwrap();
         let started = std::time::Instant::now();
-        let provider = UnleashProvider { repository };
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(false),
+        };
         provider.shutdown();
         assert!(started.elapsed() < Duration::from_secs(2));
         server.join().unwrap();
