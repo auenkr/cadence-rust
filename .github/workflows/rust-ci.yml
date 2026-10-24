@@ -42,14 +42,16 @@ jobs:
         if: inputs.clean_target != true
         with:
           workspaces: rust
-      - name: Format changed Matching runtime sources
+      - name: Format
         working-directory: rust
         run: |
-          files=(crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs)
-          rustfmt --edition 2021 "${files[@]}"
-          rustfmt --edition 2021 --check "${files[@]}"
-          mkdir -p formatted-sources
-          for file in "${files[@]}"; do mkdir -p "formatted-sources/$(dirname "$file")"; cp "$file" "formatted-sources/$file"; done
+          # Report existing workspace formatting debt without rewriting the tested source.
+          cargo fmt --all -- --check > format.log 2>&1
+        continue-on-error: true
+      - name: Check changed Matching runtime formatting
+        working-directory: rust
+        run: |
+          rustfmt --edition 2021 --check crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs
       - name: Clippy
         working-directory: rust
         run: |
@@ -88,4 +90,3 @@ jobs:
             rust/*.exit
             rust/commit.txt
             rust/target-dir.txt
-            rust/formatted-sources/**

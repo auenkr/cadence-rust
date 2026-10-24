@@ -3,7 +3,7 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use cadence_persistence::dynamic_config::RuntimePropertyProvider;
+use cadence_persistence::dynamic_config::{RuntimePropertyProvider, RuntimePropertyType};
 use serde_json::Value;
 
 use super::client::OpenFeatureClient;
@@ -25,25 +25,28 @@ impl RuntimePropertyProvider for OpenFeatureRuntimeProvider {
     fn evaluate(
         &self,
         key: &str,
+        property_type: RuntimePropertyType,
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Result<Value, String> {
-        let result = match &default {
-            Value::Bool(default) => {
-                let (value, error) = self.client.get_bool_value(key, *default, filters);
+        match (property_type, default) {
+            (RuntimePropertyType::Boolean, Value::Bool(default)) => {
+                let (value, error) = self.client.get_bool_value(key, default, filters);
                 error.map_or_else(|| Ok(Value::Bool(value)), |error| Err(error.to_string()))
             }
-            Value::String(default) => {
-                let (value, error) = self.client.get_string_value(key, default, filters);
+            (RuntimePropertyType::String, Value::String(default)) => {
+                let (value, error) = self.client.get_string_value(key, &default, filters);
                 error.map_or_else(|| Ok(Value::String(value)), |error| Err(error.to_string()))
             }
-            Value::Number(default) if default.as_i64().is_some() => {
+            (RuntimePropertyType::Integer, Value::Number(default))
+                if default.as_i64().is_some() =>
+            {
                 let (value, error) =
                     self.client
                         .get_int_value(key, default.as_i64().unwrap(), filters);
                 error.map_or_else(|| Ok(Value::from(value)), |error| Err(error.to_string()))
             }
-            Value::Number(default) => {
+            (RuntimePropertyType::Float, Value::Number(default)) => {
                 let (value, error) =
                     self.client
                         .get_float_value(key, default.as_f64().unwrap_or_default(), filters);
@@ -56,16 +59,25 @@ impl RuntimePropertyProvider for OpenFeatureRuntimeProvider {
                     |error| Err(error.to_string()),
                 )
             }
-            Value::Array(default) => {
+            (RuntimePropertyType::Duration, Value::Number(default))
+                if default.as_i64().is_some() =>
+            {
+                let (value, error) =
+                    self.client
+                        .get_duration_value(key, default.as_i64().unwrap(), filters);
+                error.map_or_else(|| Ok(Value::from(value)), |error| Err(error.to_string()))
+            }
+            (RuntimePropertyType::StringList, Value::Array(default)) => {
                 let (value, error) = self.client.get_list_value(key, default.clone(), filters);
                 error.map_or_else(|| Ok(Value::Array(value)), |error| Err(error.to_string()))
             }
-            Value::Object(default) => {
+            (RuntimePropertyType::Map, Value::Object(default)) => {
                 let (value, error) = self.client.get_map_value(key, default.clone(), filters);
                 error.map_or_else(|| Ok(Value::Object(value)), |error| Err(error.to_string()))
             }
-            Value::Null => return Err("null has no OpenFeature property type".into()),
-        };
-        result
+            (kind, _) => Err(format!(
+                "default does not match OpenFeature property type {kind:?}"
+            )),
+        }
     }
 }

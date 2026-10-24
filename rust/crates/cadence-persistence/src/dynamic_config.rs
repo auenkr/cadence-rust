@@ -14,9 +14,23 @@ pub trait RuntimePropertyProvider: Send + Sync + std::fmt::Debug {
     fn evaluate(
         &self,
         key: &str,
+        property_type: RuntimePropertyType,
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Result<Value, String>;
+}
+
+/// Typed Matching getter semantics. Duration remains distinct from string so
+/// its OpenFeature default and parse errors follow GetDurationValue exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimePropertyType {
+    Integer,
+    Boolean,
+    Float,
+    Duration,
+    String,
+    StringList,
+    Map,
 }
 
 /// An explicit key-preserving runtime read. File and config-store values stay
@@ -50,10 +64,12 @@ impl RuntimePropertyRead {
 
     pub fn evaluate(
         &self,
+        property_type: RuntimePropertyType,
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Result<Value, String> {
-        self.provider.evaluate(&self.key, default, filters)
+        self.provider
+            .evaluate(&self.key, property_type, default, filters)
     }
 }
 
@@ -79,12 +95,13 @@ impl<'a> PropertyValues<'a> {
     }
     pub fn evaluate(
         &self,
+        property_type: RuntimePropertyType,
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>> {
         self.runtime
             .as_ref()
-            .map(|runtime| runtime.evaluate(default, filters))
+            .map(|runtime| runtime.evaluate(property_type, default, filters))
     }
 }
 
@@ -99,6 +116,7 @@ pub trait PropertyValueSource {
     fn snapshot_values(&self) -> &[DynamicConfigValue];
     fn runtime_value(
         &self,
+        property_type: RuntimePropertyType,
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>>;
@@ -110,10 +128,11 @@ impl PropertyValueSource for PropertyValues<'_> {
     }
     fn runtime_value(
         &self,
+        property_type: RuntimePropertyType,
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>> {
-        self.evaluate(default, filters)
+        self.evaluate(property_type, default, filters)
     }
 }
 impl PropertyValueSource for &PropertyValues<'_> {
@@ -122,10 +141,11 @@ impl PropertyValueSource for &PropertyValues<'_> {
     }
     fn runtime_value(
         &self,
+        property_type: RuntimePropertyType,
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>> {
-        self.evaluate(default, filters)
+        self.evaluate(property_type, default, filters)
     }
 }
 
@@ -135,6 +155,7 @@ impl PropertyValueSource for &[DynamicConfigValue] {
     }
     fn runtime_value(
         &self,
+        _: RuntimePropertyType,
         _: Value,
         _: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>> {
@@ -147,6 +168,7 @@ impl<const N: usize> PropertyValueSource for &[DynamicConfigValue; N] {
     }
     fn runtime_value(
         &self,
+        _: RuntimePropertyType,
         _: Value,
         _: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>> {
@@ -159,6 +181,7 @@ impl PropertyValueSource for &Vec<DynamicConfigValue> {
     }
     fn runtime_value(
         &self,
+        _: RuntimePropertyType,
         _: Value,
         _: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>> {
@@ -193,22 +216,6 @@ fn runtime_typed<T>(
             None
         }
     }
-}
-
-fn duration_default(nanos: i64) -> String {
-    if nanos == 0 {
-        return "0s".into();
-    }
-    if nanos % 1_000_000_000 == 0 {
-        return format!("{}s", nanos / 1_000_000_000);
-    }
-    if nanos % 1_000_000 == 0 {
-        return format!("{}ms", nanos / 1_000_000);
-    }
-    if nanos % 1_000 == 0 {
-        return format!("{}µs", nanos / 1_000);
-    }
-    format!("{nanos}ns")
 }
 
 static READ_ERROR_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -294,7 +301,9 @@ pub fn task_list_integer(
     default: i64,
 ) -> i64 {
     let filters = property_filters(domain, Some((task_list, task_type)));
-    if let Some(result) = values.runtime_value(Value::from(default), &filters) {
+    if let Some(result) =
+        values.runtime_value(RuntimePropertyType::Integer, Value::from(default), &filters)
+    {
         return runtime_typed(result, default, "integer")
             .and_then(integer_value)
             .unwrap_or(default);
@@ -323,7 +332,9 @@ pub fn task_list_boolean(
     default: bool,
 ) -> bool {
     let filters = property_filters(domain, Some((task_list, task_type)));
-    if let Some(result) = values.runtime_value(Value::Bool(default), &filters) {
+    if let Some(result) =
+        values.runtime_value(RuntimePropertyType::Boolean, Value::Bool(default), &filters)
+    {
         return runtime_typed(result, default, "boolean")
             .and_then(|value| value.as_bool())
             .unwrap_or(default);
@@ -353,7 +364,11 @@ pub fn task_list_float(
     default: f64,
 ) -> f64 {
     let filters = property_filters(domain, Some((task_list, task_type)));
-    if let Some(result) = values.runtime_value(serde_json::json!(default), &filters) {
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::Float,
+        serde_json::json!(default),
+        &filters,
+    ) {
         return runtime_typed(result, default, "float")
             .and_then(|value| value.as_f64())
             .filter(|v| v.is_finite())
@@ -383,13 +398,13 @@ pub fn task_list_duration(
     default: i64,
 ) -> i64 {
     let filters = property_filters(domain, Some((task_list, task_type)));
-    if let Some(result) = values.runtime_value(Value::String(duration_default(default)), &filters) {
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::Duration,
+        Value::from(default),
+        &filters,
+    ) {
         return runtime_typed(result, default, "duration")
-            .and_then(|value| {
-                value
-                    .as_str()
-                    .and_then(cadence_common::duration::parse_nanos)
-            })
+            .and_then(|value| value.as_i64())
             .unwrap_or(default);
     }
     match selected_context(
@@ -417,7 +432,9 @@ pub fn integer(values: impl PropertyValueSource, domain: Option<&str>, default: 
     let filters = domain
         .map(|v| BTreeMap::from([("domainName".into(), Value::String(v.into()))]))
         .unwrap_or_default();
-    if let Some(result) = values.runtime_value(Value::from(default), &filters) {
+    if let Some(result) =
+        values.runtime_value(RuntimePropertyType::Integer, Value::from(default), &filters)
+    {
         return runtime_typed(result, default, "integer")
             .and_then(integer_value)
             .unwrap_or(default);
@@ -435,7 +452,9 @@ pub fn boolean(values: impl PropertyValueSource, domain: Option<&str>, default: 
     let filters = domain
         .map(|v| BTreeMap::from([("domainName".into(), Value::String(v.into()))]))
         .unwrap_or_default();
-    if let Some(result) = values.runtime_value(Value::Bool(default), &filters) {
+    if let Some(result) =
+        values.runtime_value(RuntimePropertyType::Boolean, Value::Bool(default), &filters)
+    {
         return runtime_typed(result, default, "boolean")
             .and_then(|v| v.as_bool())
             .unwrap_or(default);
@@ -453,9 +472,13 @@ pub fn duration(values: impl PropertyValueSource, domain: Option<&str>, default:
     let filters = domain
         .map(|v| BTreeMap::from([("domainName".into(), Value::String(v.into()))]))
         .unwrap_or_default();
-    if let Some(result) = values.runtime_value(Value::String(duration_default(default)), &filters) {
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::Duration,
+        Value::from(default),
+        &filters,
+    ) {
         return runtime_typed(result, default, "duration")
-            .and_then(|v| v.as_str().and_then(cadence_common::duration::parse_nanos))
+            .and_then(|v| v.as_i64())
             .unwrap_or(default);
     }
     match selected(values.snapshot_values(), domain).and_then(|value| {
@@ -477,7 +500,11 @@ pub fn duration(values: impl PropertyValueSource, domain: Option<&str>, default:
 /// Go `GetFloat64Property` without filters. Non-finite or non-numeric values
 /// fall back to the default.
 pub fn float(values: impl PropertyValueSource, default: f64) -> f64 {
-    if let Some(result) = values.runtime_value(serde_json::json!(default), &BTreeMap::new()) {
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::Float,
+        serde_json::json!(default),
+        &BTreeMap::new(),
+    ) {
         return runtime_typed(result, default, "float")
             .and_then(|v| v.as_f64())
             .filter(|v| v.is_finite())
@@ -500,7 +527,9 @@ pub fn float(values: impl PropertyValueSource, default: f64) -> f64 {
 /// unfiltered entry is the fallback.
 pub fn boolean_domain_id(values: impl PropertyValueSource, domain_id: &str, default: bool) -> bool {
     let filters = BTreeMap::from([("domainID".into(), Value::String(domain_id.into()))]);
-    if let Some(result) = values.runtime_value(Value::Bool(default), &filters) {
+    if let Some(result) =
+        values.runtime_value(RuntimePropertyType::Boolean, Value::Bool(default), &filters)
+    {
         return runtime_typed(result, default, "boolean")
             .and_then(|v| v.as_bool())
             .unwrap_or(default);
@@ -532,7 +561,11 @@ pub fn boolean_domain_id(values: impl PropertyValueSource, domain_id: &str, defa
 /// Go `GetStringProperty` without filters. An unset key is not an error.
 pub fn string(values: impl PropertyValueSource, default: &str) -> String {
     let filters = BTreeMap::new();
-    if let Some(result) = values.runtime_value(Value::String(default.into()), &filters) {
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::String,
+        Value::String(default.into()),
+        &filters,
+    ) {
         return runtime_typed(result, default, "string")
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| default.into());
@@ -551,7 +584,11 @@ pub fn string(values: impl PropertyValueSource, default: &str) -> String {
 
 /// Go `MapAllIsolationGroupsResponse`: one non-string rejects the whole list.
 pub fn string_list(values: impl PropertyValueSource) -> Vec<String> {
-    if let Some(result) = values.runtime_value(Value::Array(Vec::new()), &BTreeMap::new()) {
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::StringList,
+        Value::Array(Vec::new()),
+        &BTreeMap::new(),
+    ) {
         return runtime_typed(result, (), "string list")
             .and_then(|v| {
                 v.as_array().and_then(|items| {
