@@ -709,7 +709,29 @@ async function run() {
       ...startRequest, workflowId: crashID, workflowType: { name: 'main.EchoWorkflow' },
       taskList: crashTaskList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
     });
-    const queued = await taskObserver.observe(domainId, crashList, 20, 'task-before-crash');
+    let queued;
+    try {
+      queued = await taskObserver.observe(domainId, crashList, 20, 'task-before-crash');
+    } catch (error) {
+      // Keep the persistence assertion strict and capture whether History dispatched
+      // the task or Matching consumed it before the intended crash checkpoint.
+      const diagnostics = await Promise.allSettled([
+        call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
+          domain, workflowExecution: { workflowId: crashID, runId: crashStart.runId },
+        }),
+        call('WorkflowAPI', 'DescribeTaskList', {
+          domain, taskList: crashTaskList, taskListType: 'TASK_LIST_TYPE_DECISION',
+          includeTaskListStatus: true,
+        }),
+      ]);
+      fs.writeFileSync(path.join(work, 'task-before-crash-diagnostics.json'), JSON.stringify({
+        workflowId: crashID, runId: crashStart.runId, taskList: crashList,
+        diagnostics: diagnostics.map(result => result.status === 'fulfilled'
+          ? { status: result.status, value: result.value }
+          : { status: result.status, error: String(result.reason) }),
+      }, null, 2) + '\n');
+      throw error;
+    }
     assert(queued.queued_rows > 0, 'decision task was not visible in Matching persistence before production owner crash');
     const beforeCrash = await call('WorkflowAPI', 'DescribeTaskList', {
       domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
