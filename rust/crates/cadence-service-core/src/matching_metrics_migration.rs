@@ -361,7 +361,12 @@ mod sink_tests {
         assert_eq!(recording.events().len(), 2);
         assert_eq!(recording.events()[0].tags.get("domain").unwrap(), "example");
 
-        let rollup = event("persistence_latency_ns_rollup", MetricKind::Histogram);
+        let mut rollup = event("persistence_latency_ns_rollup", MetricKind::Histogram);
+        rollup.tags = BTreeMap::from([
+            ("histogram_start".into(), "1ms".into()),
+            ("histogram_end".into(), "17m28.576s".into()),
+            ("histogram_scale".into(), "2".into()),
+        ]);
         let recording = Arc::new(RecordingMetricSink::default());
         MigrationMetricSink::new(recording.clone(), MigrationPolicy::default()).record(rollup.clone());
         assert!(recording.events().is_empty());
@@ -369,7 +374,7 @@ mod sink_tests {
         rollup_policy.histograms.default = "both".into();
         MigrationMetricSink::new(recording.clone(), rollup_policy).record(rollup.clone());
         assert_eq!(recording.events(), vec![rollup]);
-        assert!(recording.events()[0].tags.is_empty() || recording.events()[0].tags.contains_key("histogram_scale"));
+        assert_eq!(recording.events()[0].tags["histogram_scale"], "2");
 
         let mut policy = MigrationPolicy::default();
         policy.histograms.default = "both".into();
