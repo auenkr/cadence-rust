@@ -143,11 +143,14 @@ fn free(ids: &[i32]) -> Vec<SemaphoreRow> {
     ids.iter().map(|id| token(*id, "")).collect()
 }
 fn new_manager(store: &Arc<ScriptStore>) -> Arc<Manager> {
-    Arc::new(Manager::new(
-        Identifier::new("uuid-d", "sem", 2).unwrap(),
-        store.clone(),
-        DEFAULT_IDLE_TTL_NANOS,
-    ))
+    Arc::new(
+        Manager::new(
+            Identifier::new("uuid-d", "sem", 2).unwrap(),
+            store.clone(),
+            DEFAULT_IDLE_TTL_NANOS,
+        )
+        .unwrap(),
+    )
 }
 async fn started(store: &Arc<ScriptStore>) -> Arc<Manager> {
     let manager = new_manager(store);
@@ -636,24 +639,51 @@ async fn matching_semaphore_acquire_refreshes_idle_time() {
 
 // Explicit gaps: these are deliberately failing tests when run with
 // --include-ignored, never empty passing placeholders.
-#[test]
-#[ignore = "parity gap: Rust Manager::new clamps invalid TTL and lacks Go parameter validation. Go go/service/matching/semaphore/semaphore_manager_test.go:136"]
-fn matching_semaphore_new_manager_validates_params() {
+// Go TestNewManagerValidatesItsParams (semaphore_manager_test.go:136). Rust has
+// no Tokens/Logger/OnStopFn/TimeSource to drop, so the cases are the identifier
+// fields and the idle TTL. Each invalid case must be a BadRequest with no manager.
+#[tokio::test]
+async fn matching_semaphore_new_manager_validates_params() {
     let store = ScriptStore::new(vec![], vec![]);
-    let invalid = Manager::new(
+    let bad_ids = [
         Identifier {
             domain_id: String::new(),
+            semaphore_name: "sem".into(),
+            bucket: 2,
+        },
+        Identifier {
+            domain_id: "uuid-d".into(),
             semaphore_name: String::new(),
+            bucket: 2,
+        },
+        Identifier {
+            domain_id: "uuid-d".into(),
+            semaphore_name: "sem".into(),
             bucket: -1,
         },
-        store,
-        0,
-    );
-    assert!(
-        !invalid.is_alive(now_nanos()),
-        "Go rejects invalid parameters without constructing a manager"
-    );
-    panic!("Go requires BadRequest and no manager, Rust constructor is infallible");
+    ];
+    for id in bad_ids {
+        assert!(matches!(
+            Manager::new(id, store.clone(), DEFAULT_IDLE_TTL_NANOS),
+            Err(ManagerError::BadRequest(_))
+        ));
+    }
+    let id = || Identifier::new("uuid-d", "sem", 2).unwrap();
+    for ttl in [0, -1_000_000_000] {
+        assert!(matches!(
+            Manager::new(id(), store.clone(), ttl),
+            Err(ManagerError::BadRequest(_))
+        ));
+    }
+    assert!(Manager::new(id(), store.clone(), DEFAULT_IDLE_TTL_NANOS).is_ok());
+
+    // The registry builds managers through the same constructor, so a bad TTL
+    // from config is refused on the request instead of being clamped.
+    let registry = Registry::new(store.clone()).with_idle_ttl(0);
+    assert!(matches!(
+        registry.get_or_create(id()).await,
+        Err(ManagerError::BadRequest(_))
+    ));
 }
 
 #[test]

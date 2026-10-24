@@ -51,22 +51,31 @@ impl Identifier {
         semaphore_name: &str,
         bucket: i32,
     ) -> Result<Self, ManagerError> {
-        if domain_id.is_empty() {
-            return Err(ManagerError::BadRequest("domainID is required".into()));
-        }
-        if semaphore_name.is_empty() {
-            return Err(ManagerError::BadRequest("semaphoreName is required".into()));
-        }
-        if bucket < 0 {
-            return Err(ManagerError::BadRequest(format!(
-                "bucket must not be negative, got {bucket}"
-            )));
-        }
-        Ok(Self {
+        let id = Self {
             domain_id: domain_id.into(),
             semaphore_name: semaphore_name.into(),
             bucket,
-        })
+        };
+        id.validate()?;
+        Ok(id)
+    }
+
+    /// Go `Identifier.validate`, shared by `new` and `Manager::new` so a
+    /// struct literal cannot skip the checks.
+    fn validate(&self) -> Result<(), ManagerError> {
+        if self.domain_id.is_empty() {
+            return Err(ManagerError::BadRequest("domainID is required".into()));
+        }
+        if self.semaphore_name.is_empty() {
+            return Err(ManagerError::BadRequest("semaphoreName is required".into()));
+        }
+        if self.bucket < 0 {
+            return Err(ManagerError::BadRequest(format!(
+                "bucket must not be negative, got {}",
+                self.bucket
+            )));
+        }
+        Ok(())
     }
     /// Go `Identifier.String()`: `domain/semaphore/bucket`, for logs.
     pub fn to_log_string(&self) -> String {
@@ -147,18 +156,27 @@ pub struct Manager {
 }
 
 impl Manager {
+    /// Go `NewManager`: a bad identifier or a non-positive idle TTL is a
+    /// BadRequest, and no manager is built.
     fn new(
         id: Identifier,
         store: Arc<dyn SemaphorePersistence>,
         idle_ttl_nanos: i64,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ManagerError> {
+        id.validate()?;
+        // Go rejects this too: liveness builds a ticker from the TTL, and a non-positive one panics.
+        if idle_ttl_nanos <= 0 {
+            return Err(ManagerError::BadRequest(
+                "ManagerParams.IdleTTL must be positive".into(),
+            ));
+        }
+        Ok(Self {
             id,
             store,
-            liveness: Liveness::new(now_nanos(), idle_ttl_nanos.max(1)),
+            liveness: Liveness::new(now_nanos(), idle_ttl_nanos),
             index: Mutex::new(Index::default()),
             startup_done: tokio::sync::watch::channel(false).0,
-        }
+        })
     }
 
     pub fn identifier(&self) -> &Identifier {
@@ -488,7 +506,7 @@ impl Registry {
     }
 
     pub fn with_idle_ttl(mut self, idle_ttl_nanos: i64) -> Self {
-        self.idle_ttl_nanos = idle_ttl_nanos.max(1);
+        self.idle_ttl_nanos = idle_ttl_nanos;
         self
     }
 
@@ -510,7 +528,7 @@ impl Registry {
             existing.start().await?;
             return Ok(existing);
         }
-        let manager = Arc::new(Manager::new(id.clone(), self.store.clone(), idle_ttl_nanos.max(1)));
+        let manager = Arc::new(Manager::new(id.clone(), self.store.clone(), idle_ttl_nanos)?);
         // The registry lock is released before any await, so the guard never
         // crosses a suspension point.
         let existing = {
