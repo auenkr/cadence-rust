@@ -1136,10 +1136,11 @@ mod tests {
             }]),
         };
         let overlay = DynamicConfigOverlay::from_config_store(&snapshot);
-        assert_eq!(overlay.property_values("k").len(), 2);
+        assert_eq!(overlay.property_values("k").snapshot_values().len(), 2);
         assert!(
             DynamicConfigOverlay::from_config_store(&Snapshot::default())
                 .property_values("k")
+                .snapshot_values()
                 .is_empty()
         );
     }
@@ -1174,7 +1175,8 @@ mod tests {
         ));
         std::fs::write(&path, "test.key:\n  - value: fallback\n  - value: constrained\n    constraints:\n      domainName: sample\n").unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
-        let values = overlay.property_values("test.key");
+        let property_values = overlay.property_values("test.key");
+        let values = property_values.snapshot_values();
         assert_eq!(values.len(), 2);
         assert_eq!(
             serde_json::from_slice::<String>(&values[0].value.as_ref().unwrap().data).unwrap(),
@@ -1206,22 +1208,28 @@ mod tests {
         .unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
         for key in ["missingValue", "explicitNull"] {
-            let value = overlay.property_values(key)[0].value.as_ref().unwrap();
+            let property_values = overlay.property_values(key);
+            let value = property_values.snapshot_values()[0].value.as_ref().unwrap();
             assert_eq!(
                 serde_json::from_slice::<serde_json::Value>(&value.data).unwrap(),
                 serde_json::Value::Null
             );
         }
-        assert!(overlay.property_values("nullConstraints")[0]
-            .filters
-            .is_empty());
+        assert!(
+            overlay.property_values("nullConstraints").snapshot_values()[0]
+                .filters
+                .is_empty()
+        );
         std::fs::write(
             &path,
             include_str!("../tests/fixtures/dynamic-config-go-null-list.yaml"),
         )
         .unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
-        assert!(overlay.property_values("emptyValues").is_empty());
+        assert!(overlay
+            .property_values("emptyValues")
+            .snapshot_values()
+            .is_empty());
         std::fs::write(
             &path,
             include_str!("../tests/fixtures/dynamic-config-go-nested-constraint-key.yaml"),
@@ -1262,6 +1270,7 @@ mod tests {
         assert!(DynamicConfigOverlay::from_file(&empty_path)
             .unwrap()
             .property_values("absent")
+            .snapshot_values()
             .is_empty());
         std::fs::remove_file(empty_path).unwrap();
     }
@@ -1278,11 +1287,13 @@ mod tests {
         )
         .unwrap();
         let overlay = DynamicConfigOverlay::from_file(&path).unwrap();
-        let values = overlay.property_values("testGetBoolPropertyKey");
+        let property_values = overlay.property_values("testGetBoolPropertyKey");
+        let values = property_values.snapshot_values();
         assert_eq!(values.len(), 3);
         assert!(!serde_json::from_slice::<bool>(&values[0].value.as_ref().unwrap().data).unwrap());
         assert_eq!(values[1].filters[0].name, "domainName");
-        let attributes = overlay.property_values("frontend.validSearchAttributes");
+        let property_attributes = overlay.property_values("frontend.validSearchAttributes");
+        let attributes = property_attributes.snapshot_values();
         let json: serde_json::Value =
             serde_json::from_slice(&attributes[0].value.as_ref().unwrap().data).unwrap();
         assert_eq!(json["DomainID"], 1);
