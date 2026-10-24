@@ -19,7 +19,13 @@ pub async fn capture<T, E>(
     future: impl Future<Output = Result<T, E>>,
 ) -> Result<Result<T, E>, String> {
     let mut future = pin!(future);
-    poll_fn(|cx| match catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx))) {
+    let mut injected = armed_for_test(operation);
+    poll_fn(|cx| match catch_unwind(AssertUnwindSafe(|| {
+        if std::mem::take(&mut injected) {
+            panic!("injected panic for test: {operation}");
+        }
+        future.as_mut().poll(cx)
+    })) {
         Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
         Ok(Poll::Pending) => Poll::Pending,
         Err(payload) => Poll::Ready(Err(panic_message(operation, payload))),
@@ -64,8 +70,66 @@ fn panic_message(operation: &str, payload: Box<dyn Any + Send>) -> String {
 }
 
 #[cfg(test)]
+thread_local! {
+    /// Operations armed by tests, with the number of captures still to panic. Thread-local so each
+    /// `#[tokio::test]` (current-thread runtime) sees only its own arms.
+    static ARMED: std::cell::RefCell<Vec<(&'static str, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Test seam: the next `times` captures of `operation` on this thread panic at their first poll,
+/// before the wrapped future runs.
+#[cfg(test)]
+pub(crate) fn arm_panic_for_test(operation: &'static str, times: usize) {
+    ARMED.with(|armed| armed.borrow_mut().push((operation, times)));
+}
+
+/// Number of arms for `operation` that no capture has consumed yet.
+#[cfg(test)]
+pub(crate) fn armed_left_for_test(operation: &str) -> usize {
+    ARMED.with(|armed| {
+        armed
+            .borrow()
+            .iter()
+            .filter(|(name, _)| *name == operation)
+            .map(|(_, times)| *times)
+            .sum()
+    })
+}
+
+#[cfg(test)]
+fn armed_for_test(operation: &str) -> bool {
+    ARMED.with(|armed| {
+        let mut armed = armed.borrow_mut();
+        match armed.iter_mut().find(|(name, times)| *name == operation && *times > 0) {
+            Some(entry) => {
+                entry.1 -= 1;
+                true
+            }
+            None => false,
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn armed_for_test(_operation: &str) -> bool {
+    false
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn armed_operation_panics_once_then_runs_normally() {
+        arm_panic_for_test("armed-op", 1);
+        assert_eq!(
+            capture("armed-op", async { Ok::<u8, String>(7) }).await,
+            Err(r#"panic object is not error: "injected panic for test: armed-op""#.to_string())
+        );
+        assert_eq!(capture("armed-op", async { Ok::<u8, String>(7) }).await, Ok(Ok(7)));
+        assert_eq!(armed_left_for_test("armed-op"), 0);
+        assert_eq!(capture("other-op", async { Ok::<u8, String>(7) }).await, Ok(Ok(7)));
+    }
 
     async fn str_panic() -> Result<u8, String> {
         panic!("boom")

@@ -1773,13 +1773,21 @@ impl QueueRegistry {
             let mut ids: Vec<i32> = current.read_partitions.keys().copied().collect();
             ids.sort();
             for id in ids {
-                let partition = match self
-                    .describe_scaled_partition(root, &name, id, config, &current.write_partitions, now)
-                    .await
+                // Go `fetchMetricsFromPartitions` captures a panicking describe as that goroutine's error.
+                let described = match crate::matching_panic::capture(
+                    "describe_partition",
+                    self.describe_scaled_partition(root, &name, id, config, &current.write_partitions, now),
+                )
+                .await
                 {
+                    Ok(described) => described.map_err(|status| status.message().to_owned()),
+                    Err(message) => Err(message),
+                };
+                let partition = match described {
                     Ok(partition) => partition,
-                    Err(_) => {
-                        // Go `run()` resets the sustains when metrics collection fails.
+                    Err(error) => {
+                        // Go `run()` logs the collection failure and resets the sustains.
+                        eprintln!("ERROR Failed to collect partition metrics error={error}");
                         scaler.reset();
                         return Ok(true);
                     }
@@ -1945,13 +1953,6 @@ impl QueueRegistry {
         let mut notifications = tokio::task::JoinSet::new();
         for partition in read_partitions.into_iter().filter(|partition| *partition != 0) {
             let task_list_name = format!("/__cadence_sys/{root_name}/{partition}");
-            let (owner, channel) = match membership.channel_for_task_list_owner(&task_list_name) {
-                Ok(resolved) => resolved,
-                Err(error) => {
-                    eprintln!("warning: resolving Matching partition refresh owner for {task_list_name}: {error}");
-                    continue;
-                }
-            };
             let request = cadence_proto::matching::RefreshTaskListPartitionConfigRequest {
                 domain_id: domain_id.to_string(),
                 task_list: Some(cadence_proto::api::TaskList {
@@ -1962,37 +1963,56 @@ impl QueueRegistry {
                 task_list_type: task_type + 1,
                 partition_config: Some(partition_config.clone()),
             };
-            let owner_identity = owner.identity().to_owned();
+            let membership = membership.clone();
+            // Go runs each notification in an errgroup goroutine whose `CapturePanic` turns a panic
+            // into that goroutine's error. Owner resolution is inside the capture too, as in Go.
             notifications.spawn(async move {
-                let mut request = tonic::Request::new(request);
-                if let Some(deadline) = caller_deadline {
-                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                    request.set_timeout(remaining);
-                }
-                let mut client = cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel);
-                let call = client.refresh_task_list_partition_config(request);
-                // The gRPC timeout header does not bound a peer that never
-                // completes the transport handshake, so enforce the caller's
-                // context deadline locally as Go's context cancellation does.
-                let result = match caller_deadline {
-                    Some(deadline) => tokio::time::timeout_at(deadline, call)
-                        .await
-                        .unwrap_or_else(|_| Err(Status::deadline_exceeded("context deadline exceeded"))),
-                    None => call.await,
-                };
-                result
-                    .map(|_| ())
-                    .map_err(|error| (task_list_name, owner_identity, error))
+                crate::matching_panic::capture("notify_partition_config", async move {
+                    let (owner, channel) = match membership.channel_for_task_list_owner(&task_list_name) {
+                        Ok(resolved) => resolved,
+                        Err(error) => {
+                            eprintln!("warning: resolving Matching partition refresh owner for {task_list_name}: {error}");
+                            return Ok(());
+                        }
+                    };
+                    let owner_identity = owner.identity().to_owned();
+                    let mut request = tonic::Request::new(request);
+                    if let Some(deadline) = caller_deadline {
+                        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                        request.set_timeout(remaining);
+                    }
+                    let mut client = cadence_proto::matching::matching_api_client::MatchingApiClient::new(channel);
+                    let call = client.refresh_task_list_partition_config(request);
+                    // The gRPC timeout header does not bound a peer that never
+                    // completes the transport handshake, so enforce the caller's
+                    // context deadline locally as Go's context cancellation does.
+                    let result = match caller_deadline {
+                        Some(deadline) => tokio::time::timeout_at(deadline, call)
+                            .await
+                            .unwrap_or_else(|_| Err(Status::deadline_exceeded("context deadline exceeded"))),
+                        None => call.await,
+                    };
+                    result
+                        .map(|_| ())
+                        .map_err(|error| (task_list_name, owner_identity, error))
+                })
+                .await
             });
         }
         while let Some(result) = notifications.join_next().await {
             match result {
-                Ok(Ok(())) => {}
-                Ok(Err((task_list_name, owner, error))) => {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err((task_list_name, owner, error)))) => {
                     // Go logs partition notification failures but does not fail
                     // the root update RPC. Keep that error behavior while allowing
                     // a later refresh or owner reload to converge.
                     eprintln!("warning: refreshing Matching partition {task_list_name} on {owner} failed: {error}");
+                }
+                Ok(Err(message)) => {
+                    // Go: the captured panic is the goroutine's error, which the
+                    // caller logs. The other partitions still run and the root
+                    // update still succeeds.
+                    eprintln!("warning: notifying Matching partitions failed: {message}");
                 }
                 Err(error) => {
                     eprintln!("warning: Matching partition notification task failed: {error}")
@@ -3259,6 +3279,59 @@ mod tests {
         registry.sweep_idle(base + 2 * TTL, false).await.unwrap();
         assert!(adding.queue.is_stopped());
     }
+    // Go `notifyPartitionConfig`: a panicking refresh is captured in its errgroup goroutine and does not
+    // fail the caller. The call returns normally, and the armed panic is consumed by exactly one partition.
+    #[tokio::test]
+    async fn notify_read_partitions_panic_is_captured_and_does_not_fail_the_caller() {
+        use cadence_common::membership::Host;
+        let (_dir, _store, registry, _key) = fixture();
+        let membership = crate::matching_membership::Membership::new(
+            "rust-matching-0",
+            vec![Host {
+                address: "rust-1:7935".into(),
+                identity: "rust-matching-1".into(),
+                grpc_address: "rust-1:7835".into(),
+            }],
+        );
+        let registry = registry.with_membership(membership);
+        let config = cadence_persistence::StoredPartitionConfig {
+            version: 1,
+            read_partitions: HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]),
+            write_partitions: HashMap::from([(0, Vec::new())]),
+        };
+        crate::matching_panic::arm_panic_for_test("notify_partition_config", 1);
+        registry
+            .notify_read_partitions(
+                Uuid::from_u128(1),
+                "queue",
+                0,
+                0,
+                vec![0, 1, 2],
+                config,
+                Some(tokio::time::Instant::now() + Duration::from_secs(1)),
+            )
+            .await;
+        assert_eq!(crate::matching_panic::armed_left_for_test("notify_partition_config"), 0);
+    }
+
+    // Go `adaptiveScalerImpl.fetchMetricsFromPartitions` + `run()`: a panicking describe is captured as the
+    // collection error. The tick returns with the sustains reset and no config change, and the loop keeps running.
+    #[tokio::test]
+    async fn scaler_describe_panic_is_a_collection_failure_and_the_tick_returns() {
+        let (_dir, _store, registry, key) = fixture();
+        let config = crate::matching_scaler::ScalerConfig {
+            enabled: true,
+            cache_enabled: true,
+            isolation_assignment: true,
+            ..Default::default()
+        };
+        let mut scaler = crate::matching_scaler::Scaler::new();
+        crate::matching_panic::arm_panic_for_test("describe_partition", 1);
+        let outcome = registry.scaler_update(&key, &config, &mut scaler).await;
+        assert!(matches!(outcome, Ok(true)), "{outcome:?}");
+        assert_eq!(crate::matching_panic::armed_left_for_test("describe_partition"), 0);
+    }
+
     // Go: TestRefreshTaskListPartitionConfig (task_list_manager_test.go:1380), cases "refresh from
     // request" and "ignore older version". A pushed config replaces the cached one only when its
     // version is newer. The database-refresh and failed-refresh cases are not ported (see inventory).
