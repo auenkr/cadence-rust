@@ -741,7 +741,12 @@ mod production_matching_metric_tests {
             events[1].histogram,
             Some(crate::matching_metrics::HistogramSpec::GoLow1ms100s)
         );
-        assert_eq!(events[1].tags, events[0].tags);
+        for (key, value) in &events[0].tags {
+            assert_eq!(events[1].tags[key], *value);
+        }
+        assert_eq!(events[1].tags["histogram_start"], "1ms");
+        assert_eq!(events[1].tags["histogram_end"], "17m28.576s");
+        assert_eq!(events[1].tags["histogram_scale"], "1");
     }
 
     #[test]

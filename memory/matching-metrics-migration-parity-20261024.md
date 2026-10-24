@@ -42,7 +42,8 @@ and CI formatting validation. No OpenFeature reader/evaluator source was taken.
   the migration filter: default policy emits only the timer; `both` emits both
   kinds, preserving Go request tags (`operation`, `domain`, sanitized
   `tasklist`, `caller`, `transport`). Histogram bucket tags are added by the
-  exporter after migration filtering.
+  Rust `HistogramTagSink` before migration filtering, so the sink sees the
+  Go-equivalent `histogram_start/end/scale` metadata on the histogram event.
 - Go's task-list manager scope adds `operation=TaskListMgr`; `NewPerTaskListScope`
   adds `domain` and `tasklist`; manager metrics add `tasklistType=decision|activity`
   (`go/service/matching/tasklist/task_list_manager.go`). Rust's manager tag
