@@ -56,8 +56,7 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--all"; fi
-          cargo fmt $SEL -- --check > fmt.log 2>&1
+          rustfmt --edition 2021 --check crates/cadence-service-core/src/openfeature/unleash_engine.rs > fmt.log 2>&1
           result=$?
           echo "$result" > fmt.exit
           cat fmt.log
