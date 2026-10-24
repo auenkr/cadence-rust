@@ -1,0 +1,11 @@
+{
+  "result": "passed",
+  "taskList": "active-offer-c5c78e70-ee54-4753-b63e-6b07e7456313",
+  "pollerIdentity": "active-offer-poller-c5c78e70-ee54-4753-b63e-6b07e7456313",
+  "workflowId": "active-offer-workflow-c5c78e70-ee54-4753-b63e-6b07e7456313",
+  "runId": "57fe82a8-f67f-4c3f-94fd-aa93ee03cbd7",
+  "historyScheduledTaskDelivered": true,
+  "taskTokenDelivered": true,
+  "persistedTaskRows": 0,
+  "persistedTaskInsertAttempts": 0
+}
