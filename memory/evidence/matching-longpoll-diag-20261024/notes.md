@@ -104,7 +104,16 @@ Scenario: window 2s (via `with_durable_queues` fallback, same value as the seed)
 RecordDecisionTaskStarted answers after 900ms, so the start ends at ~2.2s. Go's 1s per-attempt cap is not hit, so Go
 should return started_event_id 92. Rust returns an empty poll at 2.0s, so the assertion should fail.
 
-Compile-verified via GitHub Actions only (no local cargo). Run: see the CI result recorded below.
+Compile-verified via GitHub Actions only (no local cargo).
+
+- Run `40065431024` (head `2a80e4973`, `rust-ci.yml -f package=cadence-matching`): **success**. Clippy
+  `--all-targets -D warnings` passed, so the new file compiles with no warnings. Test step:
+  `Running tests/matching_longpoll_expiry_parity.rs` → 0 passed, 1 ignored.
+- Run `40065211343` (same head) failed on a pre-existing flaky lib test,
+  `matching_reader::tests::matching_reader_pump_falls_back_to_default_for_unknown_isolation_group`
+  (`matching_reader.rs:2273`, `left == right`). It is not touched by this branch. Master run `40064723413`
+  (`e7285da4f`) also failed, and it was recorded as "flake rerun green". The rerun above passed.
+- The ignored test has **not** been executed. Running it needs the Go-history control described below.
 
 **Caveat (Go expectation not run):** the Go-side expectation is from reading (`engine.go:808`, `retry.go:268`).
 No Go control was run. A Go-history control would settle it: run the same schedule against Go matching with a
