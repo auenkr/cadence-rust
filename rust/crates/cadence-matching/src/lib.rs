@@ -52,6 +52,7 @@ pub mod matching_fault_injection;
 pub mod matching_task_info_log;
 #[allow(clippy::result_large_err)]
 pub mod matching_partition;
+pub mod matching_handler;
 #[allow(clippy::result_large_err)]
 pub mod matching_registry;
 pub mod matching_runtime;

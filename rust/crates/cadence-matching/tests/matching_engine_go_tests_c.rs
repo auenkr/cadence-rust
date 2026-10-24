@@ -22,7 +22,8 @@ use cadence_api::types::DomainInfo;
 use cadence_matching::{
     grpc_matching::Matching, matching_history::MatchingHistoryClient,
     matching_registry::QueueRegistry,
-    matching_shard_routing::task_list_excluded_from_shard_distributor,
+    matching_shard_distributor::{setup_shard_executor, GetShardProcessError, ShardExecutorSetup},
+    matching_shard_routing::{shard_distributor_onboarded, task_list_excluded_from_shard_distributor},
 };
 use cadence_persistence::{
     matching_blob::{BlobEncoding, TaskData},
@@ -422,9 +423,19 @@ async fn refresh_workflow_tasks_nil_execution_is_forwarded() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "parity gap: Go setupExecutor installs a no-op executor and taskListsFactory on matchingEngineImpl and the test asserts on both; Rust has no setupExecutor or executor field. Its nearest analog, MatchingShardRouting without a spectator, resolves from the ring but exposes no executor to assert on"]
 fn setup_executor_with_empty_config_installs_noop_executor() {
-    unimplemented!("no public setupExecutor seam in Rust");
+    let config = cadence_service_core::config::ShardDistributorMatchingConfig {
+        namespaces: vec![],
+        peer_ttl_nanos: 0,
+    };
+    // Go: setupExecutor with no namespaces succeeds and installs the no-op executor.
+    let ShardExecutorSetup::Noop(executor) = setup_shard_executor(&config).unwrap() else {
+        panic!("empty namespaces must install the no-op executor");
+    };
+    // Go: the no-op executor owns no shards, so every lookup is ErrShardProcessNotFound.
+    let err = executor.get_shard_process("any-shard").unwrap_err();
+    assert!(matches!(err, GetShardProcessError::NotFound(ref key) if key == "any-shard"));
+    assert!(!executor.has_local_shard_process("any-shard"));
 }
 
 // ---------------------------------------------------------------------------
@@ -455,7 +466,12 @@ fn shard_distributor_onboarded_full_excludes_no_task_list() {
 }
 
 #[test]
-#[ignore = "parity gap: Go shardDistributorOnboarded is one engine-wide boolean (percentage > 0); Rust gates per task list by fingerprint bucket and exposes no engine-wide predicate, so at percentage 1 Go's onboarded=true has no public Rust equivalent"]
 fn shard_distributor_onboarded_partial_percentage_is_engine_wide() {
-    unimplemented!("no engine-wide onboarded predicate in Rust");
+    // Go TestShardDistributorOnboarded: the engine-wide gate is percentage > 0.
+    assert!(!shard_distributor_onboarded(0));
+    assert!(shard_distributor_onboarded(1));
+    assert!(shard_distributor_onboarded(100));
+    // The engine-wide gate reads no task list name. Per-task-list admission at
+    // percentage 1 is the separate fingerprint rule in
+    // `task_list_excluded_from_shard_distributor`, covered by its own tests.
 }
