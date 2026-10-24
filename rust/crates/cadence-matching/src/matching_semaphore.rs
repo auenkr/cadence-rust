@@ -27,6 +27,9 @@ use std::{
 pub const MAX_GRANT_ATTEMPTS: usize = 3;
 /// Go `matching.semaphoreIdleTime` default: 5 minutes in nanoseconds.
 pub const DEFAULT_IDLE_TTL_NANOS: i64 = 5 * 60 * 1_000_000_000;
+/// Go `scanPageSize`: one larger than a full bucket (one token row per slot plus one owner row
+/// per hold), so the startup scan takes a single round trip. Paging runs to the end regardless.
+pub const SCAN_PAGE_SIZE: usize = 2 * cadence_persistence::semaphores::MAX_BUCKET_SIZE as usize + 1;
 
 fn now_nanos() -> i64 {
     SystemTime::now()
@@ -51,22 +54,30 @@ impl Identifier {
         semaphore_name: &str,
         bucket: i32,
     ) -> Result<Self, ManagerError> {
-        if domain_id.is_empty() {
-            return Err(ManagerError::BadRequest("domainID is required".into()));
-        }
-        if semaphore_name.is_empty() {
-            return Err(ManagerError::BadRequest("semaphoreName is required".into()));
-        }
-        if bucket < 0 {
-            return Err(ManagerError::BadRequest(format!(
-                "bucket must not be negative, got {bucket}"
-            )));
-        }
-        Ok(Self {
+        let id = Self {
             domain_id: domain_id.into(),
             semaphore_name: semaphore_name.into(),
             bucket,
-        })
+        };
+        id.validate()?;
+        Ok(id)
+    }
+
+    /// Go `Identifier.validate`: shared by `NewIdentifier` and `NewManager`.
+    fn validate(&self) -> Result<(), ManagerError> {
+        if self.domain_id.is_empty() {
+            return Err(ManagerError::BadRequest("domainID is required".into()));
+        }
+        if self.semaphore_name.is_empty() {
+            return Err(ManagerError::BadRequest("semaphoreName is required".into()));
+        }
+        if self.bucket < 0 {
+            return Err(ManagerError::BadRequest(format!(
+                "bucket must not be negative, got {}",
+                self.bucket
+            )));
+        }
+        Ok(())
     }
     /// Go `Identifier.String()`: `domain/semaphore/bucket`, for logs.
     pub fn to_log_string(&self) -> String {
@@ -147,30 +158,34 @@ pub struct Manager {
     index: Mutex<Index>,
     /// Go `startupDoneCh`: set once the startup load ended (or the manager stopped).
     startup_done: tokio::sync::watch::Sender<bool>,
-    /// Go `onStopFn`: unregisters this manager. Set by the registry; `None` for a
-    /// manager built outside one.
-    on_stop: Option<OnStop>,
+    /// Go `onStopFn`: unregisters this manager. Required, as in Go.
+    on_stop: OnStop,
 }
 
 impl Manager {
+    /// Go `NewManager`: validates the parameters before building anything, so a bad
+    /// one is a BadRequest and no manager exists.
     fn new(
         id: Identifier,
         store: Arc<dyn SemaphorePersistence>,
         idle_ttl_nanos: i64,
-    ) -> Self {
-        Self {
+        on_stop: OnStop,
+    ) -> Result<Self, ManagerError> {
+        id.validate()?;
+        // Go rejects a non-positive IdleTTL: the liveness timer cannot be built from it.
+        if idle_ttl_nanos <= 0 {
+            return Err(ManagerError::BadRequest(
+                "ManagerParams.IdleTTL must be positive".into(),
+            ));
+        }
+        Ok(Self {
             id,
             store,
-            liveness: Liveness::new(now_nanos(), idle_ttl_nanos.max(1)),
+            liveness: Liveness::new(now_nanos(), idle_ttl_nanos),
             index: Mutex::new(Index::default()),
             startup_done: tokio::sync::watch::channel(false).0,
-            on_stop: None,
-        }
-    }
-
-    fn with_on_stop(mut self, on_stop: OnStop) -> Self {
-        self.on_stop = Some(on_stop);
-        self
+            on_stop,
+        })
     }
 
     pub fn identifier(&self) -> &Identifier {
@@ -198,16 +213,37 @@ impl Manager {
         loaded
     }
 
+    /// Go `loadTokenOwnership` paging: follows each page token to the end, so the load
+    /// sees the whole bucket however many pages it takes.
+    async fn scan_bucket(&self) -> Result<Vec<SemaphoreRow>, AcquireError> {
+        let mut rows = Vec::new();
+        let mut page_token: Option<Vec<u8>> = None;
+        loop {
+            let page = self
+                .store
+                .scan_semaphore_bucket(
+                    &self.id.domain_id,
+                    &self.id.semaphore_name,
+                    self.id.bucket,
+                    SCAN_PAGE_SIZE,
+                    page_token.as_deref(),
+                )
+                .await?;
+            rows.extend(page.rows);
+            // Go stops on an empty token, not only a missing one.
+            match page.next_page_token.filter(|token| !token.is_empty()) {
+                Some(token) => page_token = Some(token),
+                None => return Ok(rows),
+            }
+        }
+    }
+
     async fn load(&self) -> Result<(), ManagerError> {
         self.store.get_semaphore_metadata(
             &self.id.domain_id,
             &self.id.semaphore_name,
         ).await?;
-        let rows = self.store.scan_semaphore_bucket(
-            &self.id.domain_id,
-            &self.id.semaphore_name,
-            self.id.bucket,
-        ).await?;
+        let rows = self.scan_bucket().await?;
         // Go builds the free set only from rows returned by the scan. Metadata
         // does not prove that an absent token row exists or is unheld.
         let mut free: HashMap<i32, ()> = HashMap::new();
@@ -271,9 +307,7 @@ impl Manager {
         }
         // Unregistered before startup is released, so nothing is handed a manager
         // that can no longer serve. The index lock is not held across the callback.
-        if let Some(on_stop) = &self.on_stop {
-            on_stop(self);
-        }
+        (self.on_stop)(self);
         self.startup_done.send_replace(true);
     }
 
@@ -532,8 +566,9 @@ impl Registry {
         }
     }
 
+    /// Kept as given, not clamped: a non-positive TTL fails the manager's creation, as Go's does.
     pub fn with_idle_ttl(mut self, idle_ttl_nanos: i64) -> Self {
-        self.idle_ttl_nanos = idle_ttl_nanos.max(1);
+        self.idle_ttl_nanos = idle_ttl_nanos;
         self
     }
 
@@ -557,15 +592,17 @@ impl Registry {
         }
         // Weak, so a manager stopped after the registry is gone does not keep the map alive.
         let managers = Arc::downgrade(&self.managers);
-        let manager = Arc::new(
-            Manager::new(id.clone(), self.store.clone(), idle_ttl_nanos.max(1)).with_on_stop(
-                Box::new(move |stopping: &Manager| {
-                    if let Some(managers) = managers.upgrade() {
-                        remove_current(&managers, stopping, stopping.identifier());
-                    }
-                }),
-            ),
-        );
+        let on_stop: OnStop = Box::new(move |stopping: &Manager| {
+            if let Some(managers) = managers.upgrade() {
+                remove_current(&managers, stopping, stopping.identifier());
+            }
+        });
+        let manager = Arc::new(Manager::new(
+            id.clone(),
+            self.store.clone(),
+            idle_ttl_nanos,
+            on_stop,
+        )?);
         // The registry lock is released before any await, so the guard never
         // crosses a suspension point.
         let existing = {

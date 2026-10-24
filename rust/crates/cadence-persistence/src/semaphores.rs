@@ -92,6 +92,17 @@ pub enum AcquireError {
     Throttled(String),
 }
 
+/// Rejected by every scan: a zero page size could never advance, so Go's paging would loop forever.
+pub const SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE: &str = "semaphore scan page size must be positive";
+
+/// Go `ScanSemaphoreBucketResponse`: one page of a bucket's rows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SemaphoreBucketPage {
+    pub rows: Vec<SemaphoreRow>,
+    /// `None` on the last page; passing it back returns the following page.
+    pub next_page_token: Option<Vec<u8>>,
+}
+
 /// Persistence boundary for Matching's semaphore metadata and bucket rows.
 /// Embedded mode uses the in-memory adapter; configured SQL preserves Go's
 /// explicit unsupported-backend behavior. A Cassandra adapter can implement
@@ -110,12 +121,15 @@ pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
         domain_id: &str,
         name: &str,
     ) -> Result<SemaphoreMetadata, AcquireError>;
+    /// Go `ScanSemaphoreBucket`: one page per call, following `next_page_token`.
     async fn scan_semaphore_bucket(
         &self,
         domain_id: &str,
         name: &str,
         bucket: i32,
-    ) -> Result<Vec<SemaphoreRow>, AcquireError>;
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPage, AcquireError>;
     async fn get_semaphore_ownership_by_token(
         &self,
         domain_id: &str,
@@ -186,7 +200,9 @@ impl SemaphorePersistence for SqlUnsupportedSemaphorePersistence {
         _domain_id: &str,
         _name: &str,
         _bucket: i32,
-    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
+        _page_size: usize,
+        _next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPage, AcquireError> {
         Err(AcquireError::Invalid(Self::MESSAGE.into()))
     }
 
@@ -436,7 +452,21 @@ impl super::InMemoryExecutionStore {
         domain_id: &str,
         name: &str,
         bucket: i32,
-    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPage, AcquireError> {
+        if page_size == 0 {
+            return Err(AcquireError::Invalid(SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE.into()));
+        }
+        let start = match next_page_token {
+            None => 0,
+            Some(token) => {
+                let bytes: [u8; 8] = token
+                    .try_into()
+                    .map_err(|_| AcquireError::Invalid("invalid semaphore scan page token".into()))?;
+                u64::from_be_bytes(bytes) as usize
+            }
+        };
         let inner = self.inner.read().expect("execution store lock");
         let budget = Self::semaphore_budget(&inner, domain_id, name)?;
         let holds: Vec<SemaphoreHold> = inner
@@ -461,7 +491,15 @@ impl super::InMemoryExecutionStore {
                 held_token: hold.token_id,
             });
         }
-        Ok(rows)
+        // The token is the offset of the next row, so a page resumes exactly where the last ended.
+        let start = start.min(rows.len());
+        let end = start.saturating_add(page_size).min(rows.len());
+        let next_page_token = (end < rows.len()).then(|| (end as u64).to_be_bytes().to_vec());
+        let rows: Vec<SemaphoreRow> = rows.into_iter().skip(start).take(end - start).collect();
+        Ok(SemaphoreBucketPage {
+            rows,
+            next_page_token,
+        })
     }
 
     /// The holder of one token row, mirroring
@@ -601,8 +639,17 @@ impl SemaphorePersistence for super::InMemoryExecutionStore {
         domain_id: &str,
         name: &str,
         bucket: i32,
-    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
-        super::InMemoryExecutionStore::scan_semaphore_bucket(self, domain_id, name, bucket)
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPage, AcquireError> {
+        super::InMemoryExecutionStore::scan_semaphore_bucket(
+            self,
+            domain_id,
+            name,
+            bucket,
+            page_size,
+            next_page_token,
+        )
     }
 
     async fn get_semaphore_ownership_by_token(
@@ -733,7 +780,7 @@ mod tests {
             Err(SemaphoreError::UnsupportedBackend)
         ));
         assert_eq!(
-            sql.scan_semaphore_bucket("d", "s", 0).await.unwrap_err().to_string(),
+            sql.scan_semaphore_bucket("d", "s", 0, 1, None).await.unwrap_err().to_string(),
             SqlUnsupportedSemaphorePersistence::MESSAGE
         );
         assert_eq!(

@@ -27,8 +27,8 @@ use cadence_matching::{
     matching_semaphore::{Identifier, ManagerError, Registry},
 };
 use cadence_persistence::semaphores::{
-    AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata, SemaphorePersistence,
-    SemaphoreRow,
+    AcquireError, GrantOutcome, SemaphoreBucketPage, SemaphoreError, SemaphoreMetadata,
+    SemaphorePersistence, SemaphoreRow,
 };
 use cadence_proto::matching as m;
 use cadence_service_core::handlers::AppState;
@@ -193,7 +193,9 @@ impl SemaphorePersistence for SemaphoreStore {
         _domain_id: &str,
         _name: &str,
         bucket: i32,
-    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
+        _page_size: usize,
+        _next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPage, AcquireError> {
         self.scans.fetch_add(1, Ordering::SeqCst);
         if bucket == self.held_bucket && self.holding.load(Ordering::SeqCst) {
             self.scan_started.notify_one();
@@ -201,6 +203,10 @@ impl SemaphorePersistence for SemaphoreStore {
         }
         let next = self.scan_results.lock().unwrap().pop_front();
         next.unwrap_or(Ok(Vec::new()))
+            .map(|rows| SemaphoreBucketPage {
+                rows,
+                next_page_token: None,
+            })
     }
 
     async fn get_semaphore_ownership_by_token(

@@ -1046,9 +1046,11 @@ impl crate::SemaphorePersistence for MySqlTaskStore {
         domain_id: &str,
         name: &str,
         bucket: i32,
-    ) -> std::result::Result<Vec<crate::SemaphoreRow>, crate::AcquireError> {
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> std::result::Result<crate::SemaphoreBucketPage, crate::AcquireError> {
         crate::SqlUnsupportedSemaphorePersistence
-            .scan_semaphore_bucket(domain_id, name, bucket)
+            .scan_semaphore_bucket(domain_id, name, bucket, page_size, next_page_token)
             .await
     }
 

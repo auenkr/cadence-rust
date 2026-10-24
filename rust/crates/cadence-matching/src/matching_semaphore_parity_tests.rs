@@ -1,13 +1,16 @@
 //! Go semaphore_manager_test.go parity cases. Scripted persistence deliberately
 //! panics on unexpected reads/writes, so retry counts and request fields matter.
 use super::*;
-use cadence_persistence::{SemaphoreError, SemaphoreMetadata};
+use cadence_persistence::{SemaphoreBucketPage, SemaphoreError, SemaphoreMetadata};
 use std::collections::{HashSet, VecDeque};
 use tokio::sync::Notify;
 
 #[derive(Debug)]
 struct ScriptStore {
+    /// The first scan page, or the error that scan returns.
     rows: Mutex<Option<Result<Vec<SemaphoreRow>, AcquireError>>>,
+    /// Every page after the first, in scan order.
+    later_pages: Mutex<VecDeque<Vec<SemaphoreRow>>>,
     grants: Mutex<VecDeque<Result<GrantOutcome, AcquireError>>>,
     reads: Mutex<VecDeque<Result<String, AcquireError>>>,
     writes: Mutex<Vec<(i32, String)>>,
@@ -22,8 +25,18 @@ struct ScriptStore {
 
 impl ScriptStore {
     fn new(rows: Vec<SemaphoreRow>, grants: Vec<Result<GrantOutcome, AcquireError>>) -> Arc<Self> {
+        Self::with_pages(vec![rows], grants)
+    }
+
+    fn with_pages(
+        pages: Vec<Vec<SemaphoreRow>>,
+        grants: Vec<Result<GrantOutcome, AcquireError>>,
+    ) -> Arc<Self> {
+        let mut pages = pages.into_iter();
+        let first = pages.next().unwrap_or_default();
         Arc::new(Self {
-            rows: Mutex::new(Some(Ok(rows))),
+            rows: Mutex::new(Some(Ok(first))),
+            later_pages: Mutex::new(pages.collect()),
             grants: Mutex::new(grants.into()),
             reads: Mutex::new(VecDeque::new()),
             writes: Mutex::new(Vec::new()),
@@ -80,18 +93,40 @@ impl SemaphorePersistence for ScriptStore {
         domain: &str,
         name: &str,
         bucket: i32,
-    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
+        _page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPage, AcquireError> {
         request(domain, name, bucket);
-        self.scans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let index = self.scans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Go expectScan: the first page starts with no token, and each later page is
+        // requested with the token the previous page returned.
+        match next_page_token {
+            None => assert_eq!(index, 0, "first page must start with no token"),
+            Some(token) => assert_eq!(token, format!("page-{index}").as_bytes()),
+        }
         if self.block_scan {
             self.scanning.notify_one();
             self.finish_scan.notified().await;
         }
-        self.rows
-            .lock()
-            .unwrap()
-            .take()
-            .expect("unexpected extra scan")
+        let rows = if index == 0 {
+            self.rows
+                .lock()
+                .unwrap()
+                .take()
+                .expect("unexpected extra scan")?
+        } else {
+            self.later_pages
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected extra scan")
+        };
+        // Go expectScan: every page but the last names the next one.
+        let more = !self.later_pages.lock().unwrap().is_empty();
+        Ok(SemaphoreBucketPage {
+            rows,
+            next_page_token: more.then(|| format!("page-{}", index + 1).into_bytes()),
+        })
     }
     async fn get_semaphore_ownership_by_token(
         &self,
@@ -143,11 +178,15 @@ fn free(ids: &[i32]) -> Vec<SemaphoreRow> {
     ids.iter().map(|id| token(*id, "")).collect()
 }
 fn new_manager(store: &Arc<ScriptStore>) -> Arc<Manager> {
-    Arc::new(Manager::new(
-        Identifier::new("uuid-d", "sem", 2).unwrap(),
-        store.clone(),
-        DEFAULT_IDLE_TTL_NANOS,
-    ))
+    Arc::new(
+        Manager::new(
+            Identifier::new("uuid-d", "sem", 2).unwrap(),
+            store.clone(),
+            DEFAULT_IDLE_TTL_NANOS,
+            Box::new(|_: &Manager| {}),
+        )
+        .unwrap(),
+    )
 }
 async fn started(store: &Arc<ScriptStore>) -> Arc<Manager> {
     let manager = new_manager(store);
@@ -634,32 +673,75 @@ async fn matching_semaphore_acquire_refreshes_idle_time() {
     assert!(!manager.is_running());
 }
 
-// Explicit gaps: these are deliberately failing tests when run with
-// --include-ignored, never empty passing placeholders.
+// Go TestNewManagerValidatesItsParams (semaphore_manager_test.go:136): each case
+// drops one required value, and the constructor returns BadRequest with no manager.
+// Go's nil Tokens, Logger, OnStopFn and TimeSource cases have no Rust case: the store
+// and stop callback are required by type, and Rust has no logger or injected clock.
 #[test]
-#[ignore = "parity gap: Rust Manager::new clamps invalid TTL and lacks Go parameter validation. Go go/service/matching/semaphore/semaphore_manager_test.go:136"]
 fn matching_semaphore_new_manager_validates_params() {
     let store = ScriptStore::new(vec![], vec![]);
-    let invalid = Manager::new(
-        Identifier {
-            domain_id: String::new(),
-            semaphore_name: String::new(),
-            bucket: -1,
-        },
-        store,
-        0,
-    );
-    assert!(
-        !invalid.is_alive(now_nanos()),
-        "Go rejects invalid parameters without constructing a manager"
-    );
-    panic!("Go requires BadRequest and no manager, Rust constructor is infallible");
+    let valid = || Identifier::new("uuid-d", "sem", 2).unwrap();
+    let cases = [
+        (
+            "no identifier domain",
+            Identifier {
+                domain_id: String::new(),
+                semaphore_name: "sem".into(),
+                bucket: 2,
+            },
+            DEFAULT_IDLE_TTL_NANOS,
+        ),
+        (
+            "no identifier name",
+            Identifier {
+                domain_id: "uuid-d".into(),
+                semaphore_name: String::new(),
+                bucket: 2,
+            },
+            DEFAULT_IDLE_TTL_NANOS,
+        ),
+        (
+            "negative identifier bucket",
+            Identifier {
+                domain_id: "uuid-d".into(),
+                semaphore_name: "sem".into(),
+                bucket: -1,
+            },
+            DEFAULT_IDLE_TTL_NANOS,
+        ),
+        ("no idle ttl", valid(), 0),
+        ("negative idle ttl", valid(), -1_000_000_000),
+    ];
+    for (name, id, idle_ttl) in cases {
+        let result = Manager::new(id, store.clone(), idle_ttl, Box::new(|_: &Manager| {}));
+        assert!(
+            matches!(result, Err(ManagerError::BadRequest(_))),
+            "{name}: a misconfigured manager is never worth retrying"
+        );
+    }
 }
 
-#[test]
-#[ignore = "parity gap: scan returns Vec without page tokens; cannot assert page threading. Go go/service/matching/semaphore/semaphore_manager_test.go:180"]
-fn matching_semaphore_scan_threads_page_tokens() {
-    panic!("SemaphorePersistence has no page-token input/output; Go requires page-1 then page-2");
+// Go TestStartBuildsTheFreeSetAndTheHeldIndexAcrossPages (semaphore_manager_test.go:180):
+// the scan arrives in three pages, and Start follows each token to the end.
+#[tokio::test]
+async fn matching_semaphore_scan_threads_page_tokens() {
+    let store = ScriptStore::with_pages(
+        vec![
+            vec![token(1, ""), token(2, "owner-x")],
+            vec![token(3, ""), token(4, "owner-y")],
+            vec![owner("owner-x", 2), owner("owner-y", 4)],
+        ],
+        vec![],
+    );
+    let manager = started(&store).await;
+    assert_eq!(store.scans.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert_eq!(manager.free_count(), 2, "only the unheld slots are free");
+    let index = manager.index.lock().unwrap();
+    assert_eq!(index.free_list, vec![1, 3]);
+    assert_eq!(
+        index.held,
+        std::collections::HashMap::from([("owner-x".to_string(), 2), ("owner-y".to_string(), 4)])
+    );
 }
 
 // TestStartSkipsRowsItCannotClassify (227). Go's nil, zero-value, and type-7 rows
