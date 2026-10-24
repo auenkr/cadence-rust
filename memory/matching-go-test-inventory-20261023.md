@@ -445,3 +445,9 @@ Rust API, `AutoConfigHint` is absent from Rust poll responses, and Go's per-poll
 replacement assertion has no distinct Rust context object. No remaining forwarder/matcher test was
 added because the remaining listed candidates either already have matching Rust assertions or test
 Go-only APIs without a Rust behavior branch.
+
+CI validation for this audit commit: `cadence-matching` via `.github/workflows/rust-ci.yml`,
+source SHA `8385f79eef7238d8d3489be80b4d2ff311df41a2`, run
+https://github.com/auenkr/cadence-rust/actions/runs/40073697557, conclusion `success`.
+The run executes the workflow's configured clippy and package test jobs on GitHub Actions; no local
+Cargo command was run.
