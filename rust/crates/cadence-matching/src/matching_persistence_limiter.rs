@@ -703,7 +703,7 @@ mod metered_task_tests {
         limiter.record_list_response("GetTasks", 5, 700);
         limiter.record_task_call(
             "GetTasks",
-            Some(uuid::Uuid::nil()),
+            None,
             std::time::Duration::from_millis(1),
             &Err::<(), _>(MatchingTaskStoreError::Backend {
                 kind: BackendErrorKind::DbUnavailable,
