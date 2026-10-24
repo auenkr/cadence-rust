@@ -70,3 +70,19 @@ test itself is still an unimplemented placeholder. Existing mixed partition
 probes do not by themselves prove this specific startup push; retain the need
 for direct startup-notification evidence rather than treating implementation
 inspection as behavioral validation.
+
+## Lifecycle integration and review checkpoint
+
+Merged Unleash lifecycle as ae442535c. Integrated fresh workspace run40089398117
+and MySQL extended probe run40089419226 passed that source. MySQL evidence is
+preserved under memory/evidence/matching-mysql-probes-acceptance-20261024/;
+it includes query standby forwarding, partition owner agreement, three-partition
+durable restart/drain and default AutoConfigHint observations.
+
+Do not merge t3/unleash-repository-backoff code4f02ea1ab as final parity despite
+its passing CI: review found FetchBackoff.delay never consumes skips. Go consumes
+skips on ticker events; Rust would retain an earlier skip delay across later304,
+network and decode failures. New worker unleash-fetch-review-v5 owns correction
+and actual HTTP-sequence verification, plus reentrant account lookup and bounded
+hostname handling. Existing getpwuid is not thread-safe and its fallback identity
+shape differs from Go. Metrics and completion-audit workers remain active.
