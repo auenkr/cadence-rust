@@ -15,11 +15,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 pub struct Config {
     /// Go top-level metric migration policies (common/config.Config).
     #[serde(default, rename = "histograms")]
-    pub histograms: crate::matching_metrics_runtime::HistogramMigration,
+    pub histograms: crate::matching_metrics_migration::HistogramMigration,
     #[serde(default, rename = "gauge-migration")]
-    pub gauge_migration: crate::matching_metrics_runtime::GaugeMigration,
+    pub gauge_migration: crate::matching_metrics_migration::GaugeMigration,
     #[serde(default, rename = "counter-migration")]
-    pub counter_migration: crate::matching_metrics_runtime::CounterMigration,
+    pub counter_migration: crate::matching_metrics_migration::CounterMigration,
     /// Go's dynamicconfig.client provider stanza (filebased is supported for
     /// Matching; other providers are rejected explicitly by the runtime).
     #[serde(default, rename = "dynamicconfig")]
