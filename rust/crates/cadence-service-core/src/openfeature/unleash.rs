@@ -1,14 +1,11 @@
 //! Unleash provider configuration and construction, mirroring Go
 //! `common/dynamicconfig/openfeatureprovider/unleash` (`init.go`, `unleash.go`).
 //!
-//! PARTIAL PORT. Config decoding, validation and the bootstrap-file read match
-//! Go's `newProvider`. Constructing a working provider is not yet possible:
-//! Go delegates polling, strategy evaluation, variants and payloads to
-//! `unleash-client-go` v4.5.0, and no Rust equivalent exists in this crate.
-//! `new_provider` therefore stops with [`NOT_PORTED_MESSAGE`] after the
-//! validation steps instead of returning a provider that approximates Go.
+//! PARTIAL PORT. Config decoding, validation, bootstrap, and repository
+//! polling are implemented. Strategy evaluation, variants and payloads remain
+//! unported, so lookups still return the supplied default with a clear error.
 
-use std::sync::{Arc, RwLock, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, Mutex, RwLock, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 use std::thread::JoinHandle;
 
@@ -22,8 +19,7 @@ use crate::config::de_go_duration;
 /// Plugin name, set as `dynamicconfig.openfeature.providerName`.
 pub const PROVIDER_NAME: &str = "unleash";
 
-/// Returned by [`new_provider`] once validation passes, until the evaluation
-/// engine is ported.
+/// Returned by flag lookups until the evaluation engine is ported.
 pub const NOT_PORTED_MESSAGE: &str = "unleash provider evaluation is not ported to Rust yet: \
     Go's unleash-client-go v4.5.0 polling, strategy and variant evaluation has no Rust \
     equivalent (memory/evidence/matching-openfeature-20261024/notes.md)";
@@ -87,19 +83,27 @@ pub fn new_provider(config: Option<&serde_yaml::Value>) -> anyhow::Result<Arc<dy
 pub struct UnleashRepository {
     features: Arc<RwLock<Value>>,
     stop: Arc<AtomicBool>,
-    poller: Option<JoinHandle<()>>,
+    poller: Mutex<Option<JoinHandle<()>>>,
 }
 impl UnleashRepository {
     fn new(config: UnleashConfig, bootstrap: Option<Value>) -> anyhow::Result<Self> {
         let features = Arc::new(RwLock::new(feature_map(bootstrap.unwrap_or_else(|| serde_json::json!({"features": []})))));
         let stop = Arc::new(AtomicBool::new(false));
         let interval = if config.refresh_interval_nanos > 0 { Duration::from_nanos(config.refresh_interval_nanos as u64) } else { Duration::from_secs(15) };
-        let url = reqwest::Url::parse(&config.url).map_err(|e| anyhow!("invalid unleash url: {e}"))?;
-        let mut endpoint = url.join("client/features").map_err(|e| anyhow!("invalid unleash url: {e}"))?; if !config.project_name.is_empty() { endpoint.query_pairs_mut().append_pair("project", &config.project_name); }
-        let client = reqwest::blocking::Client::builder().build().map_err(|e| anyhow!("failed to create unleash HTTP client: {e}"))?;
+        // unleash-client-go appends a slash before resolving ./client/features.
+        let mut base = config.url.clone();
+        if !base.ends_with('/') { base.push('/'); }
+        let url = reqwest::Url::parse(&base).map_err(|e| anyhow!("invalid unleash url: {e}"))?;
+        let mut endpoint = url.join("./client/features").map_err(|e| anyhow!("invalid unleash url: {e}"))?;
+        // Go builds ./client/features?project=<name> as a reference string;
+        // preserve that URL escaping behavior instead of form-encoding spaces as '+'.
+        if !config.project_name.is_empty() { endpoint.set_query(Some(&format!("project={}", config.project_name))); }
         let headers = vec![("UNLEASH-APPNAME", config.app_name.clone()), ("UNLEASH-INSTANCEID", config.instance_id.clone()), ("Unleash-Interval", interval.as_millis().to_string()), ("User-Agent", config.app_name.clone()), ("Unleash-Client-Spec", "4.3.1".into()), ("Authorization", config.api_token.clone())];
         let state = features.clone(); let stop_flag = stop.clone();
         let poller = std::thread::Builder::new().name("unleash-repository".into()).spawn(move || {
+            // reqwest's blocking client must be created off any Tokio runtime
+            // thread. Its finite timeout also bounds shutdown during a fetch.
+            let Ok(client) = reqwest::blocking::Client::builder().timeout(Duration::from_millis(500)).build() else { return; };
             while !stop_flag.load(Ordering::Acquire) {
                 let mut request = client.get(endpoint.clone());
                 for (name,value) in &headers { if !value.is_empty() { request = request.header(*name, value); } }
@@ -112,10 +116,13 @@ impl UnleashRepository {
                 while !stop_flag.load(Ordering::Acquire) && std::time::Instant::now() < until { std::thread::sleep(Duration::from_millis(10).min(until.saturating_duration_since(std::time::Instant::now()))); }
             }
         }).map_err(|e| anyhow!("failed to start unleash poller: {e}"))?;
-        Ok(Self { features, stop, poller: Some(poller) })
+        Ok(Self { features, stop, poller: Mutex::new(Some(poller)) })
     }
     pub fn snapshot(&self) -> Value { self.features.read().unwrap_or_else(|p| p.into_inner()).clone() }
-    pub fn shutdown(&mut self) { self.stop.store(true, Ordering::Release); if let Some(task)=self.poller.take() { let _=task.join(); } }
+    pub fn shutdown(&self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(task) = self.poller.lock().unwrap_or_else(|p| p.into_inner()).take() { let _ = task.join(); }
+    }
 }
 impl Drop for UnleashRepository { fn drop(&mut self) { self.shutdown(); } }
 fn feature_map(body: Value) -> Value {
@@ -125,7 +132,7 @@ fn feature_map(body: Value) -> Value {
 }
 struct UnleashProvider { repository: UnleashRepository }
 impl FeatureProvider for UnleashProvider {
-    fn shutdown(&self) { /* Repository drop/shutdown owns poller lifetime. */ }
+    fn shutdown(&self) { self.repository.shutdown(); }
     fn resolve(&self, _flag: &str, default: super::provider::FlagValue, _ctx: &super::provider::FlattenedContext) -> super::provider::Resolution {
         super::provider::Resolution { value: default, error: Some(super::provider::ResolutionError { code: super::provider::ErrorCode::ProviderNotReady, message: NOT_PORTED_MESSAGE.into() }) }
     }
@@ -193,8 +200,7 @@ mod tests {
         assert!(err.to_string().contains("failed to read unleash bootstrap file"));
     }
 
-    // Validation passes for both configs below; the remaining Go assertion
-    // (a constructed provider) is the part that is not yet ported.
+    // A constructed provider starts polling asynchronously.
     #[test]
     fn valid_config_constructs_repository() {
         let provider = new_provider(Some(&yaml(
@@ -204,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_bootstrap_file_reaches_the_unported_engine() {
+    fn valid_bootstrap_file_constructs_provider() {
         let path = temp_file("bootstrap", r#"{"version":1,"features":[]}"#);
         let config = format!(
             "url: https://unleash.example.com/api\nappName: cadence\nbootstrapFile: {path:?}"
@@ -232,5 +238,87 @@ mod tests {
         assert_eq!(config.refresh_interval_nanos, 30_000_000_000);
         assert_eq!(config.metrics_interval_nanos, 60_000_000_000);
         assert_eq!(config.bootstrap_file, "b");
+    }
+
+    fn local_server<F>(mut respond: F) -> (String, std::sync::mpsc::Receiver<String>, std::thread::JoinHandle<()>)
+    where F: FnMut(usize) -> (&'static str, &'static str) + Send + 'static {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            for index in 0..3 {
+                let Ok((mut stream, _)) = listener.accept() else { break; };
+                let mut request = [0; 4096];
+                let size = stream.read(&mut request).unwrap_or(0);
+                tx.send(String::from_utf8_lossy(&request[..size]).into_owned()).unwrap();
+                let (status, body) = respond(index);
+                let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        (format!("http://{address}/api"), rx, handle)
+    }
+
+    fn wait_for_feature(repository: &UnleashRepository, name: &str) {
+        let until = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < until {
+            if repository.snapshot().get(name).is_some() { return; }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("feature {name} did not arrive");
+    }
+
+    #[test]
+    fn polling_bootstraps_refreshes_uses_go_url_and_headers_and_keeps_cache_on_errors() {
+        let (base, requests, server) = local_server(|index| match index {
+            0 => ("200 OK", r#"{"features":[{"name":"refreshed","enabled":true}]}"#),
+            1 => ("503 Service Unavailable", "{}"),
+            _ => ("200 OK", "not-json"),
+        });
+        let bootstrap = serde_json::json!({"features":[{"name":"bootstrapped","enabled":true}]});
+        let repository = UnleashRepository::new(UnleashConfig {
+            url: base, app_name: "cadence-test".into(), instance_id: "instance-7".into(),
+            project_name: "project blue".into(), api_token: "token-123".into(),
+            refresh_interval_nanos: 20_000_000, ..Default::default()
+        }, Some(bootstrap)).unwrap();
+        assert!(repository.snapshot().get("bootstrapped").is_some());
+        wait_for_feature(&repository, "refreshed");
+        let first = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(first.starts_with("GET /api/client/features?project=project%20blue HTTP/1.1"), "{first}");
+        for expected in ["UNLEASH-APPNAME: cadence-test", "UNLEASH-INSTANCEID: instance-7", "Unleash-Interval: 20", "Unleash-Client-Spec: 4.3.1", "Authorization: token-123", "User-Agent: cadence-test"] {
+            assert!(first.to_ascii_lowercase().contains(&expected.to_ascii_lowercase()), "missing {expected} in {first}");
+        }
+        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(repository.snapshot().get("refreshed").is_some());
+        repository.shutdown();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn shutdown_joins_an_in_flight_request_within_client_timeout() {
+        use std::io::Read;
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0; 1024];
+            let _ = stream.read(&mut buffer);
+            tx.send(()).unwrap();
+            // Keep the socket open; reqwest's configured deadline releases the poller.
+            std::thread::sleep(Duration::from_secs(1));
+        });
+        let repository = UnleashRepository::new(UnleashConfig {
+            url: format!("http://{address}/api"), app_name: "cadence".into(),
+            refresh_interval_nanos: 1_000_000, ..Default::default()
+        }, None).unwrap();
+        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let started = std::time::Instant::now();
+        repository.shutdown();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        server.join().unwrap();
     }
 }
