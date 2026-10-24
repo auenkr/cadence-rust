@@ -393,7 +393,7 @@ impl RingpopConfig {
     }
 }
 
-fn de_go_duration<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+pub(crate) fn de_go_duration<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
     use serde::de::Error;
     let value = serde_yaml::Value::deserialize(d)?;
     match value {

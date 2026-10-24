@@ -18,3 +18,4 @@ pub mod matching_metrics_statsd;
 pub mod matching_metrics_m3;
 pub mod matching_metrics_runtime;
 pub mod matching_quota;
+pub mod openfeature;
