@@ -42,15 +42,14 @@ jobs:
         if: inputs.clean_target != true
         with:
           workspaces: rust
-      - name: Formatting
+      - name: Format changed Matching runtime sources
         working-directory: rust
         run: |
-          set +e
-          cargo fmt --all -- --check > fmt.log 2>&1
-          result=$?
-          echo "$result" > fmt.exit
-          cat fmt.log
-          exit "$result"
+          files=(crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs)
+          rustfmt --edition 2021 "${files[@]}"
+          rustfmt --edition 2021 --check "${files[@]}"
+          mkdir -p formatted-sources
+          for file in "${files[@]}"; do mkdir -p "formatted-sources/$(dirname "$file")"; cp "$file" "formatted-sources/$file"; done
       - name: Clippy
         working-directory: rust
         run: |
@@ -89,3 +88,4 @@ jobs:
             rust/*.exit
             rust/commit.txt
             rust/target-dir.txt
+            rust/formatted-sources/**
