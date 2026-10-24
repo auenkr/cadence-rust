@@ -268,11 +268,26 @@ impl Membership {
         if owner.identity() == self.identity.as_ref() {
             return Ok(());
         }
-        Err(crate::grpc::detailed_status_type(tonic::Code::Aborted,
-            format!("semaphore bucket is not owned by this host: OwnedBy: {}, Me: {}, BucketID: {bucket_id}", owner.identity(), self.identity),
-            "type.googleapis.com/uber.cadence.shared.v1.SemaphoreNotOwnedByHostError".into(),
-            cadence_proto::shared::SemaphoreNotOwnedByHostError { owned_by_identity: owner.identity().into(), my_identity: self.identity.to_string(), bucket_id }))
+        Err(semaphore_not_owned_status(owner.identity(), self.identity.as_ref(), bucket_id))
     }
+    pub(crate) fn identity(&self) -> &str {
+        self.identity.as_ref()
+    }
+}
+
+/// Go `SemaphoreNotOwnedByHostError` for one bucket. Go's engine names the owner
+/// "not known" while it shuts down, because the next owner is not settled yet.
+pub(crate) fn semaphore_not_owned_status(owner: &str, my_identity: &str, bucket_id: String) -> Status {
+    crate::grpc::detailed_status_type(
+        tonic::Code::Aborted,
+        format!("semaphore bucket is not owned by this host: OwnedBy: {owner}, Me: {my_identity}, BucketID: {bucket_id}"),
+        "type.googleapis.com/uber.cadence.shared.v1.SemaphoreNotOwnedByHostError".into(),
+        cadence_proto::shared::SemaphoreNotOwnedByHostError {
+            owned_by_identity: owner.into(),
+            my_identity: my_identity.into(),
+            bucket_id,
+        },
+    )
 }
 
 #[cfg(test)]

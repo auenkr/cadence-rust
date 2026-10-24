@@ -19,7 +19,7 @@ use cadence_persistence::{
 };
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -144,6 +144,23 @@ pub struct Manager {
     index: Mutex<Index>,
     /// Go `startupDoneCh`: set once the startup load ended (or the manager stopped).
     startup_done: tokio::sync::watch::Sender<bool>,
+    /// Go `OnStopFn`: the registry this manager was built for, so a stop unregisters it.
+    managers: Weak<Mutex<HashMap<Identifier, Arc<Manager>>>>,
+}
+
+/// Stops a manager whose startup load was dropped before it returned, so the
+/// bucket is not left in `Starting` with nothing to finish the load.
+struct LoadInFlight<'a> {
+    manager: &'a Manager,
+    completed: bool,
+}
+
+impl Drop for LoadInFlight<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.manager.stop();
+        }
+    }
 }
 
 impl Manager {
@@ -158,7 +175,14 @@ impl Manager {
             liveness: Liveness::new(now_nanos(), idle_ttl_nanos.max(1)),
             index: Mutex::new(Index::default()),
             startup_done: tokio::sync::watch::channel(false).0,
+            managers: Weak::new(),
         }
+    }
+
+    /// Go passes `OnStopFn: unregisterSemaphoreManager` when it builds a manager.
+    fn registered_in(mut self, managers: &Arc<Mutex<HashMap<Identifier, Arc<Manager>>>>) -> Self {
+        self.managers = Arc::downgrade(managers);
+        self
     }
 
     pub fn identifier(&self) -> &Identifier {
@@ -177,7 +201,9 @@ impl Manager {
                 State::Stopped => return Err(ManagerError::NotReady),
             }
         }
+        let mut load = LoadInFlight { manager: self, completed: false };
         let loaded = self.load().await;
+        load.completed = true;
         if loaded.is_err() {
             self.stop();
         }
@@ -243,9 +269,20 @@ impl Manager {
         Ok(())
     }
 
-    /// Go `Manager.Stop`: later acquires get `NotReady`.
+    /// Go `Manager.Stop`: later acquires get `NotReady`. Like Go's `OnStopFn`, the
+    /// stopped manager removes itself from its registry, unless a newer manager
+    /// has taken the bucket.
     pub fn stop(&self) {
         self.index.lock().expect("semaphore manager lock").state = State::Stopped;
+        if let Some(managers) = self.managers.upgrade() {
+            let mut managers = managers.lock().expect("semaphore registry lock");
+            if managers
+                .get(&self.id)
+                .is_some_and(|current| std::ptr::eq(Arc::as_ptr(current), self))
+            {
+                managers.remove(&self.id);
+            }
+        }
         self.startup_done.send_replace(true);
     }
 
@@ -510,7 +547,10 @@ impl Registry {
             existing.start().await?;
             return Ok(existing);
         }
-        let manager = Arc::new(Manager::new(id.clone(), self.store.clone(), idle_ttl_nanos.max(1)));
+        let manager = Arc::new(
+            Manager::new(id.clone(), self.store.clone(), idle_ttl_nanos.max(1))
+                .registered_in(&self.managers),
+        );
         // The registry lock is released before any await, so the guard never
         // crosses a suspension point.
         let existing = {
