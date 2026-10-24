@@ -172,32 +172,54 @@ fn default_instance_id() -> String {
     // Match os/user.Current and os.Hostname, rather than environment variables
     // or Linux-specific files. Go's fallback username includes random entropy
     // as well as the PID, so separate processes do not share an identity.
-    let user = current_username().unwrap_or_else(|| {
-        format!(
-            "generated-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        )
-    });
+    let user = current_username().unwrap_or_else(generated_username);
     match system_hostname().filter(|value| !value.is_empty()) {
         Some(host) => format!("{user}-{host}"),
         None => user,
     }
 }
 
+fn generated_username() -> String {
+    let random = u128::from_be_bytes(*uuid::Uuid::new_v4().as_bytes()) % 1_000_000;
+    format!("generated-{random}-{}", std::process::id())
+}
+
 #[cfg(unix)]
 fn current_username() -> Option<String> {
-    // SAFETY: getpwuid returns a process-global record; copy the name before
-    // making another libc call and reject a null pointer.
+    // Match os/user.Current with the real UID. getpwuid_r avoids the shared
+    // static record returned by getpwuid and retries when libc reports ERANGE.
     unsafe {
-        let entry = libc::getpwuid(libc::geteuid());
-        if entry.is_null() || (*entry).pw_name.is_null() {
-            return None;
+        let mut size = libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX);
+        if size < 1024 {
+            size = 1024;
         }
-        std::ffi::CStr::from_ptr((*entry).pw_name)
-            .to_str()
-            .ok()
-            .map(str::to_owned)
+        loop {
+            let mut buffer = vec![0u8; size as usize];
+            let mut entry: libc::passwd = std::mem::zeroed();
+            let mut result = std::ptr::null_mut();
+            let error = libc::getpwuid_r(
+                libc::getuid(),
+                &mut entry,
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                &mut result,
+            );
+            if error == libc::ERANGE {
+                size = size.saturating_mul(2);
+                if size > 16 * 1024 * 1024 {
+                    return None;
+                }
+                continue;
+            }
+            if error != 0 || result.is_null() || entry.pw_name.is_null() {
+                return None;
+            }
+            return std::ffi::CStr::from_ptr(entry.pw_name)
+                .to_str()
+                .ok()
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned);
+        }
     }
 }
 #[cfg(not(unix))]
@@ -212,6 +234,9 @@ fn system_hostname() -> Option<String> {
     if unsafe { libc::gethostname(name.as_mut_ptr(), name.len()) } != 0 {
         return None;
     }
+    // POSIX permits gethostname to fill the buffer without a trailing NUL.
+    // Reserve the final byte so CStr never scans beyond this allocation.
+    name[name.len() - 1] = 0;
     unsafe {
         std::ffi::CStr::from_ptr(name.as_ptr())
             .to_str()
@@ -228,6 +253,43 @@ fn system_hostname() -> Option<String> {
 struct FetchBackoff {
     errors: u8,
     skips: u8,
+}
+fn fetch_once(
+    client: &reqwest::blocking::Client,
+    endpoint: &reqwest::Url,
+    headers: &[(&str, String)],
+    state: &RwLock<Value>,
+    etag: &Mutex<String>,
+    backoff: &mut FetchBackoff,
+) {
+    let mut request = client.get(endpoint.clone());
+    for (name, value) in headers {
+        if !value.is_empty() {
+            request = request.header(*name, value);
+        }
+    }
+    let tag = etag.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    if !tag.is_empty() {
+        request = request.header("If-None-Match", tag);
+    }
+    if let Ok(response) = request.send() {
+        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+            // 304 keeps both the snapshot and backoff state unchanged.
+        } else if response.status().is_success() {
+            let new_etag = response
+                .headers()
+                .get(reqwest::header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            if let Ok(body) = response.json::<Value>() {
+                *state.write().unwrap_or_else(|p| p.into_inner()) = feature_map(body);
+                *etag.lock().unwrap_or_else(|p| p.into_inner()) = new_etag.unwrap_or_default();
+                backoff.decoded_success();
+            }
+        } else {
+            backoff.status_failure(response.status());
+        }
+    }
 }
 impl FetchBackoff {
     fn status_failure(&mut self, status: reqwest::StatusCode) {
@@ -248,8 +310,15 @@ impl FetchBackoff {
         self.errors = self.errors.saturating_sub(1);
         self.skips = self.errors;
     }
-    fn delay(&self, interval: Duration) -> Duration {
-        interval.saturating_mul(u32::from(self.skips) + 1)
+    /// Called once per fixed refresh ticker event. Go decrements a pending
+    /// skip on each tick and fetches only on the next tick after it reaches 0.
+    fn on_tick(&mut self) -> bool {
+        if self.skips == 0 {
+            true
+        } else {
+            self.skips -= 1;
+            false
+        }
     }
 }
 impl UnleashRepository {
@@ -331,43 +400,23 @@ impl UnleashRepository {
                     return;
                 };
                 let mut backoff = FetchBackoff::default();
-                while !stop_flag.load(Ordering::Acquire) {
-                    let mut request = client.get(endpoint.clone());
-                    for (name, value) in &headers {
-                        if !value.is_empty() {
-                            request = request.header(*name, value);
-                        }
+                let mut next_tick = std::time::Instant::now();
+                loop {
+                    if next_tick > std::time::Instant::now() {
+                        std::thread::sleep(next_tick - std::time::Instant::now());
                     }
-                    let tag = poll_etag.lock().unwrap_or_else(|p| p.into_inner()).clone();
-                    if !tag.is_empty() {
-                        request = request.header("If-None-Match", tag);
+                    if stop_flag.load(Ordering::Acquire) {
+                        break;
                     }
-                    if let Ok(response) = request.send() {
-                        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
-                            // A 304 is a successful transport response but does
-                            // not count as a decoded fetch in Go's repository.
-                        } else if response.status().is_success() {
-                            let new_etag = response
-                                .headers()
-                                .get(reqwest::header::ETAG)
-                                .and_then(|v| v.to_str().ok())
-                                .map(str::to_owned);
-                            if let Ok(body) = response.json::<Value>() {
-                                *state.write().unwrap_or_else(|p| p.into_inner()) =
-                                    feature_map(body);
-                                *poll_etag.lock().unwrap_or_else(|p| p.into_inner()) =
-                                    new_etag.unwrap_or_default();
-                                backoff.decoded_success();
-                            }
-                        } else {
-                            backoff.status_failure(response.status());
-                        }
-                    }
-                    let until = std::time::Instant::now() + backoff.delay(poll_interval);
-                    while !stop_flag.load(Ordering::Acquire) && std::time::Instant::now() < until {
-                        std::thread::sleep(
-                            Duration::from_millis(10)
-                                .min(until.saturating_duration_since(std::time::Instant::now())),
+                    next_tick = std::time::Instant::now() + poll_interval;
+                    if backoff.on_tick() {
+                        fetch_once(
+                            &client,
+                            &endpoint,
+                            &headers,
+                            &state,
+                            &poll_etag,
+                            &mut backoff,
                         );
                     }
                 }
@@ -703,7 +752,6 @@ mod tests {
 
     #[test]
     fn fetch_backoff_matches_status_recovery_and_304_contract() {
-        let interval = Duration::from_millis(25);
         let mut state = FetchBackoff::default();
         state.status_failure(reqwest::StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
@@ -713,7 +761,8 @@ mod tests {
                 skips: 1
             }
         );
-        assert_eq!(state.delay(interval), interval * 2);
+        assert!(!state.on_tick());
+        assert!(state.on_tick());
         // Network errors, malformed JSON, and 304 do not enter either success
         // or status-failure transitions; the poller only calls these methods
         // after observing a classified HTTP status or decoding a body.
@@ -767,6 +816,93 @@ mod tests {
                 skips: 10
             }
         );
+    }
+
+    #[test]
+    fn fallback_username_matches_go_identity_shape() {
+        let generated = generated_username();
+        let mut parts = generated.split('-');
+        assert_eq!(parts.next(), Some("generated"));
+        let random = parts.next().unwrap().parse::<u32>().unwrap();
+        assert!(random < 1_000_000);
+        let expected_pid = std::process::id().to_string();
+        assert_eq!(parts.next(), Some(expected_pid.as_str()));
+        assert_eq!(parts.next(), None);
+    }
+
+    #[test]
+    fn fake_http_sequence_consumes_skipped_ticks_and_recovers_after_failures() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = reqwest::Url::parse(&format!("http://{}/api/client/features", listener.local_addr().unwrap())).unwrap();
+        let (seen_tx, seen_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let replies = [
+                ("200 OK", Some("\"v1\""), r#"{"features":[{"name":"initial","enabled":true}]}"#),
+                ("503 Service Unavailable", None, "{}"),
+                ("304 Not Modified", None, ""),
+                ("NETWORK", None, ""),
+                ("200 OK", None, "not-json"),
+                ("200 OK", None, r#"{"features":[{"name":"recovered","enabled":true}]}"#),
+            ];
+            for (status, etag, body) in replies {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 4096];
+                let size = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..size]).into_owned();
+                seen_tx.send(request).unwrap();
+                if status == "NETWORK" { continue; }
+                let etag_header = etag.map(|tag| format!("ETag: {tag}\r\n")).unwrap_or_default();
+                write!(stream, "HTTP/1.1 {status}\r\n{etag_header}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+
+        let client = reqwest::blocking::Client::builder().no_proxy().build().unwrap();
+        let headers = [("UNLEASH-APPNAME", "test".to_owned())];
+        let state = RwLock::new(serde_json::json!({"features": []}));
+        let etag = Mutex::new(String::new());
+        let mut backoff = FetchBackoff::default();
+        let fetch = |backoff: &mut FetchBackoff| fetch_once(&client, &endpoint, &headers, &state, &etag, backoff);
+
+        assert!(backoff.on_tick());
+        fetch(&mut backoff);
+        assert_eq!(*etag.lock().unwrap(), "\"v1\"");
+        assert!(state.read().unwrap().get("initial").is_some());
+        seen_rx.recv().unwrap();
+
+        assert!(backoff.on_tick());
+        fetch(&mut backoff);
+        assert_eq!(backoff.skips, 1);
+        let failed_request = seen_rx.recv().unwrap();
+        assert!(failed_request.contains("If-None-Match: \"v1\""));
+
+        assert!(!backoff.on_tick(), "first ticker event must only consume the skip");
+        assert!(seen_rx.try_recv().is_err(), "a skipped event must issue no HTTP request");
+        assert!(backoff.on_tick());
+        fetch(&mut backoff);
+        let unchanged_request = seen_rx.recv().unwrap();
+        assert!(unchanged_request.contains("If-None-Match: \"v1\""));
+        assert_eq!(backoff.errors, 1, "304 must not count as decoded success");
+        assert_eq!(backoff.skips, 0);
+
+        assert!(backoff.on_tick());
+        fetch(&mut backoff); // transport failure
+        seen_rx.recv().unwrap();
+        assert_eq!(backoff.errors, 1);
+        assert!(backoff.on_tick());
+        fetch(&mut backoff); // malformed decoded body
+        seen_rx.recv().unwrap();
+        assert_eq!(backoff.errors, 1);
+        assert!(state.read().unwrap().get("initial").is_some());
+        assert!(backoff.on_tick());
+        fetch(&mut backoff); // valid recovery
+        seen_rx.recv().unwrap();
+        assert_eq!(backoff.errors, 0);
+        assert!(state.read().unwrap().get("recovered").is_some());
+        assert!(state.read().unwrap().get("initial").is_none());
+        server.join().unwrap();
     }
 
     fn yaml(text: &str) -> serde_yaml::Value {
