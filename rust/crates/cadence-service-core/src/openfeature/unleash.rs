@@ -1186,9 +1186,16 @@ mod tests {
         .unwrap();
         wait_for_feature(&repository, "retained");
         let mut requests = Vec::new();
-        for _ in 0..4 { requests.push(rx.recv_timeout(Duration::from_secs(2)).unwrap()); }
+        for _ in 0..4 {
+            requests.push(rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        }
         assert_eq!(requests.iter().filter(|r| r.starts_with("GET ")).count(), 3);
-        assert!(requests.iter().any(|r| r.contains("if-none-match: \"rev-1\"")), "{requests:?}");
+        assert!(
+            requests
+                .iter()
+                .any(|r| r.contains("if-none-match: \"rev-1\"")),
+            "{requests:?}"
+        );
         assert!(repository.snapshot().get("retained").is_some());
         repository.shutdown();
         server.join().unwrap();
